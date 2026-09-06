@@ -20,6 +20,118 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
     [Fact]
+    public async Task TenderProjectionCreatesEveryVotingSeatOnceAndPreservesSignedCommittee()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeWithQuorumAsync();
+        var before = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        fixture.SwitchUser(control.Members[0].UserId);
+        var first = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "projection-first");
+        var repeated = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "projection-retry");
+        first.Should().NotBeNull();
+        repeated!.Id.Should().Be(first!.Id);
+        var assignments = await fixture.Context.TenderEvaluators.ToListAsync();
+        var votingMembers = control.Members.Where(item => item.IsVoting && item.MemberKind != ProcurementCommitteeMemberKind.Observer);
+        assignments.Should().HaveCount(votingMembers.Count());
+        assignments.Select(item => item.UserId).Should().BeEquivalentTo(votingMembers.Select(item => item.UserId));
+        assignments.Should().OnlyContain(item => item.TenantId == fixture.TenantId && item.TenderId == fixture.Tender.Id);
+        var after = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        after.Members.Should().BeEquivalentTo(before.Members);
+        after.Meetings.Should().BeEquivalentTo(before.Meetings);
+        after.ScoreSheets.Should().BeEmpty();
+        (await fixture.Context.TenderEvaluations.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AcceptedMemberCanPrepareDraftProjectionBeforeQuorumButCannotLock()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchUser(control.Members[0].UserId);
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "draft-before-quorum"))
+            .Should().NotBeNull();
+        (await fixture.Service.EnsureScorerEligibleAsync(ProcurementEvaluationSourceType.Tender,
+            fixture.Tender.Id, ProcurementEvaluationPhase.Combined, "still-no-quorum")).Allowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProjectionReusesExistingAssignmentAndKeepsPendingVotingSeatInRoster()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var actor = control.Members[0];
+        var existing = new TenderEvaluator
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = fixture.Tender.Id,
+            UserId = actor.UserId, Status = "Accepted", Notes = "Existing assignment retained."
+        };
+        fixture.Context.TenderEvaluators.Add(existing);
+        var pending = await fixture.Context.ProcurementEvaluationCommitteeAppointments.FindAsync(control.Members[1].Id);
+        pending!.Status = ProcurementEvaluationAppointmentStatus.Pending;
+        var observer = await fixture.Context.ProcurementEvaluationCommitteeAppointments.FindAsync(control.Members[2].Id);
+        observer!.MemberKind = ProcurementCommitteeMemberKind.Observer;
+        observer.IsVoting = false;
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        fixture.SwitchUser(actor.UserId);
+        var assignment = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "reuse-projection");
+        assignment!.Id.Should().Be(existing.Id);
+        assignment.Notes.Should().Be("Existing assignment retained.");
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(2);
+        (await fixture.Service.GetTenderScoringUserIdsAsync(fixture.Tender.Id))
+            .Should().BeEquivalentTo(new[] { actor.UserId, pending.UserId });
+    }
+
+    [Theory]
+    [InlineData("outsider")]
+    [InlineData("observer")]
+    [InlineData("nonvoting")]
+    [InlineData("deleted")]
+    [InlineData("declined")]
+    [InlineData("withdrawn")]
+    [InlineData("expired")]
+    [InlineData("conflict")]
+    [InlineData("inactive")]
+    public async Task TenderProjectionNeverGrantsScoringToIneligibleActor(string reason)
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var member = await fixture.Context.ProcurementEvaluationCommitteeAppointments
+            .Include(item => item.ConflictDeclarations).FirstAsync(item => item.CommitteeControlId == control.Id);
+        fixture.SwitchUser(reason == "outsider" ? Guid.NewGuid() : member.UserId);
+        switch (reason)
+        {
+            case "observer": member.MemberKind = ProcurementCommitteeMemberKind.Observer; break;
+            case "nonvoting": member.IsVoting = false; break;
+            case "deleted": member.IsDeleted = true; break;
+            case "declined": member.Status = ProcurementEvaluationAppointmentStatus.Declined; break;
+            case "withdrawn": member.Status = ProcurementEvaluationAppointmentStatus.Withdrawn; break;
+            case "expired": member.EffectiveToUtc = DateTime.UtcNow.AddDays(-1); break;
+            case "conflict": member.ConflictDeclarations.Single().Outcome = ProcurementEvaluationConflictOutcome.ConflictDeclared; break;
+            case "inactive": (await fixture.Context.ProcurementEvaluationCommitteeControls.FindAsync(control.Id))!.Status = ProcurementEvaluationCommitteeControlStatus.Closed; break;
+        }
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        Func<Task> action = () => fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "denied-projection");
+        await action.Should().ThrowAsync<Exception>().Where(exception =>
+            exception is ProcurementEvaluationCommitteeAuthorizationException ||
+            exception is ProcurementEvaluationCommitteeConflictException);
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProjectionDoesNotUseOtherTenantCommitteeOrCreateStandaloneAssignments()
+    {
+        await using var fixture = new Fixture();
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "no-committee")).Should().BeNull();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchUser(control.Members[0].UserId);
+        fixture.SwitchTenant(Guid.NewGuid());
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "other-tenant")).Should().BeNull();
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task StandardPublishedTenderWithOnTimeBidCanConstituteWithoutAdvancedControl()
     {
         await using var fixture = new Fixture();

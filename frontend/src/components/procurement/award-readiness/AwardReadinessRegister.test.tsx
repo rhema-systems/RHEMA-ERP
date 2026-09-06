@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AwardReadinessRegister } from './AwardReadinessRegister';
@@ -161,8 +161,7 @@ const sodStatus = (
   sourceReference: 'TDR-001',
   allowed: true,
   code: 'SOD_ALLOWED',
-  message:
-    'The current actor is distinct from the retained evaluator lineage.',
+  message: 'The current actor is distinct from the retained evaluator lineage.',
   currentActorUserId: 'approver-1',
   currentActorName: 'Procurement Approver',
   currentActorRoles: ['AwardApprover'],
@@ -240,7 +239,7 @@ describe('award-readiness history-first register', () => {
     expect(screen.queryByText(/mark ready/i)).not.toBeInTheDocument();
   });
 
-  it('renders prerequisite remediation, score locks, supplier lineage, authority, and immutable history', () => {
+  it('keeps the default view focused and retains all audit records in expandable details', () => {
     render(
       <AwardReadinessRegister
         sourceType="Tender"
@@ -256,21 +255,49 @@ describe('award-readiness history-first register', () => {
     );
 
     expect(screen.getByText('Award remains blocked')).toBeInTheDocument();
+    expect(screen.getByTestId('award-readiness-outcome')).toBeVisible();
     expect(
       screen.getByText('Server-derived prerequisite register')
-    ).toBeInTheDocument();
+    ).not.toBeVisible();
+    expect(screen.getByText('Financial Evaluator')).not.toBeVisible();
+    expect(screen.getByText('Qualified Supplier Ltd')).not.toBeVisible();
+    expect(screen.getByText('BOARD-PPA')).not.toBeVisible();
+    expect(screen.getByText('Award Readiness Evaluated')).not.toBeVisible();
+    screen
+      .getAllByRole('table')
+      .forEach((table) => expect(table).not.toBeVisible());
+    expect(
+      screen.getByText('Authoritative evaluator lineage')
+    ).not.toBeVisible();
+    fireEvent.click(screen.getByText('Evaluator and approval audit details'));
+    expect(screen.getByText('Authoritative evaluator lineage')).toBeVisible();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Review verification and due diligence',
+      })
+    );
+    expect(
+      screen.getByRole('button', {
+        name: 'Review verification and due diligence',
+      })
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      screen.getByText('Server-derived prerequisite register')
+    ).toBeVisible();
     expect(screen.getAllByText('Award verification').length).toBeGreaterThan(0);
     expect(
       screen.getByRole('link', { name: 'Open existing control' })
-    ).toHaveAttribute(
-      'href',
-      '/procurement/tenders/tender-1?tab=verification'
+    ).toHaveAttribute('href', '/procurement/tenders/tender-1?tab=verification');
+    fireEvent.click(
+      screen.getByText('Recommendation, evaluation and supplier records')
     );
-    expect(screen.getByText('Financial Evaluator')).toBeInTheDocument();
+    expect(screen.getByText('Financial Evaluator')).toBeVisible();
     expect(screen.getAllByText('Locked').length).toBeGreaterThan(0);
-    expect(screen.getByText('Qualified Supplier Ltd')).toBeInTheDocument();
-    expect(screen.getByText('BOARD-PPA')).toBeInTheDocument();
-    expect(screen.getByText('Award Readiness Evaluated')).toBeInTheDocument();
+    expect(screen.getByText('Qualified Supplier Ltd')).toBeVisible();
+    fireEvent.click(screen.getByText('Authority and evidence records'));
+    expect(screen.getByText('BOARD-PPA')).toBeVisible();
+    fireEvent.click(screen.getByText('Decision history and integrity'));
+    expect(screen.getByText('Award Readiness Evaluated')).toBeVisible();
   });
 
   it('requires both client permission and the latest server action gate', () => {
@@ -291,9 +318,7 @@ describe('award-readiness history-first register', () => {
     expect(
       screen.queryByRole('button', { name: 'Re-evaluate current readiness' })
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/not allowed by the server/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/not allowed by the server/i)).toBeInTheDocument();
   });
 
   it('shows the authoritative SOD lineage and disables evaluation for a blocked actor', () => {
@@ -333,13 +358,176 @@ describe('award-readiness history-first register', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText('Current actor is blocked from evaluating readiness')
-    ).toBeInTheDocument();
-    expect(screen.getByText('Effective hard stop')).toBeInTheDocument();
-    expect(screen.getByText('Authoritative evaluator lineage')).toBeInTheDocument();
-    expect(screen.getByText('Financial Evaluator')).toBeInTheDocument();
+    ).toBeVisible();
+    expect(screen.getByText('Effective hard stop')).not.toBeVisible();
+    expect(
+      screen.getByText('Authoritative evaluator lineage')
+    ).not.toBeVisible();
+    fireEvent.click(screen.getByText('Evaluator and approval audit details'));
+    expect(screen.getByText('Effective hard stop')).toBeVisible();
+    expect(screen.getByText('Authoritative evaluator lineage')).toBeVisible();
+    expect(screen.getByText('Financial Evaluator')).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Evaluate award readiness' })
     ).toBeDisabled();
     expect(onEvaluate).not.toHaveBeenCalled();
   });
+
+  it('shows a readable blocker without raw identifiers and retains the exact server reason in details', () => {
+    const code = 'SUPPLIER_ef23c5222ff74f71a71848a9833725ec_ELIGIBLE';
+    const message =
+      'A current supplier-risk and concentration assessment is required.';
+    const raw = `${code}: ${message}`;
+    render(
+      <AwardReadinessRegister
+        sourceType="Tender"
+        sourceId="tender-1"
+        decision={decision({
+          blockedReasons: [raw],
+          prerequisiteGroups: [
+            {
+              group: 'SupplierEligibility',
+              status: 'Failed',
+              items: [
+                { code, label: 'Supplier eligible', status: 'Failed', message },
+              ],
+            },
+          ],
+        })}
+        history={[]}
+        sodStatus={sodStatus()}
+        isSodStatusLoading={false}
+        canEvaluate
+        isEvaluating={false}
+        onEvaluate={vi.fn()}
+      />
+    );
+    expect(screen.getByText(raw)).not.toBeVisible();
+    expect(
+      screen
+        .getAllByText(message)
+        .some((element) => element.closest('details') === null)
+    ).toBe(true);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Review supplier eligibility' })
+    );
+    expect(screen.getByText(raw)).toBeVisible();
+  });
+
+  it('shows supplier warnings and keeps all additional blockers accessible', () => {
+    const reasons = [
+      'First blocker.',
+      'Second blocker.',
+      'Third blocker.',
+      'Fourth blocker.',
+    ];
+    render(
+      <AwardReadinessRegister
+        sourceType="Tender"
+        sourceId="tender-1"
+        decision={decision({
+          blockedReasons: reasons,
+          suppliers: [
+            {
+              ...decision().suppliers[0],
+              warnings: ['Risk review expires soon.'],
+            },
+          ],
+        })}
+        history={[]}
+        sodStatus={sodStatus()}
+        isSodStatusLoading={false}
+        canEvaluate
+        isEvaluating={false}
+        onEvaluate={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Supplier warnings (1)')).toBeVisible();
+    expect(
+      screen.getByText('Qualified Supplier Ltd: Risk review expires soon.')
+    ).toBeVisible();
+    expect(
+      screen
+        .getAllByText('Fourth blocker.')
+        .every((element) => element.closest('details'))
+    ).toBe(true);
+    fireEvent.click(screen.getByText('More blockers (1)'));
+    const more = screen.getByText('More blockers (1)').closest('details')!;
+    expect(within(more).getByText('Fourth blocker.')).toBeVisible();
+  });
+
+  it('keeps a historical Ready decision visibly stale and refresh accessible in history details', () => {
+    const onRefresh = vi.fn();
+    render(
+      <AwardReadinessRegister
+        sourceType="Tender"
+        sourceId="tender-1"
+        decision={decision({
+          status: 'Ready',
+          isReady: true,
+          isCurrent: false,
+          blockedReasons: [],
+        })}
+        history={[]}
+        sodStatus={sodStatus()}
+        isSodStatusLoading={false}
+        canEvaluate
+        isEvaluating={false}
+        onEvaluate={vi.fn()}
+        onRefresh={onRefresh}
+      />
+    );
+    expect(screen.getByText('Readiness must be rechecked')).toBeVisible();
+    expect(
+      screen.queryByText('Ready for award review')
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Refresh history' })
+    ).not.toBeVisible();
+    fireEvent.click(screen.getByText('Decision history and integrity'));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh history' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])(
+    'retains visible recovery from a failed SOD preflight with a retained decision: %s',
+    (retained) => {
+      const onRefresh = vi.fn();
+      const onEvaluate = vi.fn();
+      render(
+        <AwardReadinessRegister
+          sourceType="Tender"
+          sourceId="tender-1"
+          decision={
+            retained
+              ? decision({
+                  status: 'Ready',
+                  isReady: true,
+                  blockedReasons: [],
+                  prerequisiteGroups: [],
+                })
+              : undefined
+          }
+          history={[]}
+          isSodStatusLoading={false}
+          sodStatusError="SOD check timed out."
+          canEvaluate
+          isEvaluating={false}
+          onEvaluate={onEvaluate}
+          onRefresh={onRefresh}
+        />
+      );
+      expect(screen.getByText('SOD preflight is unavailable')).toBeVisible();
+      expect(
+        screen.getByRole('button', {
+          name: retained
+            ? 'Re-evaluate current readiness'
+            : 'Evaluate award readiness',
+        })
+      ).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh checks' }));
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      expect(onEvaluate).not.toHaveBeenCalled();
+    }
+  );
 });

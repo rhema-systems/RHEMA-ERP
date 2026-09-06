@@ -134,7 +134,10 @@ describe('ProcurementUatFlowSidebar', () => {
     );
     expect(screen.getByText('View full process')).toBeInTheDocument();
     expect(screen.queryByText('2/12 complete')).not.toBeInTheDocument();
-    expect(screen.getByText('1/12 complete')).toBeInTheDocument();
+    expect(screen.getByText('1 complete')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Process progress coverage')
+    ).toHaveTextContent('Step 6 of 12 · 9 unverified');
   });
 
   it('points to the next stage action after the current stage is complete', () => {
@@ -176,7 +179,11 @@ describe('ProcurementUatFlowSidebar', () => {
       />
     );
 
-    expect(screen.getByText('0/12 complete')).toBeInTheDocument();
+    expect(screen.queryByText('0/12 complete')).not.toBeInTheDocument();
+    expect(screen.getByText('Progress unverified')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Process progress coverage')
+    ).toHaveTextContent('Step 1 of 12 · 11 unverified');
     expect(
       screen.getByText('This is the first procurement stage.')
     ).toBeInTheDocument();
