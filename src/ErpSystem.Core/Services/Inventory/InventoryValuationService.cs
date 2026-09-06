@@ -298,20 +298,25 @@ public class InventoryValuationService : IInventoryValuationService
         decimal quantity,
         List<InventoryMovement> movements)
     {
+        if (quantity <= 0) throw new ArgumentOutOfRangeException(nameof(quantity));
         var query = _unitOfWork.Repository<InventoryLayer>()
             .GetQueryable()
-            .Where(l => l.InventoryItemId == inventoryItemId &&
+            .Where(l => l.TenantId == _currentUserProvider.TenantId && !l.IsDeleted && l.IsActive &&
+                       l.InventoryItemId == inventoryItemId &&
                        l.WarehouseId == warehouseId &&
+                       l.LocationId == locationId &&
                        !l.IsFullyConsumed &&
                        l.RemainingQuantity > 0);
-
-        if (locationId.HasValue)
-            query = query.Where(l => l.LocationId == locationId.Value);
 
         var layers = await query
             .OrderBy(l => l.LayerDate)
             .ThenBy(l => l.CreatedAt)
+            .ThenBy(l => l.Id)
             .ToListAsync();
+
+        // Validate before touching tracked layers, including callers that own their transaction.
+        if (layers.Sum(layer => layer.RemainingQuantity) < quantity)
+            throw new InvalidOperationException("Insufficient inventory layers in the selected stock location.");
 
         decimal totalCost = 0;
         decimal remainingQty = quantity;
@@ -816,11 +821,17 @@ public class InventoryValuationService : IInventoryValuationService
         string? lotNumber = null,
         string? serialNumber = null)
     {
+        if (quantity <= 0) throw new ArgumentOutOfRangeException(nameof(quantity));
         var item = await _unitOfWork.Repository<InventoryItem>()
-            .GetByIdAsync(inventoryItemId);
+            .GetQueryable(value => value.Id == inventoryItemId &&
+                value.TenantId == _currentUserProvider.TenantId && !value.IsDeleted)
+            .SingleOrDefaultAsync();
 
         if (item == null)
             throw new KeyNotFoundException($"Inventory item {inventoryItemId} not found");
+
+        if (item.ValuationMethod is not (ValuationMethod.FIFO or ValuationMethod.WeightedAverage or ValuationMethod.StandardCost))
+            throw new InvalidOperationException($"Issue valuation is not supported for {item.ValuationMethod}; no stock was issued.");
 
         // Check for negative stock
         var balance = await GetOrCreateBalanceAsync(inventoryItemId, warehouseId, locationId);
@@ -862,12 +873,18 @@ public class InventoryValuationService : IInventoryValuationService
         var unitCost = quantity > 0 ? totalCost / quantity : 0;
 
         // Create movement record
-        await CreateMovementAsync(
+        var movement = await CreateMovementAsync(
             inventoryItemId, warehouseId, locationId,
             movementType, MovementDirection.Out,
             quantity, unitCost,
             referenceType, referenceNumber, referenceId,
             lotNumber, serialNumber, null);
+
+        // These are closing balances: the valuation routines above already applied the issue.
+        // CreateMovementAsync also serves other callers with pre-mutation balances.
+        balance.QuantityAvailable = balance.QuantityOnHand - balance.QuantityAllocated;
+        movement.RunningBalance = balance.QuantityOnHand;
+        movement.RunningValue = balance.TotalValue;
 
         return totalCost;
     }

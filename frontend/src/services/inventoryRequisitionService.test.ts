@@ -13,6 +13,17 @@ beforeEach(() => {
 });
 
 describe('inventoryRequisitionService controlled issue lifecycle', () => {
+  it.each([
+    ['StockItem', 'Expense', 1, 1],
+    ['FixedAsset', 'FixedAsset', 4, 2],
+    [1, 1, 1, 1],
+  ])('normalizes mapping enums %s / %s for display and editing', async (itemType, treatment, expectedItem, expectedTreatment) => {
+    mockedAxios.get.mockResolvedValueOnce({ data: [{ id: 'rule-1', itemType, treatment, expenseAccount: '000-6700-0000 · UAT' }] });
+    const [rule] = await inventoryRequisitionService.getIssueAccountingRules();
+    expect(rule).toEqual(expect.objectContaining({ itemType: expectedItem, treatment: expectedTreatment }));
+    expect(rule.expenseAccount).toContain('000-6700-0000');
+  });
+
   it('carries receiver, replay key and requisition row version into issue', async () => {
     const request: IssueRequisitionDto = {
       receiverUserId: 'receiver-1',
@@ -35,7 +46,7 @@ describe('inventoryRequisitionService controlled issue lifecycle', () => {
 
   it('loads controlled issue reasons and persists rule selectors without free-text owner IDs', async () => {
     mockedAxios.get.mockResolvedValueOnce({ data: { applicableMovementReasonCodes: ['ASSET_CUSTODY'] } });
-    mockedAxios.post.mockResolvedValueOnce({ data: { id: 'rule-1', rowVersion: 'AQID' } });
+    mockedAxios.post.mockResolvedValueOnce({ data: { id: 'rule-1', rowVersion: 'AQID', itemType: 'FixedAsset', treatment: 'FixedAsset' } });
 
     await inventoryRequisitionService.getIssueAccountingOptions('req-1');
     await inventoryRequisitionService.createIssueAccountingRule({

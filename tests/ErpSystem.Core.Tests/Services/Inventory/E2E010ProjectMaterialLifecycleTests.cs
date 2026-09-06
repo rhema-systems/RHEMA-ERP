@@ -54,6 +54,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
     private readonly InventoryProjectReservationService _reservations;
     private readonly InventoryRequisitionService _requisitions;
     private readonly InventoryReturnControlService _returns;
+    private readonly Mock<IInventoryIssueFinanceAssetService> _issueFinanceAssets = new();
 
     public E2E010ProjectMaterialLifecycleTests()
     {
@@ -258,7 +259,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
                 EvaluatedAtUtc = DateTime.UtcNow,
                 WasAudited = true
             });
-        var issueFinanceAssets = Mock.Of<IInventoryIssueFinanceAssetService>();
+        var issueFinanceAssets = _issueFinanceAssets.Object;
 
         _returns = new InventoryReturnControlService(
             _unitOfWork,
@@ -301,6 +302,8 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             controlEvents.Object,
             _returns,
             issueFinanceAssets,
+            new InventoryValuationService(_unitOfWork, NullLogger<InventoryValuationService>.Instance,
+                _currentUser, Mock.Of<IProcurementReceiptSourceControlService>()),
             NullLogger<InventoryRequisitionService>.Instance);
     }
 
@@ -351,6 +354,7 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             UnitOfMeasure = "EA",
             Status = ItemStatus.Active,
             AverageCost = 10m,
+            ValuationMethod = ValuationMethod.WeightedAverage,
             CurrentStock = 20m,
             AvailableStock = 20m,
             IsProjectApplicable = true
@@ -412,6 +416,12 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
             warehouse,
             location,
             item,
+            new InventoryBalance
+            {
+                TenantId = _tenantId, InventoryItemId = _itemId, WarehouseId = _warehouseId,
+                LocationId = _locationId, QuantityOnHand = 20m, QuantityAvailable = 20m,
+                TotalValue = 200m, AverageUnitCost = 10m
+            },
             new WarehouseQuantity
             {
                 TenantId = _tenantId,
@@ -633,6 +643,60 @@ public sealed class E2E010ProjectMaterialLifecycleTests : IAsyncLifetime
         movements.Should().ContainSingle(value => value.MovementType == "Issue" && value.TotalValue == -50m);
         movements.Should().ContainSingle(value => value.MovementType == "Return" && value.TotalValue == 20m);
         await AssertProjectCostAsync(expectedIssue: 50m, expectedReturn: -20m, expectedActual: 30m);
+    }
+
+    [Fact]
+    public async Task Issue_uses_actual_fifo_cost_preserves_approval_and_replay_does_not_consume_twice()
+    {
+        var item = await _context.Set<InventoryItem>().SingleAsync(value => value.Id == _itemId);
+        item.ValuationMethod = ValuationMethod.FIFO;
+        item.StandardCost = 2000m;
+        var source = await _context.Set<InventoryRequisitionItem>().SingleAsync(value => value.Id == _requisitionLineId);
+        source.UnitCost = 2000m;
+        var balance = await _context.Set<InventoryBalance>().SingleAsync();
+        balance.TotalValue = 38000m;
+        balance.AverageUnitCost = 1900m;
+        _context.Add(new InventoryLayer
+        {
+            TenantId = _tenantId, InventoryItemId = _itemId, WarehouseId = _warehouseId,
+            LocationId = _locationId, LayerNumber = "FIFO-UAT", LayerDate = DateTime.UtcNow.AddDays(-1),
+            OriginalQuantity = 20m, RemainingQuantity = 20m, UnitCost = 1900m, RemainingValue = 38000m
+        });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        var request = new IssueRequisitionDto
+        {
+            IdempotencyKey = "actual-fifo-issue", CorrelationId = "actual-fifo-issue",
+            RowVersion = Convert.ToBase64String(_requisitionRowVersion), ReceiverUserId = _receiverId,
+            MovementReasonCode = InventoryIssueMovementReasons.ProjectConsumption,
+            Items = [new() { ItemId = _requisitionLineId, IssuedQuantity = 2m, LocationId = _locationId }]
+        };
+        await _requisitions.IssueAsync(_requisitionId, request);
+        await _requisitions.IssueAsync(_requisitionId, request);
+        _context.ChangeTracker.Clear();
+        var voucher = await _context.Set<InventoryIssueVoucher>().SingleAsync();
+        var line = await _context.Set<InventoryIssueVoucherLine>().SingleAsync();
+        line.UnitCost.Should().Be(1900m);
+        line.TotalValue.Should().Be(3800m);
+        voucher.SourceSnapshotJson.Should().Contain("\"UnitCost\":2000");
+        source = await _context.Set<InventoryRequisitionItem>().SingleAsync();
+        source.UnitCost.Should().Be(2000m, "the approved demand estimate must not be rewritten");
+        source.IssuedQuantity.Should().Be(2m);
+        source.LineValue.Should().Be(3800m);
+        (await _context.Set<StockMovement>().SingleAsync()).TotalValue.Should().Be(-3800m);
+        var movement = await _context.Set<InventoryMovement>().SingleAsync();
+        movement.ReferenceId.Should().Be(_requisitionId);
+        movement.ReferenceNumber.Should().Be("REQ-E2E-010");
+        movement.TotalValue.Should().Be(3800m);
+        movement.RunningBalance.Should().Be(18m);
+        movement.RunningValue.Should().Be(34200m);
+        balance = await _context.Set<InventoryBalance>().SingleAsync();
+        balance.QuantityOnHand.Should().Be(18m);
+        balance.TotalValue.Should().Be(34200m);
+        (await _context.Set<InventoryLayer>().SingleAsync()).RemainingQuantity.Should().Be(18m);
+        (await WarehouseStock()).CurrentStock.Should().Be(18m);
+        _issueFinanceAssets.Verify(value => value.PostIssueAsync(voucher.Id, It.IsAny<CancellationToken>()), Times.Once);
+        await AssertProjectCostAsync(3800m, 0m, 3800m);
     }
 
     public Task DisposeAsync()
