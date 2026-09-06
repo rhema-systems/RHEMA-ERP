@@ -741,6 +741,127 @@ public sealed class ProcurementBudgetCommitmentLifecycleServiceTests
         CorrelationId = $"amendment-{sequence}"
     };
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SupplyContractAfterExactApprovedPoReusesItsCommitmentAndReceiptStillUtilizesOnce(bool legacyBudgetReference)
+    {
+        await using var fixture = new Fixture(100_000m, 52_000m);
+        var (contract, order) = await SeedSupplyCoverage(fixture);
+        order.BudgetId = legacyBudgetReference ? Guid.NewGuid() : null;
+        await fixture.Context.SaveChangesAsync();
+        var original = await fixture.Context.ProcurementBudgetCommitmentLedgerEntries.SingleAsync();
+        await fixture.InTransaction(async () =>
+        {
+            var coverage = await fixture.Service.CommitContractAsync(contract, "activate-supply");
+            coverage.Id.Should().Be(original.Id);
+            (await fixture.Service.CommitContractAsync(contract, "activate-supply-replay")).Id.Should().Be(original.Id);
+            await fixture.Context.SaveChangesAsync();
+        });
+        fixture.Budget.CommittedAmount.Should().Be(52_000m);
+        fixture.Budget.RemainingAmount.Should().Be(48_000m);
+        (await fixture.Context.ProcurementBudgetCommitmentLedgerEntries.CountAsync()).Should().Be(1);
+        order.ContractId.Should().BeNull("approved source lineage must not be rewritten");
+        var receipt = new PurchaseOrderReceipt { Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            PurchaseOrderId = order.Id, ReceiptNumber = "SUPPLY-REC-001" };
+        fixture.Context.Add(receipt);
+        await fixture.Context.SaveChangesAsync();
+        await fixture.InTransaction(async () =>
+        {
+            await fixture.Service.UtilizePurchaseOrderAsync(order.Id, receipt.Id, receipt.ReceiptNumber, 52_000m, "accept-supply");
+            await fixture.Service.UtilizePurchaseOrderAsync(order.Id, receipt.Id, receipt.ReceiptNumber, 52_000m, "accept-replay");
+        });
+        fixture.Budget.CommittedAmount.Should().Be(0m);
+        fixture.Budget.UtilizedAmount.Should().Be(52_000m);
+        fixture.Budget.RemainingAmount.Should().Be(48_000m);
+    }
+
+    [Theory]
+    [InlineData("supplier")]
+    [InlineData("requisition")]
+    [InlineData("amount")]
+    [InlineData("currency")]
+    [InlineData("unapproved")]
+    [InlineData("foreign-contract")]
+    [InlineData("source")]
+    [InlineData("category")]
+    [InlineData("ledger")]
+    [InlineData("budget-envelope")]
+    [InlineData("receipt")]
+    [InlineData("duplicate")]
+    [InlineData("award")]
+    [InlineData("release")]
+    public async Task SupplyCoverageMismatchFailsClosedWithoutAnotherCommitment(string mismatch)
+    {
+        await using var fixture = new Fixture(100_000m, 52_000m);
+        var (contract, order) = await SeedSupplyCoverage(fixture);
+        var formal = await fixture.Context.ProcurementBudgetCommitmentLedgerEntries.SingleAsync();
+        switch (mismatch)
+        {
+            case "supplier": order.BusinessPartnerId = Guid.NewGuid(); break;
+            case "requisition": order.SourceRequisitionId = Guid.NewGuid(); break;
+            case "amount": order.TotalAmount = 51_000m; break;
+            case "currency": order.Currency = "USD"; break;
+            case "unapproved": order.Status = "Draft"; break;
+            case "foreign-contract": order.ContractId = Guid.NewGuid(); break;
+            case "source": order.ProcurementSourceId = Guid.NewGuid(); break;
+            case "category": order.ProcurementCategory = ProcurementCategoryClass.Works; break;
+            case "ledger": formal.PurchaseRequisitionId = Guid.NewGuid(); break;
+            case "budget-envelope": formal.ProcurementBudgetId = Guid.NewGuid(); break;
+            case "receipt": fixture.Context.Add(new PurchaseOrderReceipt { Id = Guid.NewGuid(),
+                TenantId = fixture.TenantId, PurchaseOrderId = order.Id, ReceiptNumber = "EXISTING" }); break;
+            case "duplicate":
+                var sibling = fixture.NewPurchaseOrder(52_000m);
+                sibling.TenderAwardId = contract.TenderAwardId;
+                fixture.Context.Add(sibling); break;
+            case "award": (await fixture.Context.TenderAwards.SingleAsync()).Status = "Cancelled"; break;
+            case "release": fixture.Context.Add(new ProcurementBudgetCommitmentLedgerEntry {
+                Id = Guid.NewGuid(), TenantId = fixture.TenantId, EntryType = ProcurementBudgetCommitmentLedgerEntryType.Release,
+                FormalCommitmentEntryId = formal.Id, ProcurementBudgetCommitmentId = fixture.Commitment.Id,
+                ProcurementBudgetId = fixture.Budget.Id, PurchaseRequisitionId = fixture.Requisition.Id,
+                SourceType = "PurchaseOrder", SourceId = order.Id, SourceReference = order.OrderNumber,
+                Amount = 1m, Currency = "GHS", ActorName = "checker", CorrelationId = "release" }); break;
+        }
+        await fixture.Context.SaveChangesAsync();
+        var action = () => fixture.InTransaction(() => fixture.Service.CommitContractAsync(contract, "blocked-supply"));
+        (await action.Should().ThrowAsync<ProcurementBudgetCommitmentLifecycleException>()).Which.Code
+            .Should().Be("CONTRACT_PO_COMMITMENT_COVERAGE_INVALID");
+        fixture.Budget.CommittedAmount.Should().Be(52_000m);
+        (await fixture.Context.ProcurementBudgetCommitmentLedgerEntries.CountAsync(item =>
+            item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment)).Should().Be(1);
+    }
+
+    private static async Task<(Contract Contract, PurchaseOrder Order)> SeedSupplyCoverage(Fixture fixture)
+    {
+        var supplierId = Guid.NewGuid();
+        var tender = new Tender { Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            TenderNumber = "SUPPLY-TND", Title = "Goods", SourcePurchaseRequisitionId = fixture.Requisition.Id };
+        var award = new TenderAward { Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            TenderId = tender.Id, BusinessPartnerId = supplierId, AwardedAmount = 52_000m, Currency = "GHS", Status = "Awarded" };
+        var contract = new Contract { Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            TenderId = tender.Id, TenderAwardId = award.Id, BusinessPartnerId = supplierId,
+            ContractNumber = "SUPPLY-CTR", ContractTitle = "Supply contract", ContractType = "Supply",
+            ContractValue = 52_000m, Currency = "GHS", Status = "Draft" };
+        var order = fixture.NewPurchaseOrder(52_000m);
+        order.TenderAwardId = award.Id;
+        order.BusinessPartnerId = supplierId;
+        order.ProcurementSourceType = ProcurementPurchaseOrderSourceType.TenderAward;
+        order.ProcurementSourceId = award.Id;
+        order.ProcurementCategory = ProcurementCategoryClass.Goods;
+        order.BudgetId = null;
+        order.SourceIntegrityHash = new string('b', 64);
+        order.ApprovedById = fixture.UserId;
+        order.ApprovedAt = DateTime.UtcNow;
+        fixture.Context.AddRange(tender, award, contract, order);
+        await fixture.Context.SaveChangesAsync();
+        await fixture.InTransaction(async () =>
+        {
+            await fixture.Service.CommitPurchaseOrderAsync(order, "original-po-approval");
+            await fixture.Context.SaveChangesAsync();
+        });
+        return (contract, order);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly UnitOfWork _unitOfWork;

@@ -27,6 +27,7 @@ public class ContractDto
     public string Currency { get; set; } = "USD";
     public string? PaymentTerms { get; set; }
     public decimal RetentionPercentage { get; set; }
+    public string? RetentionClause { get; set; }
 
     // Timeline
     public DateTime? StartDate { get; set; }
@@ -118,6 +119,9 @@ public class CreateContractDto
     [Range(0, 100)]
     public decimal RetentionPercentage { get; set; } = 0;
 
+    [MaxLength(2000)]
+    public string? RetentionClause { get; set; }
+
     // Timeline
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
@@ -156,6 +160,9 @@ public class UpdateContractDto
 
     [Range(0, 100)]
     public decimal? RetentionPercentage { get; set; }
+
+    [MaxLength(2000)]
+    public string? RetentionClause { get; set; }
 
     // Timeline
     public DateTime? StartDate { get; set; }

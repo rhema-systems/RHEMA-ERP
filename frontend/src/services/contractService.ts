@@ -19,6 +19,7 @@ export interface ContractDto {
   currency: string;
   paymentTerms?: string;
   retentionPercentage: number;
+  retentionClause?: string | null;
   startDate?: string;
   endDate?: string;
   durationDays?: number;
@@ -139,6 +140,7 @@ export interface CreateContractDto {
   currency: string;
   paymentTerms?: string;
   retentionPercentage: number;
+  retentionClause?: string | null;
   startDate?: string;
   endDate?: string;
   durationDays?: number;
@@ -156,6 +158,7 @@ export interface UpdateContractDto {
   contractValue?: number;
   paymentTerms?: string;
   retentionPercentage?: number;
+  retentionClause?: string | null;
   startDate?: string;
   endDate?: string;
   durationDays?: number;
