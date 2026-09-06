@@ -19,6 +19,10 @@ describe('accounting book access', () => {
             canManage: false,
             canRequestTransition: false,
             canApproveTransition: false,
+            canManagePeriods: false,
+            canApprovePeriods: false,
+            canManageInitialization: false,
+            canApproveInitialization: false,
         });
     });
 
@@ -29,6 +33,10 @@ describe('accounting book access', () => {
             canManage: true,
             canRequestTransition: false,
             canApproveTransition: false,
+            canManagePeriods: false,
+            canApprovePeriods: false,
+            canManageInitialization: false,
+            canApproveInitialization: false,
         });
     });
 });
