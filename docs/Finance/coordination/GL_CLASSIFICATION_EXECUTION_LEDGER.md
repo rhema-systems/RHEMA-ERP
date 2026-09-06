@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
-| Status | `CORRECTION_IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
 | Branch | `codex/finance-book-period-initialization-c4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C4 review cycle 2 returned `CHANGES_REQUIRED`; narrow Sol Medium fixture correction active |
+| Review status | Final clean C4 candidate `d49ee09c` under independent GPT-5.6 Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -631,3 +631,12 @@ JournalBatchService tests have related unknown-book or missing-period setup auth
 dispatched a narrow GPT-5.6 Sol Medium test-fixture correction requiring authentic tenant/book/mapping/fiscal/
 exact-book-period setup and both full regression reruns, with no production fallback or gate weakening.
 Integration and subsequent stages remain blocked; no database was accessed or mutated.
+
+The implementer completed the narrow regression correction as `78e8ae05d0776b44a8d344b8b74bbc54da38815b`
+and added final UI action-gate coverage as `d49ee09cb88d1a547df75fa6bbe477c424c744ca`. The resulting
+seven-commit C4 worktree is clean, remains linear from the exact base and passes the full-range diff check.
+The production period gate was not weakened; affected Finance test fixtures now establish explicit governed
+book, fiscal and exact-book-period authority with owner-facing comments. Final independent GPT-5.6 Sol High
+re-review is active against the exact widened 466-test gate, the combined C4/C1-C3/posting/reversal/balance/FX
+gate, both previously failing journal suites, and all substantive cycle-1 closures. Integration, migrations,
+subsequent stages and configured-database access remain blocked pending approval.
