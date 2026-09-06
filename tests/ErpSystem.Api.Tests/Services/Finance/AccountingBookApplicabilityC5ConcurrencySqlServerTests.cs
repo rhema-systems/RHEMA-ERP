@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text.RegularExpressions;
 using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
@@ -12,6 +13,7 @@ using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
 using Xunit;
 
@@ -39,31 +41,58 @@ public sealed class AccountingBookApplicabilityC5ConcurrencySqlServerTests
     }
 
     [SqlServerFact]
-    public async Task ConcurrentIdenticalFreezeReturnsOneEvidence_AndConflictingFreezeCannotReplaceIt()
+    public async Task ConcurrentIdenticalFreezeCoordinatesBothOpenTransactions_AndPersistsOneExactEvidenceGraph()
     {
         await using var database = await DisposableDatabase.CreateAsync();
         var authority = await SeedAsync(database);
         AccountingBookSelectionDto preview;
         await using (var context = database.Context()) preview = await Service(context, authority.TenantId, Guid.NewGuid()).ResolveAsync(Input());
         var request = Freeze("race", preview, "GOODS.RECEIPT");
+        var barrier = new FreezeApplicationLockBarrier(expectedParticipants: 2);
 
         async Task<AccountingBookSelectionDto> FreezeOnce()
         {
-            await using var context = database.Context();
+            await using var context = database.Context(barrier);
             return await Service(context, authority.TenantId, Guid.NewGuid()).FreezeAsync(request);
         }
         var results = await Task.WhenAll(Task.Run(FreezeOnce), Task.Run(FreezeOnce));
+        barrier.Arrivals.Should().Be(2);
         results[0].SelectionFingerprint.Should().Be(results[1].SelectionFingerprint);
-        await using (var verify = database.Context()) (await verify.AccountingBookSelectionEvidence.CountAsync()).Should().Be(1);
+        await using var verify = database.Context();
+        (await verify.AccountingBookSelectionEvidence.CountAsync()).Should().Be(1);
+        (await verify.AccountingBookSelectionEvidenceBooks.CountAsync()).Should().Be(1);
+        var evidence = await verify.AccountingBookSelectionEvidence.Include(item => item.Books).SingleAsync();
+        evidence.Books.Single().AccountingBookId.Should().Be(authority.BookId);
+        evidence.Books.Single().SelectionOrder.Should().Be(0);
+    }
 
-        AccountingBookSelectionDto conflictingPreview;
+    [SqlServerFact]
+    public async Task ConcurrentConflictingFreezeCoordinatesBothOpenTransactions_AndOneConflictLeavesNoPartialRows()
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        var authority = await SeedAsync(database);
+        AccountingBookSelectionDto firstPreview; AccountingBookSelectionDto secondPreview;
+        await using (var context = database.Context()) firstPreview = await Service(context, authority.TenantId, Guid.NewGuid()).ResolveAsync(Input());
         var otherInput = Input(); otherInput.SourceDocumentType = "OTHER.DOCUMENT";
-        await using (var context = database.Context()) conflictingPreview = await Service(context, authority.TenantId, Guid.NewGuid()).ResolveAsync(otherInput);
-        await using var conflictContext = database.Context();
-        await FluentActions.Awaiting(() => Service(conflictContext, authority.TenantId, Guid.NewGuid())
-            .FreezeAsync(Freeze("RACE", conflictingPreview, "OTHER.DOCUMENT")))
-            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_SELECTION_IDEMPOTENCY_CONFLICT:*");
-        await using var final = database.Context(); (await final.AccountingBookSelectionEvidence.CountAsync()).Should().Be(1);
+        await using (var context = database.Context()) secondPreview = await Service(context, authority.TenantId, Guid.NewGuid()).ResolveAsync(otherInput);
+        var barrier = new FreezeApplicationLockBarrier(expectedParticipants: 2);
+
+        async Task<(AccountingBookSelectionDto? Result, Exception? Error)> Attempt(FreezeAccountingBookSelectionDto request)
+        {
+            await using var context = database.Context(barrier);
+            try { return (await Service(context, authority.TenantId, Guid.NewGuid()).FreezeAsync(request), null); }
+            catch (Exception error) { return (null, error); }
+        }
+        var outcomes = await Task.WhenAll(
+            Task.Run(() => Attempt(Freeze("race", firstPreview, "GOODS.RECEIPT"))),
+            Task.Run(() => Attempt(Freeze("RACE", secondPreview, "OTHER.DOCUMENT"))));
+        barrier.Arrivals.Should().Be(2);
+        outcomes.Should().ContainSingle(item => item.Result != null && item.Error == null);
+        outcomes.Count(item => item.Error is InvalidOperationException exception
+            && exception.Message.StartsWith("ACCOUNTING_BOOK_SELECTION_IDEMPOTENCY_CONFLICT:", StringComparison.Ordinal)).Should().Be(1);
+        await using var final = database.Context();
+        (await final.AccountingBookSelectionEvidence.CountAsync()).Should().Be(1);
+        (await final.AccountingBookSelectionEvidenceBooks.CountAsync()).Should().Be(1);
     }
 
     private static async Task<(Guid TenantId, Guid BookId)> SeedAsync(DisposableDatabase database)
@@ -95,11 +124,16 @@ public sealed class AccountingBookApplicabilityC5ConcurrencySqlServerTests
     {
         var user = new Mock<ICurrentUserService>(); user.SetupGet(item => item.TenantId).Returns(tenant); user.SetupGet(item => item.UserId).Returns(actor.ToString()); user.SetupGet(item => item.UserName).Returns("c5.sql");
         var workflow = new Mock<IWorkflowService>();
-        var effectiveAudit = audit ?? Mock.Of<IFinanceAuditService>();
+        if (audit == null)
+        {
+            var auditMock = new Mock<IFinanceAuditService>();
+            auditMock.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
+            audit = auditMock.Object;
+        }
         var initialization = new Mock<IAccountingBookInitializationService>(); initialization.Setup(item => item.ValidateCurrentApprovedEvidenceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AccountingBookInitializationEvidenceValidationDto { IsValid = true, InitializationId = Guid.NewGuid(), Version = 1,
                 EvidenceFingerprint = new string('A', 64), ReconciliationFingerprint = new string('B', 64) });
-        return new AccountingBookApplicabilityService(db, user.Object, workflow.Object, effectiveAudit, initialization.Object);
+        return new AccountingBookApplicabilityService(db, user.Object, workflow.Object, audit, initialization.Object);
     }
 
     private static SaveAccountingBookApplicabilityPolicyDto Draft(Guid bookId) => new() { PolicyCode = "SQL_POLICY", Name = "SQL policy",
@@ -113,6 +147,27 @@ public sealed class AccountingBookApplicabilityC5ConcurrencySqlServerTests
     private sealed class SqlServerFactAttribute : FactAttribute
     {
         public SqlServerFactAttribute() { if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER"))) Skip = "Set RHEMA_TEST_SQLSERVER to run prefix-safe disposable C5 service gates."; }
+    }
+
+    private sealed class FreezeApplicationLockBarrier(int expectedParticipants) : DbCommandInterceptor
+    {
+        private readonly TaskCompletionSource _allArrived = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _arrivals;
+        public int Arrivals => Volatile.Read(ref _arrivals);
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("sp_getapplock", StringComparison.OrdinalIgnoreCase))
+            {
+                // Both independent Serializable transactions have begun before this command is issued. Holding
+                // them at the application-lock boundary proves they genuinely compete for the same canonical key
+                // before either evidence write, instead of merely running two sequential tasks.
+                if (Interlocked.Increment(ref _arrivals) == expectedParticipants) _allArrived.TrySetResult();
+                await _allArrived.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+            }
+            return result;
+        }
     }
 
     private sealed class DisposableDatabase : IAsyncDisposable
@@ -129,7 +184,12 @@ public sealed class AccountingBookApplicabilityC5ConcurrencySqlServerTests
             var result = new DisposableDatabase(name, master.ConnectionString, target.ConnectionString);
             await result.MasterAsync($"CREATE DATABASE [{name}]"); return result;
         }
-        public ApplicationDbContext Context() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection, options => options.EnableRetryOnFailure()).Options);
+        public ApplicationDbContext Context(DbCommandInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection, options => options.EnableRetryOnFailure());
+            if (interceptor != null) builder.AddInterceptors(interceptor);
+            return new ApplicationDbContext(builder.Options);
+        }
         private async Task MasterAsync(string sql) { await using var connection = new SqlConnection(_master); await connection.OpenAsync(); await using var command = new SqlCommand(sql, connection) { CommandTimeout = 120 }; await command.ExecuteNonQueryAsync(); }
         public async ValueTask DisposeAsync() { if (!SafeName.IsMatch(_name)) return; await MasterAsync($"IF DB_ID(N'{_name}') IS NOT NULL BEGIN ALTER DATABASE [{_name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{_name}]; END"); }
     }

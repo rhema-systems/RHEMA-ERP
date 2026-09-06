@@ -124,6 +124,8 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
         var entity = await RequirePolicyAsync(id, cancellationToken);
         ApplyRowVersion(entity, request.RowVersion); RequireReason(request.Reason);
         if (entity.PolicyStatus != AccountingBookApplicabilityPolicyStatus.Approved) throw new InvalidOperationException("Only an Approved applicability policy can be retired.");
+        if (DateTime.UtcNow.Date < entity.EffectiveFrom)
+            throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_FUTURE_RETIREMENT_FORBIDDEN: a future-effective policy cannot be retired before its governed interval begins; create a corrected successor instead.");
         if (entity.RetirementDecisionStatus == "Pending") throw new InvalidOperationException("Policy retirement is already pending independent approval.");
         if (!await _workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType)) throw new InvalidOperationException("A published AccountingBookApplicabilityPolicy approval workflow is required.");
         var result = await _workflow.StartApprovalWorkflowAsync(WorkflowEntityType, entity.Id);
@@ -152,13 +154,20 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
         if (!await _workflow.CanUserApproveAsync(WorkflowEntityType, entity.Id, actor)) throw new UnauthorizedAccessException("The current user cannot approve this policy retirement.");
         // Revalidate the still-approved version while holding the serializable writer boundary before a retirement decision.
         await ValidatePolicyAsync(entity, includeOtherApprovedPolicies: false, cancellationToken);
+        if (approve && DateTime.UtcNow.Date < entity.EffectiveFrom)
+            throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_FUTURE_RETIREMENT_FORBIDDEN: retirement cannot precede the governed effective interval.");
         var result = await _workflow.ProcessApprovalStepAsync(WorkflowEntityType, entity.Id, actor, approve ? "Approve" : "Reject", request.Reason.Trim());
         if (!result.Success) throw new InvalidOperationException(result.Message ?? "Policy-retirement workflow decision failed.");
         if (approve && result.Status == WorkflowInstanceStatus.Completed)
         {
             entity.PolicyStatus = AccountingBookApplicabilityPolicyStatus.Retired; entity.RetiredByUserId = actor; entity.RetiredAtUtc = DateTime.UtcNow;
-            // Retired policy versions remain authoritative for their historical inclusive interval.
-            entity.EffectiveTo = entity.RetiredAtUtc.Value.Date;
+            var retirementDate = entity.RetiredAtUtc.Value.Date;
+            if (retirementDate < entity.EffectiveFrom)
+                throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_FUTURE_RETIREMENT_FORBIDDEN: retirement cannot precede the governed effective interval.");
+            // Retirement may close an open interval or shorten a later bound, but it must never expand an
+            // already-ended historical interval. Resolution remains inclusive at the preserved minimum bound.
+            entity.EffectiveTo = entity.EffectiveTo.HasValue && entity.EffectiveTo.Value.Date < retirementDate
+                ? entity.EffectiveTo.Value.Date : retirementDate;
         }
         if (!approve || result.Status == WorkflowInstanceStatus.Completed)
         {
@@ -185,6 +194,8 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
                 && (item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved || item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Retired)
                 && item.EffectiveFrom <= date)
             .OrderBy(item => item.PolicyCode).ThenByDescending(item => item.Version).ToListAsync(cancellationToken);
+        foreach (var policy in startedPolicies)
+            await ValidateExactVersionLineageAsync(policy, cancellationToken);
         var effectivePolicyIds = startedPolicies.GroupBy(item => item.PolicyCode, StringComparer.Ordinal)
             .Select(group => group.First()).Where(item => item.EffectiveTo == null || item.EffectiveTo >= date).Select(item => item.Id).ToList();
         var candidates = await _db.AccountingBookApplicabilityRules.AsNoTracking()
@@ -275,9 +286,14 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
         await _db.SaveChangesAsync(cancellationToken);
         await _audit.RecordAsync(new FinanceAuditEventDto { TenantId = TenantId, EventType = FinanceAuditEvents.AccountingBookSelectionFrozen,
             SourceModule = resolved.OriginatingModuleCode, SourceDocumentType = resolved.SourceDocumentType, SourceDocumentId = evidence.Id,
-            Resource = "Finance.AccountingBookSelectionEvidence", ResourceId = evidence.Id.ToString(), AfterValues = new
-            { evidence.AccountingBookApplicabilityPolicyId, evidence.AccountingBookApplicabilityRuleId, evidence.PolicyVersion, evidence.EffectiveDate,
-              evidence.PostingAction, evidence.CalculationInputHash, evidence.SelectionFingerprint, Books = resolved.Books }, Reason = "Approved applicability selection evidence frozen." }, cancellationToken);
+            Resource = "Finance.AccountingBookSelectionEvidence", ResourceId = evidence.Id.ToString(), IdempotencyKey = evidence.IdempotencyKey,
+            AfterValues = new { evidence.Id, evidence.IdempotencyKey, evidence.FrozenByUserId, evidence.FrozenAtUtc,
+              evidence.AccountingBookApplicabilityPolicyId, evidence.AccountingBookApplicabilityRuleId, evidence.PolicyVersion,
+              evidence.EffectiveDate, evidence.OriginatingModuleCode, evidence.SourceDocumentType, evidence.PostingAction,
+              evidence.CalculationInputHash, evidence.SelectionFingerprint,
+              Books = evidence.Books.OrderBy(item => item.SelectionOrder).Select(item => new
+              { item.AccountingBookId, item.AccountingBookCodeSnapshot, item.SelectionOrder, item.AuthorityFingerprint }) },
+            Reason = "Approved applicability selection evidence frozen." }, cancellationToken);
         return resolved;
     }, cancellationToken);
 
@@ -371,6 +387,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
 
     private async Task ValidatePolicyAsync(AccountingBookApplicabilityPolicy entity, bool includeOtherApprovedPolicies, CancellationToken ct)
     {
+        await ValidateExactVersionLineageAsync(entity, ct);
         if (entity.Rules.Count == 0 || entity.Rules.Any(item => item.SelectedBooks.Count == 0)) throw new InvalidOperationException("Every applicability rule must select at least one full book.");
         var selected = entity.Rules.SelectMany(item => item.SelectedBooks).ToList();
         var selectedIds = selected.Select(item => item.AccountingBookId).Distinct().ToList();
@@ -400,6 +417,33 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
                 && item.Policy.EffectiveFrom <= (entity.EffectiveTo ?? DateTime.MaxValue)
                 && (item.Policy.EffectiveTo == null || item.Policy.EffectiveTo >= entity.EffectiveFrom), ct);
             if (overlap) throw new InvalidOperationException("AMBIGUOUS_ACCOUNTING_BOOK_APPLICABILITY: an approved equal-priority rule overlaps this effective range.");
+        }
+    }
+
+    private async Task ValidateExactVersionLineageAsync(AccountingBookApplicabilityPolicy entity, CancellationToken ct)
+    {
+        // Version numbers are accounting authority, not display sequencing. Walk the complete predecessor chain
+        // so a malformed high version can neither be approved nor win an effective-date resolution.
+        var visited = new HashSet<Guid>();
+        var current = entity;
+        while (true)
+        {
+            if (!visited.Add(current.Id))
+                throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_VERSION_LINEAGE_INVALID: policy-version lineage contains a cycle.");
+            if (current.Version == 1)
+            {
+                if (current.SupersedesPolicyId.HasValue)
+                    throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_VERSION_LINEAGE_INVALID: version 1 cannot supersede another policy.");
+                return;
+            }
+            if (current.Version < 1 || !current.SupersedesPolicyId.HasValue)
+                throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_VERSION_LINEAGE_INVALID: every version after 1 must identify its immediate predecessor.");
+            var predecessor = await _db.AccountingBookApplicabilityPolicies.AsNoTracking().SingleOrDefaultAsync(item =>
+                item.Id == current.SupersedesPolicyId.Value && item.TenantId == TenantId && !item.IsDeleted, ct);
+            if (predecessor == null || !string.Equals(predecessor.PolicyCode, current.PolicyCode, StringComparison.Ordinal)
+                || predecessor.Version != current.Version - 1)
+                throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_VERSION_LINEAGE_INVALID: successor version must equal its same-tenant, same-code predecessor version plus one.");
+            current = predecessor;
         }
     }
 
@@ -508,11 +552,17 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
     private async Task AuditAsync(string type, AccountingBookApplicabilityPolicy entity, string reason, CancellationToken ct) => await _audit.RecordAsync(new FinanceAuditEventDto
     { TenantId = TenantId, EventType = type, SourceModule = "GL", SourceDocumentType = WorkflowEntityType, SourceDocumentId = entity.Id,
         WorkflowInstanceId = entity.WorkflowInstanceId, Resource = "Finance.AccountingBookApplicabilityPolicy", ResourceId = entity.Id.ToString(),
-        AfterValues = new { entity.Id, entity.PolicyCode, entity.Version, entity.SupersedesPolicyId, Status = entity.PolicyStatus.ToString(),
-            entity.EffectiveFrom, entity.EffectiveTo, entity.Reason, entity.CreatedByUserId, entity.PreparedByUserId, entity.ApprovedByUserId,
-            entity.DecidedByUserId, entity.DecidedAtUtc, entity.DecisionReason, entity.RetirementRequestedByUserId,
-            entity.RetirementRequestedAtUtc, entity.RetirementReason, entity.RetirementDecisionStatus,
-            entity.RetirementDecidedByUserId, entity.RetirementDecidedAtUtc, entity.RetirementDecisionReason,
+        // The audit snapshot is deliberately reconstructible without rereading mutable policy tables.
+        AfterValues = new { entity.Id, entity.PolicyCode, entity.Version, entity.SupersedesPolicyId, entity.Name, entity.Description,
+            Status = entity.PolicyStatus.ToString(), entity.EffectiveFrom, entity.EffectiveTo, entity.Reason,
+            entity.CreatedByUserId, entity.CreatedAt, entity.PreparedByUserId, entity.PreparedAtUtc,
+            entity.WorkflowInstanceId, entity.ApprovedByUserId, entity.ApprovedAtUtc,
+            entity.DecidedByUserId, entity.DecidedAtUtc, entity.DecisionReason,
+            entity.RetiredByUserId, entity.RetiredAtUtc, entity.RetirementRequestedByUserId,
+            entity.RetirementRequestedAtUtc, entity.RetirementReason, entity.RetirementWorkflowInstanceId,
+            entity.RetirementDecisionStatus, entity.RetirementDecidedByUserId, entity.RetirementDecidedAtUtc,
+            entity.RetirementDecisionReason, entity.UpdatedBy, entity.UpdatedAt,
+            RowVersion = entity.RowVersion.Length == 0 ? string.Empty : Convert.ToBase64String(entity.RowVersion),
             Rules = entity.Rules.OrderBy(item => item.SortOrder).ThenBy(item => item.RuleCode).Select(item => new
             { item.Id, item.RuleCode, item.Priority, item.OriginatingModuleCode, item.SourceDocumentType, item.PostingAction, item.SortOrder,
               Books = item.SelectedBooks.OrderBy(book => book.SelectionOrder).Select(book => new { book.AccountingBookId, book.AccountingBookCodeSnapshot, book.SelectionOrder }) }) }, Reason = reason.Trim() }, ct);

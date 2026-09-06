@@ -245,10 +245,116 @@ public sealed class AccountingBookApplicabilityC5Tests
         FinanceAuditEventDto? recorded = null; var audit = new Mock<IFinanceAuditService>();
         audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
             .Callback<FinanceAuditEventDto, CancellationToken>((item, _) => recorded = item).ReturnsAsync(new AuditLog());
-        await Service(db, state.TenantId, audit: audit.Object).CreateDraftAsync(Draft(state.Primary.Id));
+        var request = Draft(state.Primary.Id); request.Description = "Auditable policy description";
+        var maker = Guid.NewGuid(); var checker = Guid.NewGuid(); var retirementMaker = Guid.NewGuid(); var retirementChecker = Guid.NewGuid();
+        var created = await Service(db, state.TenantId, maker, audit.Object).CreateDraftAsync(request);
+        var entity = db.AccountingBookApplicabilityPolicies.Single(); entity.RowVersion = [1]; await db.SaveChangesAsync();
+        await Service(db, state.TenantId, maker, audit.Object).SubmitAsync(created.Id,
+            new() { Reason = "Submit audit policy", RowVersion = Convert.ToBase64String([1]) });
+        entity.RowVersion = [2]; await db.SaveChangesAsync();
+        await Service(db, state.TenantId, checker, audit.Object).ApproveAsync(created.Id,
+            new() { Reason = "Approve audit policy", RowVersion = Convert.ToBase64String([2]) });
+        entity.RowVersion = [3]; await db.SaveChangesAsync();
+        await Service(db, state.TenantId, retirementMaker, audit.Object).RetireAsync(created.Id,
+            new() { Reason = "Request retirement", RowVersion = Convert.ToBase64String([3]) });
+        entity.RowVersion = [4]; await db.SaveChangesAsync();
+        await Service(db, state.TenantId, retirementChecker, audit.Object).ApproveRetirementAsync(created.Id,
+            new() { Reason = "Approve retirement", RowVersion = Convert.ToBase64String([4]) });
         var json = JsonSerializer.Serialize(recorded!.AfterValues);
         json.Should().Contain("INVENTORY_POLICY").And.Contain("GRN_POST").And.Contain("GOODS.RECEIPT")
-            .And.Contain(state.Primary.Id.ToString()).And.Contain("IFRS");
+            .And.Contain(state.Primary.Id.ToString()).And.Contain("IFRS").And.Contain("Auditable policy description")
+            .And.Contain("PreparedAtUtc").And.Contain("ApprovedAtUtc").And.Contain("RetirementWorkflowInstanceId")
+            .And.Contain("RowVersion").And.Contain("SelectionOrder").And.Contain(maker.ToString()).And.Contain(checker.ToString())
+            .And.Contain(retirementMaker.ToString()).And.Contain(retirementChecker.ToString());
+    }
+
+    [Fact]
+    public async Task RetirementPreservesEarlierBound_AndOpenIntervalClosesInclusivelyWithoutExpandingHistory()
+    {
+        var today = DateTime.UtcNow.Date;
+        await using var boundedDb = Context(); var boundedState = Seed(boundedDb, ready: true);
+        AddApprovedPolicy(boundedDb, boundedState, [boundedState.Parallel.Id], "BOUNDED", today.AddDays(-10));
+        await boundedDb.SaveChangesAsync();
+        var bounded = boundedDb.AccountingBookApplicabilityPolicies.Single(); bounded.EffectiveTo = today.AddDays(-5);
+        await boundedDb.SaveChangesAsync(); bounded.RowVersion = [1]; await boundedDb.SaveChangesAsync();
+        var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
+        await Service(boundedDb, boundedState.TenantId, maker).RetireAsync(bounded.Id, new() { Reason = "Retire expired policy", RowVersion = Convert.ToBase64String([1]) });
+        bounded.RowVersion = [2]; await boundedDb.SaveChangesAsync();
+        await Service(boundedDb, boundedState.TenantId, checker).ApproveRetirementAsync(bounded.Id, new() { Reason = "Approve retirement", RowVersion = Convert.ToBase64String([2]) });
+        bounded.EffectiveTo.Should().Be(today.AddDays(-5));
+        var before = Input(); before.EffectiveDate = today.AddDays(-6);
+        var at = Input(); at.EffectiveDate = today.AddDays(-5);
+        var after = Input(); after.EffectiveDate = today.AddDays(-4);
+        (await Service(boundedDb, boundedState.TenantId).ResolveAsync(before)).Books.Single().AccountingBookId.Should().Be(boundedState.Parallel.Id);
+        (await Service(boundedDb, boundedState.TenantId).ResolveAsync(at)).Books.Single().AccountingBookId.Should().Be(boundedState.Parallel.Id);
+        (await Service(boundedDb, boundedState.TenantId).ResolveAsync(after)).Books.Single().AccountingBookId.Should().Be(boundedState.Primary.Id);
+
+        await using var openDb = Context(); var openState = Seed(openDb, ready: true);
+        AddApprovedPolicy(openDb, openState, [openState.Parallel.Id], "OPEN", today.AddDays(-10)); await openDb.SaveChangesAsync();
+        var open = openDb.AccountingBookApplicabilityPolicies.Single(); open.RowVersion = [1]; await openDb.SaveChangesAsync();
+        await Service(openDb, openState.TenantId, maker).RetireAsync(open.Id, new() { Reason = "Close current interval", RowVersion = Convert.ToBase64String([1]) });
+        open.RowVersion = [2]; await openDb.SaveChangesAsync();
+        await Service(openDb, openState.TenantId, checker).ApproveRetirementAsync(open.Id, new() { Reason = "Approve interval close", RowVersion = Convert.ToBase64String([2]) });
+        open.EffectiveTo.Should().Be(today);
+        var openAt = Input(); openAt.EffectiveDate = today;
+        var openAfter = Input(); openAfter.EffectiveDate = today.AddDays(1);
+        (await Service(openDb, openState.TenantId).ResolveAsync(openAt)).Books.Single().AccountingBookId.Should().Be(openState.Parallel.Id);
+        (await Service(openDb, openState.TenantId).ResolveAsync(openAfter)).Books.Single().AccountingBookId.Should().Be(openState.Primary.Id);
+    }
+
+    [Fact]
+    public async Task FutureEffectiveRetirementFailsBeforeWorkflowOrAuditMutation()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true);
+        AddApprovedPolicy(db, state, [state.Parallel.Id], "FUTURE", DateTime.UtcNow.Date.AddDays(2)); await db.SaveChangesAsync();
+        var policy = db.AccountingBookApplicabilityPolicies.Single(); policy.RowVersion = [1]; await db.SaveChangesAsync();
+        var audit = new Mock<IFinanceAuditService>();
+        await FluentActions.Awaiting(() => Service(db, state.TenantId, audit: audit.Object).RetireAsync(policy.Id,
+            new() { Reason = "Cancel future authority", RowVersion = Convert.ToBase64String([1]) }))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_APPLICABILITY_FUTURE_RETIREMENT_FORBIDDEN:*");
+        policy.PolicyStatus.Should().Be(AccountingBookApplicabilityPolicyStatus.Approved);
+        policy.EffectiveTo.Should().BeNull(); policy.RetirementDecisionStatus.Should().BeNull();
+        audit.Verify(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MalformedVersionLineageCannotBeSubmittedOrWinResolution()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true);
+        AddApprovedPolicy(db, state, [state.Parallel.Id], "MALFORMED", new DateTime(2026, 1, 1), version: 3);
+        await db.SaveChangesAsync();
+        var malformed = db.AccountingBookApplicabilityPolicies.Single();
+        await db.SaveChangesAsync();
+        await FluentActions.Awaiting(() => Service(db, state.TenantId).ResolveAsync(Input()))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_APPLICABILITY_VERSION_LINEAGE_INVALID:*");
+
+        malformed.PolicyStatus = AccountingBookApplicabilityPolicyStatus.Draft; malformed.RowVersion = [1]; await db.SaveChangesAsync();
+        await FluentActions.Awaiting(() => Service(db, state.TenantId).SubmitAsync(malformed.Id,
+            new() { Reason = "Submit malformed version", RowVersion = Convert.ToBase64String([1]) }))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_APPLICABILITY_VERSION_LINEAGE_INVALID:*");
+    }
+
+    [Fact]
+    public async Task FrozenSelectionAuditIsComplete_AndValidationFailureWritesNoAudit()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true); await db.SaveChangesAsync();
+        var events = new List<FinanceAuditEventDto>(); var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinanceAuditEventDto, CancellationToken>((item, _) => events.Add(item)).ReturnsAsync(new AuditLog());
+        var service = Service(db, state.TenantId, audit: audit.Object); var preview = await service.ResolveAsync(Input());
+        await service.FreezeAsync(new() { EffectiveDate = state.Date, OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT",
+            PostingAction = "POST", IdempotencyKey = "audit-freeze", ExpectedCalculationInputHash = preview.CalculationInputHash,
+            ExpectedSelectionFingerprint = preview.SelectionFingerprint });
+        var frozen = events.Single(item => item.EventType == FinanceAuditEvents.AccountingBookSelectionFrozen);
+        var json = JsonSerializer.Serialize(frozen.AfterValues);
+        frozen.IdempotencyKey.Should().Be("AUDIT-FREEZE");
+        json.Should().Contain("FrozenByUserId").And.Contain("FrozenAtUtc").And.Contain("AccountingBookApplicabilityPolicyId")
+            .And.Contain("AccountingBookApplicabilityRuleId").And.Contain("PolicyVersion").And.Contain("CalculationInputHash")
+            .And.Contain("SelectionFingerprint").And.Contain("AuthorityFingerprint").And.Contain("SelectionOrder");
+
+        var invalid = Draft();
+        await FluentActions.Awaiting(() => service.CreateDraftAsync(invalid)).Should().ThrowAsync<InvalidOperationException>();
+        events.Should().ContainSingle();
     }
 
     private static ResolveAccountingBookApplicabilityDto Input() => new() { EffectiveDate = new DateTime(2026, 9, 6),
@@ -256,9 +362,11 @@ public sealed class AccountingBookApplicabilityC5Tests
     private static SaveAccountingBookApplicabilityPolicyDto Draft(params Guid[] books) => new() { PolicyCode = "INVENTORY_POLICY", Name = "Inventory policy",
         EffectiveFrom = new DateTime(2026, 1, 1), Reason = "Govern representations", Rules = [new() { RuleCode = "GRN_POST", Priority = 100,
             OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST", AccountingBookIds = books }] };
-    private static void AddApprovedPolicy(ApplicationDbContext db, State state, Guid[] books, string? policyCode = null, DateTime? effectiveFrom = null)
+    private static void AddApprovedPolicy(ApplicationDbContext db, State state, Guid[] books, string? policyCode = null,
+        DateTime? effectiveFrom = null, int version = 1, Guid? supersedesPolicyId = null)
     {
-        var policy = new AccountingBookApplicabilityPolicy { TenantId = state.TenantId, PolicyCode = policyCode ?? $"P{Guid.NewGuid():N}"[..20].ToUpperInvariant(), Version = 1,
+        var policy = new AccountingBookApplicabilityPolicy { TenantId = state.TenantId, PolicyCode = policyCode ?? $"P{Guid.NewGuid():N}"[..20].ToUpperInvariant(), Version = version,
+            SupersedesPolicyId = supersedesPolicyId,
             Name = "Approved", EffectiveFrom = effectiveFrom ?? new DateTime(2026, 1, 1), PolicyStatus = AccountingBookApplicabilityPolicyStatus.Approved,
             Reason = "Approved", CreatedByUserId = Guid.NewGuid(), PreparedByUserId = Guid.NewGuid(), PreparedAtUtc = DateTime.UtcNow, ApprovedByUserId = Guid.NewGuid(), ApprovedAtUtc = DateTime.UtcNow };
         var rule = new AccountingBookApplicabilityRule { TenantId = state.TenantId, RuleCode = "RULE", Priority = 100, OriginatingModuleCode = "INV",

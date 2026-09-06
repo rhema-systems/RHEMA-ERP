@@ -103,6 +103,7 @@ IF EXISTS (
                     table.CheckConstraint("CK_AccountingBookApplicabilityPolicies_ApprovalShape", "([PolicyStatus] IN (1,2,4) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 5 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NOT NULL AND [RetiredAtUtc] IS NOT NULL)");
                     table.CheckConstraint("CK_AccountingBookApplicabilityPolicies_CodeCanonical", "LEN([PolicyCode]) > 0 AND [PolicyCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PolicyCode]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([PolicyCode]) = DATALENGTH(UPPER(LTRIM(RTRIM([PolicyCode])))) AND LEFT([PolicyCode], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
                     table.CheckConstraint("CK_AccountingBookApplicabilityPolicies_EffectiveRange", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
+                    table.CheckConstraint("CK_AccountingBookApplicabilityPolicies_VersionLineageShape", "([Version] = 1 AND [SupersedesPolicyId] IS NULL) OR ([Version] > 1 AND [SupersedesPolicyId] IS NOT NULL)");
                     table.CheckConstraint("CK_AccountingBookApplicabilityPolicies_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
                     table.CheckConstraint("CK_AccountingBookApplicabilityPolicies_NoDelete", "[IsDeleted] = 0");
                     table.CheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementMakerChecker", "[RetiredByUserId] IS NULL OR [RetiredByUserId] <> [RetirementRequestedByUserId]");
@@ -410,6 +411,88 @@ BEGIN
     IF EXISTS (SELECT 1 FROM deleted) AND NOT EXISTS (SELECT 1 FROM inserted)
         THROW 51000, 'C5_POLICY_IMMUTABLE: policies cannot be physically deleted.', 1;
 
+    IF EXISTS (SELECT 1 FROM inserted i LEFT JOIN deleted d ON d.[Id]=i.[Id]
+               WHERE d.[Id] IS NULL AND i.[PolicyStatus] IN (3,5))
+        THROW 51000, 'C5_POLICY_TRANSITION_INVALID: approved or retired authority must be reached through a governed transition.', 1;
+
+    IF EXISTS (
+        SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+        WHERE i.[PolicyStatus]<>d.[PolicyStatus]
+          AND NOT ((d.[PolicyStatus]=1 AND i.[PolicyStatus]=2)
+                OR (d.[PolicyStatus]=2 AND i.[PolicyStatus] IN (3,4))
+                OR (d.[PolicyStatus]=3 AND i.[PolicyStatus]=5))
+    ) THROW 51000, 'C5_POLICY_TRANSITION_INVALID: direct policy status demotion or ungoverned transition is forbidden.', 1;
+
+    IF EXISTS (
+        SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+        WHERE d.[PolicyStatus] IN (3,5)
+          AND (i.[TenantId]<>d.[TenantId]
+            OR i.[PolicyCode] COLLATE Latin1_General_100_BIN2<>d.[PolicyCode] COLLATE Latin1_General_100_BIN2
+            OR i.[Version]<>d.[Version]
+            OR ISNULL(i.[SupersedesPolicyId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[SupersedesPolicyId],'00000000-0000-0000-0000-000000000000')
+            OR i.[Name] COLLATE Latin1_General_100_BIN2<>d.[Name] COLLATE Latin1_General_100_BIN2
+            OR ISNULL(i.[Description],N'') COLLATE Latin1_General_100_BIN2<>ISNULL(d.[Description],N'') COLLATE Latin1_General_100_BIN2
+            OR i.[Reason] COLLATE Latin1_General_100_BIN2<>d.[Reason] COLLATE Latin1_General_100_BIN2
+            OR i.[EffectiveFrom]<>d.[EffectiveFrom]
+            OR (ISNULL(i.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))<>ISNULL(d.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))
+                AND NOT (d.[PolicyStatus]=3 AND i.[PolicyStatus]=5 AND i.[RetiredAtUtc] IS NOT NULL
+                         AND i.[EffectiveTo]=CASE WHEN d.[EffectiveTo] IS NULL OR CONVERT(date,i.[RetiredAtUtc])<d.[EffectiveTo]
+                            THEN CONVERT(date,i.[RetiredAtUtc]) ELSE d.[EffectiveTo] END))
+            OR ISNULL(i.[ApprovedByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[ApprovedByUserId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[ApprovedAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(d.[ApprovedAtUtc],CONVERT(datetime2,'1900-01-01'))
+            OR i.[PreparedByUserId]<>d.[PreparedByUserId] OR i.[PreparedAtUtc]<>d.[PreparedAtUtc]
+            OR ISNULL(i.[WorkflowInstanceId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[WorkflowInstanceId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[DecidedByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[DecidedByUserId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[DecidedAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(d.[DecidedAtUtc],CONVERT(datetime2,'1900-01-01'))
+            OR ISNULL(i.[DecisionReason],N'') COLLATE Latin1_General_100_BIN2<>ISNULL(d.[DecisionReason],N'') COLLATE Latin1_General_100_BIN2)
+    ) THROW 51000, 'C5_POLICY_IMMUTABLE: approved or retired structural and approval authority is immutable except for bounded governed retirement closure.', 1;
+
+    IF EXISTS (
+        SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+        WHERE (ISNULL(i.[RetirementRequestedByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RetirementRequestedByUserId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[RetirementRequestedAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(d.[RetirementRequestedAtUtc],CONVERT(datetime2,'1900-01-01'))
+            OR ISNULL(i.[RetirementReason],N'') COLLATE Latin1_General_100_BIN2<>ISNULL(d.[RetirementReason],N'') COLLATE Latin1_General_100_BIN2
+            OR ISNULL(i.[RetirementWorkflowInstanceId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RetirementWorkflowInstanceId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[RetirementDecisionStatus],N'')<>ISNULL(d.[RetirementDecisionStatus],N'')
+            OR ISNULL(i.[RetirementDecidedByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RetirementDecidedByUserId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[RetirementDecidedAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(d.[RetirementDecidedAtUtc],CONVERT(datetime2,'1900-01-01'))
+            OR ISNULL(i.[RetirementDecisionReason],N'') COLLATE Latin1_General_100_BIN2<>ISNULL(d.[RetirementDecisionReason],N'') COLLATE Latin1_General_100_BIN2)
+          AND NOT (
+              (d.[PolicyStatus]=3 AND i.[PolicyStatus]=3 AND ISNULL(d.[RetirementDecisionStatus],N'') IN (N'',N'Rejected')
+               AND i.[RetirementDecisionStatus]=N'Pending' AND i.[RetirementRequestedByUserId] IS NOT NULL
+               AND i.[RetirementRequestedAtUtc] IS NOT NULL AND i.[RetirementReason] IS NOT NULL
+               AND i.[RetirementWorkflowInstanceId] IS NOT NULL AND i.[RetirementDecidedByUserId] IS NULL AND i.[RetirementDecidedAtUtc] IS NULL)
+           OR (d.[PolicyStatus]=3 AND i.[PolicyStatus]=3 AND d.[RetirementDecisionStatus]=N'Pending'
+               AND i.[RetirementDecisionStatus]=N'Rejected' AND i.[RetirementRequestedByUserId]=d.[RetirementRequestedByUserId]
+               AND i.[RetirementRequestedAtUtc]=d.[RetirementRequestedAtUtc] AND i.[RetirementWorkflowInstanceId]=d.[RetirementWorkflowInstanceId]
+               AND i.[RetirementDecidedByUserId] IS NOT NULL AND i.[RetirementDecidedAtUtc] IS NOT NULL AND i.[RetirementDecisionReason] IS NOT NULL)
+           OR (d.[PolicyStatus]=3 AND i.[PolicyStatus]=5 AND d.[RetirementDecisionStatus]=N'Pending'
+               AND i.[RetirementDecisionStatus]=N'Approved' AND i.[RetirementRequestedByUserId]=d.[RetirementRequestedByUserId]
+               AND i.[RetirementRequestedAtUtc]=d.[RetirementRequestedAtUtc] AND i.[RetirementWorkflowInstanceId]=d.[RetirementWorkflowInstanceId]
+               AND i.[RetirementDecidedByUserId] IS NOT NULL AND i.[RetirementDecidedAtUtc] IS NOT NULL AND i.[RetirementDecisionReason] IS NOT NULL)
+          )
+    ) THROW 51000, 'C5_POLICY_RETIREMENT_TRANSITION_INVALID: retirement evidence may change only through the governed maker-checker request and decision path.', 1;
+
+    IF EXISTS (
+        SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+        WHERE (ISNULL(i.[ApprovedByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[ApprovedByUserId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[ApprovedAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(d.[ApprovedAtUtc],CONVERT(datetime2,'1900-01-01')))
+          AND NOT (d.[PolicyStatus]=2 AND i.[PolicyStatus]=3 AND d.[ApprovedByUserId] IS NULL AND d.[ApprovedAtUtc] IS NULL
+                   AND i.[ApprovedByUserId] IS NOT NULL AND i.[ApprovedAtUtc] IS NOT NULL
+                   AND i.[DecidedByUserId] IS NOT NULL AND i.[DecidedAtUtc] IS NOT NULL AND i.[DecisionReason] IS NOT NULL)
+    ) THROW 51000, 'C5_POLICY_APPROVAL_IMMUTABLE: approval identity may be established only by the governed pending-to-approved decision.', 1;
+
+    -- Version numbers are relational authority. The trigger complements the shape check by requiring
+    -- the exact immediate same-tenant/same-code predecessor before any version can be approved or resolved.
+    IF EXISTS (
+        SELECT 1 FROM inserted i
+        WHERE i.[Version]>1 AND NOT EXISTS (
+            SELECT 1 FROM [AccountingBookApplicabilityPolicies] p WITH (UPDLOCK,HOLDLOCK)
+            WHERE p.[Id]=i.[SupersedesPolicyId] AND p.[TenantId]=i.[TenantId] AND p.[IsDeleted]=0
+              AND p.[PolicyCode] COLLATE Latin1_General_100_BIN2=i.[PolicyCode] COLLATE Latin1_General_100_BIN2
+              AND p.[Version]=i.[Version]-1)
+    ) THROW 51000, 'C5_POLICY_VERSION_LINEAGE: each successor must be exactly predecessor version plus one in the same tenant/code lineage.', 1;
+
     IF EXISTS (SELECT 1 FROM inserted i WHERE i.[PolicyStatus]=3 AND i.[IsDeleted]=0
                AND NOT EXISTS (SELECT 1 FROM [AccountingBookApplicabilityRules] r WITH (UPDLOCK,HOLDLOCK)
                                WHERE r.[TenantId]=i.[TenantId] AND r.[AccountingBookApplicabilityPolicyId]=i.[Id] AND r.[IsDeleted]=0))
@@ -426,7 +509,8 @@ BEGIN
             OR i.[EffectiveFrom]<>d.[EffectiveFrom]
             OR (ISNULL(i.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))<>ISNULL(d.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))
                 AND NOT (d.[PolicyStatus]=3 AND i.[PolicyStatus]=5 AND i.[RetiredAtUtc] IS NOT NULL
-                         AND i.[EffectiveTo]=CONVERT(date,i.[RetiredAtUtc]))))
+                         AND i.[EffectiveTo]=CASE WHEN d.[EffectiveTo] IS NULL OR CONVERT(date,i.[RetiredAtUtc])<d.[EffectiveTo]
+                            THEN CONVERT(date,i.[RetiredAtUtc]) ELSE d.[EffectiveTo] END)))
     ) THROW 51000, 'C5_POLICY_IMMUTABLE: structural policy evidence cannot change after first approved use.', 1;
 
     IF EXISTS (

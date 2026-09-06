@@ -39,9 +39,13 @@ VALUES ('{{Guid.NewGuid()}}','{{ruleId}}','{{second.BookId}}',2,N'LOCAL',SYSUTCD
 """);
         (await crossTenant.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(547);
 
+        var malformedVersion = () => database.InsertDraftPolicyRuleAsync(first.TenantId, Guid.NewGuid(), Guid.NewGuid(),
+            "POLICY_A", "RULE_BAD_VERSION", 8, version: 3, supersedes: policyId);
+        (await malformedVersion.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+
         var emptyPolicy = Guid.NewGuid();
         await database.InsertDraftPolicyRuleAsync(first.TenantId, emptyPolicy, Guid.NewGuid(), "POLICY_EMPTY", "RULE_EMPTY", 11);
-        var approveEmpty = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=3,ApprovedByUserId='{Guid.NewGuid()}',ApprovedAtUtc=SYSUTCDATETIME() WHERE Id='{emptyPolicy}'");
+        var approveEmpty = () => database.ApproveAsync(emptyPolicy);
         (await approveEmpty.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
 
         var deltaBook = Guid.NewGuid(); var deltaPolicy = Guid.NewGuid(); var deltaRule = Guid.NewGuid();
@@ -52,10 +56,10 @@ INSERT AccountingBookApplicabilityRuleBooks
  (Id,AccountingBookApplicabilityRuleId,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,CreatedAt,IsDeleted,TenantId)
 VALUES ('{{Guid.NewGuid()}}','{{deltaRule}}','{{deltaBook}}',1,N'DELTA',SYSUTCDATETIME(),0,'{{first.TenantId}}');
 """);
-        var approveDelta = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=3,ApprovedByUserId='{Guid.NewGuid()}',ApprovedAtUtc=SYSUTCDATETIME() WHERE Id='{deltaPolicy}'");
+        var approveDelta = () => database.ApproveAsync(deltaPolicy);
         (await approveDelta.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
 
-        await database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=3,ApprovedByUserId='{Guid.NewGuid()}',ApprovedAtUtc=SYSUTCDATETIME() WHERE Id='{policyId}'");
+        await database.ApproveAsync(policyId);
         var mutateApprovedRule = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityRules SET SortOrder=2 WHERE Id='{ruleId}'");
         (await mutateApprovedRule.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
 
@@ -70,6 +74,52 @@ VALUES ('{{Guid.NewGuid()}}','{{evidenceId}}','{{first.BookId}}',0,N'IFRS',REPLI
 """);
         var mutateFrozen = () => database.ExecuteAsync($"UPDATE AccountingBookSelectionEvidence SET PostingAction=N'REVERSE' WHERE Id='{evidenceId}'");
         (await mutateFrozen.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+
+        foreach (var mutation in new[]
+        {
+            $"UPDATE AccountingBookApplicabilityPolicies SET Name=N'Rewritten' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET Version=2,SupersedesPolicyId='{Guid.NewGuid()}' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET EffectiveFrom=DATEADD(day,-1,EffectiveFrom) WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET EffectiveTo=DATEADD(day,30,EffectiveFrom) WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET ApprovedByUserId='{Guid.NewGuid()}' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET RetirementRequestedByUserId='{Guid.NewGuid()}',RetirementRequestedAtUtc=SYSUTCDATETIME(),RetirementReason=N'Fake',RetirementWorkflowInstanceId='{Guid.NewGuid()}',RetirementDecisionStatus=N'Approved',RetirementDecidedByUserId='{Guid.NewGuid()}',RetirementDecidedAtUtc=SYSUTCDATETIME(),RetirementDecisionReason=N'Fake' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=1,ApprovedByUserId=NULL,ApprovedAtUtc=NULL WHERE Id='{policyId}'"
+        })
+        {
+            var mutateApproved = () => database.ExecuteAsync(mutation);
+            (await mutateApproved.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+        }
+
+        var retirementDate = new DateTime(2026, 9, 6);
+        await database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies SET
+ RetirementRequestedByUserId='{{Guid.NewGuid()}}',RetirementRequestedAtUtc=SYSUTCDATETIME(),RetirementReason=N'Retire',
+ RetirementWorkflowInstanceId='{{Guid.NewGuid()}}',RetirementDecisionStatus=N'Pending'
+WHERE Id='{{policyId}}';
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{Guid.NewGuid()}}',RetiredAtUtc=CONVERT(datetime2,'{{retirementDate:yyyy-MM-dd}}'),
+ EffectiveTo=CONVERT(datetime2,'{{retirementDate:yyyy-MM-dd}}'),RetirementDecisionStatus=N'Approved',
+ RetirementDecidedByUserId='{{Guid.NewGuid()}}',RetirementDecidedAtUtc=SYSUTCDATETIME(),RetirementDecisionReason=N'Approved'
+WHERE Id='{{policyId}}';
+""");
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{policyId}' AND PolicyStatus=5 AND EffectiveTo=CONVERT(datetime2,'2026-09-06')"))
+            .Should().Be(1);
+
+        var boundedPolicy = Guid.NewGuid(); var boundedRule = Guid.NewGuid();
+        await database.InsertDraftPolicyRuleAsync(first.TenantId, boundedPolicy, boundedRule, "BOUNDED", "BOUNDED_RULE", 99,
+            effectiveTo: new DateTime(2026, 8, 31));
+        await database.InsertRuleBookAsync(first.TenantId, boundedRule, first.BookId, "IFRS"); await database.ApproveAsync(boundedPolicy);
+        await database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies SET
+ RetirementRequestedByUserId='{{Guid.NewGuid()}}',RetirementRequestedAtUtc=SYSUTCDATETIME(),RetirementReason=N'Retire expired',
+ RetirementWorkflowInstanceId='{{Guid.NewGuid()}}',RetirementDecisionStatus=N'Pending'
+WHERE Id='{{boundedPolicy}}';
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{Guid.NewGuid()}}',RetiredAtUtc=CONVERT(datetime2,'2026-09-06'),
+ EffectiveTo=CONVERT(datetime2,'2026-08-31'),RetirementDecisionStatus=N'Approved',RetirementDecidedByUserId='{{Guid.NewGuid()}}',
+ RetirementDecidedAtUtc=SYSUTCDATETIME(),RetirementDecisionReason=N'Approved'
+WHERE Id='{{boundedPolicy}}';
+""");
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{boundedPolicy}' AND PolicyStatus=5 AND EffectiveTo=CONVERT(datetime2,'2026-08-31')"))
+            .Should().Be(1);
 
         var lossyDown = () => database.ApplyAsync(up: false);
         (await lossyDown.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
@@ -122,7 +172,7 @@ VALUES ('{{Guid.NewGuid()}}','{{evidenceId}}','{{first.BookId}}',0,N'IFRS',REPLI
         var predecessor = Guid.NewGuid(); var predecessorRule = Guid.NewGuid();
         await database.InsertDraftPolicyRuleAsync(authority.TenantId, predecessor, predecessorRule, "REPLACE", "RULE_V1", 10);
         await database.InsertRuleBookAsync(authority.TenantId, predecessorRule, authority.BookId, "IFRS");
-        await database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=3,ApprovedByUserId='{Guid.NewGuid()}',ApprovedAtUtc=SYSUTCDATETIME() WHERE Id='{predecessor}'");
+        await database.ApproveAsync(predecessor);
 
         var second = Guid.NewGuid(); var secondRule = Guid.NewGuid(); var third = Guid.NewGuid(); var thirdRule = Guid.NewGuid();
         await database.InsertDraftPolicyRuleAsync(authority.TenantId, second, secondRule, "REPLACE", "RULE_V2", 10, 2, predecessor, new DateTime(2026, 9, 6));
@@ -237,11 +287,11 @@ INSERT AccountingBooks VALUES ('{{bookId}}','{{tenantId}}',N'LOCAL',2,4,0);
         }
 
         public Task InsertDraftPolicyRuleAsync(Guid tenantId, Guid policyId, Guid ruleId, string policyCode, string ruleCode, int priority,
-            int version = 1, Guid? supersedes = null, DateTime? effectiveFrom = null) =>
+            int version = 1, Guid? supersedes = null, DateTime? effectiveFrom = null, DateTime? effectiveTo = null) =>
             ExecuteAsync($$"""
 INSERT AccountingBookApplicabilityPolicies
- (Id,PolicyCode,Version,SupersedesPolicyId,Name,EffectiveFrom,PolicyStatus,Reason,CreatedByUserId,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
-VALUES ('{{policyId}}',N'{{policyCode}}',{{version}},{{(supersedes.HasValue ? $"'{supersedes.Value}'" : "NULL")}},N'Policy',CONVERT(datetime2,'{{(effectiveFrom ?? new DateTime(2026, 1, 1)):yyyy-MM-dd}}'),1,N'reason','{{Guid.NewGuid()}}','{{Guid.NewGuid()}}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{{tenantId}}');
+ (Id,PolicyCode,Version,SupersedesPolicyId,Name,EffectiveFrom,EffectiveTo,PolicyStatus,Reason,CreatedByUserId,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
+VALUES ('{{policyId}}',N'{{policyCode}}',{{version}},{{(supersedes.HasValue ? $"'{supersedes.Value}'" : "NULL")}},N'Policy',CONVERT(datetime2,'{{(effectiveFrom ?? new DateTime(2026, 1, 1)):yyyy-MM-dd}}'),{{(effectiveTo.HasValue ? $"CONVERT(datetime2,'{effectiveTo.Value:yyyy-MM-dd}')" : "NULL")}},1,N'reason','{{Guid.NewGuid()}}','{{Guid.NewGuid()}}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{{tenantId}}');
 INSERT AccountingBookApplicabilityRules
  (Id,AccountingBookApplicabilityPolicyId,RuleCode,Priority,OriginatingModuleCode,SourceDocumentType,PostingAction,SortOrder,CreatedAt,IsDeleted,TenantId)
 VALUES ('{{ruleId}}','{{policyId}}',N'{{ruleCode}}',{{priority}},N'FIN',N'JOURNAL',N'POST',1,SYSUTCDATETIME(),0,'{{tenantId}}');
@@ -257,8 +307,20 @@ VALUES ('{{Guid.NewGuid()}}','{{ruleId}}','{{bookId}}',0,N'{{code}}',SYSUTCDATET
         {
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = $"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=3,ApprovedByUserId='{Guid.NewGuid()}',ApprovedAtUtc=SYSUTCDATETIME() WHERE Id='{policyId}'";
+            var workflowId = Guid.NewGuid(); var checker = Guid.NewGuid();
+            command.CommandText = $@"
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=2,WorkflowInstanceId='{workflowId}' WHERE Id='{policyId}';
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=3,ApprovedByUserId='{checker}',ApprovedAtUtc=SYSUTCDATETIME(),
+ DecidedByUserId='{checker}',DecidedAtUtc=SYSUTCDATETIME(),DecisionReason=N'Approved' WHERE Id='{policyId}';";
             await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task ApproveAsync(Guid policyId)
+        {
+            await using var connection = await OpenAsync();
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync();
+            await ApproveAsync(connection, transaction, policyId);
+            await transaction.CommitAsync();
         }
 
         public async Task ApplyAsync(bool up)

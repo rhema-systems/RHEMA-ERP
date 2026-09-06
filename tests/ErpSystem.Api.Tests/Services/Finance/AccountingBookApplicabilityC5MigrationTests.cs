@@ -64,6 +64,7 @@ public sealed class AccountingBookApplicabilityC5MigrationTests
         constraints.Keys.Should().Contain(new[]
         {
             "CK_AccountingBookApplicabilityPolicies_RetirementRequestShape",
+            "CK_AccountingBookApplicabilityPolicies_VersionLineageShape",
             "CK_AccountingBookApplicabilityRules_ModuleSupported",
             "CK_AccountingBookSelectionEvidence_RuleLineage",
             "CK_AccountingBookSelectionEvidenceBooks_AuthorityFingerprint"
@@ -72,11 +73,16 @@ public sealed class AccountingBookApplicabilityC5MigrationTests
 
         var triggerSql = string.Join('\n', up.OfType<SqlOperation>().Skip(1).Select(item => item.Sql));
         triggerSql.Should().Contain("C5_POLICY_REPLACEMENT_ORDER")
+            .And.Contain("C5_POLICY_VERSION_LINEAGE")
+            .And.Contain("C5_POLICY_TRANSITION_INVALID")
+            .And.Contain("C5_POLICY_APPROVAL_IMMUTABLE")
+            .And.Contain("C5_POLICY_RETIREMENT_TRANSITION_INVALID")
             .And.Contain("C5_EMPTY_SELECTION")
             .And.Contain("C5_SELECTED_BOOK_INVALID")
             .And.Contain("C5_RULE_AMBIGUITY")
             .And.Contain("UPDLOCK,HOLDLOCK")
             .And.Contain("C5_SELECTION_IMMUTABLE")
+            .And.Contain("bounded governed retirement closure")
             .And.Contain("first approved use");
 
         var down = migration.BuildDownOperations();

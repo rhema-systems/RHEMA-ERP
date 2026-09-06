@@ -12,6 +12,8 @@ The C1 `PARALLEL_BOOK_POSTING_DISABLED` control remains authoritative. A frozen 
 - A later approved version shadows its predecessor from the successor's inclusive `EffectiveFrom` date. The
   predecessor remains unchanged for historical resolution and frozen evidence; at the boundary there is no
   overlap ambiguity or fallback gap.
+- Version lineage is exact: version 1 has no predecessor, and each successor is exactly its same-tenant,
+  same-code predecessor plus one. Malformed high versions fail approval and resolution.
 - Equal highest-priority matches are rejected as ambiguous.
 - An explicit rule may select only same-tenant `PrimaryFull` and `ParallelFull` books by stable ID. Its ordered code values are immutable snapshots, not selection keys.
 - `Delta` books and pseudo selectors are never eligible for ordinary automatic applicability.
@@ -22,7 +24,7 @@ Resolution returns explicit blockers and versioned, domain-separated hashes. Fre
 
 ## Governance
 
-Policy versions progress through Draft, PendingApproval, Approved, Rejected, and Retired states. Approval and retirement use independent maker-checker workflow decisions, reasons, rowversion checks, serializable tenant-scoped validation, and atomic Finance audit writes. Retirement closes the version's inclusive effective interval without altering frozen selections. Approved structure and any structure referenced by frozen selection evidence are otherwise immutable. There is no physical-delete or write-on-GET path.
+Policy versions progress through Draft, PendingApproval, Approved, Rejected, and Retired states. Approval and retirement use independent maker-checker workflow decisions, reasons, rowversion checks, serializable tenant-scoped validation, and atomic Finance audit writes. Retirement closes an open interval at the approved retirement date or preserves an earlier existing `EffectiveTo`; it never expands history or alters frozen selections. A future-effective version cannot be retired before its interval begins and must be corrected through a governed successor. Approved structure and any structure referenced by frozen selection evidence are otherwise immutable. There is no physical-delete or write-on-GET path.
 
 Permissions are deliberately separate from general book/report access:
 
