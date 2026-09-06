@@ -54,6 +54,21 @@ describe('PurchaseOrderBudgetCommitment', () => {
       markup.indexOf('FormalCommitment')
     );
     expect(markup).toContain('Final PO approval reserved and committed');
+
+    // Parse the server HTML as the browser does. A block Badge inside a p
+    // implicitly closes that paragraph and inserts extra nodes on hydration.
+    const container = document.createElement('div');
+    container.innerHTML = markup;
+    const events = container.querySelectorAll(
+      'ol[aria-label="Commitment evidence history"] > li'
+    );
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.querySelectorAll('p')).toHaveLength(1);
+      expect(event.querySelector('p')?.textContent).toContain(
+        'Independent PO Approver'
+      );
+    }
   });
 
   it('describes a contract child PO as an allocation rather than another formal commitment', () => {
