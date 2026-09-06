@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
-| Status | `COMPLETE` |
+| Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
-| Branch | `codex/finance-book-period-initialization-c4` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-book-period-initialization-c4` |
+| Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
+| Branch | `codex/finance-book-applicability-c5` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-book-applicability-c5` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `f38036b7773ea27ef189e0617045b3481285e19c` |
+| Primary HEAD at activation | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C4 independently approved, integrated and verified on primary |
+| Review status | C5 implementation active; independent GPT-5.6 Sol High review required before integration |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -655,3 +655,16 @@ check and unchanged unrelated dirty-work evidence. Migration
 `20260906140533_AddAccountingBookPeriodInitializationFoundation` remains unapplied; configured `RHEMAERP`
 was not accessed or mutated. Stage C4 is complete. Automatic parallel posting and AccountingEvent orchestration
 remain disabled pending separately reviewed applicability and orchestration stages.
+
+Stage C5 was dispatched to the existing implementing task on GPT-5.6 Sol Medium from fresh exact primary base
+`bb50aeed3635b040fe4bb3217a1ab87b7de79cc3`, using isolated branch
+`codex/finance-book-applicability-c5` and worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-book-applicability-c5`. C5 is limited to
+effective-dated, versioned Finance-owned applicability policy/rules and deterministic frozen selection
+evidence. Primary/default full book is the only fallback; explicit policies may select eligible full books by
+stable ID, while Delta and pseudo selectors are excluded. Selection must fail closed on lifecycle,
+initialization, mapping/classification or exact-period blockers and must never silently drop a selected book.
+Maker-checker, concurrency, immutable approved-use evidence, permissions, governed API/UI, an unapplied
+fail-closed migration and guarded SQL tests are required. AccountingEvent schema/orchestration, journal
+fan-out, automatic parallel posting and all producer-module changes remain prohibited until a later separately
+reviewed stage.
