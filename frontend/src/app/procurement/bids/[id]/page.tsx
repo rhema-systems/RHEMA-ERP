@@ -56,25 +56,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { QuantitySurveyTenderBoqVettingPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqVettingPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
-import { tenderService, type TenderDetailDto, type TenderDocumentRequirement } from '@/services/tenderService';
+import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import { getSupportingDocuments, getSupportingDocumentRequirements } from '@/lib/procurement-bid-documents';
 import {
   getTenderEvaluationRoute,
   type TenderEvaluationRoute,
 } from '@/lib/procurement-tender-evaluation-route';
 
-const isProposalDocumentType = (documentType: string) =>
-  documentType === 'TechnicalProposal' || documentType === 'CommercialProposal';
-
 function BidDocumentRequirements({ bid, tender }: { bid: TenderBidDetailDto; tender: TenderDetailDto | null }) {
-  let requirements: TenderDocumentRequirement[];
-  try {
-    if (!tender) throw new Error('Tender unavailable');
-    const parsed: unknown = tender.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
-    if (!Array.isArray(parsed) || !parsed.every((item) => item &&
-      typeof item.documentType === 'string' && typeof item.documentName === 'string' &&
-      typeof item.isRequired === 'boolean')) throw new Error('Invalid requirements');
-    requirements = parsed.filter((item) => !isProposalDocumentType(item.documentType));
-  } catch {
+  const requirements = getSupportingDocumentRequirements(tender);
+  if (requirements === null) {
     return <Alert className="mb-4"><AlertTitle>Document requirements unavailable</AlertTitle><AlertDescription>Uploaded files are listed below, but completeness cannot be checked until the tender requirements load correctly.</AlertDescription></Alert>;
   }
 
@@ -745,9 +736,7 @@ export default function BidDetailPage() {
     );
   }
 
-  const supportingDocuments = (bid.documents ?? []).filter(
-    (document) => !isProposalDocumentType(document.documentType)
-  );
+  const supportingDocuments = getSupportingDocuments(bid.documents);
   const evaluationRoute: TenderEvaluationRoute | undefined = sourceTender
     ? getTenderEvaluationRoute(sourceTender, bidId)
     : undefined;
