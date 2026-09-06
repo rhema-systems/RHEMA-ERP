@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `CHANGES_REQUIRED` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 SQL race harness does not yet exercise the real serializable authority boundary |
+| Review status | Corrected C3 candidate `197913f2` is under independent Sol High concurrency review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -512,3 +512,10 @@ invalidation exists, approval-time attachment is intentionally unreachable and m
 A GPT-5.6 Sol Medium test correction was dispatched requiring deterministic post-authority-query barriers,
 both attachment-first and invalidation-first outcomes, explicit CreateAsync and UpdateAsync coverage, and
 exact durable invariant assertions. Integration and C4 remain blocked; no database was accessed.
+
+The implementer completed the corrected SQL race work as
+`197913f2e9e544f9382049a99d021a4dc6a9e7d6`. The executable race exposed a need to strengthen
+production accounting-book graph-writer serialization, so this eighth commit is not test-only. The worktree
+is clean and the exact-base range passes `git diff --check`. Independent GPT-5.6 Sol High review is active on
+the new serialization boundary, deadlock/retry/idempotency and tenant scope, the deterministic race barriers
+and all prior C3/C1/C2 gates. Integration, C4 and database operations remain blocked pending approval.
