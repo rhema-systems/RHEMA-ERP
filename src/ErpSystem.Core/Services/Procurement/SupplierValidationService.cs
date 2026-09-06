@@ -154,10 +154,19 @@ public class SupplierValidationService : ISupplierValidationService
         CancellationToken cancellationToken = default) =>
         EvaluateEligibilityCoreAsync(request, openNctParticipation: false, cancellationToken);
 
+    // Internal composition boundary for readiness, which owns its source-specific
+    // policy checks. This is not an API-selectable bypass; Enforce remains complete.
+    public Task<SupplierValidationResult> EvaluateBaselineEligibilityAsync(
+        SupplierEligibilityEvaluationRequest request,
+        CancellationToken cancellationToken = default) =>
+        EvaluateEligibilityCoreAsync(request, openNctParticipation: false,
+            cancellationToken, includePolicyControls: false);
+
     private async Task<SupplierValidationResult> EvaluateEligibilityCoreAsync(
         SupplierEligibilityEvaluationRequest request,
         bool openNctParticipation,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includePolicyControls = true)
     {
         EnsureAuthenticatedTenant();
         if (request.BusinessPartnerId == Guid.Empty)
@@ -214,28 +223,20 @@ public class SupplierValidationService : ISupplierValidationService
         AddFinancialWarnings(partner, request, result);
         await AddRegistrationEvidenceAsync(partner.Id, result, cancellationToken);
         await AddPrequalificationAsync(request, result, now, cancellationToken);
+        if (openNctParticipation || !includePolicyControls)
+            await AddKnownAdverseReviewFindingAsync(result, cancellationToken);
         if (openNctParticipation)
         {
-            // An absent internal annual review does not bar open participation,
-            // but an already approved adverse finding must never be ignored.
-            var adverseReview = await _unitOfWork.Repository<ProcurementSupplierDueDiligenceReview>()
-                .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                    item.BusinessPartnerId == partner.Id && !item.IsDeleted &&
-                    item.Status == ProcurementSupplierDueDiligenceStatus.Approved)
-                .AnyAsync(item => item.Outcome == ProcurementSupplierDueDiligenceOutcome.Adverse ||
-                    item.Checks.Any(check => !check.IsDeleted && check.TenantId == _currentUser.TenantId &&
-                        check.Status == ProcurementSupplierDueDiligenceCheckStatus.Adverse), cancellationToken);
-            if (adverseReview)
-                result.Block("SUPPLIER_DUE_DILIGENCE_ADVERSE",
-                    "An approved supplier review contains an adverse finding that must be resolved before bidding.");
             result.Warn("OPEN_NCT_PARTICIPATION_ONLY",
                 "Open NCT participation does not require internal AVL or annual supplier reviews; award, contract and purchase-order controls remain separate.");
             result.Warn("GHANEPS_REGISTRATION_EXTERNAL_VERIFICATION",
                 "This local eligibility decision does not verify GHANEPS registration or replace the published tender requirements and controlled GHANEPS exchange.");
         }
-        else
+        else if (includePolicyControls)
         {
             await AddAvlPolicyLineageAsync(result, now, cancellationToken);
+            if (!result.AvlPolicyAvailable)
+                await AddKnownAdverseReviewFindingAsync(result, cancellationToken);
             await AddDueDiligenceLineageAsync(result, now, cancellationToken);
             if (!request.SkipFormalAvlMembership)
                 await AddFormalAvlLineageAsync(result, now, cancellationToken);
@@ -258,6 +259,24 @@ public class SupplierValidationService : ISupplierValidationService
             "Supplier eligibility {Result} for {PartnerId} at {Boundary}; decision {DecisionHash}",
             result.IsValid ? "allowed" : "denied", partner.Id, request.Boundary, result.DecisionHash);
         return result;
+    }
+
+    private async Task AddKnownAdverseReviewFindingAsync(
+        SupplierValidationResult result,
+        CancellationToken cancellationToken)
+    {
+        // Optional periodic policy cannot erase an approved adverse finding.
+        // Missing or draft reviews do not introduce a new baseline requirement.
+        var adverseReview = await _unitOfWork.Repository<ProcurementSupplierDueDiligenceReview>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                item.BusinessPartnerId == result.BusinessPartnerId && !item.IsDeleted &&
+                item.Status == ProcurementSupplierDueDiligenceStatus.Approved)
+            .AnyAsync(item => item.Outcome == ProcurementSupplierDueDiligenceOutcome.Adverse ||
+                item.Checks.Any(check => !check.IsDeleted && check.TenantId == _currentUser.TenantId &&
+                    check.Status == ProcurementSupplierDueDiligenceCheckStatus.Adverse), cancellationToken);
+        if (adverseReview)
+            result.Block("SUPPLIER_DUE_DILIGENCE_ADVERSE",
+                "An approved supplier review contains an adverse finding that must be resolved before procurement can proceed.");
     }
 
     public async Task<SupplierValidationResult> EnforceEligibilityAsync(
@@ -1416,5 +1435,6 @@ public interface ISupplierValidationService
     Task<SupplierValidationResult> ValidateForTenderBidAsync(Guid businessPartnerId, Guid tenderId, CancellationToken cancellationToken = default);
     Task<SupplierValidationResult> ValidateForFrameworkCallOffAsync(Guid businessPartnerId);
     Task<SupplierValidationResult> EvaluateEligibilityAsync(SupplierEligibilityEvaluationRequest request, CancellationToken cancellationToken = default);
+    Task<SupplierValidationResult> EvaluateBaselineEligibilityAsync(SupplierEligibilityEvaluationRequest request, CancellationToken cancellationToken = default);
     Task<SupplierValidationResult> EnforceEligibilityAsync(SupplierEligibilityEvaluationRequest request, CancellationToken cancellationToken = default);
 }

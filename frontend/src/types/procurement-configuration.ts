@@ -1,5 +1,5 @@
 export type ProcurementConfigurationProfileStatus = 'Draft' | 'Published' | 'Retired';
-export type ProcurementConfigurationDecisionStatus = 'Draft' | 'Proposed' | 'Approved' | 'Rejected';
+export type ProcurementConfigurationDecisionStatus = 'Draft' | 'Proposed' | 'Approved' | 'Rejected' | 'Withdrawn';
 export type ProcurementConfigurationApprovalStatus = 'Pending' | 'Approved' | 'Rejected' | 'NotRequired';
 export type ProcurementConfigurationEvidenceStatus = 'Missing' | 'Attached' | 'Verified';
 

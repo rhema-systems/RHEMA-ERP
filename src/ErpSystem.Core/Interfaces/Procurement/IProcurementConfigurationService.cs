@@ -11,6 +11,7 @@ public interface IProcurementConfigurationService
     Task<ProcurementConfigurationProfileDto> CreateProfileAsync(CreateProcurementConfigurationProfileRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementConfigurationProfileDto> UpdateProfileAsync(Guid id, UpdateProcurementConfigurationProfileRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementConfigurationDecisionDto> SaveDecisionAsync(Guid profileId, string decisionKey, SaveProcurementConfigurationDecisionRequest request, string correlationId, CancellationToken cancellationToken = default);
+    Task<ProcurementConfigurationProfileDto> WithdrawDecisionAsync(Guid profileId, string decisionKey, WithdrawProcurementConfigurationDecisionRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementConfigurationValidationResultDto> ValidateProfileAsync(Guid id, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementConfigurationProfileDto> PublishProfileAsync(Guid id, ProcurementConfigurationLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);
     Task<ProcurementConfigurationProfileDto> RetireProfileAsync(Guid id, ProcurementConfigurationLifecycleRequest request, string correlationId, CancellationToken cancellationToken = default);

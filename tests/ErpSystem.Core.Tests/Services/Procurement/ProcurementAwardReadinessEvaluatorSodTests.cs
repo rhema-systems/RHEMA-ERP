@@ -11,6 +11,7 @@ using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -498,7 +499,10 @@ public sealed class ProcurementAwardReadinessEvaluatorSodTests
                 _current.Object,
                 access.Object,
                 sod.Object,
-                events.Object);
+                events.Object,
+                new SupplierValidationService(_unitOfWork, _current.Object,
+                    Mock.Of<IProcurementSupplierEvidencePackService>(), events.Object,
+                    NullLogger<SupplierValidationService>.Instance));
         }
 
         public Guid TenantId { get; }

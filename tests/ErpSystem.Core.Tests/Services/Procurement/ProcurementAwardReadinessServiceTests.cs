@@ -13,12 +13,13 @@ using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
-public sealed class ProcurementAwardReadinessServiceTests
+public sealed partial class ProcurementAwardReadinessServiceTests
 {
     [Fact]
     public async Task FormalTenderUsesOneAggregateLockedProjectionPerRequiredPhase()
@@ -619,7 +620,7 @@ public sealed class ProcurementAwardReadinessServiceTests
                 {
                     Allowed = true
                 });
-            var events = new Mock<IProcurementControlEventService>();
+            var events = ControlEvents = new Mock<IProcurementControlEventService>();
             events.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
                     It.IsAny<CancellationToken>()))
@@ -629,7 +630,10 @@ public sealed class ProcurementAwardReadinessServiceTests
                 _current.Object,
                 Access.Object,
                 sod.Object,
-                events.Object);
+                events.Object,
+                new SupplierValidationService(_unitOfWork, _current.Object,
+                    EvidencePacks.Object, events.Object,
+                    NullLogger<SupplierValidationService>.Instance));
         }
 
         public Guid TenantId { get; }
@@ -641,6 +645,8 @@ public sealed class ProcurementAwardReadinessServiceTests
         public TenderEvaluation Evaluation { get; }
         public BusinessPartner Partner { get; }
         public Mock<IProcurementAccessControlService> Access { get; }
+        public Mock<IProcurementSupplierEvidencePackService> EvidencePacks { get; } = new();
+        public Mock<IProcurementControlEventService> ControlEvents { get; }
         public ProcurementAwardReadinessService Service { get; }
 
         public EvaluateProcurementAwardReadinessRequest Request(string key) => new()
