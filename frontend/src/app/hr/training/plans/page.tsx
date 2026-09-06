@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, MoreHorizontal, Trash2, CheckCircle2, Coins, Eye } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Trash2, Send, CalendarRange, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,21 +29,21 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { trainingBudgetService } from '@/services/hr/training-budget.service';
-import type { TrainingBudgetSummary } from '@/types/hr/training';
+import { trainingPlanService } from '@/services/hr/training-plan.service';
+import type { TrainingPlanSummary } from '@/types/hr/training';
 
-export default function TrainingBudgetsPage() {
+export default function TrainingPlansPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [search, setSearch] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<TrainingBudgetSummary | null>(null);
-  const [approveTarget, setApproveTarget] = useState<TrainingBudgetSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TrainingPlanSummary | null>(null);
+  const [submitTarget, setSubmitTarget] = useState<TrainingPlanSummary | null>(null);
   const [busy, setBusy] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['hr', 'training', 'budgets'],
-    queryFn: () => trainingBudgetService.getAll(),
+    queryKey: ['hr', 'training', 'plans'],
+    queryFn: () => trainingPlanService.getAll(),
   });
 
   const rows = useMemo(() => {
@@ -51,41 +51,42 @@ export default function TrainingBudgetsPage() {
     const all = data ?? [];
     if (!term) return all;
     return all.filter(
-      (b) =>
-        b.budgetCode.toLowerCase().includes(term) || (b.organizationUnitName ?? '').toLowerCase().includes(term),
+      (p) =>
+        p.planNumber.toLowerCase().includes(term) ||
+        (p.organizationUnitName ?? '').toLowerCase().includes(term),
     );
   }, [data, search]);
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hr', 'training', 'budgets'] });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hr', 'training', 'plans'] });
 
   const handleDelete = async () => {
     if (!deleteTarget) return false;
     setBusy(true);
     try {
-      await trainingBudgetService.remove(deleteTarget.id);
+      await trainingPlanService.remove(deleteTarget.id);
       await invalidate();
-      toast({ title: 'Deleted', description: `Budget "${deleteTarget.budgetCode}" was removed.` });
+      toast({ title: 'Deleted', description: `Plan "${deleteTarget.planNumber}" was removed.` });
       setDeleteTarget(null);
       return true;
     } catch (error: any) {
-      toast({ title: 'Error', description: error?.message || 'Failed to delete budget.', variant: 'destructive' });
+      toast({ title: 'Error', description: error?.message || 'Failed to delete plan.', variant: 'destructive' });
       return false;
     } finally {
       setBusy(false);
     }
   };
 
-  const handleApprove = async () => {
-    if (!approveTarget) return false;
+  const handleSubmit = async () => {
+    if (!submitTarget) return false;
     setBusy(true);
     try {
-      await trainingBudgetService.approve(approveTarget.id);
+      await trainingPlanService.submit(submitTarget.id);
       await invalidate();
-      toast({ title: 'Approved', description: `Budget "${approveTarget.budgetCode}" was approved.` });
-      setApproveTarget(null);
+      toast({ title: 'Submitted', description: `Plan "${submitTarget.planNumber}" was submitted for approval.` });
+      setSubmitTarget(null);
       return true;
     } catch (error: any) {
-      toast({ title: 'Error', description: error?.message || 'Failed to approve budget.', variant: 'destructive' });
+      toast({ title: 'Error', description: error?.message || 'Failed to submit plan.', variant: 'destructive' });
       return false;
     } finally {
       setBusy(false);
@@ -95,12 +96,12 @@ export default function TrainingBudgetsPage() {
   return (
     <div className="space-y-6 p-6">
       <PageHeader
-        title="Training Budgets"
-        description="Allocated training spend by year/quarter and organization scope, with spend transactions."
-        backHref="/administration/hr/training"
+        title="Training Plans"
+        description="Annual or quarterly training plans by organization scope, with items and budget lines."
+        backHref="/hr/training"
         actions={
-          <Button onClick={() => router.push('/administration/hr/training/budgets/new')}>
-            <Plus className="mr-2 h-4 w-4" /> New Budget
+          <Button onClick={() => router.push('/hr/training/plans/new')}>
+            <Plus className="mr-2 h-4 w-4" /> New Plan
           </Button>
         }
       />
@@ -108,11 +109,11 @@ export default function TrainingBudgetsPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>Budgets</CardTitle>
+            <CardTitle>Plans</CardTitle>
             <div className="relative w-64">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by code or unit…"
+                placeholder="Search by plan number or unit…"
                 className="pl-8"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -125,13 +126,12 @@ export default function TrainingBudgetsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Budget code</TableHead>
-                  <TableHead>Period</TableHead>
+                  <TableHead>Plan number</TableHead>
+                  <TableHead>Year</TableHead>
                   <TableHead>Organization unit</TableHead>
-                  <TableHead>Allocated</TableHead>
-                  <TableHead>Spent</TableHead>
-                  <TableHead>Remaining</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Completion</TableHead>
                   <TableHead className="w-[70px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -139,22 +139,22 @@ export default function TrainingBudgetsPage() {
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
-                      {[...Array(8)].map((__, j) => (
+                      {[...Array(7)].map((__, j) => (
                         <TableCell key={j}><Skeleton className="h-4 w-[100px]" /></TableCell>
                       ))}
                     </TableRow>
                   ))
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8}>
+                    <TableCell colSpan={7}>
                       <EmptyState
-                        icon={Coins}
-                        title={search ? 'No matching budgets' : 'No training budgets yet'}
-                        description={search ? 'Try a different search.' : 'Create your first training budget.'}
+                        icon={CalendarRange}
+                        title={search ? 'No matching plans' : 'No training plans yet'}
+                        description={search ? 'Try a different search.' : 'Create your first training plan.'}
                         action={
                           !search ? (
-                            <Button size="sm" onClick={() => router.push('/administration/hr/training/budgets/new')}>
-                              <Plus className="mr-2 h-4 w-4" /> New Budget
+                            <Button size="sm" onClick={() => router.push('/hr/training/plans/new')}>
+                              <Plus className="mr-2 h-4 w-4" /> New Plan
                             </Button>
                           ) : undefined
                         }
@@ -162,19 +162,22 @@ export default function TrainingBudgetsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((b) => (
+                  rows.map((p) => (
                     <TableRow
-                      key={b.id}
+                      key={p.id}
                       className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => router.push(`/administration/hr/training/budgets/${b.id}`)}
+                      onClick={() => router.push(`/hr/training/plans/${p.id}`)}
                     >
-                      <TableCell className="font-medium">{b.budgetCode}</TableCell>
-                      <TableCell>{b.periodDescription}</TableCell>
-                      <TableCell className="text-muted-foreground">{b.organizationUnitName || 'Company-wide'}</TableCell>
-                      <TableCell>{b.currency} {b.allocatedAmount.toLocaleString()}</TableCell>
-                      <TableCell>{b.currency} {b.spentAmount.toLocaleString()}</TableCell>
-                      <TableCell>{b.currency} {b.remainingAmount.toLocaleString()}</TableCell>
-                      <TableCell><StatusBadge status={b.status} /></TableCell>
+                      <TableCell className="font-medium">{p.planNumber}</TableCell>
+                      <TableCell>{p.year}</TableCell>
+                      <TableCell className="text-muted-foreground">{p.organizationUnitName || 'Company-wide'}</TableCell>
+                      <TableCell><StatusBadge status={p.status} /></TableCell>
+                      <TableCell>{p.completedItemsCount} / {p.totalItemsCount}</TableCell>
+                      <TableCell>
+                        {p.totalItemsCount > 0
+                          ? `${Math.round((p.completedItemsCount / p.totalItemsCount) * 100)}%`
+                          : '—'}
+                      </TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -185,32 +188,32 @@ export default function TrainingBudgetsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            {/* Always present: Approve and Delete are Draft-only, so without this the
-                                menu on an approved or closed budget opened completely empty. */}
+                            {/* Always present: Submit and Delete are Draft-only, so without this the
+                                menu on an approved or completed plan opened completely empty. */}
                             <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation();
-                                router.push(`/administration/hr/training/budgets/${b.id}`);
+                                router.push(`/hr/training/plans/${p.id}`);
                               }}
                             >
                               <Eye className="mr-2 h-4 w-4" /> View details
                             </DropdownMenuItem>
-                            {b.status === 'Draft' && (
+                            {p.status === 'Draft' && (
                               <>
                                 <DropdownMenuItem
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setApproveTarget(b);
+                                    setSubmitTarget(p);
                                   }}
                                 >
-                                  <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
+                                  <Send className="mr-2 h-4 w-4" /> Submit for approval
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   className="text-destructive focus:text-destructive"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setDeleteTarget(b);
+                                    setDeleteTarget(p);
                                   }}
                                 >
                                   <Trash2 className="mr-2 h-4 w-4" /> Delete
@@ -232,9 +235,9 @@ export default function TrainingBudgetsPage() {
       <ConfirmationDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete budget"
+        title="Delete plan"
         description={
-          deleteTarget ? `Are you sure you want to delete "${deleteTarget.budgetCode}"? This cannot be undone.` : ''
+          deleteTarget ? `Are you sure you want to delete "${deleteTarget.planNumber}"? This cannot be undone.` : ''
         }
         confirmText="Delete"
         variant="destructive"
@@ -243,13 +246,13 @@ export default function TrainingBudgetsPage() {
       />
 
       <ConfirmationDialog
-        open={approveTarget !== null}
-        onOpenChange={(open) => !open && setApproveTarget(null)}
-        title="Approve budget?"
-        description={approveTarget ? `"${approveTarget.budgetCode}" will be marked Approved.` : ''}
-        confirmText="Approve"
+        open={submitTarget !== null}
+        onOpenChange={(open) => !open && setSubmitTarget(null)}
+        title="Submit plan for approval?"
+        description={submitTarget ? `"${submitTarget.planNumber}" will move to Pending Approval.` : ''}
+        confirmText="Submit"
         isLoading={busy}
-        onConfirm={handleApprove}
+        onConfirm={handleSubmit}
       />
     </div>
   );

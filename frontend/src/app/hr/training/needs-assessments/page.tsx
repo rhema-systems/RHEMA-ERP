@@ -90,16 +90,16 @@ export default function NeedsAssessmentsPage() {
       <PageHeader
         title="Training Needs Assessments"
         description="Gaps identified for individual employees, with recommended programs and skill targets."
-        backHref="/administration/hr/training"
+        backHref="/hr/training"
         actions={
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => router.push('/administration/hr/training/needs-assessments/bulk')}
+              onClick={() => router.push('/hr/training/needs-assessments/bulk')}
             >
               <Users className="mr-2 h-4 w-4" /> Bulk Create
             </Button>
-            <Button onClick={() => router.push('/administration/hr/training/needs-assessments/new')}>
+            <Button onClick={() => router.push('/hr/training/needs-assessments/new')}>
               <Plus className="mr-2 h-4 w-4" /> New Assessment
             </Button>
           </div>
@@ -156,7 +156,7 @@ export default function NeedsAssessmentsPage() {
                           !search ? (
                             <Button
                               size="sm"
-                              onClick={() => router.push('/administration/hr/training/needs-assessments/new')}
+                              onClick={() => router.push('/hr/training/needs-assessments/new')}
                             >
                               <Plus className="mr-2 h-4 w-4" /> New Assessment
                             </Button>
@@ -170,7 +170,7 @@ export default function NeedsAssessmentsPage() {
                     <TableRow
                       key={a.id}
                       className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => router.push(`/administration/hr/training/needs-assessments/${a.id}`)}
+                      onClick={() => router.push(`/hr/training/needs-assessments/${a.id}`)}
                     >
                       <TableCell className="font-medium">
                         {a.employeeName}
@@ -199,7 +199,7 @@ export default function NeedsAssessmentsPage() {
                             <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation();
-                                router.push(`/administration/hr/training/needs-assessments/${a.id}`);
+                                router.push(`/hr/training/needs-assessments/${a.id}`);
                               }}
                             >
                               <Eye className="mr-2 h-4 w-4" /> View details

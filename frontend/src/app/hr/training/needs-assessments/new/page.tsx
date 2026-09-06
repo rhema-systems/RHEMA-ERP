@@ -33,7 +33,7 @@ export default function NewNeedsAssessmentPage() {
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'training', 'needs-assessments'] });
       toast({ title: 'Success', description: 'Training needs assessment created.' });
-      router.push(`/administration/hr/training/needs-assessments/${created.id}`);
+      router.push(`/hr/training/needs-assessments/${created.id}`);
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -50,7 +50,7 @@ export default function NewNeedsAssessmentPage() {
       <PageHeader
         title="New Training Needs Assessment"
         description="Record a training need identified for an employee."
-        backHref="/administration/hr/training/needs-assessments"
+        backHref="/hr/training/needs-assessments"
       />
       <NeedsAssessmentForm
         mode="create"
@@ -58,7 +58,7 @@ export default function NewNeedsAssessmentPage() {
         onSubmit={handleSubmit}
         submitting={submitting}
         submitLabel="Create Assessment"
-        onCancel={() => router.push('/administration/hr/training/needs-assessments')}
+        onCancel={() => router.push('/hr/training/needs-assessments')}
       />
     </div>
   );

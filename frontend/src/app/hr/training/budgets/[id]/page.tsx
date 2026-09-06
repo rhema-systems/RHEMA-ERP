@@ -126,7 +126,7 @@ export default function TrainingBudgetDetailPage() {
       <PageHeader
         title={budget.budgetCode}
         description={`${budget.periodDescription} — ${budget.organizationUnitName || 'Company-wide'}`}
-        backHref="/administration/hr/training/budgets"
+        backHref="/hr/training/budgets"
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge status={budget.status} />
@@ -188,7 +188,7 @@ export default function TrainingBudgetDetailPage() {
               onSubmit={handleOverviewSubmit}
               submitting={savingOverview}
               submitLabel="Save changes"
-              onCancel={() => router.push('/administration/hr/training/budgets')}
+              onCancel={() => router.push('/hr/training/budgets')}
               budgetCodeEditable={false}
             />
           ) : (

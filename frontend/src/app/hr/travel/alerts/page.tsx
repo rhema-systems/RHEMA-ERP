@@ -210,7 +210,7 @@ export default function TravelAlertsPage() {
       <PageHeader
         title="Destination alerts"
         description="What travellers are told about security, health and disruption where they are going."
-        backHref="/administration/hr"
+        backHref="/hr/travel"
         actions={
           canWrite ? (
             <Button onClick={openCreate}>

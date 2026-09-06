@@ -35,7 +35,7 @@ export default function NewTrainingBudgetPage() {
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'training', 'budgets'] });
       toast({ title: 'Success', description: `Budget ${created.budgetCode} created.` });
-      router.push(`/administration/hr/training/budgets/${created.id}`);
+      router.push(`/hr/training/budgets/${created.id}`);
     } catch (error: any) {
       toast({ title: 'Error', description: error?.message || 'Failed to create budget.', variant: 'destructive' });
     } finally {
@@ -48,14 +48,14 @@ export default function NewTrainingBudgetPage() {
       <PageHeader
         title="New Training Budget"
         description="A budget is created as a Draft and must be approved before spend can be recorded against it."
-        backHref="/administration/hr/training/budgets"
+        backHref="/hr/training/budgets"
       />
       <TrainingBudgetForm
         defaultValues={emptyTrainingBudget}
         onSubmit={handleSubmit}
         submitting={submitting}
         submitLabel="Create Budget"
-        onCancel={() => router.push('/administration/hr/training/budgets')}
+        onCancel={() => router.push('/hr/training/budgets')}
       />
     </div>
   );

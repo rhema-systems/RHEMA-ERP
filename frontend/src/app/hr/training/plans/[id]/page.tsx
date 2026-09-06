@@ -161,7 +161,7 @@ export default function TrainingPlanDetailPage() {
       <PageHeader
         title={plan.planNumber}
         description={`${plan.year} — ${plan.organizationUnitName || 'Company-wide'}`}
-        backHref="/administration/hr/training/plans"
+        backHref="/hr/training/plans"
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge status={plan.status} />
@@ -198,7 +198,7 @@ export default function TrainingPlanDetailPage() {
               onSubmit={handleOverviewSubmit}
               submitting={savingOverview}
               submitLabel="Save changes"
-              onCancel={() => router.push('/administration/hr/training/plans')}
+              onCancel={() => router.push('/hr/training/plans')}
             />
           ) : (
             <Card>

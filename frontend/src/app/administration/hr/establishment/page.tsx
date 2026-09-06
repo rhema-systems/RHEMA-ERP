@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Loader2, Search, ShieldCheck, ShieldOff } from 'lucide-react';
 import { toast } from 'sonner';
@@ -124,8 +125,20 @@ export default function EstablishmentPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Approved establishment"
-        description="How many posts each position is authorised to hold (FR-HR-136)."
+        title="Manual Establishment"
+        description="Establish a post no approved manpower budget covers — the exception path to FR-HR-135's three-step chain (FR-HR-136)."
+        backHref="/administration/hr"
+        actions={
+          // The operational counterpart, which carried this screen's exact name in the other
+          // menu until this one was renamed: where headcount stands against the establishment,
+          // and the gaps that follow from it.
+          <Button variant="outline" asChild>
+            <Link href="/hr/recruitment/establishment">
+              <Search className="mr-2 h-4 w-4" />
+              Establishment gaps
+            </Link>
+          </Button>
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-3">

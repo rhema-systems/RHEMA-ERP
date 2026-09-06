@@ -47,7 +47,7 @@ the same thing.
 ### 2.1 Salary structure — payroll owns grades, HR mirrors them (built 2026-08-02)
 
 - **The parallel sets:** payroll `PayrollGrade`/`PayrollGradeNotch` (2-tier, legacy string codes,
-  edited at Administration → HR → Payroll → Grades Setup) vs HR `SalaryGrade`/`SalaryLevel`/
+  edited at Administration → HR → Pay & Benefits → Payroll Setup → Grades Setup) vs HR `SalaryGrade`/`SalaryLevel`/
   `SalaryNotch` (3-tier, Guid keys). Every HR FK — position, salary assignment, staff movements,
   recruitment offers, benefit policies, job architecture — points at the HR set, and
   `EmolumentService.GetMonthlyBasicPayAsync` reads `SalaryNotch.SalaryAmount` for basic pay.

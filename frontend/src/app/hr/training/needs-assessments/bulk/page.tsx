@@ -78,7 +78,7 @@ export default function BulkNeedsAssessmentPage() {
         title: 'Success',
         description: `Created ${result.createdCount} of ${result.requestedCount} requested assessments.`,
       });
-      router.push('/administration/hr/training/needs-assessments');
+      router.push('/hr/training/needs-assessments');
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -95,7 +95,7 @@ export default function BulkNeedsAssessmentPage() {
       <PageHeader
         title="Bulk Training Needs Assessment"
         description="Record the same identified gap across several employees at once — for example, after a skills-gap analysis."
-        backHref="/administration/hr/training/needs-assessments"
+        backHref="/hr/training/needs-assessments"
       />
 
       <Card>
@@ -145,7 +145,7 @@ export default function BulkNeedsAssessmentPage() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => router.push('/administration/hr/training/needs-assessments')}
+            onClick={() => router.push('/hr/training/needs-assessments')}
             disabled={submitting}
           >
             Cancel

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, FilePlus2, Loader2, MessageSquare, RefreshCw, XCircle } from 'lucide-react';
+import { Building2, FilePlus2, Loader2, MessageSquare, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -174,14 +174,26 @@ export default function EstablishmentPage() {
         backHref="/hr/recruitment"
         actions={
           isHr && (
-            <Button
-              variant="outline"
-              onClick={() => reconcile.mutate()}
-              disabled={reconcile.isPending}
-            >
-              <RefreshCw className={`mr-2 h-4 w-4 ${reconcile.isPending ? 'animate-spin' : ''}`} />
-              Reconcile
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* The Admin-tier exception path, which used to carry this screen's exact name in
+                  the other menu. Establishing a post there bypasses the manpower-budget chain,
+                  so a gap seen here can be answered from there when no budget covers it. */}
+              <Button
+                variant="outline"
+                onClick={() => router.push('/administration/hr/establishment')}
+              >
+                <ShieldCheck className="mr-2 h-4 w-4" />
+                Manual Establishment
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => reconcile.mutate()}
+                disabled={reconcile.isPending}
+              >
+                <RefreshCw className={`mr-2 h-4 w-4 ${reconcile.isPending ? 'animate-spin' : ''}`} />
+                Reconcile
+              </Button>
+            </div>
           )
         }
       />

@@ -29,7 +29,7 @@ export default function NewTrainingPlanPage() {
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'training', 'plans'] });
       toast({ title: 'Success', description: `Plan ${created.planNumber} created.` });
-      router.push(`/administration/hr/training/plans/${created.id}`);
+      router.push(`/hr/training/plans/${created.id}`);
     } catch (error: any) {
       toast({ title: 'Error', description: error?.message || 'Failed to create plan.', variant: 'destructive' });
     } finally {
@@ -42,14 +42,14 @@ export default function NewTrainingPlanPage() {
       <PageHeader
         title="New Training Plan"
         description="A plan is created as a Draft; add items and budget lines before submitting for approval."
-        backHref="/administration/hr/training/plans"
+        backHref="/hr/training/plans"
       />
       <TrainingPlanForm
         defaultValues={emptyTrainingPlan}
         onSubmit={handleSubmit}
         submitting={submitting}
         submitLabel="Create Plan"
-        onCancel={() => router.push('/administration/hr/training/plans')}
+        onCancel={() => router.push('/hr/training/plans')}
       />
     </div>
   );

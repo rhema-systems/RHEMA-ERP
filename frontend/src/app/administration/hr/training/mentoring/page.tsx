@@ -74,7 +74,7 @@ export default function MentoringProgramsPage() {
   return (
     <div className="space-y-6 p-6">
       <PageHeader
-        title="Mentoring Programmes"
+        title="Mentoring Schemes"
         description="The schemes. Pairs and session logs live under HR → Training → Mentoring."
         backHref="/administration/hr/training"
         actions={

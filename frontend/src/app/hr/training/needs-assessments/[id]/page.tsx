@@ -115,7 +115,7 @@ export default function NeedsAssessmentDetailPage() {
       <PageHeader
         title={`${assessment.employeeName} — ${assessment.year}`}
         description={assessment.employeeNumber}
-        backHref="/administration/hr/training/needs-assessments"
+        backHref="/hr/training/needs-assessments"
         actions={<StatusBadge status={assessment.trainingProvided ? 'Fulfilled' : 'Pending'} />}
       />
 
@@ -146,7 +146,7 @@ export default function NeedsAssessmentDetailPage() {
             onSubmit={handleOverviewSubmit}
             submitting={savingOverview}
             submitLabel="Save changes"
-            onCancel={() => router.push('/administration/hr/training/needs-assessments')}
+            onCancel={() => router.push('/hr/training/needs-assessments')}
           />
         </TabsContent>
 
