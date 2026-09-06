@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `REVIEW_REQUIRED` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C3 candidate `df730e7b` is under independent Sol High evidence re-review |
+| Review status | C3 SQL race harness does not yet exercise the real serializable authority boundary |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -501,3 +501,14 @@ passes `git diff --check`. The commit is test-focused and is intended to prove s
 child-first and invalidation-first ordering for create/update/advance versus suspension/retirement approval.
 Independent GPT-5.6 Sol High review is active on the exact test design and full C3 regression boundary.
 Integration, C4 and database operations remain blocked pending approval.
+
+Independent review of test-only commit `df730e7b` left production C3 approved in substance but returned
+`CHANGES_REQUIRED` for the SQL race harness. It contains no `CreateAsync` race, performs approval after the
+purported concurrent Update race, and labels a descendant-predetermined advance case as concurrency evidence.
+Its gate also blocks the losing task before an authority query acquires locks, so two open transactions still
+execute effectively in sequence. The coordinator clarified the actual lifecycle boundary: meaningful
+winner-order races are Delta Create/Update attachment versus suspension/retirement request; once pending
+invalidation exists, approval-time attachment is intentionally unreachable and must be tested as such.
+A GPT-5.6 Sol Medium test correction was dispatched requiring deterministic post-authority-query barriers,
+both attachment-first and invalidation-first outcomes, explicit CreateAsync and UpdateAsync coverage, and
+exact durable invariant assertions. Integration and C4 remain blocked; no database was accessed.
