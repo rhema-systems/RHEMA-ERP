@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `REVIEW_REQUIRED` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C3 candidate `0ebea93c` is under independent Sol High re-review |
+| Review status | C3 re-review found runtime-currency parity and SQL concurrency coverage gaps; correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -450,3 +450,13 @@ and documentation. Independent GPT-5.6 Sol High re-review is active over the com
 coordinator requested a read-only structured handoff reconciliation because the task API again did not surface
 the completed turn text. Integration, C4, migration application and configured-database access remain blocked
 pending approval.
+
+Stage C3 independent re-review cycle 2 returned `CHANGES_REQUIRED` at clean HEAD `0ebea93c`. The prior
+Delta-lineage, book-code migration grammar and UI-lock findings are closed, and 221 focused backend tests plus
+16 frontend tests passed with seven SQL Server tests guarded by the absent test connection. Two gates remain:
+runtime currency validation accepts numeric or non-ASCII uppercase length-three values even though migration
+and database constraints require ASCII `[A-Z]{3}`, and the serializable transitive-lineage protection lacks an
+executable two-context SQL Server race test. The coordinator dispatched a narrow GPT-5.6 Sol Medium correction
+requiring shared runtime canonical currency validation and guarded relational create/advance versus base
+suspension/retirement request-or-approval races. Integration and C4 remain blocked; configured `RHEMAERP`
+remains untouched.
