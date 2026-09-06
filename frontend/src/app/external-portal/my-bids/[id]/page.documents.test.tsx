@@ -37,50 +37,81 @@ async function openDocuments(count: number) {
 }
 
 describe('submitted bid document requirements', () => {
-  it('counts proposal uploads and matches both required documents without claiming they are missing', async () => {
-    const panel = await openDocuments(2);
-    expect(within(panel).getByText('2 requirement(s) - 2 required, 0 optional • 2 file(s) uploaded')).toBeInTheDocument();
-    expect(within(panel).getByText('technical.pdf')).toBeInTheDocument();
-    expect(within(panel).getByText('commercial.pdf')).toBeInTheDocument();
-    expect(within(panel).getAllByText('1 uploaded')).toHaveLength(2);
-    expect(within(panel).queryByText('No document uploaded for this requirement')).not.toBeInTheDocument();
-    fireEvent.click(within(panel).getAllByRole('button', { name: 'Download' })[0]);
-    expect(api.download).toHaveBeenCalledExactlyOnceWith('bid-1', 'technical-1', 'technical.pdf');
+  const supportingRequirements = [
+    { documentType: 'CompanyRegistration', documentName: 'Business registration', isRequired: true },
+    { documentType: 'TaxClearance', documentName: 'Tax clearance', isRequired: true },
+    { documentType: 'FinancialStatements', documentName: 'Financial statements', isRequired: true },
+  ];
+  const supportingFile = { ...documents[0], id: 'registration-1', documentType: 'CompanyRegistration', documentName: 'registration.pdf' };
+
+  it('keeps proposals under Proposals and explains zero supporting documents for a proposal-only tender', async () => {
+    const panel = await openDocuments(0);
+    expect(within(panel).getByText(/No supporting-document requirements were configured/)).toBeInTheDocument();
+    expect(within(panel).queryByText('technical.pdf')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('commercial.pdf')).not.toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Proposals' }), { button: 0, ctrlKey: false });
+    const proposals = await screen.findByRole('tabpanel', { name: 'Proposals' });
+    expect(within(proposals).getByText('technical.pdf')).toBeInTheDocument();
+    expect(within(proposals).getByText('commercial.pdf')).toBeInTheDocument();
+    expect(within(proposals).getAllByRole('button', { name: 'Download' })).toHaveLength(2);
   });
 
-  it('still shows a genuinely missing commercial requirement', async () => {
+  it('shows saved supporting requirements, missing certificates and the correct download identity', async () => {
     const bid = await api.bid();
-    api.bid.mockResolvedValue({ ...bid, documents: documents.slice(0, 1) });
+    api.bid.mockResolvedValue({ ...bid, documents: [...documents, supportingFile] });
+    api.tender.mockResolvedValue({ ...tender, requiredDocuments: JSON.stringify([...requirements, ...supportingRequirements]) });
     const panel = await openDocuments(1);
-    expect(within(panel).getByText('technical.pdf')).toBeInTheDocument();
-    expect(within(panel).getAllByText('No document uploaded for this requirement')).toHaveLength(1);
+    for (const req of supportingRequirements) expect(within(panel).getByText(req.documentName)).toBeInTheDocument();
+    expect(within(panel).getAllByText('No document uploaded for this required supporting document')).toHaveLength(2);
+    expect(within(panel).getByText('registration.pdf')).toBeInTheDocument();
     expect(within(panel).queryByText('commercial.pdf')).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Download' }));
+    expect(api.download).toHaveBeenCalledExactlyOnceWith('bid-1', 'registration-1', 'registration.pdf');
   });
 
   it('retains unmatched supporting files without double-counting proposal uploads', async () => {
     const bid = await api.bid();
     api.bid.mockResolvedValue({ ...bid, documents: [...documents, { ...documents[0], id: 'extra-1', documentType: 'Other', documentName: 'extra.pdf' }] });
-    const panel = await openDocuments(3);
+    api.tender.mockResolvedValue({ ...tender, requiredDocuments: JSON.stringify(supportingRequirements) });
+    const panel = await openDocuments(1);
     expect(within(panel).getByText('Other Documents')).toBeInTheDocument();
-    for (const name of ['technical.pdf', 'commercial.pdf', 'extra.pdf']) {
-      expect(within(panel).getAllByText(name)).toHaveLength(1);
-    }
+    expect(within(panel).getAllByText('extra.pdf')).toHaveLength(1);
+    expect(within(panel).queryByText('technical.pdf')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('commercial.pdf')).not.toBeInTheDocument();
   });
 
-  it('shows all uploaded files when there are no configured requirements', async () => {
+  it('does not invent certificate requirements or include proposals for an empty configuration', async () => {
     api.tender.mockResolvedValue({ ...tender, requiredDocuments: '[]' });
-    const panel = await openDocuments(2);
-    expect(within(panel).getByText('2 file(s) uploaded')).toBeInTheDocument();
-    expect(within(panel).getByText('technical.pdf')).toBeInTheDocument();
-    expect(within(panel).getByText('commercial.pdf')).toBeInTheDocument();
+    const panel = await openDocuments(0);
+    expect(within(panel).getByText(/No supporting-document requirements were configured/)).toBeInTheDocument();
+    expect(within(panel).getByText('No supporting files uploaded')).toBeInTheDocument();
   });
 
-  it('keeps zero and missing indicators when there really are no uploads', async () => {
+  it.each([[], undefined])('keeps missing supporting requirements visible with uploads %s', async (files) => {
     const bid = await api.bid();
-    api.bid.mockResolvedValue({ ...bid, documents: undefined });
+    api.bid.mockResolvedValue({ ...bid, documents: files });
+    api.tender.mockResolvedValue({ ...tender, requiredDocuments: JSON.stringify(supportingRequirements) });
     const panel = await openDocuments(0);
-    expect(within(panel).getAllByText('No document uploaded for this requirement')).toHaveLength(2);
+    expect(within(panel).getAllByText('No document uploaded for this required supporting document')).toHaveLength(3);
     expect(within(panel).queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+
+  it('distinguishes an optional certificate from a missing mandatory upload', async () => {
+    api.tender.mockResolvedValue({ ...tender, requiredDocuments: JSON.stringify([{ ...supportingRequirements[0], isRequired: false }]) });
+    const panel = await openDocuments(0);
+    expect(within(panel).getByText('Optional document not supplied')).toBeInTheDocument();
+    expect(within(panel).queryByText('No document uploaded for this required supporting document')).not.toBeInTheDocument();
+  });
+
+  it.each(['invalid JSON', '{}', '[{"documentType":"TaxClearance"}]', null])('preserves uploads and warns when requirements are unavailable: %s', async (requiredDocuments) => {
+    const bid = await api.bid();
+    api.bid.mockResolvedValue({ ...bid, documents: [...documents, supportingFile] });
+    api.tender.mockResolvedValue(requiredDocuments === null ? null : { ...tender, requiredDocuments });
+    const panel = await openDocuments(1);
+    expect(within(panel).getByText('Document requirements unavailable')).toBeInTheDocument();
+    expect(within(panel).getByText('registration.pdf')).toBeInTheDocument();
+    expect(within(panel).queryByText(/No supporting-document requirements were configured/)).not.toBeInTheDocument();
   });
 });
 
