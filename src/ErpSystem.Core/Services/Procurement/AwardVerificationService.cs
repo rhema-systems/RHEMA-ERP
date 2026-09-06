@@ -129,6 +129,7 @@ public class AwardVerificationService : IAwardVerificationService
                 Description = itemDto.Description,
                 DisplayOrder = itemDto.DisplayOrder,
                 IsRequired = itemDto.IsRequired,
+                RequiresDocument = itemDto.RequiresDocument,
                 Category = itemDto.Category,
                 IsActive = itemDto.IsActive,
                 TenantId = template.TenantId,
@@ -211,6 +212,7 @@ public class AwardVerificationService : IAwardVerificationService
             Description = dto.Description,
             DisplayOrder = dto.DisplayOrder,
             IsRequired = dto.IsRequired,
+            RequiresDocument = dto.RequiresDocument,
             Category = dto.Category,
             IsActive = dto.IsActive,
             TenantId = template.TenantId,
@@ -232,10 +234,16 @@ public class AwardVerificationService : IAwardVerificationService
         if (item == null)
             throw new KeyNotFoundException($"Item with ID {itemId} not found.");
 
+        if (item.RequiresDocument != dto.RequiresDocument &&
+            await _unitOfWork.Repository<TenderAwardVerificationItemResult>().ExistsAsync(result =>
+                result.ChecklistItemId == itemId && !result.IsDeleted))
+            throw new InvalidOperationException("AWARD_VERIFICATION_RULE_IN_USE: Create a new checklist template to change the evidence rule of an existing review.");
+
         item.ItemText = dto.ItemText;
         item.Description = dto.Description;
         item.DisplayOrder = dto.DisplayOrder;
         item.IsRequired = dto.IsRequired;
+        item.RequiresDocument = dto.RequiresDocument;
         item.Category = dto.Category;
         item.IsActive = dto.IsActive;
         item.LastModifiedById = _currentUserProvider.UserId;
@@ -404,6 +412,8 @@ public class AwardVerificationService : IAwardVerificationService
         if (bidder == null)
             throw new KeyNotFoundException($"Bidder verification with ID {dto.BidderId} not found.");
 
+        AwardVerificationEvidencePolicy.EnsureComplete(bidder.ItemResults);
+
         // Check if all required items are verified
         var unverifiedRequired = bidder.ItemResults
             .Where(r => !r.IsDeleted && r.ChecklistItem?.IsRequired == true && !r.IsVerified)
@@ -434,6 +444,9 @@ public class AwardVerificationService : IAwardVerificationService
         var verification = await _verificationRepository.GetByIdWithDetailsAsync(verificationId);
         if (verification == null)
             throw new KeyNotFoundException($"Verification with ID {verificationId} not found.");
+
+        foreach (var bidder in verification.Bidders.Where(b => !b.IsDeleted))
+            AwardVerificationEvidencePolicy.EnsureComplete(bidder.ItemResults);
 
         // Check if all bidders are verified
         var pendingBidders = verification.Bidders.Where(b => !b.IsDeleted && b.Status == "Pending").ToList();
@@ -569,6 +582,7 @@ public class AwardVerificationService : IAwardVerificationService
             Description = item.Description,
             DisplayOrder = item.DisplayOrder,
             IsRequired = item.IsRequired,
+            RequiresDocument = item.RequiresDocument,
             Category = item.Category,
             IsActive = item.IsActive
         };
@@ -630,6 +644,7 @@ public class AwardVerificationService : IAwardVerificationService
             ItemDescription = result.ChecklistItem?.Description,
             ItemCategory = result.ChecklistItem?.Category,
             IsRequired = result.ChecklistItem?.IsRequired ?? false,
+            RequiresDocument = result.ChecklistItem?.RequiresDocument ?? false,
             IsVerified = result.IsVerified,
             Status = result.Status,
             Comments = result.Comments,

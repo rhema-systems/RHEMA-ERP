@@ -109520,6 +109520,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsRequired")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("RequiresDocument")
+                        .HasColumnType("bit");
+
                     b.Property<string>("ItemText")
                         .IsRequired()
                         .HasMaxLength(200)
