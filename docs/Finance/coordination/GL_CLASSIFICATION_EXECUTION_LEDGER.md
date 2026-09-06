@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `APPROVED_PENDING_INTEGRATION` |
+| Status | `INTEGRATION_VERIFICATION_FAILED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C3 candidate `197913f2` independently approved |
+| Review status | C3 integrated locally, but fresh-build FX fixture regression requires correction and re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -530,3 +530,16 @@ canonical code/currency, permission, UI, audit, C4-readiness, C1 and C2 finding 
 passed 245 backend and 16 frontend tests with 11 guarded SQL skips, targeted ESLint, EF no-pending-model,
 eight-commit ancestry, diff check and clean status. No database was accessed. The approved commits may now be
 integrated locally in exact order; C4 remains blocked until coordinator integration verification completes.
+
+The coordinator integrated the eight approved commits locally as `a7897992`, `f97ea23a`, `5408179f`,
+`ab3f90c1`, `da6e49a7`, `a18a52e8`, `69aa65a1` and `c362b8f0`. Candidate-tree equivalence excluding the
+coordinator ledger and the full-range diff check passed, and unrelated primary dirt remained unchanged. A
+fresh test-project build passed with zero errors and 1,176 existing warnings. The subsequent coordinator
+regression filter failed 51 tests, passed 195 and skipped 11 guarded SQL tests. Every observed failure originates
+from the new FinanceClassificationManifestSeeder tenant functional-currency lookup: the shared FX fixture calls
+the seeder without inserting the now-required Tenant authority row and receives raw `Sequence contains no
+elements`. This is a candidate-caused test/diagnostic regression that stale/no-build earlier gates did not
+detect. The coordinator kept the production fail-closed currency contract, dispatched a GPT-5.6 Sol Medium
+fixture and actionable-error correction on the C3 branch, and notified the independent reviewer. C4 remains
+blocked; the integrated C3 stack is local only, its migration remains unapplied, and configured `RHEMAERP`
+remains untouched.
