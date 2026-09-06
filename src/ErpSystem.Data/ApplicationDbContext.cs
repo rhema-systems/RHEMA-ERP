@@ -122,6 +122,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinanceDimensionReadinessAssessment> FinanceDimensionReadinessAssessments { get; set; }
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
+    public DbSet<AccountingBookPeriod> AccountingBookPeriods { get; set; }
+    public DbSet<AccountingBookInitialization> AccountingBookInitializations { get; set; }
+    public DbSet<AccountingBookInitializationLine> AccountingBookInitializationLines { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
     public DbSet<AccountBookCurrencyPolicy> AccountBookCurrencyPolicies { get; set; }
     public DbSet<AccountClassification> AccountClassifications { get; set; }
@@ -2841,6 +2844,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FiscalPeriod>(entity =>
         {
             entity.ToTable("FiscalPeriods");
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id });
             entity.HasOne(e => e.FiscalYear)
                 .WithMany(y => y.FiscalPeriods)
                 .HasForeignKey(e => e.FiscalYearId)
@@ -2897,6 +2901,86 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookPeriod>(entity =>
+        {
+            entity.ToTable("AccountingBookPeriods", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookPeriods_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookPeriods_Status", "[IsDeleted] = 1 OR [PeriodStatus] IN (1, 2, 3, 4)");
+                table.HasCheckConstraint("CK_AccountingBookPeriods_PendingStatus", "[PendingStatus] IS NULL OR [PendingStatus] IN (1, 2, 3, 4)");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.FiscalPeriodId }).IsUnique();
+            entity.Property(item => item.PendingReason).HasMaxLength(500);
+            entity.Property(item => item.DecisionReason).HasMaxLength(500);
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.AccountingBook).WithMany(book => book.BookPeriods)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FiscalPeriod).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.FiscalPeriodId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookInitialization>(entity =>
+        {
+            entity.ToTable("AccountingBookInitializations", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookInitializations_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Mode", "[IsDeleted] = 1 OR [Mode] IN (1, 2, 3)");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Status", "[IsDeleted] = 1 OR [InitializationStatus] IN (1, 2, 3, 4)");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Balanced", "[IsDeleted] = 1 OR [TotalDebits] = [TotalCredits]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Coverage", "[RequiredAccountCount] >= 0 AND [CoveredAccountCount] >= 0 AND [CoveredAccountCount] <= [RequiredAccountCount]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_SourceShape", "([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2, 4)) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL)");
+                if (this.Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "DATALENGTH([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "DATALENGTH([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.Version }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.InitializationStatus })
+                .IsUnique().HasFilter("[IsDeleted] = 0 AND [InitializationStatus] = 3");
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.EvidenceFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.ReconciliationFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.AccountingBook).WithMany(book => book.Initializations)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SourceAccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SourceAccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SupersedesInitialization).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SupersedesInitializationId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookInitializationLine>(entity =>
+        {
+            entity.ToTable("AccountingBookInitializationLines", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookInitializationLines_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookInitializationLines_Amounts", "[OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)");
+                if (this.Database.IsSqlServer())
+                    table.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "DATALENGTH([CurrencyCode]) = 3 AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookInitializationId, item.AccountId }).IsUnique();
+            entity.Property(item => item.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.HasOne(item => item.Initialization).WithMany(initialization => initialization.Lines)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookInitializationId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Account).WithMany().HasForeignKey(item => new { item.TenantId, item.AccountId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountAccountingBook>(entity =>

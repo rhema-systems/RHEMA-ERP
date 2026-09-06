@@ -1163,6 +1163,16 @@ WHERE [Id] = {delta.AccountId}
             throw new InvalidOperationException("Posting date does not fall inside the fiscal period.");
         }
 
+        // The tenant fiscal calendar remains the outer lock. C4 adds a second, exact-book gate;
+        // absence is not an open period and must never be repaired opportunistically by posting.
+        var bookPeriod = await _context.AccountingBookPeriods.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.AccountingBookId == accountingBook.Id
+            && item.FiscalPeriodId == fiscalPeriod.Id && !item.IsDeleted, cancellationToken);
+        if (bookPeriod == null)
+            throw new InvalidOperationException("ACCOUNTING_BOOK_PERIOD_REQUIRED: Exact-book period authority is missing for the selected fiscal period.");
+        if (bookPeriod.PeriodStatus != AccountingBookPeriodStatus.Open || bookPeriod.PendingStatus is AccountingBookPeriodStatus.Closed or AccountingBookPeriodStatus.Locked)
+            throw new InvalidOperationException("ACCOUNTING_BOOK_PERIOD_NOT_OPEN: The selected accounting book is not open for this fiscal period.");
+
         // Period status answers whether the ledger accepts postings at all. This independent
         // policy answers whether Finance may recognize a transaction after today's business date.
         // Drafting and workflow approval remain possible; only the irreversible posting boundary

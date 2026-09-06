@@ -40,14 +40,20 @@ public sealed class AccountingBookService : IAccountingBookService
         if (!includeInactive) query = query.Where(book => book.IsActive);
         var books = await query.OrderBy(book => book.SortOrder).ThenBy(book => book.Code).ToListAsync(cancellationToken);
         var used = await GetUsedBookIdsAsync(books.Select(item => item.Id), cancellationToken);
-        return books.Select(item => Map(item, used.Contains(item.Id))).ToList();
+        var result = new List<AccountingBookDto>();
+        foreach (var item in books)
+        {
+            var readiness = await GetActivationReadinessAsync(item, cancellationToken);
+            result.Add(Map(item, used.Contains(item.Id), readiness));
+        }
+        return result;
     }
 
     public async Task<AccountingBookDto> GetBookAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var book = await BookQuery().AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Accounting book was not found.");
-        return Map(book, await HasUseAsync(id, cancellationToken));
+        return Map(book, await HasUseAsync(id, cancellationToken), await GetActivationReadinessAsync(book, cancellationToken));
     }
 
     public async Task EnsureTenantDefaultsAsync(CancellationToken cancellationToken = default)
@@ -160,7 +166,6 @@ public sealed class AccountingBookService : IAccountingBookService
         else if (completed)
         {
             var target = book.PendingLifecycleStatus!.Value;
-            if (target == AccountingBookLifecycleStatus.Active) throw new InvalidOperationException("ACCOUNTING_BOOK_ACTIVATION_NOT_READY: C4 initialization and book-period readiness evidence is required before activation.");
             book.LifecycleStatus = target;
             if (target == AccountingBookLifecycleStatus.Initializing) book.InitializationStartedAtUtc ??= DateTime.UtcNow;
             ApplyPostingFlags(book); ClearPending(book, true);
@@ -273,7 +278,11 @@ public sealed class AccountingBookService : IAccountingBookService
             && book.IsDefault)
             throw new InvalidOperationException("The tenant's primary/default book cannot be retired without a governed replacement workflow.");
         if (target == AccountingBookLifecycleStatus.Active)
-            throw new InvalidOperationException("ACCOUNTING_BOOK_ACTIVATION_NOT_READY: C4 initialization and book-period readiness evidence is required before activation.");
+        {
+            var readiness = await GetActivationReadinessAsync(book, ct);
+            if (!readiness.IsReady)
+                throw new InvalidOperationException($"ACCOUNTING_BOOK_ACTIVATION_NOT_READY: {string.Join(" ", readiness.Blockers)}");
+        }
 
         // One tenant-scoped graph is used for both child advancement and ancestor invalidation.
         // A direct-only query is insufficient because Delta books may legitimately base on another
@@ -413,9 +422,9 @@ public sealed class AccountingBookService : IAccountingBookService
     private async Task<AccountingBookDto> LoadDtoAsync(Guid id, CancellationToken ct)
     {
         var item = await BookQuery().AsNoTracking().SingleAsync(book => book.Id == id, ct);
-        return Map(item, await HasUseAsync(id, ct));
+        return Map(item, await HasUseAsync(id, ct), await GetActivationReadinessAsync(item, ct));
     }
-    private static AccountingBookDto Map(AccountingBook book, bool used) => new()
+    private static AccountingBookDto Map(AccountingBook book, bool used, AccountingBookActivationReadinessDto readiness) => new()
     {
         Id = book.Id, TenantId = book.TenantId, Code = book.Code, Name = book.Name, Description = book.Description,
         Purpose = book.Purpose, BookType = book.BookType.ToString(), LifecycleStatus = book.LifecycleStatus.ToString(),
@@ -425,10 +434,30 @@ public sealed class AccountingBookService : IAccountingBookService
         AllowsPosting = book.AllowsPosting, IsSystemDefined = book.IsSystemDefined, SortOrder = book.SortOrder,
         PendingLifecycleStatus = book.PendingLifecycleStatus?.ToString(), PendingTransitionReason = book.PendingTransitionReason,
         TransitionRequestedByUserId = book.TransitionRequestedByUserId, TransitionRequestedAtUtc = book.TransitionRequestedAtUtc,
-        TransitionWorkflowInstanceId = book.TransitionWorkflowInstanceId, HasAccountingUse = used, ActivationReady = false,
-        ReadinessMessage = "C4 initialization and book-period readiness are not yet available; activation is disabled.",
+        TransitionWorkflowInstanceId = book.TransitionWorkflowInstanceId, HasAccountingUse = used, ActivationReady = readiness.IsReady,
+        ReadinessMessage = readiness.IsReady ? null : string.Join(" ", readiness.Blockers),
         RowVersion = book.RowVersion.Length == 0 ? string.Empty : Convert.ToBase64String(book.RowVersion)
     };
+    private async Task<AccountingBookActivationReadinessDto> GetActivationReadinessAsync(AccountingBook book, CancellationToken ct)
+    {
+        var blockers = new List<string>();
+        var initialization = await _db.AccountingBookInitializations.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted, ct);
+        if (initialization?.InitializationStatus != AccountingBookInitializationStatus.Approved)
+            blockers.Add("Approved initialization evidence is required.");
+        var firstPostingDate = initialization == null ? (DateTime?)null : initialization.CutoffDate.Date.AddDays(1);
+        if (firstPostingDate.HasValue && book.EffectiveFromUtc.HasValue && book.EffectiveFromUtc.Value.Date > firstPostingDate.Value)
+            firstPostingDate = book.EffectiveFromUtc.Value.Date;
+        var fiscalIds = firstPostingDate.HasValue ? await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted
+            && item.StartDate <= firstPostingDate.Value && item.EndDate >= firstPostingDate.Value).Select(item => item.Id).ToListAsync(ct) : new List<Guid>();
+        if (fiscalIds.Count != 1) blockers.Add("Exactly one tenant fiscal period must contain the book's first posting date.");
+        var openPeriods = await _db.AccountingBookPeriods.AsNoTracking().CountAsync(item => item.TenantId == TenantId
+            && item.AccountingBookId == book.Id && fiscalIds.Contains(item.FiscalPeriodId)
+            && item.PeriodStatus == AccountingBookPeriodStatus.Open && !item.IsDeleted, ct);
+        if (fiscalIds.Count == 1 && openPeriods != 1) blockers.Add("The book's first posting period must be governed and open.");
+        return new AccountingBookActivationReadinessDto { IsReady = blockers.Count == 0, Blockers = blockers,
+            InitializationFingerprint = initialization?.EvidenceFingerprint, ReadyPeriodCount = openPeriods, RequiredPeriodCount = fiscalIds.Count };
+    }
     private static object Snapshot(AccountingBook item) => new
     {
         item.Code, item.Name, item.Description, item.Purpose, BookType = item.BookType.ToString(), LifecycleStatus = item.LifecycleStatus.ToString(),

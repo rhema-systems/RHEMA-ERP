@@ -16,3 +16,26 @@ public enum AccountingBookLifecycleStatus
     Suspended = 5,
     Retired = 6
 }
+
+public enum AccountingBookPeriodStatus
+{
+    Future = 1,
+    Open = 2,
+    Closed = 3,
+    Locked = 4
+}
+
+public enum AccountingBookInitializationMode
+{
+    IndependentOpeningBalances = 1,
+    BaseBookCopyAtCutoff = 2,
+    BaseBalancesWithOpeningAdjustments = 3
+}
+
+public enum AccountingBookInitializationStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Rejected = 4
+}

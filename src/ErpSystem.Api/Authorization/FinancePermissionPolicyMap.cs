@@ -115,6 +115,18 @@ public static class FinancePermissionPolicyMap
                 "ApproveTransition" or "RejectTransition" => One(FinancePermissions.ApproveAccountingBookTransitions),
                 _ => One(FinancePermissions.ViewFinance)
             },
+            "AccountingBookPeriods" => action switch
+            {
+                "Get" => One(FinancePermissions.ViewFinance),
+                "Approve" or "Reject" => One(FinancePermissions.ApproveAccountingBookPeriods),
+                _ => One(FinancePermissions.ManageAccountingBookPeriods)
+            },
+            "AccountingBookInitialization" => action switch
+            {
+                "Get" or "GetReadiness" or "Prepare" => One(FinancePermissions.ViewFinance),
+                "Approve" or "Reject" => One(FinancePermissions.ApproveAccountingBookInitialization),
+                _ => One(FinancePermissions.ManageAccountingBookInitialization)
+            },
             "AccountClassifications" => ReadOrManage(action, methods, FinancePermissions.ManageChartOfAccounts),
             "AccountBookCurrencyPolicies" => action switch
             {

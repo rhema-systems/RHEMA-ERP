@@ -77,5 +77,7 @@ namespace ErpSystem.Core.Entities.Finance
 
         public virtual ICollection<AccountAccountingBook> AccountMappings { get; set; } = new List<AccountAccountingBook>();
         public virtual ICollection<AccountClassification> AccountClassifications { get; set; } = new List<AccountClassification>();
+        public virtual ICollection<AccountingBookPeriod> BookPeriods { get; set; } = new List<AccountingBookPeriod>();
+        public virtual ICollection<AccountingBookInitialization> Initializations { get; set; } = new List<AccountingBookInitialization>();
     }
 }

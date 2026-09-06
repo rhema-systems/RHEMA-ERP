@@ -17,6 +17,16 @@ public static class FinanceAuditEvents
     public const string AccountingBookTransitionApproved = "Finance.GL.AccountingBook.TransitionApproved";
     public const string AccountingBookTransitionApprovalStepCompleted = "Finance.GL.AccountingBook.TransitionApprovalStepCompleted";
     public const string AccountingBookTransitionRejected = "Finance.GL.AccountingBook.TransitionRejected";
+    public const string AccountingBookPeriodCreated = "Finance.GL.AccountingBookPeriod.Created";
+    public const string AccountingBookPeriodTransitionRequested = "Finance.GL.AccountingBookPeriod.TransitionRequested";
+    public const string AccountingBookPeriodTransitionApproved = "Finance.GL.AccountingBookPeriod.TransitionApproved";
+    public const string AccountingBookPeriodTransitionApprovalStepCompleted = "Finance.GL.AccountingBookPeriod.TransitionApprovalStepCompleted";
+    public const string AccountingBookPeriodTransitionRejected = "Finance.GL.AccountingBookPeriod.TransitionRejected";
+    public const string AccountingBookInitializationConfigured = "Finance.GL.AccountingBookInitialization.Configured";
+    public const string AccountingBookInitializationSubmitted = "Finance.GL.AccountingBookInitialization.Submitted";
+    public const string AccountingBookInitializationApprovalStepCompleted = "Finance.GL.AccountingBookInitialization.ApprovalStepCompleted";
+    public const string AccountingBookInitializationApproved = "Finance.GL.AccountingBookInitialization.Approved";
+    public const string AccountingBookInitializationRejected = "Finance.GL.AccountingBookInitialization.Rejected";
     public const string FxPolicyOverrideChanged = "Finance.FX.Policy.OverrideChanged";
     public const string FxPolicyOverrideRequested = "Finance.FX.Policy.OverrideRequested";
     public const string FxPolicyOverrideApproved = "Finance.FX.Policy.OverrideApproved";
