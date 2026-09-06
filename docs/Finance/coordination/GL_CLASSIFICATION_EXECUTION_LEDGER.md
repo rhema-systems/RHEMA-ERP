@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
-| Status | `IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
 | Branch | `codex/finance-book-period-initialization-c4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C4 implementation active; independent GPT-5.6 Sol High review required before integration |
+| Review status | Clean C4 candidate `ebf3c2e4` under independent GPT-5.6 Sol High review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -585,3 +585,14 @@ deterministic fingerprints, idempotent retries, balanced/reconciled opening evid
 owner-facing boundary comments, and an unapplied fail-closed migration with guarded SQL Server coverage.
 Applicability, AccountingEvent orchestration, producer enumeration, automatic parallel posting and owner-module
 changes remain prohibited.
+
+The C4 implementer completed a clean four-commit candidate at
+`ebf3c2e40212711f15c0dbc0ba09fc2eae2fbdc3` from exact base
+`f38036b7773ea27ef189e0617045b3481285e19c`. Its ordered ancestry is `5fd9fa6b` (Finance period and
+initialization authority), `3045f534` (governance/migration tests), `b93f2e3d` (readiness UI), and `ebf3c2e4`
+(API permission-boundary tests). The isolated worktree is clean, the merge base is exact and the full range
+passes `git diff --check`; no coordinator-ledger or owner-module file changed. Independent GPT-5.6 Sol High
+review is active across the accounting, lifecycle, period-lock, cutoff, maker-checker, idempotency, migration,
+concurrency, API/UI permission and C1/C2/C3 regression boundaries. A separate read-only structured-handoff
+reconciliation was requested because the completed task turn did not expose its final text. No C4 commit is
+approved for integration, no migration was applied and configured `RHEMAERP` remains untouched.
