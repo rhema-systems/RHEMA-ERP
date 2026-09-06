@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ErpSystem.Core.Configuration;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -97,7 +98,8 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
             EscalatedAlertCount = current.SelectMany(item => item.Alerts)
                 .Count(item => !item.IsDeleted &&
                     item.Status == ProcurementSupplierRiskAlertStatus.Escalated),
-            AwardBlockedSupplierCount = current.Count(item => AwardBlocked(item, now)),
+            AwardBlockedSupplierCount = policy is null ? 0 : current.Count(item =>
+                MatchesPolicy(item, policy) && AwardBlocked(item, now)),
             PolicyAvailable = policy is not null,
             PolicyProfileCode = policy?.Decision.Profile.ProfileCode,
             PolicyProfileVersion = policy?.Decision.Profile.Version,
@@ -400,7 +402,6 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
             foreach (var alert in alerts) await Alerts.AddAsync(alert);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }, cancellationToken);
-        assessment.BusinessPartner = partner;
         assessment.Alerts = alerts;
         await RecordAssessmentEventAsync(assessment, findings, correlation, now, cancellationToken);
         if (alerts.Count != 0)
@@ -409,7 +410,10 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         _logger.LogInformation(
             "Supplier risk assessment {AssessmentReference} recorded for {PartnerId} with score {RiskScore} and {AlertCount} alert(s)",
             assessment.AssessmentReference, partner.Id, assessment.RiskScore, alerts.Count);
-        return Map(assessment, now);
+        // Keep the read-only supplier out of this tracked assessment graph. A later
+        // audit/notification save can otherwise attach it as Modified and falsely
+        // invalidate an already completed tender recommendation.
+        return Map(assessment, now, partner);
     }
 
     public async Task<ProcurementSupplierRiskAlertDto> EscalateAsync(
@@ -600,7 +604,10 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                     out var weight))
                 throw Validation("SUPPLIER_RISK_DIMENSION_INVALID",
                     $"Risk dimension '{value}' must use Metric=WeightPercent.");
-            result.Add(new DimensionDefinition(parts[0], weight));
+            if (!ProcurementSupplierRiskDimensionCatalog.TryResolve(parts[0], out var metric))
+                throw Validation("SUPPLIER_RISK_DIMENSION_INVALID",
+                    $"Risk dimension '{parts[0]}' is not supported. Supported metrics: {string.Join(", ", ProcurementSupplierRiskDimensionCatalog.SupportedNames)}.");
+            result.Add(new DimensionDefinition(parts[0], weight, metric));
         }
         if (result.Count == 0 || result.Sum(item => item.Weight) != 100 ||
             result.GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -744,11 +751,9 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
             decimal? score = null;
             string source;
             string? missing = null;
-            switch (definition.Name.Trim().ToUpperInvariant())
+            switch (definition.Metric)
             {
-                case "SUPPLIERPERFORMANCE":
-                case "PERFORMANCE":
-                case "OVERALLPERFORMANCE":
+                case ProcurementSupplierRiskDimension.SupplierPerformance:
                     score = metric?.OverallScore;
                     source = metric is null
                         ? "ProcurementSupplierPerformanceScorecard"
@@ -757,7 +762,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                         ? null
                         : "No current governed performance scorecard exists in the exposure window.";
                     break;
-                case "DELIVERY":
+                case ProcurementSupplierRiskDimension.Delivery:
                     score = metric?.DeliveryTimelinessScore;
                     source = metric is null
                         ? "ProcurementSupplierPerformanceScorecard"
@@ -766,7 +771,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                         ? null
                         : "No governed delivery measure exists in the exposure window.";
                     break;
-                case "QUALITY":
+                case ProcurementSupplierRiskDimension.Quality:
                     score = metric?.GrnQualityScore;
                     source = metric is null
                         ? "ProcurementSupplierPerformanceScorecard"
@@ -775,7 +780,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                         ? null
                         : "No governed GRN-quality measure exists in the exposure window.";
                     break;
-                case "COSTCOMPETITIVENESS":
+                case ProcurementSupplierRiskDimension.CostCompetitiveness:
                     score = metric?.PriceCompetitivenessScore;
                     source = metric is null
                         ? "ProcurementSupplierPerformanceScorecard"
@@ -784,7 +789,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                         ? null
                         : "No governed price-competitiveness measure exists in the exposure window.";
                     break;
-                case "COMPLIANCE":
+                case ProcurementSupplierRiskDimension.Compliance:
                     score = metric?.ContractCompletionScore;
                     source = metric is null
                         ? "ProcurementSupplierPerformanceScorecard"
@@ -809,7 +814,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                             ? "No current approved due-diligence outcome exists for the first-award baseline."
                             : "No governed contract-completion measure exists in the exposure window.";
                     break;
-                case "DUEDILIGENCE":
+                case ProcurementSupplierRiskDimension.DueDiligence:
                     score = eligibility.DueDiligenceCurrent &&
                             eligibility.DueDiligenceOutcome ==
                             ProcurementSupplierDueDiligenceOutcome.Clear
@@ -820,7 +825,7 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                         : "ProcurementSupplierDueDiligenceReview";
                     missing = score.HasValue ? null : "No current approved due-diligence outcome exists.";
                     break;
-                case "FINANCIALSTABILITY":
+                case ProcurementSupplierRiskDimension.FinancialStability:
                     var financial = eligibility.DueDiligenceChecks.SingleOrDefault(item =>
                         item.CheckType == ProcurementSupplierDueDiligenceCheckType.FinancialStability);
                     score = financial?.Status == ProcurementSupplierDueDiligenceCheckStatus.Clear
@@ -830,19 +835,18 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
                         $"ProcurementSupplierDueDiligenceCheck:{financial.CheckId:N}";
                     missing = score.HasValue ? null : "No current financial-stability check outcome exists.";
                     break;
-                case "SPENDDIVERSIFICATION":
+                case ProcurementSupplierRiskDimension.SpendDiversification:
                     score = 100 - (spend.Count == 0 ? 0 :
                         spend.Max(item => item.SpendSharePercent));
                     source = "PurchaseOrders.TotalAmount by currency";
                     break;
-                case "SINGLESOURCEDEPENDENCY":
+                case ProcurementSupplierRiskDimension.SingleSourceDependency:
                     score = categories.Any(item => item.IsSingleSource) ? 0 : 100;
                     source = "PurchaseOrderItems by inventory category and currency";
                     break;
                 default:
-                    source = "Unsupported";
-                    missing = $"Configured dimension '{definition.Name}' is not supported by the risk engine.";
-                    break;
+                    throw Validation("SUPPLIER_RISK_DIMENSION_INVALID",
+                        $"Configured dimension '{definition.Name}' is not supported by the risk engine.");
             }
             if (score.HasValue) score = Clamp(score.Value);
             if (!string.IsNullOrWhiteSpace(missing))
@@ -1215,14 +1219,15 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
 
     private static ProcurementSupplierRiskListItemDto MapList(
         ProcurementSupplierRiskAssessment item,
-        DateTime now) => new()
+        DateTime now,
+        BusinessPartner? partner = null) => new()
     {
         Id = item.Id,
         AssessmentReference = item.AssessmentReference,
         AssessmentSequence = item.AssessmentSequence,
         BusinessPartnerId = item.BusinessPartnerId,
-        PartnerCode = item.BusinessPartner.PartnerCode,
-        PartnerName = item.BusinessPartner.PartnerName,
+        PartnerCode = (partner ?? item.BusinessPartner).PartnerCode,
+        PartnerName = (partner ?? item.BusinessPartner).PartnerName,
         AssessedAtUtc = item.AssessedAtUtc,
         NextReviewDueAtUtc = item.NextReviewDueAtUtc,
         RiskScore = item.RiskScore,
@@ -1241,9 +1246,10 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
 
     private static ProcurementSupplierRiskAssessmentDto Map(
         ProcurementSupplierRiskAssessment item,
-        DateTime now)
+        DateTime now,
+        BusinessPartner? partner = null)
     {
-        var list = MapList(item, now);
+        var list = MapList(item, now, partner);
         return new ProcurementSupplierRiskAssessmentDto
         {
             Id = list.Id,
@@ -1357,7 +1363,11 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
         ProcurementSupplierRiskAssessment item,
         PolicyResolution policy,
         DateTime now) =>
-        item.NextReviewDueAtUtc > now &&
+        item.NextReviewDueAtUtc > now && MatchesPolicy(item, policy);
+
+    private static bool MatchesPolicy(
+        ProcurementSupplierRiskAssessment item,
+        PolicyResolution policy) =>
         item.PolicyDecisionId == policy.Decision.Id &&
         string.Equals(item.PolicyValueHash, Hash(policy.Decision.ValueJson),
             StringComparison.OrdinalIgnoreCase);
@@ -1563,7 +1573,8 @@ public sealed class ProcurementSupplierRiskService : IProcurementSupplierRiskSer
     private sealed record PolicyResolution(
         ProcurementConfigurationDecision Decision,
         ProcurementSupplierRiskDecisionValueDto Value);
-    private sealed record DimensionDefinition(string Name, decimal Weight);
+    private sealed record DimensionDefinition(
+        string Name, decimal Weight, ProcurementSupplierRiskDimension Metric);
     private sealed record BandDefinition(string Name, decimal Minimum, decimal Maximum);
 
     private static JsonSerializerOptions CreateJsonOptions()

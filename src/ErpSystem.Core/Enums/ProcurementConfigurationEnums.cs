@@ -12,7 +12,8 @@ public enum ProcurementConfigurationDecisionStatus
     Draft = 0,
     Proposed = 1,
     Approved = 2,
-    Rejected = 3
+    Rejected = 3,
+    Withdrawn = 4
 }
 
 public enum ProcurementConfigurationApprovalStatus

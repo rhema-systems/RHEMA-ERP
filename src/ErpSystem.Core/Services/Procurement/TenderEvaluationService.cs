@@ -130,7 +130,7 @@ public class TenderEvaluationService : ITenderEvaluationService
                 ?? throw new InvalidOperationException($"Bid with ID {dto.TenderBidId} not found");
             await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
             await EnsureEvaluationConfigurationAsync(bid.TenderId);
-            EnsureBidEvaluationState(bid);
+            await EnsureBidEvaluationStateAsync(bid);
             await EnsurePaymentAdmissionForEvaluationAsync(bid);
 
             // A source committee owns membership; legacy assignments are only score-row projections.
@@ -250,9 +250,9 @@ public class TenderEvaluationService : ITenderEvaluationService
             await EnsureCurrentEvaluatorOwnsAsync(evaluation);
             await EnsureEvaluationConfigurationAsync(tenderId);
 
-            if (evaluation.Status == "Submitted")
+            if (!string.Equals(evaluation.Status, "Draft", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Cannot update submitted evaluation");
+                throw new InvalidOperationException("Only a draft evaluation can be updated; locked evaluations require an authorized replacement attempt.");
             }
 
             if (dto.PriceScore.HasValue) evaluation.PriceScore = dto.PriceScore.Value;
@@ -313,9 +313,9 @@ public class TenderEvaluationService : ITenderEvaluationService
             await EnsureEvaluationConfigurationAsync(tenderId);
             await EnsureCommitteeScorerAsync(tenderId, evaluation.TenderBidId);
 
-            if (evaluation.Status == "Submitted")
+            if (!string.Equals(evaluation.Status, "Draft", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Evaluation already submitted");
+                throw new InvalidOperationException("Only a draft evaluation can be submitted; locked evaluations require an authorized replacement attempt.");
             }
 
             if (!dto.ConfirmSubmission)
@@ -1538,7 +1538,7 @@ public class TenderEvaluationService : ITenderEvaluationService
         var bid = await _bidRepository.GetByIdAsync(bidId)
             ?? throw new InvalidOperationException($"Bid with ID {bidId} not found");
         await EnsureLegacyEvaluationAllowedAsync(bid.TenderId);
-        EnsureBidEvaluationState(bid);
+        await EnsureBidEvaluationStateAsync(bid);
         await EnsurePaymentAdmissionForEvaluationAsync(bid);
         return bid.TenderId;
     }
@@ -1591,12 +1591,41 @@ public class TenderEvaluationService : ITenderEvaluationService
         throw new TenderBidInitiationValidationException(admission.Code, admission.Message);
     }
 
-    private static void EnsureBidEvaluationState(TenderBid bid)
+    private async Task EnsureBidEvaluationStateAsync(TenderBid bid)
     {
-        if (!string.Equals(bid.Status, "Opened", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(bid.Status, "UnderEvaluation", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(bid.Status, "Opened", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(bid.Status, "UnderEvaluation", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!string.Equals(bid.Status, "Evaluated", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"Only an opened bid can be evaluated (current status: '{bid.Status}').");
+
+        var tender = await _tenderRepository.GetByIdAsync(bid.TenderId);
+        if (bid.TenantId != _currentUserProvider.TenantId || bid.IsDeleted ||
+            tender is null || tender.TenantId != _currentUserProvider.TenantId || tender.IsDeleted)
+            throw new ProcurementEvaluationCommitteeAuthorizationException(
+                "The replacement evaluation source is unavailable in the current tenant.");
+        if (string.Equals(tender.Status, "Awarded", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tender.Status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+            tender.AwardDate.HasValue)
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_SCORE_RECALL_DOWNSTREAM_FINAL",
+                "An evaluation cannot be replaced after the tender has been awarded or cancelled.");
+
+        // A completed bid may be corrected only by its original scorer through
+        // the existing independently approved, unconsumed subject-specific recall.
+        // Do not reopen the bid or make the previous locked projection editable.
+        var eligibility = await _evaluationCommittee.EnsureScoreSubjectEligibleAsync(
+            ProcurementEvaluationSourceType.Tender, tender.Id,
+            ProcurementEvaluationPhase.Combined, "TenderEvaluation", bid.Id,
+            $"TDC0208-REPLACEMENT-{Guid.NewGuid():N}", CancellationToken.None);
+        if (!eligibility.Allowed || eligibility.AuthorizedAttempt <= 1 ||
+            eligibility.ActorUserId != _currentUserProvider.UserId ||
+            eligibility.SourceType != ProcurementEvaluationSourceType.Tender ||
+            eligibility.SourceId != tender.Id || eligibility.Phase != ProcurementEvaluationPhase.Combined)
+            throw new ProcurementEvaluationCommitteeConflictException(
+                "EVALUATION_REPLACEMENT_RECALL_REQUIRED",
+                "Replacing an evaluated bid requires this evaluator's approved, unconsumed controlled recall for the same bid.");
     }
 
     private async Task EnsureCurrentEvaluatorOwnsAsync(TenderEvaluation evaluation)

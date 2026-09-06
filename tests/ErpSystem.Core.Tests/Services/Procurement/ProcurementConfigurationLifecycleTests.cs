@@ -117,6 +117,103 @@ public sealed class ProcurementConfigurationDecisionRegistryTests
 
 public sealed class ProcurementConfigurationServiceTests
 {
+    [Theory]
+    [InlineData(ProcurementConfigurationDecisionStatus.Draft)]
+    [InlineData(ProcurementConfigurationDecisionStatus.Proposed)]
+    [InlineData(ProcurementConfigurationDecisionStatus.Approved)]
+    public async Task UnsupportedDec011DimensionCannotBeSavedOrApproved(
+        ProcurementConfigurationDecisionStatus requestedStatus)
+    {
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
+        var profile = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-invalid-risk-dimension");
+        var decision = profile.Decisions.Single(item => item.DecisionKey == "DEC-011");
+        var validValue = CreateValidDecisionValue("DEC-011", profile.EffectiveFrom, profile.EffectiveTo!.Value);
+        await fixture.Service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
+            new SaveProcurementConfigurationDecisionRequest
+            {
+                SchemaVersion = 1,
+                OwnerGroup = decision.OwnerGroup,
+                Status = ProcurementConfigurationDecisionStatus.Draft,
+                ApprovalStatus = ProcurementConfigurationApprovalStatus.Pending,
+                Value = validValue,
+                DecisionDate = profile.EffectiveFrom,
+                RowVersion = decision.RowVersion
+            }, "save-valid-risk-draft");
+        decision = (await fixture.Service.GetProfileAsync(profile.Id)).Decisions.Single(item => item.DecisionKey == "DEC-011");
+        await fixture.Service.LinkEvidenceAsync(profile.Id, decision.DecisionKey,
+            new LinkProcurementConfigurationEvidenceRequest
+            {
+                EvidenceType = "ExternalReference",
+                ExternalReference = "TEST-RISK-DIMENSION-EVIDENCE",
+                DecisionRowVersion = decision.RowVersion
+            }, "evidence-invalid-risk-dimension");
+        decision = (await fixture.Service.GetProfileAsync(profile.Id)).Decisions.Single(item => item.DecisionKey == "DEC-011");
+        var retainedJson = decision.Value.GetRawText();
+        using var unsupported = JsonDocument.Parse(validValue.GetRawText()
+            .Replace("FinancialStability=50", "Financial=50", StringComparison.Ordinal));
+
+        await fixture.Service.Invoking(service => service.SaveDecisionAsync(profile.Id, decision.DecisionKey,
+                new SaveProcurementConfigurationDecisionRequest
+                {
+                    SchemaVersion = 1,
+                    OwnerGroup = decision.OwnerGroup,
+                    Status = requestedStatus,
+                    ApprovalStatus = requestedStatus == ProcurementConfigurationDecisionStatus.Approved
+                        ? ProcurementConfigurationApprovalStatus.Approved
+                        : ProcurementConfigurationApprovalStatus.Pending,
+                    Value = unsupported.RootElement.Clone(),
+                    DecisionDate = profile.EffectiveFrom,
+                    ApprovalReference = "MINUTE-INVALID-RISK-DIMENSION",
+                    RowVersion = decision.RowVersion
+                }, $"reject-risk-dimension-{requestedStatus}"))
+            .Should().ThrowAsync<ProcurementConfigurationValidationException>()
+            .Where(exception => exception.Validation.Errors.Any(error =>
+                error.Message.Contains("'Financial' is not supported", StringComparison.Ordinal)));
+
+        var retained = (await fixture.Service.GetProfileAsync(profile.Id)).Decisions.Single(item => item.DecisionKey == "DEC-011");
+        retained.Value.GetRawText().Should().Be(retainedJson);
+        retained.Status.Should().Be(ProcurementConfigurationDecisionStatus.Draft);
+        retained.ApprovalStatus.Should().Be(ProcurementConfigurationApprovalStatus.Pending);
+        retained.Evidence.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task PublicationRevalidatesUnsupportedDec011ValuesPersistedBeforeTheDimensionGuard()
+    {
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
+        var profile = await fixture.Service.CreateProfileAsync(NewProfileRequest(), "create-pre-guard-risk-policy");
+        await PrepareForPublicationAsync(fixture.Service, profile.Id,
+            profile.EffectiveFrom, profile.EffectiveTo!.Value);
+        (await fixture.Service.ValidateProfileAsync(profile.Id, "validate-supported-risk-policy"))
+            .IsValid.Should().BeTrue();
+        var decision = await fixture.Context.ProcurementConfigurationDecisions
+            .SingleAsync(item => item.ProfileId == profile.Id && item.DecisionKey == "DEC-011");
+        // Simulate a draft saved before validation knew the engine's supported names.
+        decision.ValueJson = decision.ValueJson.Replace("FinancialStability=50", "Financial=50", StringComparison.Ordinal);
+        await fixture.Context.SaveChangesAsync();
+
+        var validation = await fixture.Service.ValidateProfileAsync(profile.Id, "validate-pre-guard-risk-policy");
+        validation.IsValid.Should().BeFalse();
+        validation.Errors.Should().Contain(error => error.Code == "VALUE_INVALID" &&
+            error.Message.Contains("'Financial' is not supported", StringComparison.Ordinal));
+        profile = await fixture.Service.GetProfileAsync(profile.Id);
+        await fixture.Service.Invoking(service => service.PublishProfileAsync(profile.Id,
+                new ProcurementConfigurationLifecycleRequest
+                {
+                    RowVersion = profile.RowVersion,
+                    Reason = "Attempt to publish unsupported risk dimension"
+                }, "publish-pre-guard-risk-policy"))
+            .Should().ThrowAsync<ProcurementConfigurationValidationException>();
+
+        var retained = await fixture.Service.GetProfileAsync(profile.Id);
+        retained.LifecycleStatus.Should().Be(ProcurementConfigurationProfileStatus.Draft);
+        retained.Decisions.Single(item => item.DecisionKey == "DEC-011").Value.GetRawText()
+            .Should().Contain("Financial=50");
+        (await fixture.Context.ProcurementConfigurationRevisions
+            .AnyAsync(item => item.ProfileId == profile.Id && item.Action == "Publish" && item.Result == "Rejected"))
+            .Should().BeTrue();
+    }
+
     [Fact]
     public async Task CreateSeedsFourteenDraftDecisionsAndIsTenantScoped()
     {

@@ -699,9 +699,13 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
                 item.TenantId == _currentUser.TenantId && item.ProfileId == source.Id)
             .AsNoTracking().ToListAsync(cancellationToken);
         if (decisions.Count != ProcurementConfigurationDecisionRegistry.Definitions.Count ||
-            decisions.Any(item => item.Status != ProcurementConfigurationDecisionStatus.Approved ||
-                                  item.ApprovalStatus != ProcurementConfigurationApprovalStatus.Approved))
-            throw ValidationException("SOURCE_CONFIGURATION_INCOMPLETE", "The source configuration does not contain fourteen approved decisions.");
+            ProcurementConfigurationDecisionRegistry.Definitions.Any(definition =>
+                decisions.Count(item => item.DecisionKey == definition.DecisionKey) != 1) ||
+            decisions.Any(item =>
+                !(item.DecisionKey == "DEC-011" && item.Status == ProcurementConfigurationDecisionStatus.Withdrawn) &&
+                (item.Status != ProcurementConfigurationDecisionStatus.Approved ||
+                 item.ApprovalStatus != ProcurementConfigurationApprovalStatus.Approved)))
+            throw ValidationException("SOURCE_CONFIGURATION_INCOMPLETE", "The source configuration must contain all fourteen governed decisions, with each approved or the optional DEC-011 explicitly withdrawn.");
 
         var tenantRoles = (await _roleService.GetRolesForTenantAsync(_currentUser.TenantId, cancellationToken))
             .Where(item => !string.IsNullOrWhiteSpace(item.Name))

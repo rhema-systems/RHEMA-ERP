@@ -19,7 +19,7 @@ using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
-public sealed class SupplierValidationServiceTests
+public sealed partial class SupplierValidationServiceTests
 {
     [Fact]
     public async Task OpenNctBidParticipationDoesNotRequireAnnualInternalAvlReviewsOrGrantDownstreamApproval()

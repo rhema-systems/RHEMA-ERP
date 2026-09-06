@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   awardReadinessRemediationHref,
@@ -14,6 +14,8 @@ import type {
 } from '@/types/procurement-award-readiness';
 
 describe('procurement award readiness helpers', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it('normalizes server action names without manufacturing client readiness', () => {
     expect(hasAwardReadinessAction(['EvaluateReadiness'], 'EvaluateReadiness')).toBe(
       true
@@ -22,11 +24,12 @@ describe('procurement award readiness helpers', () => {
     expect(hasAwardReadinessAction(['ViewHistory'], 'RecordAward')).toBe(false);
   });
 
-  it('builds a stale-safe server evaluation request from retained lineage only', () => {
+  it('keeps the optimistic source hash for a current retained decision', () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue(
       '00000000-0000-4000-8000-000000000209'
     );
     const latest = {
+      isCurrent: true,
       sourceIntegrityHash: 'source-hash',
       recommendation: {
         subjectIds: ['bid-1'],
@@ -44,6 +47,60 @@ describe('procurement award readiness helpers', () => {
     expect(
       createAwardReadinessEvaluationRequest(latest)
     ).not.toHaveProperty('isReady');
+  });
+
+  it('re-evaluates a historical decision without binding its obsolete source hash', () => {
+    const latest = {
+      isCurrent: false,
+      sourceIntegrityHash: 'obsolete-source-hash',
+      recommendation: {
+        subjectIds: ['bid-1'],
+        businessPartnerIds: ['supplier-1'],
+      },
+    } as ProcurementAwardReadinessDecision;
+
+    const request = createAwardReadinessEvaluationRequest(latest);
+
+    expect(request.expectedSourceIntegrityHash).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(request))).not.toHaveProperty(
+      'expectedSourceIntegrityHash'
+    );
+    expect(request.expectedRecommendedSubjectIds).toEqual(['bid-1']);
+    expect(request.expectedBusinessPartnerIds).toEqual(['supplier-1']);
+    expect(latest.sourceIntegrityHash).toBe('obsolete-source-hash');
+  });
+
+  it('conservatively retains a supplied hash when currentness is unavailable', () => {
+    const latest = {
+      sourceIntegrityHash: 'unverified-source-hash',
+      recommendation: {
+        subjectIds: ['bid-1'],
+        businessPartnerIds: ['supplier-1'],
+      },
+    } as ProcurementAwardReadinessDecision;
+
+    expect(
+      createAwardReadinessEvaluationRequest(latest).expectedSourceIntegrityHash
+    ).toBe('unverified-source-hash');
+  });
+
+  it('does not manufacture lineage when no retained decision is available', () => {
+    const request = createAwardReadinessEvaluationRequest();
+
+    expect(request.expectedSourceIntegrityHash).toBeUndefined();
+    expect(request.expectedRecommendedSubjectIds).toEqual([]);
+    expect(request.expectedBusinessPartnerIds).toEqual([]);
+  });
+
+  it('uses a fresh idempotency key for each new evaluation attempt', () => {
+    vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000002');
+
+    const first = createAwardReadinessEvaluationRequest();
+    const second = createAwardReadinessEvaluationRequest();
+
+    expect(first.idempotencyKey).not.toBe(second.idempotencyKey);
   });
 
   it('routes remediation to existing shared controls for Tender and RFQ', () => {
