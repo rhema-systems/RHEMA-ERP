@@ -9,7 +9,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, Building2, MinusCircle, Award, DollarSign } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, Building2, MinusCircle, Award } from 'lucide-react';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
 import { toast } from 'sonner';
 import {
   awardVerificationService,
@@ -27,12 +28,14 @@ interface BidderInfo {
   businessPartnerName: string;
   bidNumber: string;
   totalBidAmount: number;
+  currency?: string;
 }
 
 interface AwardVerificationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tenderId: string;
+  tenderCurrency?: string;
   bidders: BidderInfo[];
   onVerificationComplete?: (verification: TenderAwardVerification) => void;
   onAwardBidder?: (bidId: string, bidAmount: number) => void;
@@ -65,6 +68,7 @@ export function AwardVerificationDialog({
   open,
   onOpenChange,
   tenderId,
+  tenderCurrency,
   bidders,
   onVerificationComplete,
   onAwardBidder,
@@ -474,8 +478,10 @@ export function AwardVerificationDialog({
                       <div className="flex justify-between items-center mt-4 pt-4 border-t">
                         {/* Show bid amount */}
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <DollarSign className="h-4 w-4" />
-                          <span>Bid Amount: <strong className="text-foreground">${bidders.find(b => b.bidId === bv.bidId)?.totalBidAmount.toLocaleString() || 0}</strong></span>
+                          <span>Bid Amount: <strong className="text-foreground">{formatProcurementMoney(
+                            bidders.find(b => b.bidId === bv.bidId)?.totalBidAmount ?? 0,
+                            bidders.find(b => b.bidId === bv.bidId)?.currency || tenderCurrency
+                          )}</strong></span>
                         </div>
 
                         <div className="flex gap-2">
