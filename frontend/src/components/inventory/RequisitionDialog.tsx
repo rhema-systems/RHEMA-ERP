@@ -735,6 +735,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   </Card>
                 )}
 
+                {canEdit && <p className="text-xs text-muted-foreground mb-2">Draft costs are calculated from the item&apos;s configured valuation method when saved.</p>}
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -775,10 +776,10 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                           <TableCell>{item.approvedQuantity}</TableCell>
                           <TableCell>{item.issuedQuantity}</TableCell>
                           <TableCell>{item.unitOfMeasure}</TableCell>
-                          <TableCell>{item.unitCost.toFixed(2)}</TableCell>
+                          <TableCell>{isCreateMode || editingItemId === item.id ? 'On save' : item.unitCost.toFixed(2)}</TableCell>
                           <TableCell>
-                            {editingItemId === item.id
-                              ? ((item.unitCost || 0) * editingItemData.requestedQuantity).toFixed(2)
+                            {isCreateMode || editingItemId === item.id
+                              ? 'On save'
                               : item.totalCost.toFixed(2)
                             }
                           </TableCell>
