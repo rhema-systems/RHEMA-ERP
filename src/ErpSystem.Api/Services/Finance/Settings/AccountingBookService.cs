@@ -290,9 +290,23 @@ public sealed class AccountingBookService : IAccountingBookService
         // Every structural and lifecycle writer scans the same tenant graph inside AtomicAsync's
         // serializable transaction. Those range locks make child attachment and ancestor
         // invalidation mutually visible; weakening this query can reintroduce invalid Delta trees.
-        var tenantBooks = await _db.AccountingBooks.AsNoTracking()
-            .Where(item => item.TenantId == TenantId && !item.IsDeleted)
-            .ToListAsync(ct);
+        List<AccountingBook> tenantBooks;
+        if (_db.Database.IsSqlServer())
+        {
+            // Serializable shared range reads can deadlock during symmetric lock conversion and
+            // do not guarantee that the first authority reader wins. UPDLOCK makes this tenant
+            // graph the actual writer boundary; HOLDLOCK retains it through commit.
+            tenantBooks = await _db.AccountingBooks
+                .FromSqlInterpolated($"SELECT * FROM [AccountingBooks] WITH (UPDLOCK, HOLDLOCK) WHERE [TenantId] = {TenantId} AND [IsDeleted] = CAST(0 AS bit)")
+                .AsNoTracking()
+                .ToListAsync(ct);
+        }
+        else
+        {
+            tenantBooks = await _db.AccountingBooks.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && !item.IsDeleted)
+                .ToListAsync(ct);
+        }
         var byId = tenantBooks.ToDictionary(item => item.Id);
         byId[candidate.Id] = candidate;
         ValidateOwnDeltaLineage(candidate, target, byId);
