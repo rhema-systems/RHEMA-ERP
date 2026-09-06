@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `CORRECTION_IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
 | Branch | `codex/finance-book-period-initialization-c4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Clean C4 candidate `ebf3c2e4` under independent GPT-5.6 Sol High review |
+| Review status | C4 review cycle 1 returned `CHANGES_REQUIRED`; Sol Medium correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -596,3 +596,18 @@ review is active across the accounting, lifecycle, period-lock, cutoff, maker-ch
 concurrency, API/UI permission and C1/C2/C3 regression boundaries. A separate read-only structured-handoff
 reconciliation was requested because the completed task turn did not expose its final text. No C4 commit is
 approved for integration, no migration was applied and configured `RHEMAERP` remains untouched.
+
+Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
+gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
+fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
+supersession lineage; activation readiness is version-unsafe and does not rederive mapping, classification,
+balance, source-book, outer-period or pending exact-book authority; draft edits preserve the original maker and
+permit self-approval; and the new posting-period gate caused 244 failures across a widened 466-test Finance
+consumer run because shared fixtures lack explicit book-period authority. Pure base-copy mode accepts unused
+adjustments, rejection is stored in approval fields, and owner guidance/UI contains stale or inaccurate mode,
+backfill and C3-readiness text. The otherwise bounded candidate passed a fresh zero-error build, 224 selected
+tests with 15 guarded SQL skips, 21 frontend tests, ESLint, EF no-pending-model, no-connect migration script
+generation, diff and clean-status checks. The coordinator dispatched all findings directly for one substantive
+GPT-5.6 Sol Medium correction, including executable SQL success/failure coverage and full posting-consumer
+fixture repair without weakening the production gate. Integration and subsequent stages remain blocked; no
+database was accessed or mutated.
