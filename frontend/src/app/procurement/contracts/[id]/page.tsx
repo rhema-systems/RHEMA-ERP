@@ -66,6 +66,7 @@ import {
   type UpdateContractDto,
 } from '@/services/contractService';
 import { ContractActivationGate } from '@/components/procurement/ContractActivationGate';
+import { ContractRetentionFields, validateContractRetention } from '@/components/procurement/ContractRetentionFields';
 import { ContractOperationsDashboard } from '@/components/procurement/ContractOperationsDashboard';
 import { WorksCloseoutWorkspace } from '@/components/procurement/WorksCloseoutWorkspace';
 import { QuantitySurveyContractCommercialTermsPanel } from '@/components/quantity-survey/QuantitySurveyContractCommercialTermsPanel';
@@ -219,6 +220,7 @@ export default function ContractDetailPage() {
       contractValue: contract.contractValue,
       paymentTerms: contract.paymentTerms,
       retentionPercentage: contract.retentionPercentage,
+      retentionClause: contract.retentionClause,
       startDate: contract.startDate?.split('T')[0],
       endDate: contract.endDate?.split('T')[0],
       durationDays: contract.durationDays,
@@ -234,6 +236,14 @@ export default function ContractDetailPage() {
 
   const handleSaveContract = async () => {
     if (!contract) return;
+    const retentionError = validateContractRetention(
+      editData.retentionPercentage ?? contract.retentionPercentage,
+      editData.retentionClause ?? contract.retentionClause
+    );
+    if (retentionError) {
+      toast.error(retentionError);
+      return;
+    }
     try {
       setSaving(true);
       await contractService.updateContract(contract.id, editData);
@@ -241,7 +251,7 @@ export default function ContractDetailPage() {
       setShowEditDialog(false);
       loadContract(contract.id);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to update contract');
+      toast.error(getProcurementProblemMessage(error, 'Failed to update contract'));
     } finally {
       setSaving(false);
     }
@@ -682,6 +692,12 @@ export default function ContractDetailPage() {
                   label="Retention %"
                   value={`${contract.retentionPercentage}%`}
                 />
+                {(contract.retentionPercentage > 0 || contract.retentionClause) && (
+                  <div className="space-y-1 text-sm">
+                    <p className="text-muted-foreground">Retention clause and release conditions</p>
+                    <p className="whitespace-pre-wrap">{contract.retentionClause || 'Not recorded — review the contract terms.'}</p>
+                  </div>
+                )}
                 <InfoRow
                   label="Total Paid"
                   value={formatCurrency(
@@ -1127,19 +1143,11 @@ export default function ContractDetailPage() {
               />
             </div>
             <div>
-              <Label>Retention %</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                value={editData.retentionPercentage || ''}
-                onChange={(e) =>
-                  setEditData({
-                    ...editData,
-                    retentionPercentage: parseFloat(e.target.value) || 0,
-                  })
-                }
+              <ContractRetentionFields
+                percentage={editData.retentionPercentage ?? 0}
+                clause={editData.retentionClause}
+                onPercentageChange={(value) => setEditData({ ...editData, retentionPercentage: value })}
+                onClauseChange={(value) => setEditData({ ...editData, retentionClause: value })}
               />
             </div>
             <div className="col-span-2">
