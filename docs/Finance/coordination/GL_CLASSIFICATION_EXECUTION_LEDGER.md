@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `CHANGES_REQUIRED` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 review cycle 3 found one remaining Delta creation/update lineage gap; correction active |
+| Review status | Final C3 candidate `36fd5baf` is under independent Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -477,3 +477,10 @@ present and therefore does not prove create-versus-invalidation ordering. A narr
 correction was dispatched requiring one full-lineage validator across Create/Update/request/approval and
 meaningful two-context SQL races for both winner orders against suspension/retirement approval. Integration,
 C4 and database operations remain blocked.
+
+The implementer completed the final Delta structure-write correction as
+`36fd5baf9439fcc03a8f7780896c838e45fe53a7`; the six-commit C3 worktree is clean and the full
+exact-base range passes `git diff --check`. The correction reuses full lifecycle/pending-state ancestry
+authority for Delta Create/Update and extends guarded relational race coverage. Final GPT-5.6 Sol High
+re-review is active over all C3 findings and regression boundaries. No integration, C4 dispatch, migration
+application or configured-database access is authorized before approval.
