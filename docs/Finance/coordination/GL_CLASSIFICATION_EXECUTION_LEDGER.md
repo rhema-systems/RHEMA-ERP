@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `CHANGES_REQUIRED` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 re-review found runtime-currency parity and SQL concurrency coverage gaps; correction active |
+| Review status | Final C3 candidate `10654cdb` is under independent Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -460,3 +460,10 @@ executable two-context SQL Server race test. The coordinator dispatched a narrow
 requiring shared runtime canonical currency validation and guarded relational create/advance versus base
 suspension/retirement request-or-approval races. Integration and C4 remain blocked; configured `RHEMAERP`
 remains untouched.
+
+The implementer completed the second narrow correction as
+`10654cdb45b1bcbb18783513b14b1c691b83ac59`; the five-commit C3 worktree is clean and the exact-base
+range passes `git diff --check`. The correction aligns runtime currency validation with the migration/database
+ASCII contract and adds guarded two-context SQL Server lifecycle-concurrency coverage. Final independent
+GPT-5.6 Sol High re-review is active over the complete C3 range and all prior findings. Integration, C4 and
+database operations remain blocked pending approval.
