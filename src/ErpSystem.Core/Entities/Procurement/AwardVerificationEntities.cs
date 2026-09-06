@@ -69,6 +69,12 @@ public class AwardVerificationChecklistItem : TenantEntity
     public bool IsRequired { get; set; } = true;
 
     /// <summary>
+    /// Require a retained document for this check, independently of whether the check is mandatory.
+    /// Otherwise an attributable review note may reference existing controlled ERP evidence.
+    /// </summary>
+    public bool RequiresDocument { get; set; }
+
+    /// <summary>
     /// Category for grouping items (e.g., "Financial", "Legal", "Technical")
     /// </summary>
     [MaxLength(50)]

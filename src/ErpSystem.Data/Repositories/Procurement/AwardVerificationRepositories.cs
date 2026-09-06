@@ -322,6 +322,8 @@ public class TenderAwardVerificationBidderRepository : GenericRepository<TenderA
             .Include(b => b.BusinessPartner)
             .Include(b => b.ItemResults.Where(r => !r.IsDeleted))
                 .ThenInclude(r => r.ChecklistItem)
+            .Include(b => b.ItemResults.Where(r => !r.IsDeleted))
+                .ThenInclude(r => r.Documents.Where(d => !d.IsDeleted))
             .FirstOrDefaultAsync();
     }
 

@@ -19,10 +19,12 @@ import {
 } from '@/services/awardVerificationService';
 
 interface ChecklistItemForm {
+  id?: string;
   itemText: string;
   description: string;
   displayOrder: number;
   isRequired: boolean;
+  requiresDocument: boolean;
   category: string;
   isActive: boolean;
 }
@@ -83,6 +85,7 @@ export default function AwardVerificationChecklistsPage() {
         description: '',
         displayOrder: formData.items.length,
         isRequired: true,
+        requiresDocument: false,
         category: '',
         isActive: true,
       }],
@@ -130,6 +133,7 @@ export default function AwardVerificationChecklistsPage() {
           description: item.description || undefined,
           displayOrder: i,
           isRequired: item.isRequired,
+          requiresDocument: item.requiresDocument,
           category: item.category || undefined,
           isActive: item.isActive,
         })),
@@ -151,6 +155,18 @@ export default function AwardVerificationChecklistsPage() {
       return;
     }
     try {
+      // Persist the independent evidence rule through its owning item endpoint.
+      // The server rejects changing a rule already used by a verification.
+      for (const item of formData.items) {
+        const original = selectedTemplate.items.find(existing => existing.id === item.id);
+        if (item.id && original && (original.requiresDocument ?? false) !== item.requiresDocument) {
+          await awardVerificationService.updateTemplateItem(item.id, {
+            itemText: original.itemText, description: original.description,
+            displayOrder: original.displayOrder, isRequired: original.isRequired,
+            requiresDocument: item.requiresDocument, category: original.category, isActive: original.isActive,
+          });
+        }
+      }
       await awardVerificationService.updateTemplate(selectedTemplate.id, {
         name: formData.name,
         description: formData.description || undefined,
@@ -204,10 +220,12 @@ export default function AwardVerificationChecklistsPage() {
         isDefault: fullTemplate.isDefault,
         displayOrder: fullTemplate.displayOrder,
         items: fullTemplate.items.map(item => ({
+          id: item.id,
           itemText: item.itemText,
           description: item.description || '',
           displayOrder: item.displayOrder,
           isRequired: item.isRequired,
+          requiresDocument: item.requiresDocument ?? false,
           category: item.category || '',
           isActive: item.isActive,
         })),
@@ -268,6 +286,14 @@ export default function AwardVerificationChecklistsPage() {
                       onCheckedChange={(checked) => handleItemChange(index, 'isRequired', checked)}
                     />
                     <Label className="text-sm">Required</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      aria-label={`Document required for check ${index + 1}`}
+                      checked={item.requiresDocument}
+                      onCheckedChange={(checked) => handleItemChange(index, 'requiresDocument', checked)}
+                    />
+                    <Label className="text-sm">Document required</Label>
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch
@@ -409,7 +435,7 @@ export default function AwardVerificationChecklistsPage() {
       <Card>
         <CardHeader><CardTitle>Filters</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -491,4 +517,3 @@ export default function AwardVerificationChecklistsPage() {
     </div>
   );
 }
-

@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, Building2, MinusCircle, Award } from 'lucide-react';
 import { formatProcurementMoney } from '@/lib/procurement-currency';
 import { getAwardBidderReviewStatus, isAwardVerificationClosed } from '@/lib/award-verification-status';
+import { hasAwardVerificationEvidence } from '@/lib/award-verification-evidence';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { toast } from 'sonner';
 import {
@@ -49,6 +50,7 @@ interface ItemVerification {
   itemText: string;
   description?: string;
   isRequired: boolean;
+  requiresDocument?: boolean;
   isVerified: boolean;
   status: string;
   comments: string;
@@ -141,6 +143,7 @@ export function AwardVerificationDialog({
               itemText: item.checklistItemText || item.itemText || '',
               description: item.itemDescription || '',
               isRequired: item.isRequired ?? true,
+              requiresDocument: item.requiresDocument ?? false,
               isVerified: item.isVerified,
               status: item.status,
               comments: item.comments || '',
@@ -171,6 +174,7 @@ export function AwardVerificationDialog({
             itemText: item.itemText,
             description: item.description,
             isRequired: item.isRequired,
+            requiresDocument: item.requiresDocument ?? false,
             isVerified: false,
             status: 'Pending',
             comments: '',
@@ -255,6 +259,13 @@ export function AwardVerificationDialog({
       return;
     }
 
+    const missingEvidence = bidderVerification.items.filter(item => !hasAwardVerificationEvidence(item));
+    if (missingEvidence.length > 0) {
+      toast.error(missingEvidence.map(item => `${item.itemText}: ${item.requiresDocument
+        ? 'attach the required document' : 'add review notes referencing the records checked, or attach evidence'}`).join('; '));
+      return;
+    }
+
     // Check if all items have been actioned
     const pendingItems = bidderVerification.items.filter(item => item.status === 'Pending');
     if (pendingItems.length > 0) {
@@ -297,7 +308,9 @@ export function AwardVerificationDialog({
       }
     } catch (error: any) {
       console.error('Error verifying bidder:', error);
-      toast.error(error.message || 'Failed to verify bidder');
+      let problem: unknown = error;
+      try { problem = JSON.parse(error?.message); } catch { /* Keep plain errors. */ }
+      toast.error(getProcurementProblemMessage(problem, 'Failed to verify bidder'));
     } finally {
       setSaving(false);
     }
@@ -305,6 +318,10 @@ export function AwardVerificationDialog({
 
   const handleCompleteVerification = async () => {
     if (!verification || readOnly || loading || loadError || saving || bidderVerifications.length === 0) return;
+    if (bidderVerifications.some(bidder => bidder.items.some(item => !hasAwardVerificationEvidence(item)))) {
+      toast.error('Required evidence is missing. Review the checklist before completing verification.');
+      return;
+    }
 
     const unverifiedBidders = bidderVerifications.filter(bv => bv.status !== 'verified');
     if (unverifiedBidders.length > 0) {
@@ -324,7 +341,9 @@ export function AwardVerificationDialog({
       onOpenChange(false);
     } catch (error: any) {
       console.error('Error completing verification:', error);
-      toast.error(error.message || 'Failed to complete verification');
+      let problem: unknown = error;
+      try { problem = JSON.parse(error?.message); } catch { /* Keep plain errors. */ }
+      toast.error(getProcurementProblemMessage(problem, 'Failed to complete verification'));
     } finally {
       setSaving(false);
     }
@@ -467,6 +486,11 @@ export function AwardVerificationDialog({
                                 disabled={readOnly || saving || bv.status === 'verified'}
                                 rows={2}
                               />
+                              <p className="text-xs text-muted-foreground">
+                                {item.requiresDocument
+                                  ? 'Document required: retain the supporting file for this check.'
+                                  : 'Review record: reference the existing records checked in your notes. A separate upload is not required.'}
+                              </p>
 
                               {/* Document Attachments */}
                               {item.itemResultId && (
@@ -551,7 +575,8 @@ export function AwardVerificationDialog({
                 <Button variant="outline" onClick={() => onOpenChange(false)}>{readOnly ? 'Close' : 'Cancel'}</Button>
                 {!readOnly && <Button
                   onClick={handleCompleteVerification}
-                  disabled={saving || !verification || progress.total === 0 || progress.verified !== progress.total}
+                  disabled={saving || !verification || progress.total === 0 || progress.verified !== progress.total ||
+                    bidderVerifications.some(bidder => bidder.items.some(item => !hasAwardVerificationEvidence(item)))}
                 >
                   {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
                   Complete Verification
