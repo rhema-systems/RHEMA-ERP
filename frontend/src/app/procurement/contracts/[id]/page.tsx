@@ -1478,6 +1478,7 @@ export default function ContractDetailPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Contract">Contract</SelectItem>
+                  <SelectItem value="SignedCopy">Signed copy</SelectItem>
                   <SelectItem value="Amendment">Amendment</SelectItem>
                   <SelectItem value="Addendum">Addendum</SelectItem>
                   <SelectItem value="Specification">Specification</SelectItem>
