@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `REVIEW_REQUIRED` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Clean C3 candidate `a8de11c7` is under independent Sol High review |
+| Review status | C3 review cycle 1 found material lineage/migration/UI gaps; Sol Medium correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -429,3 +429,15 @@ Independent GPT-5.6 Sol High review is active against the exact candidate and in
 invariants, concurrency, maker-checker/audit atomicity, migration preflight, API/UI permissions, activation
 fail-closed readiness, C1/C2 regression boundaries, and scope isolation. No C3 commit is approved for
 integration yet, no C4 work is authorized, and configured `RHEMAERP` remains untouched.
+
+Stage C3 independent review cycle 1 returned `CHANGES_REQUIRED` against clean candidate `a8de11c7`.
+The reviewer found that Delta base validity is not preserved through request/approval transitions: direct and
+transitive dependents can become Initializing through a Suspended/Retired lineage, and approval does not
+revalidate the full chain under the concurrency boundary. Migration preflight also accepts existing book codes
+outside the runtime `[A-Z][A-Z0-9_]*` grammar, leaving upgraded rows that the governed API cannot represent;
+currency character-domain parity requires the same exact treatment. The UI exposes structural editing for
+status-locked or pending-transition books because it checks only use/initialization evidence. The coordinator
+sent a substantive GPT-5.6 Sol Medium correction requiring lifecycle-aware full-lineage validation at request
+and approval, transitive dependent protection, binary/ASCII-safe migration and database constraints with
+fail-before-mutation SQL coverage, and UI parity with backend lock rules. C3 integration and C4 remain blocked;
+the migration remains unapplied and configured `RHEMAERP` remains untouched.
