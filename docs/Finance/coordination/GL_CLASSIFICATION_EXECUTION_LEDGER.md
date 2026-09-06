@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
 | Branch | `codex/finance-book-period-initialization-c4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final clean C4 candidate `d49ee09c` under independent GPT-5.6 Sol High re-review |
+| Review status | C4 independently approved, integrated and verified on primary |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -636,7 +636,22 @@ The implementer completed the narrow regression correction as `78e8ae05d0776b44a
 and added final UI action-gate coverage as `d49ee09cb88d1a547df75fa6bbe477c424c744ca`. The resulting
 seven-commit C4 worktree is clean, remains linear from the exact base and passes the full-range diff check.
 The production period gate was not weakened; affected Finance test fixtures now establish explicit governed
-book, fiscal and exact-book-period authority with owner-facing comments. Final independent GPT-5.6 Sol High
-re-review is active against the exact widened 466-test gate, the combined C4/C1-C3/posting/reversal/balance/FX
-gate, both previously failing journal suites, and all substantive cycle-1 closures. Integration, migrations,
-subsequent stages and configured-database access remain blocked pending approval.
+book, fiscal and exact-book-period authority with owner-facing comments.
+
+Independent GPT-5.6 Sol High review approved final clean C4 candidate
+`d49ee09cb88d1a547df75fa6bbe477c424c744ca` with no candidate-caused P1/P2 findings. The seven-commit
+ancestry is linear. Fresh reviewer gates passed a zero-error rebuild, 252 combined C4/C1-C3/posting/reversal/
+balance/FX/journal tests with 16 guarded SQL skips, JournalEntry lifecycle 14/14, JournalBatch 11/11,
+frontend 24/24, changed-file ESLint, EF no-pending-model, migration discovery/script generation and clean
+diff/status. The wider 466-test filter reached 435 passes and 31 evidenced inherited failures in byte-unchanged
+controlled-opening-balance, retired AR compatibility, fiscal-year exact-reversal and AP canonical-fingerprint
+paths; none is caused by C4 or its period gate.
+
+The coordinator integrated the seven approved commits locally as `1966d429`, `f7378c92`, `6b642157`,
+`dfca02eb`, `1d9b9e5b`, `f0a137ea` and `50a4e1a8`. All 60 task-owned files are byte-identical to the reviewed
+candidate. Primary verification passed a fresh zero-error rebuild with 1,177 existing warnings, 296 selected
+Finance tests with 16 guarded SQL skips, frontend 24/24, targeted ESLint, EF no-pending-model, full-range diff
+check and unchanged unrelated dirty-work evidence. Migration
+`20260906140533_AddAccountingBookPeriodInitializationFoundation` remains unapplied; configured `RHEMAERP`
+was not accessed or mutated. Stage C4 is complete. Automatic parallel posting and AccountingEvent orchestration
+remain disabled pending separately reviewed applicability and orchestration stages.
