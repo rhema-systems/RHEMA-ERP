@@ -211,7 +211,7 @@ export default function AccountingBooksSettingsPage() {
                 <h1 className="flex items-center gap-2 text-2xl font-semibold"><BookOpen className="h-6 w-6" />Accounting books</h1>
                 <p className="text-muted-foreground">Govern ledger purpose, structural identity and lifecycle without enabling cross-book execution.</p>
             </div>
-            {access.canManage && <Button onClick={() => openEditor()}><Plus className="mr-2 h-4 w-4" />New accounting book</Button>}
+            <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/finance/settings/accounting-books/applicability">Applicability policy</Link></Button>{access.canManage && <Button onClick={() => openEditor()}><Plus className="mr-2 h-4 w-4" />New accounting book</Button>}</div>
         </div>
 
         <Alert className="border-amber-300 bg-amber-50 text-amber-950"><ShieldAlert className="h-4 w-4" /><AlertTitle>Parallel posting remains disabled</AlertTitle><AlertDescription>C4 now governs initialization and exact-book period readiness. Activation remains blocked until that evidence is approved and current; Finance still executes one concrete book at a time.</AlertDescription></Alert>

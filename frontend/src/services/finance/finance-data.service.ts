@@ -10,6 +10,13 @@ import type {
     DecideAccountingBookTransition,
     RequestAccountingBookTransition,
     SaveAccountingBook,
+    AccountingBookApplicabilityPolicy,
+    SaveAccountingBookApplicabilityPolicy,
+    DecideAccountingBookApplicabilityPolicy,
+    ResolveAccountingBookApplicability,
+    FreezeAccountingBookSelection,
+    AccountingBookSelection,
+    AccountingBookApplicabilityEligibleBook,
     AccountClassification,
     AccountClassificationWhereUsed,
     SaveAccountClassification,
@@ -193,6 +200,34 @@ class FinanceDataService {
 
     async getAccountingBookActivationReadiness(accountingBookId: string): Promise<import('@/types/finance').AccountingBookActivationReadiness> {
         return apiService.get(`/finance/accounting-books/${accountingBookId}/initialization/readiness`);
+    }
+
+    async getAccountingBookApplicabilityPolicies(): Promise<AccountingBookApplicabilityPolicy[]> {
+        return apiService.get('/finance/accounting-book-applicability/policies');
+    }
+
+    async getAccountingBookApplicabilityEligibleBooks(): Promise<AccountingBookApplicabilityEligibleBook[]> {
+        return apiService.get('/finance/accounting-book-applicability/eligible-books');
+    }
+
+    async createAccountingBookApplicabilityPolicy(request: SaveAccountingBookApplicabilityPolicy): Promise<AccountingBookApplicabilityPolicy> {
+        return apiService.post('/finance/accounting-book-applicability/policies', request);
+    }
+
+    async updateAccountingBookApplicabilityPolicy(id: string, request: SaveAccountingBookApplicabilityPolicy): Promise<AccountingBookApplicabilityPolicy> {
+        return apiService.put(`/finance/accounting-book-applicability/policies/${id}`, request);
+    }
+
+    async decideAccountingBookApplicabilityPolicy(id: string, action: 'submit' | 'approve' | 'reject' | 'retire' | 'retire/approve' | 'retire/reject', request: DecideAccountingBookApplicabilityPolicy): Promise<AccountingBookApplicabilityPolicy> {
+        return apiService.post(`/finance/accounting-book-applicability/policies/${id}/${action}`, request);
+    }
+
+    async resolveAccountingBookApplicability(request: ResolveAccountingBookApplicability): Promise<AccountingBookSelection> {
+        return apiService.post('/finance/accounting-book-applicability/resolve', request);
+    }
+
+    async freezeAccountingBookSelection(request: FreezeAccountingBookSelection): Promise<AccountingBookSelection> {
+        return apiService.post('/finance/accounting-book-applicability/selections/freeze', request);
     }
 
     async prepareAccountingBookInitialization(accountingBookId: string, mode: string, cutoffDate: string, sourceAccountingBookId?: string | null): Promise<import('@/types/finance').AccountingBookInitializationPreparation> {
