@@ -39,6 +39,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     public async Task ImportAssetsFromExcelAsync_DryRun_ValidatesLocationWithoutSavingAsset()
     {
         SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
         await using var stream = CreateWorkbook(
             ("FA-TEST-001", "Dell Laptop", "Head Office - IT Room", "COMP-HW"));
 
@@ -55,6 +56,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     public async Task ImportAssetsFromExcelAsync_ValidFile_SavesLocationOnFinanceAsset()
     {
         SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
         await using var stream = CreateWorkbook(
             ("FA-TEST-001", "Dell Laptop", "Head Office - IT Room", "COMP-HW"));
 
@@ -77,6 +79,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     public async Task ImportAssetsFromExcelAsync_WithDuplicateCode_DoesNotPartiallyImportValidRows()
     {
         var category = SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
         _dbContext.FixedAssets.Add(new FixedAsset
         {
             TenantId = _tenantId,
@@ -110,6 +113,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     public async Task ImportAssetsFromExcelAsync_WithNonDraftStatus_RejectsLifecycleBypass()
     {
         SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
         await using var stream = CreateOpeningWorkbook(new OpeningAssetRow
         {
             AssetCode = "FA-ACTIVE-001",
@@ -286,6 +290,9 @@ public sealed class FixedAssetServiceImportTests : IDisposable
             Code = code,
             Name = code,
             Purpose = isDefault ? "Primary" : "Reporting",
+            BookType = isDefault ? AccountingBookType.PrimaryFull : AccountingBookType.ParallelFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
             IsActive = true,
             IsDefault = isDefault,
             AllowsPosting = true,

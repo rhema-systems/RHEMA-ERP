@@ -292,6 +292,7 @@ public sealed class AccountingBookClassificationAuthorityTests
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "TDC", Name = "TDC", BaseCurrency = "GHS", Status = TenantStatus.Active });
         SeedAccount(db, tenantId, "1000", AccountType.Asset);
         SeedAccount(db, tenantId, "6100", AccountType.Expense);
         await db.SaveChangesAsync();
@@ -343,6 +344,7 @@ public sealed class AccountingBookClassificationAuthorityTests
         var expected = new Dictionary<Guid, (Guid RevenueDeduction, Guid CostOfSales)>();
         foreach (var tenantId in tenants)
         {
+            db.Tenants.Add(new Tenant { Id = tenantId, Code = $"T-{tenantId:N}"[..20], Name = "Tenant", BaseCurrency = "GHS", Status = TenantStatus.Active });
             var book = SeedBook(db, tenantId);
             var revenue = SeedClassification(db, tenantId, book.Id, "REVENUE", AccountType.Revenue);
             var expense = SeedClassification(db, tenantId, book.Id, "EXPENSE", AccountType.Expense);
@@ -972,7 +974,9 @@ public sealed class AccountingBookClassificationAuthorityTests
         var book = new AccountingBook
         {
             Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
-            Purpose = "Primary", IsActive = true, IsDefault = true, AllowsPosting = true
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsActive = true, IsDefault = true, AllowsPosting = true
         };
         db.AccountingBooks.Add(book);
         return book;

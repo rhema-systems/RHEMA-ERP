@@ -222,6 +222,9 @@
     <Compile Include="Services\Finance\BookBalanceReadModelC2Tests.cs" />
     <Compile Include="Services\Finance\BookBalanceMigrationC2Tests.cs" />
     <Compile Include="Services\Finance\BookBalanceMigrationC2SqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookLifecycleC3MigrationTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookLifecycleC3MigrationSqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookLifecycleC3Tests.cs" />
     <Compile Include="Services\Finance\BookBalanceConsumerAuthorityC2Tests.cs" />
     <Compile Include="Services\Finance\GeneralLedgerPrimaryBalanceCompatibilityC2Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />
