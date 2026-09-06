@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `CORRECTION_IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
 | Branch | `codex/finance-book-period-initialization-c4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C4 candidate `fb58f71a` under independent GPT-5.6 Sol High re-review |
+| Review status | C4 review cycle 2 returned `CHANGES_REQUIRED`; narrow Sol Medium fixture correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -621,3 +621,13 @@ source-book drift; explicit rejection evidence; pure-copy adjustment denial; doc
 explicit exact-book-period setup across affected Finance posting fixtures. Independent GPT-5.6 Sol High
 re-review is active over every cycle-1 finding and the widened consumer regression gate. Integration,
 migration application, C5 work and configured-database access remain blocked pending approval.
+
+Stage C4 independent review cycle 2 accepted every substantive cycle-1 correction at clean HEAD `fb58f71a`
+but returned `CHANGES_REQUIRED` for the required posting-consumer regression gate. A fresh exact 466-test
+filter reported 184 failed and 282 passed; a combined C4/C1-C3/posting/reversal/balance/FX run reported 14
+failed, 238 passed and 16 guarded SQL skips. Four JournalEntry lifecycle tests reach the correct production
+`ACCOUNTING_BOOK_PERIOD_REQUIRED` gate because their fixture lacks exact-book period authority, while ten
+JournalBatchService tests have related unknown-book or missing-period setup authority. The coordinator
+dispatched a narrow GPT-5.6 Sol Medium test-fixture correction requiring authentic tenant/book/mapping/fiscal/
+exact-book-period setup and both full regression reruns, with no production fallback or gate weakening.
+Integration and subsequent stages remain blocked; no database was accessed or mutated.
