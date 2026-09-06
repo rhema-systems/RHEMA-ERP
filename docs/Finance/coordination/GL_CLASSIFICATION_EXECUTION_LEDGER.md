@@ -1,6 +1,6 @@
 # GL Classification and Revaluation Refactor — Execution Ledger
 
-Last reconciled: 2026-09-05 (Africa/Accra)
+Last reconciled: 2026-09-06 (Africa/Accra)
 
 ## Objective
 
@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `INTEGRATION_VERIFICATION_FAILED` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 integrated locally, but fresh-build FX fixture regression requires correction and re-review |
+| Review status | Post-integration correction `48bc19ee` is clean and under independent GPT-5.6 Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -543,3 +543,14 @@ detect. The coordinator kept the production fail-closed currency contract, dispa
 fixture and actionable-error correction on the C3 branch, and notified the independent reviewer. C4 remains
 blocked; the integrated C3 stack is local only, its migration remains unapplied, and configured `RHEMAERP`
 remains untouched.
+
+The implementer completed the bounded post-integration correction as
+`48bc19ee18b12e69b9788f616ccb84c406f65004` on top of approved C3 HEAD `197913f2`. The worktree is clean
+and the exact-base range passes `git diff --check`. The correction preserves the production fail-closed
+tenant functional-currency authority, replaces the raw missing-row exception with an actionable governed
+error, enforces the existing uppercase ASCII currency contract before mutation, and updates the shared FX
+fixture to persist its Tenant authority before running the manifest and to opt its test IFRS book into the
+explicit active/postable state required by those posting tests. Focused missing/noncanonical authority tests
+were added. Independent GPT-5.6 Sol High re-review is active over this correction and all manifest-seeder
+callers. C4 remains blocked until that review and fresh coordinator build/regression gates pass; no migration
+or database operation was performed.
