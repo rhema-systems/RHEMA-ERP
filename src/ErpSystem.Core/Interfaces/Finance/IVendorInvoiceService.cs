@@ -14,6 +14,10 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IVendorInvoiceService
 {
+    /// <summary>Read-only Goods entry quantities from governed acceptance, less other committed invoices.</summary>
+    Task<ApGoodsInvoiceEntryDto> GetGoodsInvoiceEntryAsync(Guid purchaseOrderId,
+        Guid? currentInvoiceId = null, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Retrieves a vendor invoice by ID, including line items and payment allocations.
     /// </summary>
