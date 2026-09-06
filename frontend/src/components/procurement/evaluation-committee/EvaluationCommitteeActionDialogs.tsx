@@ -95,6 +95,7 @@ export function EvaluationCommitteeActionDialogs({
   options?: ProcurementEvaluationCommitteeOptions;
 }) {
   const [busy, setBusy] = useState(false);
+  const [recallError, setRecallError] = useState<string>();
   const [committeeTemplateId, setCommitteeTemplateId] = useState('');
   const [purpose, setPurpose] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(toLocalDateTime());
@@ -120,6 +121,7 @@ export function EvaluationCommitteeActionDialogs({
   useEffect(() => {
     if (!action) return;
     setBusy(false);
+    setRecallError(undefined);
     setEvidenceReference('');
     setSignatureReference('');
     setReason('');
@@ -247,6 +249,8 @@ export function EvaluationCommitteeActionDialogs({
 
   const submit = async () => {
     if (!action || validation) return;
+    if (action.type === 'recall' || action.type === 'recall-decision')
+      setRecallError(undefined);
     setBusy(true);
     try {
       const key = createEvaluationIdempotencyKey(action.type);
@@ -338,12 +342,13 @@ export function EvaluationCommitteeActionDialogs({
       onClose();
       await onCompleted();
     } catch (error) {
-      toast.error(
-        getProcurementProblemMessage(
-          error,
-          'The controlled committee action failed.'
-        )
+      const message = getProcurementProblemMessage(
+        error,
+        'The controlled committee action failed.'
       );
+      if (action.type === 'recall' || action.type === 'recall-decision')
+        setRecallError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -749,6 +754,13 @@ export function EvaluationCommitteeActionDialogs({
           {validation && (
             <p className="text-sm text-destructive">{validation}</p>
           )}
+          {recallError &&
+            (action.type === 'recall' || action.type === 'recall-decision') && (
+              <Alert variant="destructive">
+                <AlertTitle>Recall action could not be confirmed</AlertTitle>
+                <AlertDescription>{recallError}</AlertDescription>
+              </Alert>
+            )}
         </div>
 
         <DialogFooter>

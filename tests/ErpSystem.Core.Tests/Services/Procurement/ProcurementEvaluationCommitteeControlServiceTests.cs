@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
+using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -12,6 +13,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -1016,11 +1018,56 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         decided.Status.Should().Be(ProcurementEvaluationScoreRecallStatus.Approved);
         decided.AuthorizedNewAttempt.Should().Be(2);
         decided.DecisionEvidenceReference.Should().Be("evidence://recall-decision");
+        var sodEvent = await fixture.Context.ProcurementControlEvents.SingleAsync(item =>
+            item.EventType == "SegregationOfDutiesDecision");
+        sodEvent.RuleCode.Should().Be("SOD-INITIATOR-APPROVER");
+        sodEvent.Result.Should().Be(ProcurementControlEventResult.Allowed);
+        sodEvent.ActorUserId.Should().Be(fixture.AdministratorId);
+        (await fixture.Context.ProcurementEvaluationScoreSheets.SingleAsync(item => item.Id == seeded.Locked.Id))
+            .ScoreSnapshotJson.Should().Be(seeded.Locked.ScoreSnapshotJson);
         fixture.Access.Verify(service => service.EnforceCapabilityAsync(
                 It.Is<ProcurementAccessCapabilityRequest>(request =>
                     request.PermissionCode == "procurement.tender.approve" &&
                     request.CommitteeCode == null),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("scorer")]
+    [InlineData("requester")]
+    public async Task RealMakerCheckerGuardRejectsRecallDecisionByEitherPriorParticipant(string decidingParticipant)
+    {
+        await using var fixture = new Fixture();
+        var seeded = await fixture.SeedRecallDecisionAsync(
+            WorkflowInstanceStatus.Completed, Guid.NewGuid());
+        // Retain distinct prior identities to prove both caller-supplied actors
+        // remain prohibited, even when the workflow processor is independent.
+        var requesterId = Guid.NewGuid();
+        seeded.Recall.RequestedByUserId = requesterId;
+        await fixture.Context.SaveChangesAsync();
+        var actorId = decidingParticipant == "scorer" ? seeded.Locked.SubmittedByUserId : requesterId;
+        fixture.SwitchUser(actorId);
+
+        await fixture.Service.Invoking(service => service.DecideScoreRecallAsync(
+                seeded.Recall.Id, fixture.Decision(seeded.Recall, approve: true), "conflicting-recall-decision"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+
+        var retained = await fixture.Context.ProcurementEvaluationScoreRecalls.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.Recall.Id);
+        retained.Status.Should().Be(ProcurementEvaluationScoreRecallStatus.PendingApproval);
+        retained.AuthorizedNewAttempt.Should().BeNull();
+        retained.DecidedByUserId.Should().BeNull();
+        var sheet = await fixture.Context.ProcurementEvaluationScoreSheets.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.Locked.Id);
+        sheet.ScoreSnapshotJson.Should().Be(seeded.Locked.ScoreSnapshotJson);
+        sheet.IntegrityHash.Should().Be(seeded.Locked.IntegrityHash);
+        var sodEvent = await fixture.Context.ProcurementControlEvents.SingleAsync(item =>
+            item.EventType == "SegregationOfDutiesDecision");
+        sodEvent.RuleCode.Should().Be("SOD-INITIATOR-APPROVER");
+        sodEvent.Result.Should().Be(ProcurementControlEventResult.Denied);
+        sodEvent.ActorUserId.Should().Be(actorId);
+        sodEvent.InputValuesJson.Should().Contain(requesterId.ToString()).And.Contain(seeded.Locked.SubmittedByUserId.ToString());
+        (await fixture.Context.AuditLogs.SingleAsync()).Action.Should().Be("SOD_BYPASS_BLOCKED");
     }
 
     [Fact]
@@ -1323,14 +1370,11 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             Access = new Mock<IProcurementAccessControlService>();
             SetCapabilityAllowed(true);
             var access = Access;
-            var sod = new Mock<IProcurementSodGuardService>();
-            sod.Setup(item => item.EnforceAsync(
-                    It.IsAny<ProcurementSodGuardRequest>(),
-                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new ProcurementSodGuardDecisionDto
-                {
-                    Allowed = true
-                });
+            var sod = new ProcurementSodGuardService(
+                _unitOfWork, _current.Object, Mock.Of<IProcurementPolicyService>(), Mock.Of<IRoleService>(),
+                new ProcurementControlEventService(_unitOfWork, _current.Object,
+                    NullLogger<ProcurementControlEventService>.Instance),
+                NullLogger<ProcurementSodGuardService>.Instance);
             var events = new Mock<IProcurementControlEventService>();
             events.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
@@ -1366,7 +1410,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                     CurrencyCode = SourcingCase.CurrencyCode
                 });
             Service = new ProcurementEvaluationCommitteeControlService(
-                _unitOfWork, _current.Object, access.Object, sod.Object,
+                _unitOfWork, _current.Object, access.Object, sod,
                 events.Object, SourcingCases.Object, workflowInstances.Object,
                 Notifications.Object, configuration.Object);
         }
