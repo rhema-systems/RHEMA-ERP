@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { getAwardBidderReviewStatus } from '@/lib/award-verification-status';
 import { 
   awardVerificationService, 
   TenderAwardVerification,
@@ -65,6 +66,9 @@ export function AwardVerificationResults({ tenderId, onVerificationLoaded }: Awa
       'InProgress': { variant: 'outline', className: 'bg-blue-50 text-blue-700 border-blue-200', icon: <AlertCircle className="h-3 w-3 mr-1" /> },
       'Completed': { variant: 'default', className: 'bg-green-50 text-green-700 border-green-200', icon: <CheckCircle2 className="h-3 w-3 mr-1" /> },
       'Cancelled': { variant: 'destructive', className: 'bg-red-50 text-red-700 border-red-200', icon: <XCircle className="h-3 w-3 mr-1" /> },
+      'Passed': { variant: 'default', className: 'bg-green-50 text-green-700 border-green-200', icon: <CheckCircle2 className="h-3 w-3 mr-1" /> },
+      'Verified': { variant: 'default', className: 'bg-green-50 text-green-700 border-green-200', icon: <CheckCircle2 className="h-3 w-3 mr-1" /> },
+      'Failed': { variant: 'destructive', className: 'bg-red-50 text-red-700 border-red-200', icon: <XCircle className="h-3 w-3 mr-1" /> },
     };
     const c = config[status] || config['Pending'];
     return (
@@ -160,7 +164,7 @@ export function AwardVerificationResults({ tenderId, onVerificationLoaded }: Awa
             </div>
             <div>
               <p className="text-muted-foreground">Bidders Verified</p>
-              <p className="font-medium">{verification.bidders?.length || 0}</p>
+              <p className="font-medium">{verification.bidders?.filter(bidder => getAwardBidderReviewStatus(bidder.status) === 'verified').length || 0} / {verification.bidders?.length || 0}</p>
             </div>
             <div>
               <p className="text-muted-foreground">Notes</p>
@@ -186,7 +190,7 @@ export function AwardVerificationResults({ tenderId, onVerificationLoaded }: Awa
                       <Building2 className="h-4 w-4" />
                       <span className="max-w-[150px] truncate">{bidder.businessPartnerName || 'Unknown'}</span>
                       <Badge variant="outline" className={
-                        bidder.status === 'Verified' ? 'bg-green-50 text-green-700' :
+                        getAwardBidderReviewStatus(bidder.status) === 'verified' ? 'bg-green-50 text-green-700' :
                         bidder.status === 'Failed' ? 'bg-red-50 text-red-700' :
                         'bg-yellow-50 text-yellow-700'
                       }>
