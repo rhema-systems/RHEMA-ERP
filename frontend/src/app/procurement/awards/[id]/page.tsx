@@ -24,10 +24,8 @@ import {
   Calendar,
   DollarSign,
   User,
-  Users,
   XCircle,
   Send,
-  Ban,
   Clock,
   ShoppingCart,
   FileCheck,
@@ -47,6 +45,7 @@ import * as performanceBondService from '@/services/performanceBondService';
 import { type PerformanceBondRequestDto } from '@/services/performanceBondService';
 import { format } from 'date-fns';
 import NegotiationInviteDialog from '@/components/procurement/awards/NegotiationInviteDialog';
+import { AwardActions } from '@/components/procurement/awards/AwardActions';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -628,49 +627,17 @@ export default function AwardDetailPage() {
 
       {/* Actions */}
       {isAwardFinal && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Actions</CardTitle>
-            <CardDescription>Manage this award</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center gap-4">
-              {/* Invite for Negotiation Button */}
-              {canAdministerTender && <Button onClick={() => setShowNegotiationDialog(true)} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
-                <Users className="h-4 w-4 mr-2" />
-                Invite for Negotiation
-              </Button>}
-
-              {/* Send Notification Button */}
-              {canAdministerTender && <Button onClick={() => setShowNotificationDialog(true)} className="bg-blue-600 hover:bg-blue-700">
-                <Send className="h-4 w-4 mr-2" />
-                Send Notification
-              </Button>}
-
-              {/* Create PO/Contract Button */}
-              {(canCreatePurchaseOrder || canManageContract) && <Button onClick={() => { setPOType(canCreatePurchaseOrder ? 'PO' : 'Contract'); setShowCreatePODialog(true); }} className="bg-green-600 hover:bg-green-700">
-                <ShoppingCart className="h-4 w-4 mr-2" />
-                Create PO / Contract
-              </Button>}
-
-              {/* Performance Bond Button */}
-              {(canManageContract || canApproveContract) && <Button onClick={() => setShowPerformanceBondDialog(true)} variant="outline" className="border-purple-300 text-purple-700 hover:bg-purple-50">
-                <Shield className="h-4 w-4 mr-2" />
-                Performance Bond
-                {getPerformanceBondStatusBadge() && <span className="ml-2">{getPerformanceBondStatusBadge()}</span>}
-              </Button>}
-
-              {/* Cancel Award Button */}
-              {canApproveAward && <Button
-                variant="destructive"
-                onClick={() => setShowCancelDialog(true)}
-              >
-                <Ban className="h-4 w-4 mr-2" />
-                Cancel Award
-              </Button>}
-            </div>
-          </CardContent>
-        </Card>
+        <AwardActions
+          onNotify={canAdministerTender ? () => setShowNotificationDialog(true) : undefined}
+          onPerformanceBond={canManageContract || canApproveContract ? () => setShowPerformanceBondDialog(true) : undefined}
+          performanceBondStatus={getPerformanceBondStatusBadge()}
+          onCreate={canCreatePurchaseOrder || canManageContract ? () => {
+            setPOType(canCreatePurchaseOrder ? 'PO' : 'Contract');
+            setShowCreatePODialog(true);
+          } : undefined}
+          onNegotiate={canAdministerTender ? () => setShowNegotiationDialog(true) : undefined}
+          onCancel={canApproveAward ? () => setShowCancelDialog(true) : undefined}
+        />
       )}
 
       <ConfirmationDialog
