@@ -889,6 +889,87 @@ public class InventoryValuationService : IInventoryValuationService
         return totalCost;
     }
 
+    public async Task<decimal> ProcessReturnAsync(Guid returnVoucherLineId, bool reverse = false)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var line = await _unitOfWork.Repository<InventoryReturnVoucherLine>()
+            .GetQueryable(value => value.Id == returnVoucherLineId && value.TenantId == tenantId && !value.IsDeleted)
+            .Include(value => value.InventoryReturnVoucher).SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException("The governed return line was not found in this tenant.");
+        var voucher = line.InventoryReturnVoucher;
+        var expectedState = reverse ? InventoryReturnVoucherStatus.Reversed : InventoryReturnVoucherStatus.Posted;
+        if (voucher.TenantId != tenantId || voucher.Status != expectedState || !line.LocationId.HasValue ||
+            line.Quantity <= 0 || line.TotalValue <= 0)
+            throw new InvalidOperationException("Only a governed posted return (or its approved reversal) can update valuation.");
+        var item = await _unitOfWork.Repository<InventoryItem>()
+            .GetQueryable(value => value.Id == line.InventoryItemId && value.TenantId == tenantId && !value.IsDeleted)
+            .SingleAsync();
+        if (item.ValuationMethod is not (ValuationMethod.FIFO or ValuationMethod.WeightedAverage or ValuationMethod.StandardCost))
+            throw new InvalidOperationException($"Return valuation method {item.ValuationMethod} is not supported.");
+
+        var note = $"Store Return Voucher {voucher.VoucherNumber}; line {line.Id:D}";
+        var original = await _unitOfWork.Repository<InventoryMovement>()
+            .GetQueryable(value => value.TenantId == tenantId && value.ReferenceId == voucher.InventoryRequisitionId &&
+                value.MovementType == InventoryMovementType.RequisitionReturn && value.Notes == note &&
+                !value.IsReversal && !value.IsDeleted).SingleOrDefaultAsync();
+        if ((!reverse && original is not null) || (reverse && original is null))
+            throw new InvalidOperationException("The return valuation history does not match the requested transition.");
+        if (reverse && await _unitOfWork.Repository<InventoryMovement>().GetQueryable(value =>
+            value.TenantId == tenantId && value.ReversedMovementId == original!.Id && !value.IsDeleted).AnyAsync())
+            throw new InvalidOperationException("The return valuation has already been reversed.");
+
+        var balance = await GetOrCreateBalanceAsync(line.InventoryItemId, voucher.WarehouseId, line.LocationId);
+        var delta = reverse ? -line.Quantity : line.Quantity;
+        var valueDelta = reverse ? -line.TotalValue : line.TotalValue;
+        if (reverse && (balance.QuantityAvailable < line.Quantity || balance.TotalValue < line.TotalValue ||
+            (balance.QuantityOnHand == line.Quantity && balance.TotalValue != line.TotalValue)))
+            throw new InvalidOperationException("The original return quantity and value are no longer available for reversal.");
+        Guid? layerId = null;
+        if (item.ValuationMethod == ValuationMethod.FIFO)
+        {
+            if (reverse)
+            {
+                var layer = await _unitOfWork.Repository<InventoryLayer>().GetQueryable(value =>
+                    value.TenantId == tenantId && value.SourceType == "InventoryReturnVoucher" && value.SourceId == line.Id &&
+                    value.InventoryItemId == line.InventoryItemId && value.WarehouseId == voucher.WarehouseId &&
+                    value.LocationId == line.LocationId && !value.IsDeleted).SingleOrDefaultAsync();
+                if (layer is null || layer.RemainingQuantity != line.Quantity || layer.RemainingValue != line.TotalValue)
+                    throw new InvalidOperationException("The original FIFO return layer has been consumed; unrelated stock cannot reverse it.");
+                layerId = layer.Id;
+                layer.RemainingQuantity = 0;
+                layer.RemainingValue = 0;
+                layer.IsFullyConsumed = true;
+            }
+            else
+            {
+                var layer = await CreateFIFOLayerAsync(line.InventoryItemId, voucher.WarehouseId, line.LocationId,
+                    line.Quantity, line.TotalValue / line.Quantity, "InventoryReturnVoucher", voucher.VoucherNumber,
+                    line.Id, line.LotNumber, line.ExpiryDate);
+                layer.RemainingValue = line.TotalValue;
+                layerId = layer.Id;
+            }
+        }
+        balance.QuantityOnHand += delta;
+        balance.TotalValue += valueDelta;
+        balance.QuantityAvailable = balance.QuantityOnHand - balance.QuantityAllocated;
+        balance.AverageUnitCost = balance.QuantityOnHand > 0 ? balance.TotalValue / balance.QuantityOnHand : 0;
+        balance.LastMovementDate = DateTime.UtcNow;
+        balance.LastRecalculatedAt = DateTime.UtcNow;
+        if (reverse) balance.LastIssueDate = DateTime.UtcNow;
+        else balance.LastReceiptDate = DateTime.UtcNow;
+        var movement = await CreateMovementAsync(line.InventoryItemId, voucher.WarehouseId, line.LocationId,
+            InventoryMovementType.RequisitionReturn, reverse ? MovementDirection.Out : MovementDirection.In,
+            line.Quantity, line.TotalValue / line.Quantity, ReferenceType.Requisition, voucher.VoucherNumber,
+            voucher.InventoryRequisitionId, line.LotNumber, line.SerialNumber, line.ExpiryDate, note);
+        movement.TotalValue = line.TotalValue;
+        movement.RunningBalance = balance.QuantityOnHand;
+        movement.RunningValue = balance.TotalValue;
+        movement.CostLayerId = layerId;
+        movement.IsReversal = reverse;
+        movement.ReversedMovementId = reverse ? original!.Id : null;
+        return balance.AverageUnitCost;
+    }
+
     public async Task<decimal> ProcessAdjustmentAsync(
         Guid inventoryItemId,
         Guid warehouseId,

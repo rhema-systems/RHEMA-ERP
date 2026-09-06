@@ -36,6 +36,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProjectService _projects;
     private readonly IInventoryIssueFinanceAssetService _issueFinanceAssets;
+    private readonly IInventoryValuationService _valuation;
     private readonly ICurrentUserProvider _currentUser;
 
     public InventoryReturnControlService(
@@ -55,6 +56,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         IProcurementControlEventService controlEvents,
         IProjectService projects,
         IInventoryIssueFinanceAssetService issueFinanceAssets,
+        IInventoryValuationService valuation,
         ICurrentUserProvider currentUser)
     {
         _unitOfWork = unitOfWork;
@@ -73,6 +75,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         _controlEvents = controlEvents;
         _projects = projects;
         _issueFinanceAssets = issueFinanceAssets;
+        _valuation = valuation;
         _currentUser = currentUser;
     }
 
@@ -191,9 +194,6 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                         ?? throw Validation("INV_RETURN_LINE_NOT_FOUND", $"Requisition line {input.ItemId} was not found.");
                     var locationId = input.LocationId ?? source.LocationId ?? requisition.LocationId;
                     await ValidateLocationAsync(requisition.WarehouseId, locationId, cancellationToken);
-                    if (source.UnitCost <= 0)
-                        throw Validation("INV_RETURN_COST_REQUIRED", $"A server-derived issue cost is required for {source.ItemCode}.");
-
                     var line = new InventoryReturnVoucherLine
                     {
                         TenantId = voucher.TenantId,
@@ -201,8 +201,6 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                         InventoryItemId = source.InventoryItemId,
                         LocationId = locationId,
                         Quantity = input.ReturnedQuantity,
-                        UnitCost = source.UnitCost,
-                        TotalValue = decimal.Round(input.ReturnedQuantity * source.UnitCost, 2),
                         LotNumber = Normalize(input.LotNumber, 100) ?? source.LotNumber,
                         BatchNumber = Normalize(input.BatchNumber, 100) ?? source.BatchNumber,
                         SerialNumber = Normalize(input.SerialNumber, 100) ?? source.SerialNumber,
@@ -210,6 +208,10 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                         ExpiryDate = input.ExpiryDate ?? source.ExpiryDate,
                         InventoryTrackingExceptionId = input.InventoryTrackingExceptionId ?? source.InventoryTrackingExceptionId
                     };
+                    // The requisition unit cost is an approval estimate, not the issued cost.
+                    // Capture the same original, unreversed issue lineage that Finance checks at posting.
+                    line.TotalValue = await OriginalIssueValueAsync(requisition.Id, line, cancellationToken);
+                    line.UnitCost = Math.Round(line.TotalValue / line.Quantity, 4, MidpointRounding.AwayFromZero);
                     line.IntegrityHash = LineHash(line);
                     voucher.Lines.Add(line);
                     voucher.TotalValue += line.TotalValue;
@@ -405,6 +407,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
     {
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
+            _valuation.ResetProcessingAttempt();
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             try
             {
@@ -468,7 +471,9 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         var delta = reverse ? -quantity : quantity;
         source.IssuedQuantity -= delta;
         source.TrackingSequence = trackingSequence;
-        source.LineValue = source.IssuedQuantity * source.UnitCost;
+        source.LineValue += reverse ? line.TotalValue : -line.TotalValue;
+        if (source.LineValue < 0)
+            throw Conflict("INV_RETURN_VALUE_EXCEEDS_ISSUED", "The return exceeds the remaining original issue value.");
         await _requisitionItems.UpdateAsync(source);
         warehouseQuantity.CurrentStock += delta;
         warehouseQuantity.AvailableStock += delta;
@@ -499,7 +504,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             throw Conflict("INV_RETURN_LOCATION_STOCK_UNAVAILABLE", $"Available exact-location stock is insufficient to reverse {source.ItemCode}.");
         inventoryLocation.Quantity += delta;
         inventoryLocation.AvailableQuantity = inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
-        inventoryLocation.AverageCost = line.UnitCost;
+        inventoryLocation.AverageCost = await _valuation.ProcessReturnAsync(line.Id, reverse);
         inventoryLocation.LastMovementDate = DateTime.UtcNow;
         if (isNewInventoryLocation)
             await inventoryLocationRepository.AddAsync(inventoryLocation);
@@ -543,6 +548,38 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         await _movements.AddAsync(movement);
         await _consignmentSettlement.TryCreateFromStockMovementAsync(movement);
     }
+
+    private async Task<decimal> OriginalIssueValueAsync(Guid requisitionId, InventoryReturnVoucherLine line, CancellationToken cancellationToken)
+    {
+        var candidates = await _unitOfWork.Repository<InventoryIssueFinanceLineage>()
+            .GetQueryable(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted &&
+                value.InventoryIssueVoucherLine.InventoryIssueVoucher.InventoryRequisitionId == requisitionId &&
+                value.InventoryIssueVoucherLine.InventoryRequisitionItemId == line.InventoryRequisitionItemId &&
+                value.ReturnedQuantity < value.IssuedQuantity)
+            .Include(value => value.InventoryIssueVoucherLine).ThenInclude(value => value.InventoryIssueVoucher)
+            .OrderBy(value => value.InventoryIssueVoucherLine.InventoryIssueVoucher.IssuedAtUtc)
+            .ThenBy(value => value.CreatedAt).ThenBy(value => value.Id)
+            .ToListAsync(cancellationToken);
+        var remaining = line.Quantity;
+        var total = 0m;
+        foreach (var candidate in candidates.Where(value =>
+            SameTracking(value.InventoryIssueVoucherLine.SerialNumber, line.SerialNumber) &&
+            SameTracking(value.InventoryIssueVoucherLine.LotNumber, line.LotNumber) &&
+            SameTracking(value.InventoryIssueVoucherLine.BatchNumber, line.BatchNumber)))
+        {
+            if (remaining <= 0) break;
+            var quantity = Math.Min(remaining, candidate.IssuedQuantity - candidate.ReturnedQuantity);
+            total += Math.Round(quantity * candidate.IssuedValue / candidate.IssuedQuantity, 2, MidpointRounding.AwayFromZero);
+            remaining -= quantity;
+        }
+        if (remaining > 0 || total <= 0)
+            throw Conflict("INV_RETURN_ISSUE_LINEAGE_INSUFFICIENT",
+                "The return quantity cannot be reconciled to the original posted issue and tracking lineage.");
+        return total;
+    }
+
+    private static bool SameTracking(string? left, string? right) =>
+        string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private async Task<IReadOnlyList<InventoryReturnVoucherDto>> GetListAsync(Guid? requisitionId, CancellationToken cancellationToken)
     {
