@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `REVIEW_REQUIRED` |
+| Status | `COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Post-integration correction `48bc19ee` is clean and under independent GPT-5.6 Sol High re-review |
+| Review status | C3 and post-integration correction independently approved and verified on primary |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -554,3 +554,20 @@ explicit active/postable state required by those posting tests. Focused missing/
 were added. Independent GPT-5.6 Sol High re-review is active over this correction and all manifest-seeder
 callers. C4 remains blocked until that review and fresh coordinator build/regression gates pass; no migration
 or database operation was performed.
+
+Independent GPT-5.6 Sol High re-review approved correction `48bc19ee` with no correction-owned findings.
+The reviewer confirmed actionable missing-tenant diagnostics, exact uppercase ASCII functional-currency
+authority, unchanged fail-closed production lifecycle behavior, correct persisted-Tenant ordering in the FX
+fixture, and every active manifest-seeder caller. Fresh candidate gates passed a zero-error build, 251 selected
+tests with 11 guarded SQL Server skips, 51/51 FX tests, 37/37 classification-authority tests, 4/4 wider Finance
+demo-seeder tests, EF no-pending-model and clean diff/status checks. Three exploratory failures outside the
+correction remain byte-identical to approved `197913f2` and do not invoke the corrected path.
+
+The coordinator integrated the approved correction locally as `3040150d`. All three corrected blobs are
+byte-identical to the reviewed worker HEAD. Primary verification then passed a fresh zero-error build with
+1,176 existing warnings, the exact coordinator regression filter with 251 passed and 11 guarded SQL Server
+skips, EF no-pending-model, the full C3 range diff check, and preserved the exact unrelated dirty-work set.
+Migration `20260905213000_AddGovernedAccountingBookLifecycle` remains unapplied; configured `RHEMAERP` was
+not accessed or mutated. Stage C3 is complete and the next authorized stage is C4 book-period and governed
+initialization authority; applicability, AccountingEvent orchestration and automatic parallel posting remain
+disabled.
