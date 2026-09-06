@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Clean C5 candidate `68490c9c73b0311b1cdd97dbef141be1263c0afc`; independent GPT-5.6 Sol High review active before integration |
+| Review status | C5 cycle 1 `CHANGES_REQUIRED`; substantive GPT-5.6 Sol Medium correction active before re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -678,3 +678,15 @@ task turn did not expose final handoff text. Independent GPT-5.6 Sol High review
 schema, lifecycle/readiness, deterministic selection/fingerprint, maker-checker, concurrency, migration,
 API/UI permission and C1-C4 regression boundaries. No C5 commit is approved for integration, no migration
 was applied and configured `RHEMAERP` remains untouched.
+
+Stage C5 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `68490c9c`. Three P1
+gates remain: open-ended approved versions cannot be atomically superseded without retroactively removing
+historical authority; malformed explicit rules can approve and freeze a zero-book selection; and readiness
+accepts an account/classification mapping whose core account types disagree while omitting those decision
+fields from its authority fingerprint. P2 audit evidence also omits reconstructible rule/source/priority/book
+details, and guarded SQL/concurrency coverage does not execute the required preflight, zero-book, frozen-
+immutability and identical/conflicting Freeze cases. Positive review gates passed a fresh zero-error build,
+15 C5 tests with 3 guarded SQL skips, 267 combined C1-C5 tests with 19 guarded SQL skips, frontend 23/23,
+ESLint, EF no-pending-model, migration discovery/script generation, exact ancestry, clean status and diff checks.
+The coordinator dispatched all findings directly for one bounded GPT-5.6 Sol Medium correction with clear
+owner-facing rationale comments. Integration and C6 remain blocked; no database was accessed or mutated.
