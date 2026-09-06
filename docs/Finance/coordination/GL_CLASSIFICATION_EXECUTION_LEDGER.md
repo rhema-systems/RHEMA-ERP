@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `COMPLETE` |
+| Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
-| Branch | `codex/finance-accounting-book-lifecycle-c3` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-accounting-book-lifecycle-c3` |
+| Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
+| Branch | `codex/finance-book-period-initialization-c4` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-book-period-initialization-c4` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
+| Primary HEAD at activation | `f38036b7773ea27ef189e0617045b3481285e19c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 and post-integration correction independently approved and verified on primary |
+| Review status | C4 implementation active; independent GPT-5.6 Sol High review required before integration |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -571,3 +571,17 @@ Migration `20260905213000_AddGovernedAccountingBookLifecycle` remains unapplied;
 not accessed or mutated. Stage C3 is complete and the next authorized stage is C4 book-period and governed
 initialization authority; applicability, AccountingEvent orchestration and automatic parallel posting remain
 disabled.
+
+Stage C4 was dispatched to the existing implementing task on GPT-5.6 Sol Medium from fresh exact primary base
+`f38036b7773ea27ef189e0617045b3481285e19c`, using isolated branch
+`codex/finance-book-period-initialization-c4` and worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-book-period-initialization-c4`. C4 is limited
+to Finance-owned AccountingBookPeriod authority plus governed book initialization, cutoff, reconciliation and
+maker-checker approval evidence required before Active/Postable lifecycle transitions. Existing fiscal, global
+and module locks remain outer constraints; exact-book periods are additional fail-closed authority. Approved
+initialization modes are independent opening balances, base-book copy at cutoff, or base balances plus explicit
+opening adjustments. The packet requires exact tenant/book/period lineage, rowversion and concurrency,
+deterministic fingerprints, idempotent retries, balanced/reconciled opening evidence, governed API/UI,
+owner-facing boundary comments, and an unapplied fail-closed migration with guarded SQL Server coverage.
+Applicability, AccountingEvent orchestration, producer enumeration, automatic parallel posting and owner-module
+changes remain prohibited.
