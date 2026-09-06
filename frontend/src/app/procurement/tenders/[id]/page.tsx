@@ -1686,6 +1686,8 @@ export default function TenderDetailPage() {
             tenderId={tenderId}
             tenderNumber={tender.tenderNumber}
             tenderTitle={tender.title}
+            tenderCurrency={tender.currency}
+            bids={tender.bids}
             onAwardCreated={loadTenderDetails}
           />
         </TabsContent>

@@ -23,6 +23,7 @@ import type { ProcurementAwardReadinessDecision } from '@/types/procurement-awar
 import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { formatProcurementMoney, getTenderBidCurrency } from '@/lib/procurement-currency';
 
 export default function CreateAwardPage() {
   const params = useParams();
@@ -189,6 +190,7 @@ export default function CreateAwardPage() {
       businessPartnerName: selectedBid.businessPartnerName,
       bidNumber: selectedBid.bidNumber,
       totalBidAmount: selectedBid.totalBidAmount,
+      currency: getTenderBidCurrency(selectedBid.bidId, tender?.bids, tender?.currency),
     }];
   };
 
@@ -324,7 +326,7 @@ export default function CreateAwardPage() {
               <div>
                 <Label className="text-green-600">Bid Amount</Label>
                 <p className="font-bold text-green-800">
-                  {tender.currency} {recommendation.recommendedAmount.toLocaleString()}
+                  {formatProcurementMoney(recommendation.recommendedAmount, getTenderBidCurrency(recommendation.recommendedBidId, tender.bids, tender.currency))}
                 </p>
               </div>
               <div>
@@ -369,7 +371,7 @@ export default function CreateAwardPage() {
                       <div>
                         <span className="text-gray-500">Bid Amount:</span>
                         <span className="ml-2 font-medium">
-                          {tender.currency} {bid.totalBidAmount.toLocaleString()}
+                          {formatProcurementMoney(bid.totalBidAmount, getTenderBidCurrency(bid.bidId, tender.bids, tender.currency))}
                         </span>
                       </div>
                       <div>
@@ -572,6 +574,7 @@ export default function CreateAwardPage() {
         open={showVerificationDialog}
         onOpenChange={setShowVerificationDialog}
         tenderId={tenderId}
+        tenderCurrency={tender.currency}
         bidders={getSelectedBidderForVerification()}
         onVerificationComplete={handleVerificationComplete}
       />

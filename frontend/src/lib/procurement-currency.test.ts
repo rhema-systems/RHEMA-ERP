@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatProcurementMoney,
   getProcurementBaseCurrency,
+  getTenderBidCurrency,
   normalizeProcurementCurrency,
 } from './procurement-currency';
 
@@ -21,5 +22,21 @@ describe('procurement currency', () => {
   it('normalizes ISO currency codes and safely falls back', () => {
     expect(normalizeProcurementCurrency(' eur ')).toBe('EUR');
     expect(normalizeProcurementCurrency('')).toBe('GHS');
+  });
+
+  it('uses the matching saved bid currency, not the first bid or tender currency', () => {
+    expect(getTenderBidCurrency('bid-2', [
+      { id: 'bid-1', currency: 'USD' },
+      { id: 'bid-2', currency: ' eur ' },
+    ], 'GHS')).toBe('EUR');
+  });
+
+  it.each([undefined, '', 'invalid'])('falls back to the saved tender currency for %s', (currency) => {
+    expect(getTenderBidCurrency('bid-1', [{ id: 'bid-1', currency }], 'GBP')).toBe('GBP');
+  });
+
+  it('uses the shared legacy fallback only when document currency is unavailable', () => {
+    expect(getTenderBidCurrency('missing', undefined, 'EUR')).toBe('EUR');
+    expect(getTenderBidCurrency('missing', undefined)).toBe('GHS');
   });
 });

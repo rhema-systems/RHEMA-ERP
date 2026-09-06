@@ -22,6 +22,17 @@ export const getProcurementBaseCurrency = (
   fallback
 );
 
+// Recommendation DTOs contain amounts but no currency. Resolve against the
+// already-loaded, tenant-scoped tender bids; never infer dollars from an amount.
+export const getTenderBidCurrency = (
+  bidId: string | undefined,
+  bids: ReadonlyArray<{ id: string; currency?: string | null }> | undefined,
+  tenderCurrency?: string | null
+) => normalizeProcurementCurrency(
+  bids?.find((bid) => bid.id === bidId)?.currency,
+  normalizeProcurementCurrency(tenderCurrency)
+);
+
 export const formatProcurementMoney = (
   amount: number,
   currency?: string | null,
