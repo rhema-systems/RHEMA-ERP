@@ -415,6 +415,12 @@ BEGIN
                WHERE d.[Id] IS NULL AND i.[PolicyStatus] IN (3,5))
         THROW 51000, 'C5_POLICY_TRANSITION_INVALID: approved or retired authority must be reached through a governed transition.', 1;
 
+    -- Retired policy authority is a closed historical fact. Even direct SQL must create the request in one
+    -- committed update and approve that pre-existing request in a later update; a caller cannot synthesize
+    -- request and decision evidence while retiring, nor rewrite any part of an already-retired row.
+    IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id] WHERE d.[PolicyStatus]=5)
+        THROW 51000, 'C5_POLICY_RETIRED_IMMUTABLE: retired policy authority cannot be rewritten.', 1;
+
     IF EXISTS (
         SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
         WHERE i.[PolicyStatus]<>d.[PolicyStatus]
@@ -449,7 +455,10 @@ BEGIN
 
     IF EXISTS (
         SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
-        WHERE (ISNULL(i.[RetirementRequestedByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RetirementRequestedByUserId],'00000000-0000-0000-0000-000000000000')
+        WHERE ((d.[PolicyStatus]=3 AND i.[PolicyStatus]=5)
+            OR ISNULL(i.[RetiredByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RetiredByUserId],'00000000-0000-0000-0000-000000000000')
+            OR ISNULL(i.[RetiredAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(d.[RetiredAtUtc],CONVERT(datetime2,'1900-01-01'))
+            OR ISNULL(i.[RetirementRequestedByUserId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RetirementRequestedByUserId],'00000000-0000-0000-0000-000000000000')
             OR ISNULL(i.[RetirementRequestedAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(d.[RetirementRequestedAtUtc],CONVERT(datetime2,'1900-01-01'))
             OR ISNULL(i.[RetirementReason],N'') COLLATE Latin1_General_100_BIN2<>ISNULL(d.[RetirementReason],N'') COLLATE Latin1_General_100_BIN2
             OR ISNULL(i.[RetirementWorkflowInstanceId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RetirementWorkflowInstanceId],'00000000-0000-0000-0000-000000000000')
@@ -460,16 +469,35 @@ BEGIN
           AND NOT (
               (d.[PolicyStatus]=3 AND i.[PolicyStatus]=3 AND ISNULL(d.[RetirementDecisionStatus],N'') IN (N'',N'Rejected')
                AND i.[RetirementDecisionStatus]=N'Pending' AND i.[RetirementRequestedByUserId] IS NOT NULL
-               AND i.[RetirementRequestedAtUtc] IS NOT NULL AND i.[RetirementReason] IS NOT NULL
-               AND i.[RetirementWorkflowInstanceId] IS NOT NULL AND i.[RetirementDecidedByUserId] IS NULL AND i.[RetirementDecidedAtUtc] IS NULL)
+               AND i.[RetirementRequestedAtUtc] IS NOT NULL AND NULLIF(LTRIM(RTRIM(i.[RetirementReason])),N'') IS NOT NULL
+               AND i.[RetirementWorkflowInstanceId] IS NOT NULL AND i.[RetirementDecidedByUserId] IS NULL
+               AND i.[RetirementDecidedAtUtc] IS NULL AND i.[RetirementDecisionReason] IS NULL
+               AND i.[RetiredByUserId] IS NULL AND i.[RetiredAtUtc] IS NULL)
            OR (d.[PolicyStatus]=3 AND i.[PolicyStatus]=3 AND d.[RetirementDecisionStatus]=N'Pending'
                AND i.[RetirementDecisionStatus]=N'Rejected' AND i.[RetirementRequestedByUserId]=d.[RetirementRequestedByUserId]
-               AND i.[RetirementRequestedAtUtc]=d.[RetirementRequestedAtUtc] AND i.[RetirementWorkflowInstanceId]=d.[RetirementWorkflowInstanceId]
-               AND i.[RetirementDecidedByUserId] IS NOT NULL AND i.[RetirementDecidedAtUtc] IS NOT NULL AND i.[RetirementDecisionReason] IS NOT NULL)
+               AND i.[RetirementRequestedAtUtc]=d.[RetirementRequestedAtUtc]
+               AND i.[RetirementReason] COLLATE Latin1_General_100_BIN2=d.[RetirementReason] COLLATE Latin1_General_100_BIN2
+               AND i.[RetirementWorkflowInstanceId]=d.[RetirementWorkflowInstanceId]
+               AND i.[RetirementDecidedByUserId] IS NOT NULL AND i.[RetirementDecidedByUserId]<>d.[RetirementRequestedByUserId]
+               AND i.[RetirementDecidedAtUtc] IS NOT NULL AND i.[RetirementDecidedAtUtc]>=d.[RetirementRequestedAtUtc]
+               AND NULLIF(LTRIM(RTRIM(i.[RetirementDecisionReason])),N'') IS NOT NULL
+               AND i.[RetiredByUserId] IS NULL AND i.[RetiredAtUtc] IS NULL)
            OR (d.[PolicyStatus]=3 AND i.[PolicyStatus]=5 AND d.[RetirementDecisionStatus]=N'Pending'
                AND i.[RetirementDecisionStatus]=N'Approved' AND i.[RetirementRequestedByUserId]=d.[RetirementRequestedByUserId]
-               AND i.[RetirementRequestedAtUtc]=d.[RetirementRequestedAtUtc] AND i.[RetirementWorkflowInstanceId]=d.[RetirementWorkflowInstanceId]
-               AND i.[RetirementDecidedByUserId] IS NOT NULL AND i.[RetirementDecidedAtUtc] IS NOT NULL AND i.[RetirementDecisionReason] IS NOT NULL)
+               AND d.[RetirementRequestedByUserId] IS NOT NULL AND d.[RetirementRequestedAtUtc] IS NOT NULL
+               AND NULLIF(LTRIM(RTRIM(d.[RetirementReason])),N'') IS NOT NULL AND d.[RetirementWorkflowInstanceId] IS NOT NULL
+               AND i.[RetirementRequestedAtUtc]=d.[RetirementRequestedAtUtc]
+               AND i.[RetirementReason] COLLATE Latin1_General_100_BIN2=d.[RetirementReason] COLLATE Latin1_General_100_BIN2
+               AND i.[RetirementWorkflowInstanceId]=d.[RetirementWorkflowInstanceId]
+               AND i.[RetirementDecidedByUserId] IS NOT NULL AND i.[RetirementDecidedByUserId]<>d.[RetirementRequestedByUserId]
+               AND i.[RetirementDecidedAtUtc] IS NOT NULL AND i.[RetirementDecidedAtUtc]>=d.[RetirementRequestedAtUtc]
+               AND NULLIF(LTRIM(RTRIM(i.[RetirementDecisionReason])),N'') IS NOT NULL
+               AND i.[RetiredByUserId]=i.[RetirementDecidedByUserId] AND i.[RetiredAtUtc] IS NOT NULL
+               AND i.[RetiredAtUtc]<=i.[RetirementDecidedAtUtc]
+               AND CONVERT(date,i.[RetiredAtUtc])>=CONVERT(date,d.[RetirementRequestedAtUtc])
+               AND CONVERT(date,i.[RetiredAtUtc])>=CONVERT(date,d.[EffectiveFrom])
+               AND i.[EffectiveTo]=CASE WHEN d.[EffectiveTo] IS NOT NULL AND CONVERT(date,d.[EffectiveTo])<CONVERT(date,i.[RetiredAtUtc])
+                    THEN CONVERT(datetime2,CONVERT(date,d.[EffectiveTo])) ELSE CONVERT(datetime2,CONVERT(date,i.[RetiredAtUtc])) END)
           )
     ) THROW 51000, 'C5_POLICY_RETIREMENT_TRANSITION_INVALID: retirement evidence may change only through the governed maker-checker request and decision path.', 1;
 

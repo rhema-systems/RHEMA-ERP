@@ -63,6 +63,21 @@ VALUES ('{{Guid.NewGuid()}}','{{deltaRule}}','{{deltaBook}}',1,N'DELTA',SYSUTCDA
         var mutateApprovedRule = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityRules SET SortOrder=2 WHERE Id='{ruleId}'");
         (await mutateApprovedRule.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
 
+        var bareRetiredBy = Guid.NewGuid();
+        var bareRetirementWithoutRequest = () => database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies
+SET PolicyStatus=5,RetiredByUserId='{{bareRetiredBy}}',RetiredAtUtc=CONVERT(datetime2,'2026-09-06')
+WHERE Id='{{policyId}}';
+""");
+        (await bareRetirementWithoutRequest.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{policyId}' AND PolicyStatus=3 AND EffectiveTo IS NULL AND RetiredByUserId IS NULL AND RetiredAtUtc IS NULL"))
+            .Should().Be(1);
+
+        // Approved authority is immutable immediately; frozen-use evidence is an additional boundary, not
+        // the condition that turns policy configuration into governed authority.
+        var mutateApprovedBeforeUse = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET Name=N'Rewritten before use' WHERE Id='{policyId}'");
+        (await mutateApprovedBeforeUse.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+
         var evidenceId = Guid.NewGuid();
         await database.ExecuteAsync($$"""
 INSERT AccountingBookSelectionEvidence
@@ -91,14 +106,16 @@ VALUES ('{{Guid.NewGuid()}}','{{evidenceId}}','{{first.BookId}}',0,N'IFRS',REPLI
         }
 
         var retirementDate = new DateTime(2026, 9, 6);
+        var retirementMaker = Guid.NewGuid();
+        var retirementChecker = Guid.NewGuid();
         await database.ExecuteAsync($$"""
 UPDATE AccountingBookApplicabilityPolicies SET
- RetirementRequestedByUserId='{{Guid.NewGuid()}}',RetirementRequestedAtUtc=SYSUTCDATETIME(),RetirementReason=N'Retire',
+ RetirementRequestedByUserId='{{retirementMaker}}',RetirementRequestedAtUtc=CONVERT(datetime2,'2026-09-05T10:00:00'),RetirementReason=N'Retire',
  RetirementWorkflowInstanceId='{{Guid.NewGuid()}}',RetirementDecisionStatus=N'Pending'
 WHERE Id='{{policyId}}';
-UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{Guid.NewGuid()}}',RetiredAtUtc=CONVERT(datetime2,'{{retirementDate:yyyy-MM-dd}}'),
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{retirementChecker}}',RetiredAtUtc=CONVERT(datetime2,'{{retirementDate:yyyy-MM-dd}}'),
  EffectiveTo=CONVERT(datetime2,'{{retirementDate:yyyy-MM-dd}}'),RetirementDecisionStatus=N'Approved',
- RetirementDecidedByUserId='{{Guid.NewGuid()}}',RetirementDecidedAtUtc=SYSUTCDATETIME(),RetirementDecisionReason=N'Approved'
+ RetirementDecidedByUserId='{{retirementChecker}}',RetirementDecidedAtUtc=CONVERT(datetime2,'2026-09-06T10:00:00'),RetirementDecisionReason=N'Approved'
 WHERE Id='{{policyId}}';
 """);
         (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{policyId}' AND PolicyStatus=5 AND EffectiveTo=CONVERT(datetime2,'2026-09-06')"))
@@ -108,18 +125,55 @@ WHERE Id='{{policyId}}';
         await database.InsertDraftPolicyRuleAsync(first.TenantId, boundedPolicy, boundedRule, "BOUNDED", "BOUNDED_RULE", 99,
             effectiveTo: new DateTime(2026, 8, 31));
         await database.InsertRuleBookAsync(first.TenantId, boundedRule, first.BookId, "IFRS"); await database.ApproveAsync(boundedPolicy);
+
+        var syntheticMaker = Guid.NewGuid();
+        var syntheticChecker = Guid.NewGuid();
+        var bareRetirement = () => database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{syntheticChecker}}',RetiredAtUtc=CONVERT(datetime2,'2026-09-06'),
+ EffectiveTo=CONVERT(datetime2,'2026-08-31'),RetirementRequestedByUserId='{{syntheticMaker}}',RetirementRequestedAtUtc=CONVERT(datetime2,'2026-09-05'),
+ RetirementReason=N'Synthesized',RetirementWorkflowInstanceId='{{Guid.NewGuid()}}',RetirementDecisionStatus=N'Approved',
+ RetirementDecidedByUserId='{{syntheticChecker}}',RetirementDecidedAtUtc=CONVERT(datetime2,'2026-09-06'),RetirementDecisionReason=N'Synthesized'
+WHERE Id='{{boundedPolicy}}';
+""");
+        (await bareRetirement.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+
+        var boundedMaker = Guid.NewGuid();
+        var boundedChecker = Guid.NewGuid();
         await database.ExecuteAsync($$"""
 UPDATE AccountingBookApplicabilityPolicies SET
- RetirementRequestedByUserId='{{Guid.NewGuid()}}',RetirementRequestedAtUtc=SYSUTCDATETIME(),RetirementReason=N'Retire expired',
+ RetirementRequestedByUserId='{{boundedMaker}}',RetirementRequestedAtUtc=CONVERT(datetime2,'2026-09-05T10:00:00'),RetirementReason=N'Retire expired',
  RetirementWorkflowInstanceId='{{Guid.NewGuid()}}',RetirementDecisionStatus=N'Pending'
 WHERE Id='{{boundedPolicy}}';
-UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{Guid.NewGuid()}}',RetiredAtUtc=CONVERT(datetime2,'2026-09-06'),
- EffectiveTo=CONVERT(datetime2,'2026-08-31'),RetirementDecisionStatus=N'Approved',RetirementDecidedByUserId='{{Guid.NewGuid()}}',
- RetirementDecidedAtUtc=SYSUTCDATETIME(),RetirementDecisionReason=N'Approved'
+""");
+        var expandBoundOnRetirement = () => database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{boundedChecker}}',RetiredAtUtc=CONVERT(datetime2,'2026-09-06'),
+ EffectiveTo=CONVERT(datetime2,'2026-09-06'),RetirementDecisionStatus=N'Approved',RetirementDecidedByUserId='{{boundedChecker}}',
+ RetirementDecidedAtUtc=CONVERT(datetime2,'2026-09-06T10:00:00'),RetirementDecisionReason=N'Approved'
+WHERE Id='{{boundedPolicy}}';
+""");
+        (await expandBoundOnRetirement.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+
+        await database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=5,RetiredByUserId='{{boundedChecker}}',RetiredAtUtc=CONVERT(datetime2,'2026-09-06'),
+ EffectiveTo=CONVERT(datetime2,'2026-08-31'),RetirementDecisionStatus=N'Approved',RetirementDecidedByUserId='{{boundedChecker}}',
+ RetirementDecidedAtUtc=CONVERT(datetime2,'2026-09-06T10:00:00'),RetirementDecisionReason=N'Approved'
 WHERE Id='{{boundedPolicy}}';
 """);
         (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{boundedPolicy}' AND PolicyStatus=5 AND EffectiveTo=CONVERT(datetime2,'2026-08-31')"))
             .Should().Be(1);
+
+        foreach (var retiredRewrite in new[]
+        {
+            $"UPDATE AccountingBookApplicabilityPolicies SET Name=N'Rewritten retired authority' WHERE Id='{boundedPolicy}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=4,ApprovedByUserId=NULL,ApprovedAtUtc=NULL,RetiredByUserId=NULL,RetiredAtUtc=NULL WHERE Id='{boundedPolicy}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET RetiredByUserId='{Guid.NewGuid()}' WHERE Id='{boundedPolicy}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET RetiredAtUtc=DATEADD(day,1,RetiredAtUtc) WHERE Id='{boundedPolicy}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET RetirementReason=N'Rewritten retirement evidence' WHERE Id='{boundedPolicy}'"
+        })
+        {
+            var rewriteRetired = () => database.ExecuteAsync(retiredRewrite);
+            (await rewriteRetired.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+        }
 
         var lossyDown = () => database.ApplyAsync(up: false);
         (await lossyDown.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
