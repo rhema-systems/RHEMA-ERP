@@ -61,6 +61,7 @@ import { useQuery } from '@tanstack/react-query';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import type { ApBudgetCell } from '@/types/ap';
+import { receiptBasedInvoiceLines } from '@/lib/finance/ap-goods-invoice-entry';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import {
     toFinancePostingDimensionValues,
@@ -120,6 +121,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const editHydratedRef = useRef(false);
     const editBudgetCellsLoadedRef = useRef(false);
     const suppressPurchaseOrderHydrationRef = useRef(false);
+    const hydratedPurchaseOrderIdRef = useRef('');
     const isEditMode = Boolean(editInvoiceId);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
@@ -153,9 +155,9 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     } = useQuery({
         queryKey: ['ap-invoice-suppliers'],
         queryFn: async () => {
-            // AP commands persist Supplier.Id. Use Finance's tenant-scoped projection of the
-            // Procurement-owned Supplier master; BusinessPartner.Id is a different identity.
-            const suppliers = await accountsPayableService.getInvoiceSuppliers();
+            // The entry lookup includes approved Procurement suppliers not yet projected into AP.
+            // The command resolves and persists the canonical Supplier id; reports use another lookup.
+            const suppliers = await accountsPayableService.getInvoiceSupplierEntryOptions();
             return { items: suppliers };
         },
     });
@@ -207,10 +209,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     });
 
     const { data: purchaseOrdersData, isLoading: purchaseOrdersLoading } = useQuery({
-        queryKey: ['ap-purchase-orders', selectedSupplier?.id],
+        queryKey: ['ap-purchase-orders', selectedSupplier?.businessPartnerId || selectedSupplier?.id],
         queryFn: () => purchasingService.getPurchaseOrders({
             pageSize: 100,
-            supplierId: selectedSupplier.id,
+            supplierId: selectedSupplier.businessPartnerId || selectedSupplier.id,
         }),
         enabled: Boolean(selectedSupplier?.id),
     });
@@ -224,6 +226,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const serviceCategory = selectedPurchaseOrder?.procurementCategory &&
         selectedPurchaseOrder.procurementCategory !== 'Goods' &&
         selectedPurchaseOrder.procurementCategory !== 'Works';
+    const goodsCategory = selectedPurchaseOrder?.procurementCategory === 'Goods';
+    const { data: goodsEntry, error: goodsEntryError, isFetching: goodsEntryLoading } = useQuery({
+        queryKey: ['ap-goods-invoice-entry', currentTenantCode, selectedPurchaseOrderId, editInvoiceId],
+        queryFn: () => accountsPayableService.getGoodsInvoiceEntry(selectedPurchaseOrderId, editInvoiceId),
+        enabled: Boolean(selectedPurchaseOrderId && goodsCategory),
+    });
     const { data: acceptedSupplyOptions, isLoading: acceptedSupplyLoading } = useQuery({
         queryKey: ['ap-accepted-supply-options', selectedPurchaseOrderId],
         queryFn: () => accountsPayableService.getAcceptedSupplyOptions(selectedPurchaseOrderId),
@@ -645,6 +653,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     };
 
     const onSupplierChange = async (supplierId: string, preservePurchaseOrderId?: string) => {
+        hydratedPurchaseOrderIdRef.current = '';
         form.setValue('supplierId', supplierId);
         form.setValue('purchaseOrderId', preservePurchaseOrderId || undefined);
         form.setValue('acceptedSupplyKind', undefined);
@@ -679,6 +688,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     };
 
     const onPurchaseOrderChange = async (purchaseOrderId: string) => {
+        suppressPurchaseOrderHydrationRef.current = false;
+        hydratedPurchaseOrderIdRef.current = '';
         const value = purchaseOrderId === 'none' ? '' : purchaseOrderId;
         setSelectedPurchaseOrderId(value);
         form.setValue('purchaseOrderId', value || undefined);
@@ -691,7 +702,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         if (suppressPurchaseOrderHydrationRef.current) {
             // The saved draft is authoritative while editing. Loading its PO must not replace
             // existing invoice lines with today's remaining PO quantities.
-            suppressPurchaseOrderHydrationRef.current = false;
+            return;
+        }
+        if (hydratedPurchaseOrderIdRef.current === selectedPurchaseOrder.id) return;
+        if (goodsCategory && !goodsEntry) {
+            form.setValue('lineItems', []);
             return;
         }
         if (selectedPurchaseOrder.procurementCategory === 'Works') {
@@ -705,24 +720,28 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         }
         form.setValue('currencyCode', selectedPurchaseOrder.currency || 'GHS');
         form.setValue('exchangeRate', 1);
-        form.setValue('lineItems', selectedPurchaseOrder.items.map(item => ({
+        const sourceItems = goodsCategory
+            ? receiptBasedInvoiceLines(selectedPurchaseOrder.items, goodsEntry)
+            : selectedPurchaseOrder.items.map(item => ({ ...item, invoiceQuantity: item.remainingQuantity > 0 ? item.remainingQuantity : item.orderedQuantity }));
+        form.setValue('lineItems', sourceItems.map(item => ({
             sourceLineId: crypto.randomUUID(),
             lineItemType: selectedPurchaseOrder.procurementCategory === 'Goods' ? 'Inventory' : 'Expense',
             inventoryItemId: item.inventoryItemId || undefined,
             warehouseId: item.warehouseId || undefined,
             purchaseOrderItemId: item.id,
             description: item.itemDescription || item.itemName || item.itemCode,
-            quantity: item.remainingQuantity > 0 ? item.remainingQuantity : item.orderedQuantity,
+            quantity: item.invoiceQuantity,
             unitPrice: item.unitPrice,
             discountPercentage: 0,
             taxGroupId: 'none',
             unit: item.unitOfMeasure,
         })));
+        hydratedPurchaseOrderIdRef.current = selectedPurchaseOrder.id;
         if (selectedPurchaseOrder.procurementCategory === 'Goods')
             form.setValue('acceptedSupplyKind', undefined);
         else
             form.setValue('acceptedSupplyKind', 'ServiceCompletion');
-    }, [form, selectedPurchaseOrder, toast]);
+    }, [form, selectedPurchaseOrder, toast, goodsCategory, goodsEntry]);
 
     useEffect(() => {
         if (preselectedSupplierId && suppliersData?.items) {
@@ -745,6 +764,18 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const onSubmit = async (data: InvoiceFormValues) => {
         setIsSubmitting(true);
         try {
+            if (goodsCategory) {
+                if (!goodsEntry || goodsEntryError || goodsEntryLoading) {
+                    toast({ title: 'Accepted receipt quantities unavailable', description: 'Wait for the accepted-receipt check before recording this invoice.', variant: 'destructive' });
+                    return;
+                }
+                const totals = new Map<string, number>();
+                for (const line of data.lineItems) totals.set(line.purchaseOrderItemId || '', (totals.get(line.purchaseOrderItemId || '') || 0) + Number(line.quantity));
+                if ([...totals].some(([id, quantity]) => quantity > (goodsEntry.lines.find(line => line.purchaseOrderItemId === id)?.availableQuantity || 0))) {
+                    toast({ title: 'Receipt quantity exceeded', description: 'Use only accepted quantities not already invoiced. Rejected and pending quantities cannot be billed.', variant: 'destructive' });
+                    return;
+                }
+            }
             const isOpeningBalance = data.isOpeningBalance;
             if (serviceCategory && !data.acceptedSupplySourceId) {
                 toast({
@@ -1343,6 +1374,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 </Card>
 
                 {/* Line Items Card */}
+                {goodsCategory && (
+                    <div role={goodsEntryError ? 'alert' : 'status'} className={`rounded-lg border p-3 text-sm ${goodsEntryError ? 'border-destructive text-destructive' : 'text-muted-foreground'}`}>
+                        {goodsEntryLoading ? 'Checking accepted receipt quantities…' : goodsEntryError
+                            ? (goodsEntryError instanceof Error ? goodsEntryError.message : 'Accepted receipt quantities are unavailable.')
+                            : `Receipt-based invoice: ${goodsEntry?.lines.reduce((sum, line) => sum + line.availableQuantity, 0) || 0} accepted units remain uninvoiced. Pending and rejected quantities are excluded.`}
+                    </div>
+                )}
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Line Items</CardTitle>
@@ -1640,7 +1678,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     </CardContent>
                     <CardFooter className="flex justify-end space-x-2 bg-muted/50 p-4">
                         <Button variant="outline" type="button" onClick={() => router.back()}>Cancel</Button>
-                        <Button type="submit" disabled={isSubmitting}>
+                        <Button type="submit" disabled={isSubmitting || Boolean(goodsCategory && (goodsEntryLoading || goodsEntryError || !goodsEntry || fields.length === 0))}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {isEditMode ? 'Save Changes' : 'Record Invoice'}
                         </Button>

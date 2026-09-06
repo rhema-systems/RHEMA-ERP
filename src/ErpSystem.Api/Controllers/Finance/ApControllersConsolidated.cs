@@ -122,6 +122,23 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Returns the payable Goods quantities from accepted receipts, not ordered quantities.
+        /// </summary>
+        [HttpGet("goods-entry")]
+        public async Task<ActionResult<ApGoodsInvoiceEntryDto>> GetGoodsEntry(
+            [FromQuery] Guid purchaseOrderId, [FromQuery] Guid? currentInvoiceId,
+            CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"))
+                return Forbid();
+            try { return Ok(await _invoiceService.GetGoodsInvoiceEntryAsync(purchaseOrderId, currentInvoiceId, cancellationToken)); }
+            catch (ProcurementAcceptedSupplyValidationException exception)
+            { return UnprocessableEntity(new { code = exception.Code, message = exception.Message }); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(new { code = "AP_GOODS_ENTRY_UNAVAILABLE", message = exception.Message }); }
+        }
+
+        /// <summary>
         /// Returns active, tenant-scoped canonical Supplier identities for AP selection controls.
         /// Procurement owns the Supplier master; Finance exposes this read-only projection because
         /// VendorInvoice and AP report filters must use Supplier.Id, never BusinessPartner.Id.
@@ -164,6 +181,58 @@ namespace ErpSystem.Api.Controllers.Finance
                 .ToListAsync(cancellationToken);
 
             return Ok(suppliers);
+        }
+
+        /// <summary>
+        /// Returns selectable entry identities without mutating either supplier master.
+        /// Canonical report lookup remains separate from the approved onboarding handoff.
+        /// </summary>
+        [HttpGet("supplier-entry-options")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<IReadOnlyList<ApInvoiceSupplierEntryDto>>> GetSupplierEntryOptions(
+            CancellationToken cancellationToken)
+        {
+            Guid tenantId;
+            try { tenantId = _currentUserService.GetRequiredFinanceTenantId(); }
+            catch (InvalidOperationException) { return Forbid(); }
+
+            // Include inactive/deleted identities when resolving collisions so this read cannot
+            // offer an approved partner as a way around an existing inactive Finance supplier.
+            var suppliers = await _dbContext.Suppliers.IgnoreQueryFilters().AsNoTracking()
+                .Where(s => s.TenantId == tenantId).ToListAsync(cancellationToken);
+            var partners = await _dbContext.BusinessPartners.IgnoreQueryFilters().AsNoTracking()
+                .Where(p => p.TenantId == tenantId).ToListAsync(cancellationToken);
+            static bool Linked(ErpSystem.Core.Entities.Procurement.Supplier supplier,
+                ErpSystem.Core.Entities.Procurement.BusinessPartner partner) =>
+                supplier.Id == partner.Id || (!string.IsNullOrWhiteSpace(partner.PartnerCode) &&
+                    string.Equals(supplier.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase));
+            static bool Eligible(ErpSystem.Core.Entities.Procurement.BusinessPartner partner) =>
+                !partner.IsDeleted && partner.IsActive && !partner.IsBlacklisted &&
+                (partner.PartnerType is "Supplier" or "Vendor" or "Manufacturer") &&
+                (partner.RegistrationStatus is "Active" or "Approved");
+
+            var options = new List<ApInvoiceSupplierEntryDto>();
+            foreach (var supplier in suppliers.Where(s => !s.IsDeleted && s.IsActive && s.Status == "Active"))
+            {
+                var linked = partners.Where(p => Linked(supplier, p)).ToList();
+                if (linked.Count > 1 || (linked.Count == 1 &&
+                    (!Eligible(linked[0]) || suppliers.Count(s => Linked(s, linked[0])) != 1))) continue;
+                options.Add(new ApInvoiceSupplierEntryDto
+                {
+                    Id = supplier.Id, BusinessPartnerId = linked.SingleOrDefault()?.Id,
+                    Code = supplier.SupplierCode, Name = supplier.Name, PaymentTermId = supplier.PaymentTermId
+                });
+            }
+            foreach (var partner in partners.Where(Eligible))
+            {
+                if (suppliers.Any(s => Linked(s, partner))) continue;
+                options.Add(new ApInvoiceSupplierEntryDto
+                {
+                    Id = partner.Id, BusinessPartnerId = partner.Id,
+                    Code = partner.PartnerCode, Name = partner.PartnerName, PaymentTermId = partner.PaymentTermId
+                });
+            }
+            return Ok(options.OrderBy(s => s.Name).ThenBy(s => s.Code).ToList());
         }
 
         /// <summary>

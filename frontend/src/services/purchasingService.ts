@@ -957,6 +957,16 @@ export interface PurchaseOrderReceiptDto {
 
 export type ProcurementReceiptSourceEvidenceKind = 1 | 2;
 
+const normalizeReceiptSourceEvidence = (
+  evidence: ProcurementReceiptSourceEvidenceDto
+): ProcurementReceiptSourceEvidenceDto => {
+  const value: unknown = evidence.evidenceKind;
+  const evidenceKind = value === 1 || value === '1' || value === 'Waybill' ? 1
+    : value === 2 || value === '2' || value === 'VatInvoiceCopy' ? 2 : undefined;
+  if (evidenceKind === undefined) throw new Error('Unrecognized receipt evidence type. Refresh or contact support.');
+  return { ...evidence, evidenceKind };
+};
+
 export interface ProcurementReceiptSourceEvidenceDto {
   id: string;
   evidenceKind: ProcurementReceiptSourceEvidenceKind;
@@ -2246,7 +2256,8 @@ export const purchasingService = {
       { headers: getAuthHeaders() }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
-    return response.json();
+    const overview: ProcurementReceiptSourceEvidenceOverviewDto = await response.json();
+    return { ...overview, evidence: overview.evidence.map(normalizeReceiptSourceEvidence) };
   },
 
   async uploadReceiptSourceEvidence(
@@ -2270,7 +2281,7 @@ export const purchasingService = {
       { method: 'POST', headers: getMultipartAuthHeaders(), body: form }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
-    return response.json();
+    return normalizeReceiptSourceEvidence(await response.json());
   },
 
   async downloadReceiptSourceEvidence(

@@ -344,6 +344,21 @@ public class PurchaseOrderReceiptsController : ControllerBase
         {
             return NotFound(InspectionProblem(ex.Code, ex.Message, StatusCodes.Status404NotFound));
         }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return NotFound(InspectionProblem(ex.Code, ex.Message, StatusCodes.Status404NotFound));
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                InspectionProblem("RCV_SOURCE_FORBIDDEN", ex.Message, StatusCodes.Status403Forbidden));
+        }
+        catch (ProcurementReceiptSourceValidationException ex)
+        {
+            var problem = InspectionProblem(ex.Code, ex.Message, StatusCodes.Status422UnprocessableEntity);
+            if (ex.Readiness is not null) problem.Extensions["readiness"] = ex.Readiness;
+            return UnprocessableEntity(problem);
+        }
         catch (ProcurementReceiptInspectionAuthorizationException ex)
         {
             return StatusCode(StatusCodes.Status403Forbidden,

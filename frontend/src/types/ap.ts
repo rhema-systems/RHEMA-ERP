@@ -27,6 +27,16 @@ export interface ApInvoiceSupplier {
     currency?: string | null;
 }
 
+/** Entry-only identity; reports must continue using canonical ApInvoiceSupplier ids. */
+export interface ApInvoiceSupplierEntry extends ApInvoiceSupplier {
+    businessPartnerId?: string | null;
+}
+
+export interface ApGoodsInvoiceEntry {
+    purchaseOrderId: string;
+    lines: { purchaseOrderItemId: string; acceptedQuantity: number; invoicedQuantity: number; availableQuantity: number }[];
+}
+
 export interface VendorInvoice {
     id: string;
     invoiceNumber: string;

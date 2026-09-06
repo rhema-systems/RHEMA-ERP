@@ -123,6 +123,39 @@ public sealed class PurchaseOrderReceiptInspectionControllerTests
         documents.VerifyAll();
     }
 
+    [Theory]
+    [InlineData(422, "PO_SOURCE_LINEAGE_CHANGED")]
+    [InlineData(403, "RCV_SOURCE_FORBIDDEN")]
+    [InlineData(404, "RCV_RECEIPT_NOT_FOUND")]
+    public async Task InspectionMutationPreservesStructuredSourceErrors(int status, string code)
+    {
+        var receiptId = Guid.NewGuid();
+        var inspection = new Mock<IProcurementReceiptInspectionService>();
+        var readiness = new ProcurementReceiptSourceReadinessDto();
+        Exception error = status switch
+        {
+            422 => new ProcurementReceiptSourceValidationException(code, "Source guard rejected the action.", readiness),
+            403 => new ProcurementReceiptSourceAuthorizationException("Source guard rejected the action."),
+            _ => new ProcurementReceiptSourceNotFoundException(code, "Source guard rejected the action.")
+        };
+        inspection.Setup(item => item.InitializeAsync(receiptId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(error);
+        var controller = new PurchaseOrderReceiptsController(null!, null!, null!, inspection.Object,
+            NullLogger<PurchaseOrderReceiptsController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+
+        var result = await controller.InitializeInspection(receiptId);
+
+        var response = result.Result.Should().BeAssignableTo<ObjectResult>().Subject;
+        response.StatusCode.Should().Be(status);
+        var problem = response.Value.Should().BeOfType<ProblemDetails>().Subject;
+        problem.Title.Should().Be(code);
+        problem.Detail.Should().Be("Source guard rejected the action.");
+        if (status == 422) problem.Extensions["readiness"].Should().BeSameAs(readiness);
+    }
+
     private static string? HttpTemplate(MethodInfo method) =>
         method.GetCustomAttributes<HttpMethodAttribute>().Single().Template;
 }

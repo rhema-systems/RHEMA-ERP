@@ -31,6 +31,8 @@ import type {
     ProcurementFinanceReconciliationReport,
     ProcurementAcceptedSupplyOptions,
     ApInvoiceSupplier,
+    ApInvoiceSupplierEntry,
+    ApGoodsInvoiceEntry,
     SupplierDebitNote,
     SupplierDebitNoteCreateRequest,
     SupplierDebitNoteUpdateRequest,
@@ -139,6 +141,16 @@ class AccountsPayableService {
     /** Returns canonical Supplier.Id values through a tenant-scoped Finance read model. */
     public async getInvoiceSuppliers(): Promise<ApInvoiceSupplier[]> {
         return apiService.get<ApInvoiceSupplier[]>(`${this.baseUrl}/invoices/suppliers`);
+    }
+
+    public async getInvoiceSupplierEntryOptions(): Promise<ApInvoiceSupplierEntry[]> {
+        return apiService.get<ApInvoiceSupplierEntry[]>(`${this.baseUrl}/invoices/supplier-entry-options`);
+    }
+
+    public async getGoodsInvoiceEntry(purchaseOrderId: string, currentInvoiceId?: string): Promise<ApGoodsInvoiceEntry> {
+        const query = new URLSearchParams({ purchaseOrderId });
+        if (currentInvoiceId) query.set('currentInvoiceId', currentInvoiceId);
+        return apiService.get<ApGoodsInvoiceEntry>(`${this.baseUrl}/invoices/goods-entry?${query}`);
     }
 
     public async getInvoiceBudgetCells(budgetDate: string, accountId: string): Promise<ApBudgetCell[]> {
