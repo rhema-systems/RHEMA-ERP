@@ -615,14 +615,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         // Retain the latest projection per bidder/voter, including a new draft
         // so an unfinished replacement cannot reuse the previous recommendation.
         // The separate SOD resolver deliberately retains all evaluator history.
-        evaluations = evaluations
-            .GroupBy(item => new { item.TenderBidId, item.TenderEvaluatorId })
-            .Select(group => group
-                .OrderByDescending(item => item.SubmittedDate ?? item.UpdatedAt ?? item.EvaluationDate)
-                .ThenByDescending(item => item.CreatedAt)
-                .ThenByDescending(item => item.Id)
-                .First())
-            .ToList();
+        evaluations = ProcurementTenderEvaluationProjectionPolicy.SelectCurrent(evaluations);
         var evaluationsComplete = evaluations.Count != 0 &&
                                   evaluations.All(IsCompletedLegacyEvaluation);
         var recommended = evaluationsComplete

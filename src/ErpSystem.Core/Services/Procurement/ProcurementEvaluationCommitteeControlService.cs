@@ -1297,7 +1297,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
                 "The scorer or recall requester cannot approve the shared recall workflow.");
         var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
         {
-            ControlCode = "SOD-EVALUATION-SCORER-RECALL-APPROVER",
+            // A recall is a procurement transaction: its requester and original
+            // scorer remain makers, and its decision must use the shared checker.
+            ControlCode = "SOD-INITIATOR-APPROVER",
             SourceType = EventType,
             SourceReference = recall.ScoreSheet.CommitteeControl.SourceReference,
             ProhibitedActorUserIds = new List<Guid>
