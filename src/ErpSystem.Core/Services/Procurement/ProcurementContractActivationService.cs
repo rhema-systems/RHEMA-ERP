@@ -1025,11 +1025,21 @@ public sealed class ProcurementContractActivationService :
                 "The contract source has no current requisition sourcing release.");
         }
 
+        ProcurementSupplyContractCoverage.Coverage? coverage;
+        try
+        {
+            coverage = await ProcurementSupplyContractCoverage.ResolveAsync(
+                _unitOfWork, _currentUser.TenantId, contract, release.PurchaseRequisitionId, cancellationToken);
+        }
+        catch (ProcurementBudgetCommitmentLifecycleException exception)
+        {
+            return Failed("commitment", "Budget availability", exception.Code, exception.Message);
+        }
         var committedExposure = await GetNetCommittedExposureAsync(
             release.PurchaseRequisitionId,
             cancellationToken);
         var requiredExposure = decimal.Round(
-            committedExposure + contract.ContractValue,
+            committedExposure + (coverage is null ? contract.ContractValue : 0m),
             2,
             MidpointRounding.AwayFromZero);
 
@@ -1053,6 +1063,10 @@ public sealed class ProcurementContractActivationService :
                 exception.Code, exception.Message);
         }
 
+        if (readiness.IsCompliant && coverage is not null)
+            return Passed("commitment", "Budget availability", "CONTRACT_COVERED_BY_APPROVED_PO",
+                $"{coverage.PurchaseOrder.OrderNumber} already commits {contract.ContractValue:N2} {contract.Currency} for this exact award. Activation reuses that commitment; receipts remain owned by the PO.",
+                coverage.FormalEntry.Id, $"po:{coverage.PurchaseOrder.Id:N}/commitment:{coverage.FormalEntry.Id:N}/{coverage.PurchaseOrder.SourceIntegrityHash}");
         return readiness.IsCompliant
             ? Passed("commitment", "Budget availability",
                 readiness.DecisionCode, readiness.Message,
@@ -1165,7 +1179,8 @@ public sealed class ProcurementContractActivationService :
                 !item.IsDeleted)
             .ToListAsync(cancellationToken);
         if (entries.Count == 0)
-            return false;
+            return await ProcurementSupplyContractCoverage.ResolveAsync(
+                _unitOfWork, _currentUser.TenantId, contract, purchaseRequisitionId, cancellationToken) is not null;
         if (entries.Count != 1)
             throw Conflict(
                 "CONTRACT_ACTIVATION_BUDGET_IDEMPOTENCY_CONFLICT",
