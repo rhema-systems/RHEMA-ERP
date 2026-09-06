@@ -116185,7 +116185,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProcurementConfigurationDecisions_SchemaVersion", "[SchemaVersion] > 0");
 
-                            t.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3)");
+                            t.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3) OR ([Status] = 4 AND [DecisionKey] = 'DEC-011')");
                         });
                 });
 

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
@@ -97,6 +98,122 @@ public sealed class ProcurementConfigurationProfilesControllerTests
         result.Should().BeOfType<ForbidResult>();
     }
 
+    [Fact]
+    public void WithdrawDecisionUsesOnlyTheScopedPostAndExistingAdministrativePermission()
+    {
+        var method = typeof(ProcurementConfigurationProfilesController)
+            .GetMethod(nameof(ProcurementConfigurationProfilesController.WithdrawDecision))!;
+        method.GetCustomAttribute<HttpPostAttribute>()!.Template.Should()
+            .Be("{id:guid}/decisions/{decisionKey}/withdraw");
+        method.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be("procurement.access.manage");
+        method.GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task WithdrawalPostForwardsExactDecisionAndBodyAndReturnsUpdatedProfile()
+    {
+        var profileId = Guid.NewGuid();
+        const string version = "AQIDBA==";
+        const string reason = "Architecture baseline alignment; preserve the other thirteen decisions.";
+        var service = new Mock<IProcurementConfigurationService>();
+        service.Setup(item => item.WithdrawDecisionAsync(profileId, "DEC-011",
+                It.Is<WithdrawProcurementConfigurationDecisionRequest>(request =>
+                    request.RowVersion == version && request.Reason == reason),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementConfigurationProfileDto
+            {
+                Id = profileId, ProfileCode = "TDC-ACCEPTANCE", Version = 3
+            });
+        using var factory = CreateFactory(ConfigurationAuthorizationMode.Success, service);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/procurement/configuration-profiles/{profileId}/decisions/DEC-011/withdraw",
+            new { rowVersion = version, reason });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        payload.RootElement.GetProperty("id").GetGuid().Should().Be(profileId);
+        payload.RootElement.GetProperty("version").GetInt32().Should().Be(3);
+        service.Verify(item => item.WithdrawDecisionAsync(profileId, "DEC-011",
+            It.Is<WithdrawProcurementConfigurationDecisionRequest>(request =>
+                request.RowVersion == version && request.Reason == reason),
+            It.Is<string>(correlation => !string.IsNullOrWhiteSpace(correlation)),
+            It.IsAny<CancellationToken>()), Times.Once);
+        service.Verify(item => item.RetireProfileAsync(It.IsAny<Guid>(),
+            It.IsAny<ProcurementConfigurationLifecycleRequest>(), It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true, HttpStatusCode.Unauthorized)]
+    [InlineData(false, HttpStatusCode.Forbidden)]
+    public async Task WithdrawalPostRetainsAuthenticationAndAuthorizationGates(
+        bool anonymous, HttpStatusCode expectedStatus)
+    {
+        var service = new Mock<IProcurementConfigurationService>();
+        using var factory = CreateFactory(anonymous
+            ? ConfigurationAuthorizationMode.Challenge : ConfigurationAuthorizationMode.Forbid, service);
+        using var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/procurement/configuration-profiles/{Guid.NewGuid()}/decisions/DEC-011/withdraw",
+            new { rowVersion = "AQIDBA==", reason = "Governed withdrawal" });
+        response.StatusCode.Should().Be(expectedStatus);
+        service.Verify(item => item.WithdrawDecisionAsync(It.IsAny<Guid>(), It.IsAny<string>(),
+            It.IsAny<WithdrawProcurementConfigurationDecisionRequest>(), It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WithdrawalServiceFailuresPreserveProblemDetailsAndExactRequest(bool validationFailure)
+    {
+        var profileId = Guid.NewGuid();
+        const string detail = "The selected DEC-011 decision cannot be withdrawn in its current state.";
+        var request = new WithdrawProcurementConfigurationDecisionRequest
+        {
+            RowVersion = "AQIDBA==", Reason = "Architecture baseline alignment"
+        };
+        var validation = new ProcurementConfigurationValidationResultDto
+        {
+            Errors = new[] { new ProcurementConfigurationValidationIssueDto
+            {
+                DecisionKey = "DEC-011", Code = "WITHDRAWAL_INVALID", Message = detail
+            } }
+        };
+        Exception failure = validationFailure
+            ? new ProcurementConfigurationValidationException(detail, validation)
+            : new ProcurementConfigurationConflictException(detail);
+        var service = new Mock<IProcurementConfigurationService>();
+        using var cancellation = new CancellationTokenSource();
+        service.Setup(item => item.WithdrawDecisionAsync(profileId, "DEC-011", request,
+                "withdrawal-correlation", cancellation.Token)).ThrowsAsync(failure);
+        var context = new DefaultHttpContext { TraceIdentifier = "withdrawal-correlation" };
+        context.Request.Path = $"/api/procurement/configuration-profiles/{profileId}/decisions/DEC-011/withdraw";
+        var controller = new ProcurementConfigurationProfilesController(service.Object)
+        {
+            ControllerContext = new ControllerContext { HttpContext = context }
+        };
+
+        var result = await controller.WithdrawDecision(profileId, "DEC-011", request, cancellation.Token);
+        var response = result.Should().BeAssignableTo<ObjectResult>().Subject;
+        var problem = response.Value.Should().BeAssignableTo<ProblemDetails>().Subject;
+        response.StatusCode.Should().Be(validationFailure ? 422 : 409);
+        problem.Status.Should().Be(response.StatusCode);
+        problem.Detail.Should().Be(detail);
+        problem.Instance.Should().Be(context.Request.Path.Value);
+        problem.Extensions["correlationId"].Should().Be("withdrawal-correlation");
+        if (validationFailure)
+        {
+            var errors = problem.Should().BeOfType<ValidationProblemDetails>().Subject;
+            errors.Errors["DEC-011"].Should().ContainSingle().Which.Should().Be(detail);
+            errors.Extensions["issues"].Should().BeSameAs(validation.Errors);
+        }
+        service.Verify(item => item.WithdrawDecisionAsync(profileId, "DEC-011", request,
+            "withdrawal-correlation", cancellation.Token), Times.Once);
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(
         ConfigurationAuthorizationMode mode,
         Mock<IProcurementConfigurationService>? service = null)
@@ -106,6 +223,7 @@ public sealed class ProcurementConfigurationProfilesControllerTests
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.UseSetting("CandidatePortal:PortalUrl", "https://candidate.test/");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();

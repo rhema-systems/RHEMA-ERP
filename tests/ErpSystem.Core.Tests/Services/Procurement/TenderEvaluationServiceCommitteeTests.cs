@@ -17,7 +17,7 @@ using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
-public sealed class TenderEvaluationServiceCommitteeTests
+public sealed partial class TenderEvaluationServiceCommitteeTests
 {
     [Fact]
     public async Task CommitteeProjectionAllowsFirstDraftWithoutStandaloneAssignment()

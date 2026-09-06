@@ -102,6 +102,88 @@ public sealed class ProcurementPolicyServiceTests
     }
 
     [Fact]
+    public async Task ExplicitlyWithdrawnRiskDecisionDoesNotBlockMaterializingTheOtherApprovedPolicyRules()
+    {
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
+        var baselineSource = await fixture.AddSourceConfigurationAsync(ProcurementConfigurationProfileStatus.Published);
+        var baseline = await fixture.Service.CreatePolicySetAsync(NewPolicy(baselineSource.Id, "ACTIVE-RISK-SOURCE"), "active-risk-source");
+        var source = await fixture.AddSourceConfigurationAsync(ProcurementConfigurationProfileStatus.Published);
+        var risk = await fixture.Context.ProcurementConfigurationDecisions.SingleAsync(item =>
+            item.ProfileId == source.Id && item.DecisionKey == "DEC-011");
+        var originalValue = risk.ValueJson;
+        var originalApproval = risk.ApprovalReference;
+        var originalApprover = risk.ApprovedById;
+        var originalApprovedAt = risk.ApprovedAt;
+        risk.Status = ProcurementConfigurationDecisionStatus.Withdrawn;
+        await fixture.Context.SaveChangesAsync();
+
+        var created = await fixture.Service.CreatePolicySetAsync(NewPolicy(source.Id, "WITHDRAWN-RISK-SOURCE"), "withdrawn-risk-source");
+
+        created.Rules.Select(item => new { item.Kind, item.SourceDecisionKey }).Should().BeEquivalentTo(
+            baseline.Rules.Select(item => new { item.Kind, item.SourceDecisionKey }));
+        created.Rules.Should().NotContain(item => item.SourceDecisionKey == "DEC-011");
+        var retained = await fixture.Context.ProcurementConfigurationDecisions.AsNoTracking()
+            .Where(item => item.ProfileId == source.Id).ToListAsync();
+        retained.Should().HaveCount(14);
+        retained.Where(item => item.DecisionKey != "DEC-011").Should().OnlyContain(item =>
+            item.Status == ProcurementConfigurationDecisionStatus.Approved &&
+            item.ApprovalStatus == ProcurementConfigurationApprovalStatus.Approved);
+        var retainedRisk = retained.Single(item => item.DecisionKey == "DEC-011");
+        retainedRisk.Status.Should().Be(ProcurementConfigurationDecisionStatus.Withdrawn);
+        retainedRisk.ValueJson.Should().Be(originalValue);
+        retainedRisk.ApprovalStatus.Should().Be(ProcurementConfigurationApprovalStatus.Approved);
+        retainedRisk.ApprovalReference.Should().Be(originalApproval);
+        retainedRisk.ApprovedById.Should().Be(originalApprover);
+        retainedRisk.ApprovedAt.Should().Be(originalApprovedAt);
+        (await fixture.Context.ProcurementConfigurationProfiles.AsNoTracking().SingleAsync(item => item.Id == source.Id))
+            .LifecycleStatus.Should().Be(ProcurementConfigurationProfileStatus.Published);
+    }
+
+    [Theory]
+    [InlineData("DEC-011", ProcurementConfigurationDecisionStatus.Draft, ProcurementConfigurationApprovalStatus.Pending)]
+    [InlineData("DEC-011", ProcurementConfigurationDecisionStatus.Proposed, ProcurementConfigurationApprovalStatus.Pending)]
+    [InlineData("DEC-011", ProcurementConfigurationDecisionStatus.Approved, ProcurementConfigurationApprovalStatus.Pending)]
+    [InlineData("DEC-011", ProcurementConfigurationDecisionStatus.Rejected, ProcurementConfigurationApprovalStatus.Rejected)]
+    [InlineData("DEC-010", ProcurementConfigurationDecisionStatus.Withdrawn, ProcurementConfigurationApprovalStatus.Approved)]
+    public async Task MaterializationStillRejectsUnresolvedRiskOrWithdrawnMandatoryDecisions(
+        string decisionKey, ProcurementConfigurationDecisionStatus status, ProcurementConfigurationApprovalStatus approvalStatus)
+    {
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
+        var source = await fixture.AddSourceConfigurationAsync(ProcurementConfigurationProfileStatus.Published);
+        var decision = await fixture.Context.ProcurementConfigurationDecisions.SingleAsync(item =>
+            item.ProfileId == source.Id && item.DecisionKey == decisionKey);
+        decision.Status = status;
+        decision.ApprovalStatus = approvalStatus;
+        await fixture.Context.SaveChangesAsync();
+
+        var exception = await fixture.Service.Invoking(service =>
+                service.CreatePolicySetAsync(NewPolicy(source.Id), "unresolved-source"))
+            .Should().ThrowAsync<ProcurementPolicyValidationException>();
+
+        exception.Which.Validation.Errors.Should().Contain(item => item.Code == "SOURCE_CONFIGURATION_INCOMPLETE");
+        (await fixture.Context.ProcurementPolicySets.AsNoTracking().CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("DEC-010")]
+    [InlineData("DEC-999")]
+    public async Task MaterializationRequiresEveryRegisteredDecisionEvenWhenFourteenApprovedRowsExist(string replacementKey)
+    {
+        await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);
+        var source = await fixture.AddSourceConfigurationAsync(ProcurementConfigurationProfileStatus.Published);
+        var risk = await fixture.Context.ProcurementConfigurationDecisions.SingleAsync(item =>
+            item.ProfileId == source.Id && item.DecisionKey == "DEC-011");
+        risk.DecisionKey = replacementKey;
+        await fixture.Context.SaveChangesAsync();
+
+        var exception = await fixture.Service.Invoking(service =>
+                service.CreatePolicySetAsync(NewPolicy(source.Id), "invalid-source-keys"))
+            .Should().ThrowAsync<ProcurementPolicyValidationException>();
+
+        exception.Which.Validation.Errors.Should().Contain(item => item.Code == "SOURCE_CONFIGURATION_INCOMPLETE");
+    }
+
+    [Fact]
     public async Task CoreSourcingPolicyPublishesWithoutOptionalAuthorityEvidenceExceptionOrSodFamilies()
     {
         await using var fixture = new ServiceFixture(ProcurementAccessControlRegistry.IctAdministratorRole);

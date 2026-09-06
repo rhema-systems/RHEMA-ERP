@@ -27,19 +27,22 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementSodGuardService _sodGuard;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly ISupplierValidationService _supplierValidation;
 
     public ProcurementAwardReadinessService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
         IProcurementAccessControlService accessControl,
         IProcurementSodGuardService sodGuard,
-        IProcurementControlEventService controlEvents)
+        IProcurementControlEventService controlEvents,
+        ISupplierValidationService supplierValidation)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _accessControl = accessControl;
         _sodGuard = sodGuard;
         _controlEvents = controlEvents;
+        _supplierValidation = supplierValidation;
     }
 
     private IGenericRepository<ProcurementAwardReadinessDecision> Decisions =>
@@ -1178,23 +1181,27 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                     "Replace the foreign/stale recommendation.");
                 continue;
             }
-            var errors = new List<string>();
-            var warnings = new List<string>();
-            if (!partner.IsActive) errors.Add("Supplier is inactive.");
-            if (partner.IsBlacklisted) errors.Add("Supplier is blacklisted.");
-            if (!BusinessPartnerLifecyclePolicy.IsApproved(partner.ApprovalStatus))
-                errors.Add("Supplier approval is not current.");
+            var baseline = await _supplierValidation.EvaluateBaselineEligibilityAsync(
+                new SupplierEligibilityEvaluationRequest
+                {
+                    BusinessPartnerId = partner.Id,
+                    Boundary = SupplierEligibilityBoundary.Award,
+                    IncludeFinancialWarnings = true,
+                    // The immutable readiness decision owns this operation's audit.
+                    RecordAudit = false,
+                    SourceType = "ProcurementAwardReadiness",
+                    SourceReference = partner.PartnerCode
+                }, cancellationToken);
+            var errors = baseline.Errors.ToList();
+            var warnings = baseline.Warnings.ToList();
+            if (!baseline.IsValid && errors.Count == 0)
+                errors.Add("The shared supplier eligibility checks did not pass.");
             if (!partner.ApprovedById.HasValue && !partner.CreatedById.HasValue)
                 errors.Add("Supplier controller lineage is missing.");
-            if (!BusinessPartnerLifecyclePolicy.IsOperationalRegistration(
-                    partner.RegistrationStatus))
-                errors.Add("Supplier registration is not approved.");
             if (!partner.PartnerType.Contains("Supplier", StringComparison.OrdinalIgnoreCase) &&
                 !partner.PartnerType.Contains("Contractor", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(partner.PartnerType, "Both", StringComparison.OrdinalIgnoreCase))
                 errors.Add("Business partner is not eligible for procurement award.");
-            if (partner.RiskLevel is "High" or "Critical")
-                warnings.Add($"Supplier risk is {partner.RiskLevel}.");
             await AddSupplierRiskAsync(partner, errors, warnings, cancellationToken);
             var supplier = new ProcurementAwardReadinessSupplierDto
             {
@@ -1236,6 +1243,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                     partner.IsBlacklisted,
                     partner.ApprovalStatus,
                     partner.RegistrationStatus,
+                    baseline.DecisionHash,
                     partner.UpdatedAt
                 })));
             if (requiresPrequalification)
