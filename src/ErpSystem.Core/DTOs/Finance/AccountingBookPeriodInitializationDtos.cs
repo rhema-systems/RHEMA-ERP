@@ -1,5 +1,15 @@
 namespace ErpSystem.Core.DTOs.Finance;
 
+public sealed class AccountingBookInitializationEvidenceValidationDto
+{
+    public bool IsValid { get; set; }
+    public Guid? InitializationId { get; set; }
+    public int? Version { get; set; }
+    public string? EvidenceFingerprint { get; set; }
+    public string? ReconciliationFingerprint { get; set; }
+    public string? Blocker { get; set; }
+}
+
 public sealed class AccountingBookPeriodDto
 {
     public Guid Id { get; set; }

@@ -27,6 +27,15 @@ public static class FinanceAuditEvents
     public const string AccountingBookInitializationApprovalStepCompleted = "Finance.GL.AccountingBookInitialization.ApprovalStepCompleted";
     public const string AccountingBookInitializationApproved = "Finance.GL.AccountingBookInitialization.Approved";
     public const string AccountingBookInitializationRejected = "Finance.GL.AccountingBookInitialization.Rejected";
+    public const string AccountingBookApplicabilityPolicyDrafted = "Finance.GL.AccountingBookApplicabilityPolicy.Drafted";
+    public const string AccountingBookApplicabilityPolicySubmitted = "Finance.GL.AccountingBookApplicabilityPolicy.Submitted";
+    public const string AccountingBookApplicabilityPolicyApprovalStepCompleted = "Finance.GL.AccountingBookApplicabilityPolicy.ApprovalStepCompleted";
+    public const string AccountingBookApplicabilityPolicyApproved = "Finance.GL.AccountingBookApplicabilityPolicy.Approved";
+    public const string AccountingBookApplicabilityPolicyRejected = "Finance.GL.AccountingBookApplicabilityPolicy.Rejected";
+    public const string AccountingBookApplicabilityPolicyRetirementRequested = "Finance.GL.AccountingBookApplicabilityPolicy.RetirementRequested";
+    public const string AccountingBookApplicabilityPolicyRetirementRejected = "Finance.GL.AccountingBookApplicabilityPolicy.RetirementRejected";
+    public const string AccountingBookApplicabilityPolicyRetired = "Finance.GL.AccountingBookApplicabilityPolicy.Retired";
+    public const string AccountingBookSelectionFrozen = "Finance.GL.AccountingBookApplicability.SelectionFrozen";
     public const string FxPolicyOverrideChanged = "Finance.FX.Policy.OverrideChanged";
     public const string FxPolicyOverrideRequested = "Finance.FX.Policy.OverrideRequested";
     public const string FxPolicyOverrideApproved = "Finance.FX.Policy.OverrideApproved";

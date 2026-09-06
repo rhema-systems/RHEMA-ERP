@@ -39,3 +39,12 @@ public enum AccountingBookInitializationStatus
     Approved = 3,
     Rejected = 4
 }
+
+public enum AccountingBookApplicabilityPolicyStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Rejected = 4,
+    Retired = 5
+}

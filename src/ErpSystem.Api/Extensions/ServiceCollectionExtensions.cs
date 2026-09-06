@@ -814,6 +814,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookService, ErpSystem.Api.Services.Finance.Settings.AccountingBookService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookPeriodService, ErpSystem.Api.Services.Finance.Settings.AccountingBookPeriodService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookInitializationService, ErpSystem.Api.Services.Finance.Settings.AccountingBookInitializationService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookApplicabilityService, ErpSystem.Api.Services.Finance.Settings.AccountingBookApplicabilityService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountClassificationService, ErpSystem.Api.Services.Finance.Settings.AccountClassificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountBookCurrencyPolicyService, ErpSystem.Api.Services.Finance.MultiCurrency.AccountBookCurrencyPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService, ErpSystem.Api.Services.Finance.GL.FinanceAccountProvisioningService>();

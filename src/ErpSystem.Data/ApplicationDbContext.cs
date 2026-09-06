@@ -125,6 +125,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AccountingBookPeriod> AccountingBookPeriods { get; set; }
     public DbSet<AccountingBookInitialization> AccountingBookInitializations { get; set; }
     public DbSet<AccountingBookInitializationLine> AccountingBookInitializationLines { get; set; }
+    public DbSet<AccountingBookApplicabilityPolicy> AccountingBookApplicabilityPolicies { get; set; }
+    public DbSet<AccountingBookApplicabilityRule> AccountingBookApplicabilityRules { get; set; }
+    public DbSet<AccountingBookApplicabilityRuleBook> AccountingBookApplicabilityRuleBooks { get; set; }
+    public DbSet<AccountingBookSelectionEvidence> AccountingBookSelectionEvidence { get; set; }
+    public DbSet<AccountingBookSelectionEvidenceBook> AccountingBookSelectionEvidenceBooks { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
     public DbSet<AccountBookCurrencyPolicy> AccountBookCurrencyPolicies { get; set; }
     public DbSet<AccountClassification> AccountClassifications { get; set; }
@@ -2877,6 +2882,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             // Posting evidence uses tenant-qualified book identity so a corrupt foreign tenant
             // reference cannot be legitimized merely because GUIDs are globally unique.
             entity.HasAlternateKey(e => new { e.TenantId, e.Id });
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id, e.Code });
             entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
             entity.Property(e => e.Code).HasMaxLength(20).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
@@ -2901,6 +2907,141 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookApplicabilityPolicy>(entity =>
+        {
+            entity.ToTable("AccountingBookApplicabilityPolicies", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_Status", "[PolicyStatus] IN (1, 2, 3, 4, 5)");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_EffectiveRange", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementMakerChecker", "[RetiredByUserId] IS NULL OR [RetiredByUserId] <> [RetirementRequestedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementRequestShape", "([RetirementDecisionStatus] IS NULL AND [RetirementRequestedByUserId] IS NULL AND [RetirementRequestedAtUtc] IS NULL AND [RetirementReason] IS NULL AND [RetirementWorkflowInstanceId] IS NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] = 'Pending' AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] IN ('Approved','Rejected') AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NOT NULL AND [RetirementDecidedAtUtc] IS NOT NULL AND [RetirementDecisionReason] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_ApprovalShape", "([PolicyStatus] IN (1,2,4) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 5 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NOT NULL AND [RetiredAtUtc] IS NOT NULL)");
+                if (Database.IsSqlServer())
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_CodeCanonical", "LEN([PolicyCode]) > 0 AND [PolicyCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PolicyCode]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([PolicyCode]) = DATALENGTH(UPPER(LTRIM(RTRIM([PolicyCode])))) AND LEFT([PolicyCode], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.PolicyCode, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id, item.Version });
+            entity.HasIndex(item => new { item.TenantId, item.PolicyCode, item.Version }).IsUnique();
+            entity.Property(item => item.PolicyCode).HasMaxLength(30).IsRequired();
+            entity.Property(item => item.Name).HasMaxLength(150).IsRequired();
+            entity.Property(item => item.Description).HasMaxLength(500);
+            entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.DecisionReason).HasMaxLength(500);
+            entity.Property(item => item.RetirementReason).HasMaxLength(500);
+            entity.Property(item => item.RetirementDecisionStatus).HasMaxLength(20);
+            entity.Property(item => item.RetirementDecisionReason).HasMaxLength(500);
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.SupersedesPolicy).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.PolicyCode, item.SupersedesPolicyId })
+                .HasPrincipalKey(item => new { item.TenantId, item.PolicyCode, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookApplicabilityRule>(entity =>
+        {
+            entity.ToTable("AccountingBookApplicabilityRules", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_Priority", "[Priority] >= 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_RuleCodeCanonical", "LEN([RuleCode]) > 0 AND LEFT([RuleCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [RuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([RuleCode]))) COLLATE Latin1_General_100_BIN2 AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.RuleCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.OriginatingModuleCode, item.SourceDocumentType, item.PostingAction, item.Priority }).IsUnique();
+            entity.Property(item => item.RuleCode).HasMaxLength(40).IsRequired();
+            entity.Property(item => item.OriginatingModuleCode).HasMaxLength(40).IsRequired();
+            entity.Property(item => item.SourceDocumentType).HasMaxLength(80).IsRequired();
+            entity.Property(item => item.PostingAction).HasMaxLength(60).IsRequired();
+            entity.HasOne(item => item.Policy).WithMany(item => item.Rules)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookApplicabilityRuleBook>(entity =>
+        {
+            entity.ToTable("AccountingBookApplicabilityRuleBooks", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityRuleId, item.AccountingBookId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityRuleId, item.SelectionOrder }).IsUnique();
+            entity.Property(item => item.AccountingBookCodeSnapshot).HasMaxLength(20).IsRequired();
+            entity.HasOne(item => item.Rule).WithMany(item => item.SelectedBooks)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityRuleId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId, item.AccountingBookCodeSnapshot })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Code }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookSelectionEvidence>(entity =>
+        {
+            entity.ToTable("AccountingBookSelectionEvidence", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_RuleLineage", "([AccountingBookApplicabilityPolicyId] IS NULL AND [AccountingBookApplicabilityRuleId] IS NULL AND [PolicyVersion] IS NULL) OR ([AccountingBookApplicabilityPolicyId] IS NOT NULL AND [AccountingBookApplicabilityRuleId] IS NOT NULL AND [PolicyVersion] IS NOT NULL)");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_InputHash", "LEN([CalculationInputHash]) = 64 AND [CalculationInputHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_Fingerprint", "LEN([SelectionFingerprint]) = 64 AND [SelectionFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(item => item.OriginatingModuleCode).HasMaxLength(40).IsRequired();
+            entity.Property(item => item.SourceDocumentType).HasMaxLength(80).IsRequired();
+            entity.Property(item => item.PostingAction).HasMaxLength(60).IsRequired();
+            entity.Property(item => item.CalculationInputHash).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.SelectionFingerprint).HasMaxLength(64).IsRequired();
+            entity.HasOne(item => item.Policy).WithMany(item => item.SelectionEvidence)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.PolicyVersion })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Version }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Rule).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.AccountingBookApplicabilityRuleId })
+                .HasPrincipalKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookSelectionEvidenceBook>(entity =>
+        {
+            entity.ToTable("AccountingBookSelectionEvidenceBooks", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId, item.AccountingBookId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId, item.SelectionOrder }).IsUnique();
+            entity.Property(item => item.AccountingBookCodeSnapshot).HasMaxLength(20).IsRequired();
+            entity.Property(item => item.AuthorityFingerprint).HasMaxLength(64).IsRequired();
+            entity.HasOne(item => item.Evidence).WithMany(item => item.Books)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId, item.AccountingBookCodeSnapshot })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Code }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountingBookPeriod>(entity =>

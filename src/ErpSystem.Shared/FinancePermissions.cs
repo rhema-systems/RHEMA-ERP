@@ -35,6 +35,10 @@ public static class FinancePermissions
     public const string ApproveAccountingBookPeriods = "Finance.AccountingBooks.Periods.Approve";
     public const string ManageAccountingBookInitialization = "Finance.AccountingBooks.Initialization.Manage";
     public const string ApproveAccountingBookInitialization = "Finance.AccountingBooks.Initialization.Approve";
+    public const string ViewAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Read";
+    public const string ManageAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Manage";
+    public const string ApproveAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Approve";
+    public const string ResolveAccountingBookApplicability = "Finance.AccountingBooks.Applicability.Resolve";
     public const string ManageCodingDimensions = "Finance.Dimensions.Manage";
     public const string ManageDimensionCertification = "Finance.Dimensions.Certification.Manage";
     public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
@@ -190,6 +194,10 @@ public static class FinancePermissions
         new(ApproveAccountingBookPeriods, "Approve Accounting Book Periods", "Independently approve exact-book period transitions.", CategoryPeriodClose),
         new(ManageAccountingBookInitialization, "Manage Accounting Book Initialization", "Prepare and submit governed exact-book opening evidence.", CategoryMigration),
         new(ApproveAccountingBookInitialization, "Approve Accounting Book Initialization", "Independently approve governed accounting-book opening evidence.", CategoryMigration),
+        new(ViewAccountingBookApplicabilityPolicy, "View Accounting Book Applicability Policy", "View Finance-owned book-selection policy configuration.", CategoryGeneralLedger),
+        new(ManageAccountingBookApplicabilityPolicy, "Manage Accounting Book Applicability Policy", "Create and submit effective-dated book-selection policy versions.", CategoryGeneralLedger),
+        new(ApproveAccountingBookApplicabilityPolicy, "Approve Accounting Book Applicability Policy", "Independently approve, reject, or retire book-selection policies.", CategoryGeneralLedger),
+        new(ResolveAccountingBookApplicability, "Resolve Accounting Book Applicability", "Resolve and freeze governed book-selection evidence without posting.", CategoryGeneralLedger),
         new(ManageCodingDimensions, "Manage Coding Dimensions", "Configure tenant-owned transaction dimensions, values, and certified account applicability rules.", CategoryGeneralLedger),
         new(ManageDimensionCertification, "Manage Dimension Certification", "Assess and promote recognized Finance dimension routes using governed readiness evidence.", CategoryGeneralLedger),
         new(CreateJournalEntries, "Create Journal Entries", "Create draft manual journal entries.", CategoryGeneralLedger),

@@ -237,6 +237,27 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             InitializationFingerprint = initialization?.EvidenceFingerprint, RequiredPeriodCount = effectivePeriods.Count, ReadyPeriodCount = ready };
     }
 
+    public async Task<AccountingBookInitializationEvidenceValidationDto> ValidateCurrentApprovedEvidenceAsync(Guid accountingBookId, CancellationToken cancellationToken = default)
+    {
+        await RequireBookAsync(accountingBookId, cancellationToken);
+        var latest = await Query().AsNoTracking().Where(item => item.AccountingBookId == accountingBookId)
+            .OrderByDescending(item => item.Version).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken);
+        if (latest?.InitializationStatus != AccountingBookInitializationStatus.Approved)
+            return new() { IsValid = false, InitializationId = latest?.Id, Version = latest?.Version, Blocker = "The latest initialization version is not approved." };
+        try
+        {
+            // Re-derivation is the C4 authority: retained hashes alone are not proof that mappings and balances stayed reconciled.
+            await EnsureEvidenceUnchangedAsync(latest, cancellationToken);
+            return new() { IsValid = true, InitializationId = latest.Id, Version = latest.Version,
+                EvidenceFingerprint = latest.EvidenceFingerprint, ReconciliationFingerprint = latest.ReconciliationFingerprint };
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new() { IsValid = false, InitializationId = latest.Id, Version = latest.Version,
+                EvidenceFingerprint = latest.EvidenceFingerprint, ReconciliationFingerprint = latest.ReconciliationFingerprint, Blocker = ex.Message };
+        }
+    }
+
     private async Task EnsureEvidenceUnchangedAsync(AccountingBookInitialization entity, CancellationToken ct)
     {
         var source = await ValidateSourceAsync(entity.AccountingBook, entity.Mode, entity.SourceAccountingBookId, ct);

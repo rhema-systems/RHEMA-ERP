@@ -9203,6 +9203,329 @@ namespace ErpSystem.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("PolicyCode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("PolicyStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("PreparedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("RetiredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetiredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RetirementDecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetirementDecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RetirementDecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("RetirementDecisionStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("RetirementReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("RetirementRequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetirementRequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("RetirementWorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid?>("SupersedesPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "PolicyCode", "SupersedesPolicyId");
+
+                    b.HasIndex("TenantId", "PolicyCode", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookApplicabilityPolicies", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_ApprovalShape", "([PolicyStatus] IN (1,2,4) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 5 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NOT NULL AND [RetiredAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_CodeCanonical", "LEN([PolicyCode]) > 0 AND [PolicyCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PolicyCode]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([PolicyCode]) = DATALENGTH(UPPER(LTRIM(RTRIM([PolicyCode])))) AND LEFT([PolicyCode], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_EffectiveRange", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementMakerChecker", "[RetiredByUserId] IS NULL OR [RetiredByUserId] <> [RetirementRequestedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementRequestShape", "([RetirementDecisionStatus] IS NULL AND [RetirementRequestedByUserId] IS NULL AND [RetirementRequestedAtUtc] IS NULL AND [RetirementReason] IS NULL AND [RetirementWorkflowInstanceId] IS NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] = 'Pending' AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] IN ('Approved','Rejected') AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NOT NULL AND [RetirementDecidedAtUtc] IS NOT NULL AND [RetirementDecisionReason] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_Status", "[PolicyStatus] IN (1, 2, 3, 4, 5)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookApplicabilityPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OriginatingModuleCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("PostingAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RuleCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "RuleCode")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "OriginatingModuleCode", "SourceDocumentType", "PostingAction", "Priority")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookApplicabilityRules", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_Priority", "[Priority] >= 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_RuleCodeCanonical", "LEN([RuleCode]) > 0 AND LEFT([RuleCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [RuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([RuleCode]))) COLLATE Latin1_General_100_BIN2 AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRuleBook", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookApplicabilityRuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountingBookCodeSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SelectionOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityRuleId", "AccountingBookId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityRuleId", "SelectionOrder")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot");
+
+                    b.ToTable("AccountingBookApplicabilityRuleBooks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_NoDelete", "[IsDeleted] = 0");
+                        });
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9543,6 +9866,194 @@ namespace ErpSystem.Data.Migrations
                             t.HasCheckConstraint("CK_AccountingBookPeriods_PendingStatus", "[PendingStatus] IS NULL OR [PendingStatus] IN (1, 2, 3, 4)");
 
                             t.HasCheckConstraint("CK_AccountingBookPeriods_Status", "[IsDeleted] = 1 OR [PeriodStatus] IN (1, 2, 3, 4)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountingBookApplicabilityPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountingBookApplicabilityRuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CalculationInputHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("EffectiveDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("FrozenAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("FrozenByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OriginatingModuleCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int?>("PolicyVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PostingAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("SelectionFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "AccountingBookApplicabilityRuleId");
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "PolicyVersion");
+
+                    b.ToTable("AccountingBookSelectionEvidence", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_Fingerprint", "LEN([SelectionFingerprint]) = 64 AND [SelectionFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_InputHash", "LEN([CalculationInputHash]) = 64 AND [CalculationInputHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_RuleLineage", "([AccountingBookApplicabilityPolicyId] IS NULL AND [AccountingBookApplicabilityRuleId] IS NULL AND [PolicyVersion] IS NULL) OR ([AccountingBookApplicabilityPolicyId] IS NOT NULL AND [AccountingBookApplicabilityRuleId] IS NOT NULL AND [PolicyVersion] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidenceBook", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountingBookCodeSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookSelectionEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AuthorityFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SelectionOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot");
+
+                    b.HasIndex("TenantId", "AccountingBookSelectionEvidenceId", "AccountingBookId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookSelectionEvidenceId", "SelectionOrder")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookSelectionEvidenceBooks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_NoDelete", "[IsDeleted] = 0");
                         });
                 });
 
@@ -168831,6 +169342,74 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", "SupersedesPolicy")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "PolicyCode", "SupersedesPolicyId")
+                        .HasPrincipalKey("TenantId", "PolicyCode", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("SupersedesPolicy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", "Policy")
+                        .WithMany("Rules")
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityPolicyId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Policy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRuleBook", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", "Rule")
+                        .WithMany("SelectedBooks")
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityRuleId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot")
+                        .HasPrincipalKey("TenantId", "Id", "Code")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("Rule");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -168930,6 +169509,62 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("AccountingBook");
 
                     b.Navigation("FiscalPeriod");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", "Rule")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityPolicyId", "AccountingBookApplicabilityRuleId")
+                        .HasPrincipalKey("TenantId", "AccountingBookApplicabilityPolicyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", "Policy")
+                        .WithMany("SelectionEvidence")
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityPolicyId", "PolicyVersion")
+                        .HasPrincipalKey("TenantId", "Id", "Version")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Policy");
+
+                    b.Navigation("Rule");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidenceBook", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", "Evidence")
+                        .WithMany("Books")
+                        .HasForeignKey("TenantId", "AccountingBookSelectionEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot")
+                        .HasPrincipalKey("TenantId", "Id", "Code")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("Evidence");
 
                     b.Navigation("Tenant");
                 });
@@ -213782,9 +214417,26 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Initializations");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", b =>
+                {
+                    b.Navigation("Rules");
+
+                    b.Navigation("SelectionEvidence");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", b =>
+                {
+                    b.Navigation("SelectedBooks");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", b =>
+                {
+                    b.Navigation("Books");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AllocationRule", b =>
