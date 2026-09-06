@@ -1278,6 +1278,13 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             postingBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
             postingBook.IsActive = true;
             postingBook.AllowsPosting = true;
+            var postingPeriod = await db.FiscalPeriods.SingleAsync(item => item.TenantId == tenantId && !item.IsDeleted);
+            db.AccountingBookPeriods.Add(new AccountingBookPeriod
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = postingBook.Id,
+                FiscalPeriodId = postingPeriod.Id,
+                PeriodStatus = periodOpen && !periodClosed ? AccountingBookPeriodStatus.Open : AccountingBookPeriodStatus.Closed
+            });
             db.BankAccounts.Add(new BankAccount
             {
                 Id = Guid.NewGuid(),

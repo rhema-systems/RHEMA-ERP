@@ -404,6 +404,44 @@ public sealed class FinancePostingEngineTests
     }
 
     [Fact]
+    [Trait("Category", "AccountingBookPeriodC4")]
+    public async Task PostAsync_ShouldFailClosed_WhenExactBookPeriodAuthorityIsMissing()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        db.AccountingBookPeriods.RemoveRange(db.AccountingBookPeriods.Local);
+        var debit = SeedAccount(db, tenantId, "6110", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2110", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id)))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_PERIOD_REQUIRED:*");
+        db.JournalEntries.Should().BeEmpty();
+        debit.Balance.Should().Be(0m);
+        credit.Balance.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookPeriodC4")]
+    public async Task PostAsync_ShouldFailClosed_WhenOuterPeriodIsOpenButExactBookPeriodIsClosed()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        db.AccountingBookPeriods.Local.Single().PeriodStatus = AccountingBookPeriodStatus.Closed;
+        var debit = SeedAccount(db, tenantId, "6120", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2120", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id)))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_PERIOD_NOT_OPEN:*");
+        db.JournalEntries.Should().BeEmpty();
+    }
+
+    [Fact]
     [Trait("Category", "ModuleLocks")]
     public async Task PostAsync_ShouldRejectPosting_WhenOriginModuleIsLocked()
     {
@@ -1513,6 +1551,16 @@ public sealed class FinancePostingEngineTests
         };
 
         db.FiscalPeriods.Add(period);
+        foreach (var book in db.AccountingBooks.Local.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToList())
+        {
+            db.AccountingBookPeriods.Add(new AccountingBookPeriod
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id, FiscalPeriodId = period.Id,
+                PeriodStatus = isLocked ? AccountingBookPeriodStatus.Locked
+                    : isClosed ? AccountingBookPeriodStatus.Closed
+                    : isOpen ? AccountingBookPeriodStatus.Open : AccountingBookPeriodStatus.Future
+            });
+        }
         return period;
     }
 
@@ -1568,6 +1616,11 @@ public sealed class FinancePostingEngineTests
             AllowsPosting = true
         };
         db.AccountingBooks.Add(book);
+        foreach (var period in db.FiscalPeriods.Local.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToList())
+            db.AccountingBookPeriods.Add(new AccountingBookPeriod { Id = Guid.NewGuid(), TenantId = tenantId,
+                AccountingBookId = book.Id, FiscalPeriodId = period.Id,
+                PeriodStatus = period.IsLocked ? AccountingBookPeriodStatus.Locked : period.IsClosed ? AccountingBookPeriodStatus.Closed
+                    : period.IsOpen ? AccountingBookPeriodStatus.Open : AccountingBookPeriodStatus.Future });
         foreach (var accountId in accountIds)
         {
             db.AccountAccountingBooks.Add(new AccountAccountingBook
