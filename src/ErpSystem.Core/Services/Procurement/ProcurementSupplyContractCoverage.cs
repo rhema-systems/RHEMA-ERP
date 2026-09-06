@@ -48,7 +48,7 @@ internal static class ProcurementSupplyContractCoverage
             order.ProcurementSourceType != ProcurementPurchaseOrderSourceType.TenderAward ||
             order.ProcurementSourceId != contract.TenderAwardId ||
             order.ProcurementCategory != ProcurementCategoryClass.Goods ||
-            !order.BudgetId.HasValue || string.IsNullOrWhiteSpace(order.SourceIntegrityHash) ||
+            string.IsNullOrWhiteSpace(order.SourceIntegrityHash) ||
             (order.ContractId.HasValue && order.ContractId != contract.Id) ||
             !SameCurrency(order.Currency, contract.Currency) ||
             order.TotalAmount != contract.ContractValue || contract.ContractValue <= 0m)
@@ -67,8 +67,10 @@ internal static class ProcurementSupplyContractCoverage
                 item.EntryType == ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment &&
                 item.SourceType == "PurchaseOrder" && item.SourceId == order.Id)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        // Formal procurement coverage is owned by the PR reservation/ledger.
+        // Legacy PO.BudgetId is optional and is not that authoritative link.
         if (formal is null || formal.PurchaseRequisitionId != requisitionId ||
-            formal.ProcurementBudgetId != order.BudgetId || !SameCurrency(formal.Currency, contract.Currency))
+            !SameCurrency(formal.Currency, contract.Currency))
             throw Invalid("The exact approved PO has no matching formal budget commitment.");
 
         // Keep this recovery narrow: amended/released/utilized exposures need their

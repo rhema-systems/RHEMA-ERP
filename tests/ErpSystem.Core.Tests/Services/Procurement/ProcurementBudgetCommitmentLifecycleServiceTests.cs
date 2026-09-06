@@ -741,11 +741,15 @@ public sealed class ProcurementBudgetCommitmentLifecycleServiceTests
         CorrelationId = $"amendment-{sequence}"
     };
 
-    [Fact]
-    public async Task SupplyContractAfterExactApprovedPoReusesItsCommitmentAndReceiptStillUtilizesOnce()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SupplyContractAfterExactApprovedPoReusesItsCommitmentAndReceiptStillUtilizesOnce(bool legacyBudgetReference)
     {
         await using var fixture = new Fixture(100_000m, 52_000m);
         var (contract, order) = await SeedSupplyCoverage(fixture);
+        order.BudgetId = legacyBudgetReference ? Guid.NewGuid() : null;
+        await fixture.Context.SaveChangesAsync();
         var original = await fixture.Context.ProcurementBudgetCommitmentLedgerEntries.SingleAsync();
         await fixture.InTransaction(async () =>
         {
@@ -782,6 +786,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleServiceTests
     [InlineData("source")]
     [InlineData("category")]
     [InlineData("ledger")]
+    [InlineData("budget-envelope")]
     [InlineData("receipt")]
     [InlineData("duplicate")]
     [InlineData("award")]
@@ -802,6 +807,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleServiceTests
             case "source": order.ProcurementSourceId = Guid.NewGuid(); break;
             case "category": order.ProcurementCategory = ProcurementCategoryClass.Works; break;
             case "ledger": formal.PurchaseRequisitionId = Guid.NewGuid(); break;
+            case "budget-envelope": formal.ProcurementBudgetId = Guid.NewGuid(); break;
             case "receipt": fixture.Context.Add(new PurchaseOrderReceipt { Id = Guid.NewGuid(),
                 TenantId = fixture.TenantId, PurchaseOrderId = order.Id, ReceiptNumber = "EXISTING" }); break;
             case "duplicate":
@@ -842,7 +848,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleServiceTests
         order.ProcurementSourceType = ProcurementPurchaseOrderSourceType.TenderAward;
         order.ProcurementSourceId = award.Id;
         order.ProcurementCategory = ProcurementCategoryClass.Goods;
-        order.BudgetId = fixture.Budget.Id;
+        order.BudgetId = null;
         order.SourceIntegrityHash = new string('b', 64);
         order.ApprovedById = fixture.UserId;
         order.ApprovedAt = DateTime.UtcNow;
