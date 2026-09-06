@@ -71,7 +71,9 @@ public sealed class AccountingBookApplicabilityC5MigrationTests
         constraints.Values.Select(item => item.Sql).Should().Contain(sql => sql.Contains("ALL_CLASSIFIED_BOOKS", StringComparison.Ordinal));
 
         var triggerSql = string.Join('\n', up.OfType<SqlOperation>().Skip(1).Select(item => item.Sql));
-        triggerSql.Should().Contain("C5_POLICY_AMBIGUITY")
+        triggerSql.Should().Contain("C5_POLICY_REPLACEMENT_ORDER")
+            .And.Contain("C5_EMPTY_SELECTION")
+            .And.Contain("C5_SELECTED_BOOK_INVALID")
             .And.Contain("C5_RULE_AMBIGUITY")
             .And.Contain("UPDLOCK,HOLDLOCK")
             .And.Contain("C5_SELECTION_IMMUTABLE")

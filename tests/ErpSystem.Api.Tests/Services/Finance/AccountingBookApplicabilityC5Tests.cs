@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
@@ -178,15 +179,87 @@ public sealed class AccountingBookApplicabilityC5Tests
         entity.PolicyStatus.Should().Be(AccountingBookApplicabilityPolicyStatus.Retired); entity.RetirementDecisionStatus.Should().Be("Approved");
     }
 
+    [Fact]
+    public async Task ApprovedSuccessorShadowsOpenPredecessorAtInclusiveBoundaryWithoutMutatingHistory()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true);
+        AddApprovedPolicy(db, state, [state.Primary.Id], policyCode: "REPLACEMENT", effectiveFrom: new DateTime(2026, 9, 1));
+        await db.SaveChangesAsync(); var predecessor = db.AccountingBookApplicabilityPolicies.Single();
+        var maker = Guid.NewGuid(); var checker = Guid.NewGuid(); var draft = Draft(state.Parallel.Id);
+        draft.PolicyCode = "REPLACEMENT"; draft.EffectiveFrom = new DateTime(2026, 9, 6);
+        var successor = await Service(db, state.TenantId, maker).CreateDraftAsync(draft);
+        var successorEntity = db.AccountingBookApplicabilityPolicies.Single(item => item.Id == successor.Id);
+        successorEntity.RowVersion = [1]; await db.SaveChangesAsync();
+        await Service(db, state.TenantId, maker).SubmitAsync(successor.Id, new() { Reason = "Submit replacement", RowVersion = Convert.ToBase64String([1]) });
+        successorEntity.RowVersion = [2]; await db.SaveChangesAsync();
+        await Service(db, state.TenantId, checker).ApproveAsync(successor.Id, new() { Reason = "Approve replacement", RowVersion = Convert.ToBase64String([2]) });
+
+        var before = Input(); before.EffectiveDate = new DateTime(2026, 9, 5);
+        var at = Input(); at.EffectiveDate = new DateTime(2026, 9, 6);
+        var after = Input(); after.EffectiveDate = new DateTime(2026, 9, 7);
+        (await Service(db, state.TenantId).ResolveAsync(before)).Books.Single().AccountingBookId.Should().Be(state.Primary.Id);
+        (await Service(db, state.TenantId).ResolveAsync(at)).Books.Single().AccountingBookId.Should().Be(state.Parallel.Id);
+        (await Service(db, state.TenantId).ResolveAsync(after)).Books.Single().AccountingBookId.Should().Be(state.Parallel.Id);
+        predecessor.EffectiveTo.Should().BeNull();
+        db.AccountingBookSelectionEvidence.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CorruptExplicitZeroBookRuleFailsClosedAndFreezeWritesNothing()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true);
+        AddApprovedPolicy(db, state, [], policyCode: "EMPTY", effectiveFrom: new DateTime(2026, 1, 1)); await db.SaveChangesAsync();
+        var service = Service(db, state.TenantId);
+        await FluentActions.Awaiting(() => service.ResolveAsync(Input())).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("ACCOUNTING_BOOK_APPLICABILITY_EMPTY_SELECTION:*");
+        db.AccountingBookSelectionEvidence.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClassificationTypeDriftChangesFingerprintBlocksFreezeAndCompatibleRecoverySucceeds()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true); await db.SaveChangesAsync();
+        var service = Service(db, state.TenantId); var original = await service.ResolveAsync(Input());
+        var classification = db.AccountClassifications.Single(item => item.AccountingBookId == state.Primary.Id);
+        classification.CoreAccountType = AccountType.Liability; await db.SaveChangesAsync();
+        var drifted = await service.ResolveAsync(Input());
+        drifted.Blockers.Should().ContainSingle(item => item.Code == "BOOK_MAPPING_CLASSIFICATION_NOT_READY");
+        drifted.SelectionFingerprint.Should().NotBe(original.SelectionFingerprint);
+        await FluentActions.Awaiting(() => service.FreezeAsync(new() { EffectiveDate = state.Date, OriginatingModuleCode = "INV",
+            SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST", IdempotencyKey = "type-drift",
+            ExpectedCalculationInputHash = original.CalculationInputHash, ExpectedSelectionFingerprint = original.SelectionFingerprint }))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_SELECTION_EVIDENCE_CONFLICT:*");
+        db.AccountingBookSelectionEvidence.Should().BeEmpty();
+        classification.CoreAccountType = AccountType.Asset; await db.SaveChangesAsync();
+        var recovered = await service.ResolveAsync(Input()); recovered.Blockers.Should().BeEmpty();
+        var frozen = await service.FreezeAsync(new() { EffectiveDate = state.Date, OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT",
+            PostingAction = "POST", IdempotencyKey = "type-drift", ExpectedCalculationInputHash = recovered.CalculationInputHash,
+            ExpectedSelectionFingerprint = recovered.SelectionFingerprint });
+        frozen.Books.Should().ContainSingle(); db.AccountingBookSelectionEvidence.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task PolicyAuditContainsReconstructibleRuleBookAndSupersessionEvidence()
+    {
+        await using var db = Context(); var state = Seed(db, ready: true); await db.SaveChangesAsync();
+        FinanceAuditEventDto? recorded = null; var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinanceAuditEventDto, CancellationToken>((item, _) => recorded = item).ReturnsAsync(new AuditLog());
+        await Service(db, state.TenantId, audit: audit.Object).CreateDraftAsync(Draft(state.Primary.Id));
+        var json = JsonSerializer.Serialize(recorded!.AfterValues);
+        json.Should().Contain("INVENTORY_POLICY").And.Contain("GRN_POST").And.Contain("GOODS.RECEIPT")
+            .And.Contain(state.Primary.Id.ToString()).And.Contain("IFRS");
+    }
+
     private static ResolveAccountingBookApplicabilityDto Input() => new() { EffectiveDate = new DateTime(2026, 9, 6),
         OriginatingModuleCode = "inv", SourceDocumentType = "goods.receipt", PostingAction = "post" };
     private static SaveAccountingBookApplicabilityPolicyDto Draft(params Guid[] books) => new() { PolicyCode = "INVENTORY_POLICY", Name = "Inventory policy",
         EffectiveFrom = new DateTime(2026, 1, 1), Reason = "Govern representations", Rules = [new() { RuleCode = "GRN_POST", Priority = 100,
             OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST", AccountingBookIds = books }] };
-    private static void AddApprovedPolicy(ApplicationDbContext db, State state, params Guid[] books)
+    private static void AddApprovedPolicy(ApplicationDbContext db, State state, Guid[] books, string? policyCode = null, DateTime? effectiveFrom = null)
     {
-        var policy = new AccountingBookApplicabilityPolicy { TenantId = state.TenantId, PolicyCode = $"P{Guid.NewGuid():N}"[..20].ToUpperInvariant(), Version = 1,
-            Name = "Approved", EffectiveFrom = new DateTime(2026, 1, 1), PolicyStatus = AccountingBookApplicabilityPolicyStatus.Approved,
+        var policy = new AccountingBookApplicabilityPolicy { TenantId = state.TenantId, PolicyCode = policyCode ?? $"P{Guid.NewGuid():N}"[..20].ToUpperInvariant(), Version = 1,
+            Name = "Approved", EffectiveFrom = effectiveFrom ?? new DateTime(2026, 1, 1), PolicyStatus = AccountingBookApplicabilityPolicyStatus.Approved,
             Reason = "Approved", CreatedByUserId = Guid.NewGuid(), PreparedByUserId = Guid.NewGuid(), PreparedAtUtc = DateTime.UtcNow, ApprovedByUserId = Guid.NewGuid(), ApprovedAtUtc = DateTime.UtcNow };
         var rule = new AccountingBookApplicabilityRule { TenantId = state.TenantId, RuleCode = "RULE", Priority = 100, OriginatingModuleCode = "INV",
             SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST", SortOrder = 0 };
@@ -195,6 +268,7 @@ public sealed class AccountingBookApplicabilityC5Tests
             { TenantId = state.TenantId, AccountingBookId = id, AccountingBookCodeSnapshot = book.Code, SelectionOrder = order++ }); }
         policy.Rules.Add(rule); db.AccountingBookApplicabilityPolicies.Add(policy);
     }
+    private static void AddApprovedPolicy(ApplicationDbContext db, State state, params Guid[] books) => AddApprovedPolicy(db, state, books, null, null);
     private static State Seed(ApplicationDbContext db, bool ready)
     {
         var tenant = Guid.NewGuid(); var date = new DateTime(2026, 9, 6);
@@ -222,18 +296,18 @@ public sealed class AccountingBookApplicabilityC5Tests
         Purpose = "Reporting", BookType = type, LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS", IsDefault = primary,
         IsActive = true, AllowsPosting = true };
     private static ApplicationDbContext Context() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase($"c5-{Guid.NewGuid():N}").Options);
-    private static IAccountingBookApplicabilityService Service(ApplicationDbContext db, Guid tenant, Guid? actor = null)
+    private static IAccountingBookApplicabilityService Service(ApplicationDbContext db, Guid tenant, Guid? actor = null, IFinanceAuditService? audit = null)
     {
         var actorId = actor ?? Guid.NewGuid(); var user = new Mock<ICurrentUserService>(); user.SetupGet(item => item.TenantId).Returns(tenant); user.SetupGet(item => item.UserId).Returns(actorId.ToString()); user.SetupGet(item => item.UserName).Returns("c5.test");
         var workflow = new Mock<IWorkflowService>(); workflow.Setup(item => item.HasActiveApprovalWorkflowAsync(It.IsAny<string>())).ReturnsAsync(true);
         workflow.Setup(item => item.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>())).ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = Guid.NewGuid() });
         workflow.Setup(item => item.CanUserApproveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(true);
         workflow.Setup(item => item.ProcessApprovalStepAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>())).ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
-        var audit = new Mock<IFinanceAuditService>(); audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
+        if (audit == null) { var auditMock = new Mock<IFinanceAuditService>(); auditMock.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog()); audit = auditMock.Object; }
         var initialization = new Mock<IAccountingBookInitializationService>(); initialization.Setup(item => item.ValidateCurrentApprovedEvidenceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid id, CancellationToken _) => new AccountingBookInitializationEvidenceValidationDto { IsValid = db.AccountingBookInitializations.Any(item => item.AccountingBookId == id),
                 InitializationId = id, Version = 1, EvidenceFingerprint = new string('A', 64), ReconciliationFingerprint = new string('B', 64), Blocker = "Missing current approved initialization." });
-        return new AccountingBookApplicabilityService(db, user.Object, workflow.Object, audit.Object, initialization.Object);
+        return new AccountingBookApplicabilityService(db, user.Object, workflow.Object, audit, initialization.Object);
     }
     private sealed record State(Guid TenantId, AccountingBook Primary, AccountingBook Parallel, DateTime Date);
 }

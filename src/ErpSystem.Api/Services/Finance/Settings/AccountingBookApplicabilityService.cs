@@ -46,10 +46,12 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
         foreach (var book in books)
         {
             var initialized = await _initialization.ValidateCurrentApprovedEvidenceAsync(book.Id, cancellationToken);
-            var mappings = await _db.AccountAccountingBooks.AsNoTracking().Include(item => item.AccountClassification)
+            var mappings = await _db.AccountAccountingBooks.AsNoTracking().Include(item => item.Account).Include(item => item.AccountClassification)
                 .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted && item.IsEnabled).ToListAsync(cancellationToken);
             var mappingReady = mappings.Count > 0 && mappings.All(item => item.AccountClassificationId != null && item.AccountClassification != null
-                && !item.AccountClassification.IsDeleted && item.AccountClassification.Status == AccountClassificationStatus.Active && item.AccountClassification.IsPostingClassification);
+                && !item.AccountClassification.IsDeleted && item.AccountClassification.Status == AccountClassificationStatus.Active
+                && item.AccountClassification.IsPostingClassification && item.Account != null && !item.Account.IsDeleted
+                && item.Account.TenantId == TenantId && item.Account.AccountType == item.AccountClassification.CoreAccountType);
             result.Add(new() { AccountingBookId = book.Id, Code = book.Code, Name = book.Name, BookType = book.BookType.ToString(),
                 LifecycleStatus = book.LifecycleStatus.ToString(), IsDefault = book.IsDefault, IsActive = book.IsActive,
                 AllowsPosting = book.AllowsPosting, InitializationReconciled = initialized.IsValid, MappingClassificationReady = mappingReady });
@@ -155,6 +157,8 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
         if (approve && result.Status == WorkflowInstanceStatus.Completed)
         {
             entity.PolicyStatus = AccountingBookApplicabilityPolicyStatus.Retired; entity.RetiredByUserId = actor; entity.RetiredAtUtc = DateTime.UtcNow;
+            // Retired policy versions remain authoritative for their historical inclusive interval.
+            entity.EffectiveTo = entity.RetiredAtUtc.Value.Date;
         }
         if (!approve || result.Status == WorkflowInstanceStatus.Completed)
         {
@@ -174,11 +178,18 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
         // Producer modules supply stable evidence only. Finance remains the sole book-enumeration authority.
         var input = Normalize(request);
         var date = request.EffectiveDate.Date;
+        // An approved successor replaces its policy lineage from its inclusive EffectiveFrom date without
+        // rewriting predecessor rows or frozen selections. This keeps before/at/after resolution gap-free.
+        var startedPolicies = await _db.AccountingBookApplicabilityPolicies.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted
+                && (item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved || item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Retired)
+                && item.EffectiveFrom <= date)
+            .OrderBy(item => item.PolicyCode).ThenByDescending(item => item.Version).ToListAsync(cancellationToken);
+        var effectivePolicyIds = startedPolicies.GroupBy(item => item.PolicyCode, StringComparer.Ordinal)
+            .Select(group => group.First()).Where(item => item.EffectiveTo == null || item.EffectiveTo >= date).Select(item => item.Id).ToList();
         var candidates = await _db.AccountingBookApplicabilityRules.AsNoTracking()
             .Include(item => item.Policy).Include(item => item.SelectedBooks).ThenInclude(item => item.AccountingBook)
-            .Where(item => item.TenantId == TenantId && !item.IsDeleted && !item.Policy.IsDeleted
-                && item.Policy.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved
-                && item.Policy.EffectiveFrom <= date && (item.Policy.EffectiveTo == null || item.Policy.EffectiveTo >= date)
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted && effectivePolicyIds.Contains(item.AccountingBookApplicabilityPolicyId)
                 && item.OriginatingModuleCode == input.Module && item.SourceDocumentType == input.Document && item.PostingAction == input.Action)
             .OrderByDescending(item => item.Priority).ThenBy(item => item.Policy.PolicyCode).ThenByDescending(item => item.Policy.Version).ThenBy(item => item.RuleCode)
             .ToListAsync(cancellationToken);
@@ -205,6 +216,8 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
             // Delta books are not ordinary automatic representations; only explicit full-book IDs survive validation.
             selected = rule!.SelectedBooks.OrderBy(item => item.SelectionOrder).Select(item => new AccountingBookSelectionBookDto
             { AccountingBookId = item.AccountingBookId, AccountingBookCode = item.AccountingBookCodeSnapshot, SelectionOrder = item.SelectionOrder }).ToList();
+            // Corrupt/imported explicit authority must never become a successful empty selection or fallback.
+            if (selected.Count == 0) throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_EMPTY_SELECTION: an explicit rule must select at least one governed full book.");
         }
 
         var validation = await ValidateSelectedBooksAsync(selected, date, input.Module, cancellationToken);
@@ -223,7 +236,17 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
     public Task<AccountingBookSelectionDto> FreezeAsync(FreezeAccountingBookSelectionDto request, CancellationToken cancellationToken = default) => AtomicAsync(async () =>
     {
         if (string.IsNullOrWhiteSpace(request.IdempotencyKey)) throw new InvalidOperationException("A selection idempotency key is required.");
-        var key = request.IdempotencyKey.Trim();
+        var key = request.IdempotencyKey.Trim().ToUpperInvariant();
+        if (key.Length > 100) throw new InvalidOperationException("Selection idempotency key cannot exceed 100 characters.");
+        // SQL Server's unique-key equality is ordinarily case-insensitive. A transaction-owned application lock
+        // over the canonical key prevents identical or conflicting concurrent freezes from racing the evidence insert.
+        if (_db.Database.IsSqlServer())
+        {
+            var resource = $"FIN:C5:FREEZE:{Hash($"{TenantId:D}|{key}")}";
+            await _db.Database.ExecuteSqlInterpolatedAsync($@"DECLARE @result int;
+EXEC @result = sp_getapplock @Resource={resource}, @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=30000;
+IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection evidence could not be serialized.', 1;", cancellationToken);
+        }
         var existing = await _db.AccountingBookSelectionEvidence.AsNoTracking().Include(item => item.Books)
             .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.IdempotencyKey == key && !item.IsDeleted, cancellationToken);
         if (existing != null)
@@ -349,20 +372,29 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
     private async Task ValidatePolicyAsync(AccountingBookApplicabilityPolicy entity, bool includeOtherApprovedPolicies, CancellationToken ct)
     {
         if (entity.Rules.Count == 0 || entity.Rules.Any(item => item.SelectedBooks.Count == 0)) throw new InvalidOperationException("Every applicability rule must select at least one full book.");
+        var selected = entity.Rules.SelectMany(item => item.SelectedBooks).ToList();
+        var selectedIds = selected.Select(item => item.AccountingBookId).Distinct().ToList();
+        var books = await _db.AccountingBooks.AsNoTracking().Where(item => item.TenantId == TenantId && selectedIds.Contains(item.Id) && !item.IsDeleted).ToDictionaryAsync(item => item.Id, ct);
+        if (books.Count != selectedIds.Count || selected.Any(item => !books.TryGetValue(item.AccountingBookId, out var book)
+                || !string.Equals(item.AccountingBookCodeSnapshot, book.Code, StringComparison.Ordinal)
+                || !CanonicalCode.IsMatch(book.Code) || PseudoSelectors.Contains(book.Code)
+                || book.BookType is not (AccountingBookType.PrimaryFull or AccountingBookType.ParallelFull)))
+            throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_SELECTED_BOOK_INVALID: every selected ID/code must be a canonical same-tenant eligible full book.");
         if (!includeOtherApprovedPolicies) return;
         // Approval runs inside the serializable tenant writer boundary. The range reads below are
         // the concurrency authority paired with migration indexes/triggers; do not weaken them.
-        var versionOverlap = await _db.AccountingBookApplicabilityPolicies.AsNoTracking().AnyAsync(item =>
-            item.TenantId == TenantId && item.Id != entity.Id && !item.IsDeleted
-            && item.PolicyCode == entity.PolicyCode && item.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved
-            && item.EffectiveFrom <= (entity.EffectiveTo ?? DateTime.MaxValue)
-            && (item.EffectiveTo == null || item.EffectiveTo >= entity.EffectiveFrom), ct);
-        if (versionOverlap) throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_VERSION_OVERLAP: approved versions in one policy lineage cannot overlap.");
+        var predecessor = entity.SupersedesPolicyId.HasValue
+            ? await _db.AccountingBookApplicabilityPolicies.AsNoTracking().SingleOrDefaultAsync(item => item.TenantId == TenantId
+                && item.Id == entity.SupersedesPolicyId && item.PolicyCode == entity.PolicyCode && !item.IsDeleted, ct) : null;
+        if (predecessor != null && predecessor.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved
+            && entity.EffectiveFrom <= predecessor.EffectiveFrom)
+            throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_REPLACEMENT_ORDER: a successor must start after its approved predecessor.");
         foreach (var rule in entity.Rules)
         {
             var overlap = await _db.AccountingBookApplicabilityRules.AsNoTracking().Include(item => item.Policy).AnyAsync(item =>
                 item.TenantId == TenantId && item.AccountingBookApplicabilityPolicyId != entity.Id && !item.IsDeleted && !item.Policy.IsDeleted
                 && item.Policy.PolicyStatus == AccountingBookApplicabilityPolicyStatus.Approved
+                && item.Policy.PolicyCode != entity.PolicyCode
                 && item.Priority == rule.Priority && item.OriginatingModuleCode == rule.OriginatingModuleCode
                 && item.SourceDocumentType == rule.SourceDocumentType && item.PostingAction == rule.PostingAction
                 && item.Policy.EffectiveFrom <= (entity.EffectiveTo ?? DateTime.MaxValue)
@@ -373,6 +405,7 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
 
     private async Task<SelectionValidation> ValidateSelectedBooksAsync(IReadOnlyList<AccountingBookSelectionBookDto> selected, DateTime date, string moduleCode, CancellationToken ct)
     {
+        if (selected.Count == 0) throw new InvalidOperationException("ACCOUNTING_BOOK_APPLICABILITY_EMPTY_SELECTION: selection authority cannot be empty.");
         var ids = selected.Select(item => item.AccountingBookId).ToList();
         var books = await _db.AccountingBooks.AsNoTracking().Where(item => item.TenantId == TenantId && ids.Contains(item.Id) && !item.IsDeleted).ToDictionaryAsync(item => item.Id, ct);
         var fiscalPeriods = await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted && item.StartDate <= date && item.EndDate >= date).ToListAsync(ct);
@@ -393,8 +426,9 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
             if (mappings.Count == 0 || mappings.Any(item => item.Account == null || item.Account.IsDeleted || item.Account.TenantId != TenantId || item.Account.Status != AccountStatus.Active
                 || item.AccountClassificationId == null || item.AccountClassification == null || item.AccountClassification.TenantId != TenantId
                 || item.AccountClassification.AccountingBookId != book.Id || item.AccountClassification.IsDeleted
-                || item.AccountClassification.Status != AccountClassificationStatus.Active || !item.AccountClassification.IsPostingClassification))
-                Block("BOOK_MAPPING_CLASSIFICATION_NOT_READY", "Selected book requires enabled account mappings with active posting classifications.");
+                || item.AccountClassification.Status != AccountClassificationStatus.Active || !item.AccountClassification.IsPostingClassification
+                || item.AccountClassification.CoreAccountType != item.Account.AccountType))
+                Block("BOOK_MAPPING_CLASSIFICATION_NOT_READY", "Selected book requires enabled mappings whose active posting classification core type matches the account type.");
             Guid? fiscalYearId = null; Guid? fiscalPeriodId = null; Guid? bookPeriodId = null; Guid? moduleDefinitionId = null; Guid? moduleLockId = null;
             string fiscalYearState = "MISSING"; string periodState = "MISSING"; string bookPeriodState = "MISSING"; string moduleState = "MISSING";
             if (fiscalPeriods.Count != 1) Block("EXACT_FISCAL_PERIOD_NOT_READY", "Event date must resolve to exactly one open, unlocked tenant fiscal period.");
@@ -426,7 +460,9 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
                 bookPeriodId = bookPeriod?.Id;
                 bookPeriodState = bookPeriod == null ? "MISSING" : $"{bookPeriod.PeriodStatus}:{bookPeriod.PendingStatus}";
             }
-            var mappingEvidence = string.Join("|", mappings.OrderBy(item => item.Id).Select(item => $"{item.Id:D}:{item.TenantId:D}:{item.AccountingBookId:D}:{item.AccountId:D}:{item.Account?.TenantId:D}:{item.Account?.Status}:{item.AccountClassificationId:D}:{item.AccountClassification?.TenantId:D}:{item.AccountClassification?.AccountingBookId:D}:{item.AccountClassification?.Code}:{item.AccountClassification?.Status}:{item.AccountClassification?.IsPostingClassification}:{item.IsEnabled}"));
+            // Both economic type authorities are decision inputs; binding them prevents stale previews from
+            // surviving an account or classification type mutation.
+            var mappingEvidence = string.Join("|", mappings.OrderBy(item => item.Id).Select(item => $"{item.Id:D}:{item.TenantId:D}:{item.AccountingBookId:D}:{item.AccountId:D}:{item.Account?.TenantId:D}:{item.Account?.Status}:{item.Account?.AccountType}:{item.AccountClassificationId:D}:{item.AccountClassification?.TenantId:D}:{item.AccountClassification?.AccountingBookId:D}:{item.AccountClassification?.Code}:{item.AccountClassification?.CoreAccountType}:{item.AccountClassification?.Status}:{item.AccountClassification?.IsPostingClassification}:{item.IsEnabled}"));
             selectedBook.AuthorityFingerprint = Hash($"BOOK-APPLICABILITY-AUTHORITY-V1|{TenantId:D}|{book.Id:D}|{book.Code}|{book.BookType}|{book.LifecycleStatus}|{book.IsActive}|{book.AllowsPosting}|{book.EffectiveFromUtc:O}|{book.EffectiveToUtc:O}|INIT:{initialization.InitializationId:D}:{initialization.Version}:{initialization.EvidenceFingerprint}:{initialization.ReconciliationFingerprint}|FY:{fiscalYearId:D}|FP:{fiscalPeriodId:D}:{periodState}|BP:{bookPeriodId:D}|MOD:{moduleDefinitionId:D}:{moduleLockId:D}:{moduleState}|MAP:{mappingEvidence}");
             selectedBook.AuthorityFingerprint = Hash($"{selectedBook.AuthorityFingerprint}|FYSTATE:{fiscalYearState}|BPSTATE:{bookPeriodState}");
         }
@@ -472,7 +508,14 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
     private async Task AuditAsync(string type, AccountingBookApplicabilityPolicy entity, string reason, CancellationToken ct) => await _audit.RecordAsync(new FinanceAuditEventDto
     { TenantId = TenantId, EventType = type, SourceModule = "GL", SourceDocumentType = WorkflowEntityType, SourceDocumentId = entity.Id,
         WorkflowInstanceId = entity.WorkflowInstanceId, Resource = "Finance.AccountingBookApplicabilityPolicy", ResourceId = entity.Id.ToString(),
-        AfterValues = new { entity.PolicyCode, entity.Version, Status = entity.PolicyStatus.ToString(), entity.EffectiveFrom, entity.EffectiveTo, entity.CreatedByUserId, entity.ApprovedByUserId }, Reason = reason.Trim() }, ct);
+        AfterValues = new { entity.Id, entity.PolicyCode, entity.Version, entity.SupersedesPolicyId, Status = entity.PolicyStatus.ToString(),
+            entity.EffectiveFrom, entity.EffectiveTo, entity.Reason, entity.CreatedByUserId, entity.PreparedByUserId, entity.ApprovedByUserId,
+            entity.DecidedByUserId, entity.DecidedAtUtc, entity.DecisionReason, entity.RetirementRequestedByUserId,
+            entity.RetirementRequestedAtUtc, entity.RetirementReason, entity.RetirementDecisionStatus,
+            entity.RetirementDecidedByUserId, entity.RetirementDecidedAtUtc, entity.RetirementDecisionReason,
+            Rules = entity.Rules.OrderBy(item => item.SortOrder).ThenBy(item => item.RuleCode).Select(item => new
+            { item.Id, item.RuleCode, item.Priority, item.OriginatingModuleCode, item.SourceDocumentType, item.PostingAction, item.SortOrder,
+              Books = item.SelectedBooks.OrderBy(book => book.SelectionOrder).Select(book => new { book.AccountingBookId, book.AccountingBookCodeSnapshot, book.SelectionOrder }) }) }, Reason = reason.Trim() }, ct);
     private Guid Actor() => Guid.TryParse(_currentUser.UserId, out var id) && id != Guid.Empty ? id : throw new UnauthorizedAccessException("An authenticated Finance user is required.");
     private string ActorName() => _currentUser.UserName ?? "system";
     private sealed record SelectionValidation(IReadOnlyList<AccountingBookSelectionBlockerDto> Blockers);

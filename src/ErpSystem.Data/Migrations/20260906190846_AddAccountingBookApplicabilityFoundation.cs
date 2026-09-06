@@ -397,7 +397,9 @@ IF EXISTS (
                 unique: true);
 
             // Runtime uses the serializable tenant writer lock. These triggers close direct-SQL and concurrent
-            // commit gaps at the approved-authority and frozen-evidence boundaries.
+            // commit gaps at the approved-authority and frozen-evidence boundaries. Approval must prove that
+            // an explicit rule still owns at least one exact same-tenant full-book identity; never weaken this
+            // to silently discard corrupt selections.
             migrationBuilder.Sql(@"
 CREATE TRIGGER [TR_AccountingBookApplicabilityPolicies_C5Authority]
 ON [AccountingBookApplicabilityPolicies]
@@ -408,6 +410,11 @@ BEGIN
     IF EXISTS (SELECT 1 FROM deleted) AND NOT EXISTS (SELECT 1 FROM inserted)
         THROW 51000, 'C5_POLICY_IMMUTABLE: policies cannot be physically deleted.', 1;
 
+    IF EXISTS (SELECT 1 FROM inserted i WHERE i.[PolicyStatus]=3 AND i.[IsDeleted]=0
+               AND NOT EXISTS (SELECT 1 FROM [AccountingBookApplicabilityRules] r WITH (UPDLOCK,HOLDLOCK)
+                               WHERE r.[TenantId]=i.[TenantId] AND r.[AccountingBookApplicabilityPolicyId]=i.[Id] AND r.[IsDeleted]=0))
+        THROW 51000, 'C5_EMPTY_SELECTION: every approved explicit policy must contain a governed rule.', 1;
+
     IF EXISTS (
         SELECT 1 FROM inserted i JOIN deleted d ON d.[Id] = i.[Id]
         WHERE EXISTS (SELECT 1 FROM [AccountingBookSelectionEvidence] e WITH (UPDLOCK,HOLDLOCK)
@@ -417,7 +424,9 @@ BEGIN
             OR i.[Version]<>d.[Version]
             OR ISNULL(i.[SupersedesPolicyId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[SupersedesPolicyId],'00000000-0000-0000-0000-000000000000')
             OR i.[EffectiveFrom]<>d.[EffectiveFrom]
-            OR ISNULL(i.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))<>ISNULL(d.[EffectiveTo],CONVERT(datetime2,'9999-12-31')))
+            OR (ISNULL(i.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))<>ISNULL(d.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))
+                AND NOT (d.[PolicyStatus]=3 AND i.[PolicyStatus]=5 AND i.[RetiredAtUtc] IS NOT NULL
+                         AND i.[EffectiveTo]=CONVERT(date,i.[RetiredAtUtc]))))
     ) THROW 51000, 'C5_POLICY_IMMUTABLE: structural policy evidence cannot change after first approved use.', 1;
 
     IF EXISTS (
@@ -425,19 +434,41 @@ BEGIN
         JOIN [AccountingBookApplicabilityPolicies] b WITH (UPDLOCK,HOLDLOCK)
           ON b.[TenantId]=a.[TenantId]
          AND b.[PolicyCode] COLLATE Latin1_General_100_BIN2=a.[PolicyCode] COLLATE Latin1_General_100_BIN2
-         AND b.[Id]<>a.[Id] AND b.[PolicyStatus]=3 AND b.[IsDeleted]=0
-         AND a.[EffectiveFrom]<=ISNULL(b.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))
-         AND b.[EffectiveFrom]<=ISNULL(a.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))
+         AND b.[Id]<>a.[Id] AND b.[PolicyStatus]=3 AND b.[IsDeleted]=0 AND b.[Version]>a.[Version]
         WHERE a.[PolicyStatus]=3 AND a.[IsDeleted]=0
+          AND b.[EffectiveFrom]<=a.[EffectiveFrom]
           AND EXISTS (SELECT 1 FROM inserted i WHERE i.[TenantId]=a.[TenantId])
-    ) THROW 51000, 'C5_POLICY_AMBIGUITY: approved versions of one policy code cannot overlap.', 1;
+    ) THROW 51000, 'C5_POLICY_REPLACEMENT_ORDER: an approved successor must start after its predecessor.', 1;
+
+    IF EXISTS (
+        SELECT 1 FROM inserted i
+        JOIN [AccountingBookApplicabilityRules] r WITH (UPDLOCK,HOLDLOCK)
+          ON r.[TenantId]=i.[TenantId] AND r.[AccountingBookApplicabilityPolicyId]=i.[Id] AND r.[IsDeleted]=0
+        WHERE i.[PolicyStatus]=3 AND i.[IsDeleted]=0
+          AND NOT EXISTS (SELECT 1 FROM [AccountingBookApplicabilityRuleBooks] rb WITH (UPDLOCK,HOLDLOCK)
+                          WHERE rb.[TenantId]=r.[TenantId] AND rb.[AccountingBookApplicabilityRuleId]=r.[Id] AND rb.[IsDeleted]=0)
+    ) THROW 51000, 'C5_EMPTY_SELECTION: every approved explicit rule must select at least one governed full book.', 1;
+
+    IF EXISTS (
+        SELECT 1 FROM inserted i
+        JOIN [AccountingBookApplicabilityRules] r WITH (UPDLOCK,HOLDLOCK)
+          ON r.[TenantId]=i.[TenantId] AND r.[AccountingBookApplicabilityPolicyId]=i.[Id] AND r.[IsDeleted]=0
+        JOIN [AccountingBookApplicabilityRuleBooks] rb WITH (UPDLOCK,HOLDLOCK)
+          ON rb.[TenantId]=r.[TenantId] AND rb.[AccountingBookApplicabilityRuleId]=r.[Id] AND rb.[IsDeleted]=0
+        LEFT JOIN [AccountingBooks] b WITH (UPDLOCK,HOLDLOCK)
+          ON b.[TenantId]=rb.[TenantId] AND b.[Id]=rb.[AccountingBookId]
+         AND b.[Code] COLLATE Latin1_General_100_BIN2=rb.[AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2
+        WHERE i.[PolicyStatus]=3 AND i.[IsDeleted]=0
+          AND (b.[Id] IS NULL OR b.[IsDeleted]=1 OR b.[BookType] NOT IN (1,2))
+    ) THROW 51000, 'C5_SELECTED_BOOK_INVALID: approved rules require exact same-tenant PrimaryFull or ParallelFull book evidence.', 1;
 
     IF EXISTS (
         SELECT 1 FROM [AccountingBookApplicabilityPolicies] a WITH (UPDLOCK,HOLDLOCK)
         JOIN [AccountingBookApplicabilityRules] ar WITH (UPDLOCK,HOLDLOCK)
           ON ar.[TenantId]=a.[TenantId] AND ar.[AccountingBookApplicabilityPolicyId]=a.[Id]
         JOIN [AccountingBookApplicabilityPolicies] b WITH (UPDLOCK,HOLDLOCK)
-          ON b.[TenantId]=a.[TenantId] AND b.[Id]<>a.[Id] AND b.[PolicyStatus]=3 AND b.[IsDeleted]=0
+         ON b.[TenantId]=a.[TenantId] AND b.[Id]<>a.[Id] AND b.[PolicyStatus]=3 AND b.[IsDeleted]=0
+         AND b.[PolicyCode] COLLATE Latin1_General_100_BIN2<>a.[PolicyCode] COLLATE Latin1_General_100_BIN2
          AND a.[EffectiveFrom]<=ISNULL(b.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))
          AND b.[EffectiveFrom]<=ISNULL(a.[EffectiveTo],CONVERT(datetime2,'9999-12-31'))
         JOIN [AccountingBookApplicabilityRules] br WITH (UPDLOCK,HOLDLOCK)

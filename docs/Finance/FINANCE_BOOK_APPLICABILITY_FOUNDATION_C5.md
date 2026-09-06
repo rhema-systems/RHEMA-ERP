@@ -9,17 +9,20 @@ The C1 `PARALLEL_BOOK_POSTING_DISABLED` control remains authoritative. A frozen 
 ## Deterministic resolution
 
 - Approved rules match the exact normalized source triple and effective date.
+- A later approved version shadows its predecessor from the successor's inclusive `EffectiveFrom` date. The
+  predecessor remains unchanged for historical resolution and frozen evidence; at the boundary there is no
+  overlap ambiguity or fallback gap.
 - Equal highest-priority matches are rejected as ambiguous.
 - An explicit rule may select only same-tenant `PrimaryFull` and `ParallelFull` books by stable ID. Its ordered code values are immutable snapshots, not selection keys.
 - `Delta` books and pseudo selectors are never eligible for ordinary automatic applicability.
 - If no approved rule matches, Finance selects exactly one primary/default full book. It never expands the fallback to all active books.
-- Every selected book is validated without silently dropping failures: canonical identity, tenant lineage, active/postable lifecycle, effective date, current approved initialization and reconciliation evidence, enabled classified mappings, and the exact globally/module/book-open period for the event date.
+- Every selected book is validated without silently dropping failures: canonical identity, tenant lineage, active/postable lifecycle, effective date, current approved initialization and reconciliation evidence, enabled classified mappings whose classification core type matches the account type, and the exact globally/module/book-open period for the event date.
 
 Resolution returns explicit blockers and versioned, domain-separated hashes. Freezing requires the preview hashes, reruns the resolution inside the governed transaction, and stores immutable policy/rule/version, normalized input, ordered stable book IDs/code snapshots, readiness authority, actor, timestamp, and fingerprint evidence. Reusing an idempotency key is valid only for identical frozen evidence.
 
 ## Governance
 
-Policy versions progress through Draft, PendingApproval, Approved, Rejected, and Retired states. Approval and retirement use independent maker-checker workflow decisions, reasons, rowversion checks, serializable tenant-scoped validation, and atomic Finance audit writes. Approved structure and any structure referenced by frozen selection evidence are immutable. There is no physical-delete or write-on-GET path.
+Policy versions progress through Draft, PendingApproval, Approved, Rejected, and Retired states. Approval and retirement use independent maker-checker workflow decisions, reasons, rowversion checks, serializable tenant-scoped validation, and atomic Finance audit writes. Retirement closes the version's inclusive effective interval without altering frozen selections. Approved structure and any structure referenced by frozen selection evidence are otherwise immutable. There is no physical-delete or write-on-GET path.
 
 Permissions are deliberately separate from general book/report access:
 
