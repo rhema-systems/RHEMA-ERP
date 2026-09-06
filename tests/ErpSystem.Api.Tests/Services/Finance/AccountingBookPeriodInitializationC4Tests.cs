@@ -1,3 +1,5 @@
+using System.Reflection;
+using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
@@ -9,6 +11,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using Xunit;
@@ -17,6 +20,32 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class AccountingBookPeriodInitializationC4Tests
 {
+    [Fact]
+    public void Controllers_UseCanonicalReadManageAndCheckerPermissions_AndExposeNoDelete()
+    {
+        var periods = typeof(AccountingBookPeriodsController).GetMethods(BindingFlags.Instance | BindingFlags.Public);
+        periods.Single(item => item.Name == nameof(AccountingBookPeriodsController.Get))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ViewFinance);
+        periods.Single(item => item.Name == nameof(AccountingBookPeriodsController.Create))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ManageAccountingBookPeriods);
+        periods.Single(item => item.Name == nameof(AccountingBookPeriodsController.RequestTransition))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ManageAccountingBookPeriods);
+        periods.Single(item => item.Name == nameof(AccountingBookPeriodsController.Approve))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ApproveAccountingBookPeriods);
+        periods.Single(item => item.Name == nameof(AccountingBookPeriodsController.Reject))
+            .GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ApproveAccountingBookPeriods);
+        periods.Should().NotContain(item => item.Name.Contains("Delete", StringComparison.OrdinalIgnoreCase));
+
+        var initialization = typeof(AccountingBookInitializationController).GetMethods(BindingFlags.Instance | BindingFlags.Public);
+        foreach (var read in new[] { nameof(AccountingBookInitializationController.Get), nameof(AccountingBookInitializationController.GetReadiness), nameof(AccountingBookInitializationController.Prepare) })
+            initialization.Single(item => item.Name == read).GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ViewFinance);
+        foreach (var manage in new[] { nameof(AccountingBookInitializationController.Configure), nameof(AccountingBookInitializationController.Submit) })
+            initialization.Single(item => item.Name == manage).GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ManageAccountingBookInitialization);
+        foreach (var decide in new[] { nameof(AccountingBookInitializationController.Approve), nameof(AccountingBookInitializationController.Reject) })
+            initialization.Single(item => item.Name == decide).GetCustomAttribute<AuthorizeAttribute>()?.Policy.Should().Be(FinancePermissions.ApproveAccountingBookInitialization);
+        initialization.Should().NotContain(item => item.Name.Contains("Delete", StringComparison.OrdinalIgnoreCase));
+    }
+
     [Fact]
     public async Task Period_ReadDoesNotCreate_AndWrongTenantFails()
     {
