@@ -122,16 +122,7 @@ public sealed class AccountingBookService : IAccountingBookService
         var book = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct) ?? throw new KeyNotFoundException("Accounting book was not found.");
         ApplyRowVersion(book, request.RowVersion);
         if (book.PendingLifecycleStatus.HasValue) throw new InvalidOperationException("The accounting book already has a pending lifecycle transition.");
-        ValidateTransition(book.LifecycleStatus, target);
-        if (target == AccountingBookLifecycleStatus.Retired && book.BookType == AccountingBookType.PrimaryFull && book.IsDefault)
-            throw new InvalidOperationException("The tenant's primary/default book cannot be retired without a governed replacement workflow.");
-        if ((target is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)
-            && await _db.AccountingBooks.AnyAsync(item => item.TenantId == TenantId && item.BaseAccountingBookId == book.Id
-                && !item.IsDeleted && (item.LifecycleStatus == AccountingBookLifecycleStatus.Initializing
-                    || item.LifecycleStatus == AccountingBookLifecycleStatus.Active), ct))
-            throw new InvalidOperationException("An accounting book supporting an initializing or active Delta book cannot be suspended or retired.");
-        if (target == AccountingBookLifecycleStatus.Active)
-            throw new InvalidOperationException("ACCOUNTING_BOOK_ACTIVATION_NOT_READY: C4 initialization and book-period readiness evidence is required before activation.");
+        await ValidateGovernedTransitionAsync(book, target, ct);
         var workflow = Workflow();
         if (!await workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType)) throw new InvalidOperationException("A published AccountingBookLifecycle approval workflow is required.");
         var before = Snapshot(book);
@@ -153,12 +144,13 @@ public sealed class AccountingBookService : IAccountingBookService
         var book = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct) ?? throw new KeyNotFoundException("Accounting book was not found.");
         ApplyRowVersion(book, request.RowVersion);
         if (!book.PendingLifecycleStatus.HasValue || !book.TransitionRequestedByUserId.HasValue) throw new InvalidOperationException("The accounting book has no pending lifecycle transition.");
-        if (book.PendingLifecycleStatus == AccountingBookLifecycleStatus.Active)
-            throw new InvalidOperationException("ACCOUNTING_BOOK_ACTIVATION_NOT_READY: C4 initialization and book-period readiness evidence is required before activation.");
         var actor = RequiredActor();
         if (book.TransitionRequestedByUserId == actor) throw new InvalidOperationException("Maker-checker control prohibits the requester from deciding this transition.");
         var workflow = Workflow();
         if (!await workflow.CanUserApproveAsync(WorkflowEntityType, book.Id, actor)) throw new UnauthorizedAccessException("The current user is not an assigned approver for this transition.");
+        // The base graph is mutable while a request waits for approval. Revalidate it under the
+        // serializable writer boundary before advancing the workflow or recording approval evidence.
+        if (action == "Approve") await ValidateGovernedTransitionAsync(book, book.PendingLifecycleStatus.Value, ct);
         var before = Snapshot(book);
         var result = await workflow.ProcessApprovalStepAsync(WorkflowEntityType, book.Id, actor, action, request.Reason.Trim());
         if (!result.Success) throw new InvalidOperationException(result.Message ?? $"The transition {action.ToLowerInvariant()} action failed.");
@@ -268,6 +260,103 @@ public sealed class AccountingBookService : IAccountingBookService
             _ => false
         };
         if (!valid) throw new InvalidOperationException($"Lifecycle transition from {current} to {target} is not permitted.");
+    }
+
+    private async Task ValidateGovernedTransitionAsync(
+        AccountingBook book,
+        AccountingBookLifecycleStatus target,
+        CancellationToken ct)
+    {
+        ValidateTransition(book.LifecycleStatus, target);
+        if (target == AccountingBookLifecycleStatus.Retired
+            && book.BookType == AccountingBookType.PrimaryFull
+            && book.IsDefault)
+            throw new InvalidOperationException("The tenant's primary/default book cannot be retired without a governed replacement workflow.");
+        if (target == AccountingBookLifecycleStatus.Active)
+            throw new InvalidOperationException("ACCOUNTING_BOOK_ACTIVATION_NOT_READY: C4 initialization and book-period readiness evidence is required before activation.");
+
+        // One tenant-scoped graph is used for both child advancement and ancestor invalidation.
+        // A direct-only query is insufficient because Delta books may legitimately base on another
+        // Delta, and a stale intermediate lifecycle would otherwise invalidate descendants silently.
+        var tenantBooks = await _db.AccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted)
+            .ToListAsync(ct);
+        var byId = tenantBooks.ToDictionary(item => item.Id);
+        ValidateOwnDeltaLineage(book, target, byId);
+        ValidateDependentDeltaLineage(book, target, tenantBooks);
+    }
+
+    private static void ValidateOwnDeltaLineage(
+        AccountingBook book,
+        AccountingBookLifecycleStatus target,
+        IReadOnlyDictionary<Guid, AccountingBook> byId)
+    {
+        if (book.BookType != AccountingBookType.Delta)
+        {
+            if (book.BaseAccountingBookId.HasValue)
+                throw new InvalidOperationException("A full accounting book cannot retain Delta base-book lineage.");
+            return;
+        }
+
+        var seen = new HashSet<Guid> { book.Id };
+        var current = book;
+        while (current.BookType == AccountingBookType.Delta)
+        {
+            if (!current.BaseAccountingBookId.HasValue
+                || !byId.TryGetValue(current.BaseAccountingBookId.Value, out var baseBook))
+                throw new InvalidOperationException("Delta base-book lineage is missing, retired, deleted or belongs to another tenant.");
+            if (!seen.Add(baseBook.Id))
+                throw new InvalidOperationException("Accounting-book base cycles are prohibited.");
+            if (baseBook.LifecycleStatus == AccountingBookLifecycleStatus.Retired)
+                throw new InvalidOperationException("A Delta book cannot transition while any base-book ancestor is retired.");
+            if (baseBook.PendingLifecycleStatus is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)
+                throw new InvalidOperationException("A Delta book cannot advance while a base-book ancestor has a pending suspension or retirement.");
+            if (!BaseStatusSupports(target, baseBook.LifecycleStatus))
+                throw new InvalidOperationException($"Base book {baseBook.Code} in {baseBook.LifecycleStatus} cannot support a Delta transition to {target}.");
+            current = baseBook;
+        }
+        if (current.BaseAccountingBookId.HasValue)
+            throw new InvalidOperationException("A full accounting book cannot retain Delta base-book lineage.");
+    }
+
+    private static bool BaseStatusSupports(AccountingBookLifecycleStatus childTarget, AccountingBookLifecycleStatus baseStatus) =>
+        childTarget switch
+        {
+            AccountingBookLifecycleStatus.Configuring => baseStatus is AccountingBookLifecycleStatus.Configuring
+                or AccountingBookLifecycleStatus.Initializing or AccountingBookLifecycleStatus.Active,
+            AccountingBookLifecycleStatus.Initializing => baseStatus is AccountingBookLifecycleStatus.Initializing
+                or AccountingBookLifecycleStatus.Active,
+            AccountingBookLifecycleStatus.Active => baseStatus == AccountingBookLifecycleStatus.Active,
+            _ => baseStatus != AccountingBookLifecycleStatus.Retired
+        };
+
+    private static void ValidateDependentDeltaLineage(
+        AccountingBook book,
+        AccountingBookLifecycleStatus target,
+        IReadOnlyCollection<AccountingBook> tenantBooks)
+    {
+        if (target is not (AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)) return;
+        var descendants = new HashSet<Guid>();
+        var frontier = new Queue<Guid>();
+        frontier.Enqueue(book.Id);
+        while (frontier.Count > 0)
+        {
+            var baseId = frontier.Dequeue();
+            foreach (var child in tenantBooks.Where(item => item.BookType == AccountingBookType.Delta
+                         && item.BaseAccountingBookId == baseId && descendants.Add(item.Id)))
+                frontier.Enqueue(child.Id);
+        }
+
+        // Suspension also makes a Draft/Configuring descendant's governed advancement impossible;
+        // require every live descendant to retire or detach through its own controlled workflow first.
+        var invalid = tenantBooks.Where(item => descendants.Contains(item.Id)
+                && item.LifecycleStatus != AccountingBookLifecycleStatus.Retired)
+            .OrderBy(item => item.Code)
+            .Select(item => item.Code)
+            .ToArray();
+        if (invalid.Length > 0)
+            throw new InvalidOperationException(
+                $"Transition would invalidate dependent Delta book lineage: {string.Join(", ", invalid)}.");
     }
 
     private static void ApplyPostingFlags(AccountingBook book)

@@ -144,6 +144,44 @@ describe('accounting book settings', () => {
         expect(screen.getByLabelText('Name')).not.toBeDisabled();
     });
 
+    it.each(['Initializing', 'Active', 'Suspended'] as const)(
+        'locks structural fields from lifecycle status alone when the book is %s',
+        async lifecycleStatus => {
+            permissions.add('Finance.AccountingBooks.Manage');
+            vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+                ...initializingBook,
+                lifecycleStatus,
+                hasAccountingUse: false,
+                initializationStartedAtUtc: null,
+            }]);
+
+            render(<AccountingBooksSettingsPage />);
+            fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+
+            expect(screen.getByText('Structural identity locked')).toBeInTheDocument();
+            expect(screen.getByLabelText('Stable code')).toBeDisabled();
+            expect(screen.getByLabelText('Book type')).toHaveAttribute('data-disabled');
+            expect(screen.getByLabelText('Accounting purpose / principle')).toBeDisabled();
+            expect(screen.getByLabelText('Effective from')).toBeDisabled();
+            expect(screen.getByLabelText('Name')).not.toBeDisabled();
+            expect(screen.getByLabelText('Display order')).not.toBeDisabled();
+        },
+    );
+
+    it('does not offer editing for a retired book', async () => {
+        permissions.add('Finance.AccountingBooks.Manage');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            lifecycleStatus: 'Retired',
+            hasAccountingUse: false,
+            initializationStartedAtUtc: null,
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        expect(await screen.findByText('LOCAL_STATUTORY — Local Statutory')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    });
+
     it('submits an allowed transition with mandatory reason and rowversion', async () => {
         permissions.add('Finance.AccountingBooks.Transitions.Request');
         const draftBook = { ...initializingBook, lifecycleStatus: 'Draft' as const };
@@ -170,6 +208,7 @@ describe('accounting book settings', () => {
             pendingLifecycleStatus: 'Suspended' as const,
             pendingTransitionReason: 'Pause configuration for review',
         };
+        permissions.add('Finance.AccountingBooks.Manage');
         permissions.add('Finance.AccountingBooks.Transitions.Approve');
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([pending]);
 
@@ -178,6 +217,7 @@ describe('accounting book settings', () => {
         expect(screen.getByText('Pause configuration for review')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
         expect(screen.queryByRole('button', { name: 'Request transition' })).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Approve' }));

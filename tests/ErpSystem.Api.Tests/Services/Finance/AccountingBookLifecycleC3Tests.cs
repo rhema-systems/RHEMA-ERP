@@ -2,6 +2,7 @@ using System.Reflection;
 using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
@@ -108,6 +109,100 @@ public sealed class AccountingBookLifecycleC3Tests
         {
             Reason = "approve", RowVersion = Convert.ToBase64String([1])
         })).Should().ThrowAsync<InvalidOperationException>().WithMessage("*Maker-checker*");
+    }
+
+    [Fact]
+    public async Task BaseSuspension_BlocksDirectAndTransitiveDraftOrConfiguringDeltaDependents()
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        var primary = SeedBook(db, tenantId, "IFRS", AccountingBookType.PrimaryFull, isDefault: true,
+            status: AccountingBookLifecycleStatus.Active);
+        var direct = SeedBook(db, tenantId, "DELTA_DIRECT", AccountingBookType.Delta,
+            status: AccountingBookLifecycleStatus.Configuring);
+        direct.BaseAccountingBookId = primary.Id;
+        var nested = SeedBook(db, tenantId, "DELTA_NESTED", AccountingBookType.Delta,
+            status: AccountingBookLifecycleStatus.Draft);
+        nested.BaseAccountingBookId = direct.Id;
+        await db.SaveChangesAsync();
+        var workflow = Workflow();
+
+        await FluentActions.Awaiting(() => Service(db, tenantId, workflow: workflow.Object).RequestTransitionAsync(
+                primary.Id,
+                new RequestAccountingBookTransitionDto
+                {
+                    TargetStatus = "Suspended", Reason = "control", RowVersion = Convert.ToBase64String([1])
+                }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*DELTA_DIRECT*DELTA_NESTED*");
+        workflow.Verify(item => item.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeltaAdvancement_RequiresEveryBaseAncestorAtCompatibleStatus()
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        var primary = SeedBook(db, tenantId, "IFRS", AccountingBookType.PrimaryFull, isDefault: true,
+            status: AccountingBookLifecycleStatus.Initializing);
+        var middle = SeedBook(db, tenantId, "DELTA_MIDDLE", AccountingBookType.Delta,
+            status: AccountingBookLifecycleStatus.Draft);
+        middle.BaseAccountingBookId = primary.Id;
+        var leaf = SeedBook(db, tenantId, "DELTA_LEAF", AccountingBookType.Delta,
+            status: AccountingBookLifecycleStatus.Configuring);
+        leaf.BaseAccountingBookId = middle.Id;
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => Service(db, tenantId).RequestTransitionAsync(
+                leaf.Id,
+                new RequestAccountingBookTransitionDto
+                {
+                    TargetStatus = "Initializing", Reason = "prepare", RowVersion = Convert.ToBase64String([1])
+                }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*DELTA_MIDDLE*Draft*Initializing*");
+    }
+
+    [Fact]
+    public async Task Approval_RevalidatesStaleBaseLineageBeforeWorkflowOrAuditMutation()
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        var maker = Guid.NewGuid();
+        var checker = Guid.NewGuid();
+        var primary = SeedBook(db, tenantId, "IFRS", AccountingBookType.PrimaryFull, isDefault: true,
+            status: AccountingBookLifecycleStatus.Initializing);
+        var delta = SeedBook(db, tenantId, "DELTA", AccountingBookType.Delta,
+            status: AccountingBookLifecycleStatus.Configuring);
+        delta.BaseAccountingBookId = primary.Id;
+        await db.SaveChangesAsync();
+        var workflow = Workflow();
+        var audit = Audit();
+
+        await Service(db, tenantId, maker, workflow.Object, audit.Object).RequestTransitionAsync(delta.Id,
+            new RequestAccountingBookTransitionDto
+            {
+                TargetStatus = "Initializing", Reason = "prepare", RowVersion = Convert.ToBase64String([1])
+            });
+        primary = await db.AccountingBooks.SingleAsync(item => item.Id == primary.Id);
+        primary.LifecycleStatus = AccountingBookLifecycleStatus.Suspended;
+        primary.IsActive = false;
+        primary.AllowsPosting = false;
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => Service(db, tenantId, checker, workflow.Object, audit.Object)
+                .ApproveTransitionAsync(delta.Id, new DecideAccountingBookTransitionDto
+                {
+                    Reason = "approve", RowVersion = Convert.ToBase64String([1])
+                }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Suspended*Initializing*");
+        workflow.Verify(item => item.ProcessApprovalStepAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        audit.Verify(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        var unchanged = await db.AccountingBooks.AsNoTracking().SingleAsync(item => item.Id == delta.Id);
+        unchanged.LifecycleStatus.Should().Be(AccountingBookLifecycleStatus.Configuring);
+        unchanged.PendingLifecycleStatus.Should().Be(AccountingBookLifecycleStatus.Initializing);
     }
 
     [Fact]
@@ -218,6 +313,15 @@ public sealed class AccountingBookLifecycleC3Tests
     {
         var value = new Mock<IWorkflowService>();
         value.Setup(item => item.HasActiveApprovalWorkflowAsync(It.IsAny<string>())).ReturnsAsync(true);
+        value.Setup(item => item.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>()))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = Guid.NewGuid()
+            });
+        value.Setup(item => item.CanUserApproveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(true);
+        value.Setup(item => item.ProcessApprovalStepAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string?>()))
+            .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
         return value;
     }
 

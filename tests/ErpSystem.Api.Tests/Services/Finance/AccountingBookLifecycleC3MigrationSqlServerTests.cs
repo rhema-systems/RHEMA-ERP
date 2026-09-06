@@ -27,6 +27,10 @@ public sealed class AccountingBookLifecycleC3MigrationSqlServerTests
             .Should().Be("GHS");
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.foreign_keys WHERE name=N'FK_AccountingBooks_AccountingBooks_TenantId_BaseAccountingBookId'"))
             .Should().Be(1);
+        await database.ExecuteRejectsConstraintAsync("UPDATE AccountingBooks SET Code=N'1_INVALID' WHERE IsDefault=1");
+        await database.ExecuteRejectsConstraintAsync("UPDATE AccountingBooks SET FunctionalCurrencyCode=N'GH1' WHERE IsDefault=1");
+        await database.ExecuteRejectsConstraintAsync("UPDATE Tenants SET BaseCurrency=N'GH1'");
+        await database.ExecuteRejectsConstraintAsync("UPDATE FinanceSettings SET BaseCurrency=N'GH1'");
 
         await database.ApplyAsync(up: false);
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID(N'AccountingBooks') AND name=N'BookType'"))
@@ -42,11 +46,20 @@ public sealed class AccountingBookLifecycleC3MigrationSqlServerTests
         {
             (Code: "ifrs", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "IFRS ", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "1IFRS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "_IFRS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "IF-RS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "IF RS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "ÉIFRS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "ALL_ACTIVE_BOOKS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "ALL_CLASSIFIED_BOOKS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "ALLCLASSIFIEDBOOKS", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "ALL", Currency: "GHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "IFRS", Currency: "ghs", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "IFRS", Currency: "GH1", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "IFRS", Currency: "GH_", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "IFRS", Currency: "G H", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
+            (Code: "IFRS", Currency: "ÉHS", Defaults: 1, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "IFRS", Currency: "GHS", Defaults: 0, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "IFRS", Currency: "GHS", Defaults: 2, JournalCode: (string?)null, Active: true, Posting: true),
             (Code: "IFRS", Currency: "GHS", Defaults: 1, JournalCode: "ifrs", Active: true, Posting: true),
@@ -142,6 +155,12 @@ INSERT AccountingBooks VALUES ('{{secondBookId}}','{{tenantId}}',N'LOCAL_STATUTO
             await connection.OpenAsync();
             await using var command = new SqlCommand(sql, connection) { CommandTimeout = 600 };
             return (T)(await command.ExecuteScalarAsync())!;
+        }
+
+        public async Task ExecuteRejectsConstraintAsync(string sql)
+        {
+            var action = () => ExecuteAsync(sql);
+            (await action.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(547);
         }
 
         private async Task ExecuteAsync(string sql)

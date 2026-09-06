@@ -2864,6 +2864,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint("CK_AccountingBooks_DefaultType", "[IsDeleted] = 1 OR ([BookType] = 1 AND [IsDefault] = 1) OR ([BookType] <> 1 AND [IsDefault] = 0)");
                 table.HasCheckConstraint("CK_AccountingBooks_NoSelfBase", "[IsDeleted] = 1 OR [BaseAccountingBookId] IS NULL OR [BaseAccountingBookId] <> [Id]");
                 table.HasCheckConstraint("CK_AccountingBooks_PostingLifecycle", "[IsDeleted] = 1 OR ([LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([LifecycleStatus] <> 4 AND [IsActive] = 0 AND [AllowsPosting] = 0)");
+                if (this.Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBooks_CodeCanonical", "[IsDeleted] = 1 OR ([Code] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Code]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([Code]) = DATALENGTH(UPPER(LTRIM(RTRIM([Code])))) AND LEFT([Code], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [Code] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [Code] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL', N'ALL_ACTIVE_BOOKS', N'ALL_CLASSIFIED_BOOKS', N'ALLCLASSIFIEDBOOKS'))");
+                    table.HasCheckConstraint("CK_AccountingBooks_FunctionalCurrencyCanonical", "[IsDeleted] = 1 OR [FunctionalCurrencyCode] IS NULL OR (DATALENGTH([FunctionalCurrencyCode]) = 6 AND [FunctionalCurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+                }
             });
             // Posting evidence uses tenant-qualified book identity so a corrupt foreign tenant
             // reference cannot be legitimized merely because GUIDs are globally unique.
@@ -5359,6 +5364,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure Tenant entity
         builder.Entity<Tenant>(entity =>
         {
+            if (this.Database.IsSqlServer())
+                entity.ToTable("Tenants", table => table.HasCheckConstraint(
+                    "CK_Tenants_BaseCurrencyCanonical_C3",
+                    "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')"));
             // Configure relationship to UserTenants
             entity.HasMany(t => t.UserTenants)
                 .WithOne(ut => ut.Tenant)
@@ -5845,7 +5854,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         ConfigurePurchaseRequisitionLinkage(builder);
 
         // Configure Finance Common entities
-        ConfigureFinanceCommonEntities(builder);
+        ConfigureFinanceCommonEntities(builder, Database.IsSqlServer());
 
         // Configure Compliance/Settings entities
         ConfigureComplianceAndSettingsEntities(builder);
@@ -11747,7 +11756,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         });
     }
 
-    private static void ConfigureFinanceCommonEntities(ModelBuilder builder)
+    private static void ConfigureFinanceCommonEntities(ModelBuilder builder, bool isSqlServer)
     {
         // Configure PaymentTerm entity
         builder.Entity<PaymentTerm>(entity =>
@@ -11764,9 +11773,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FinanceSettings>(entity =>
         {
             entity.ToTable("FinanceSettings", table =>
+            {
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_TDC0504ApMatchTolerances",
-                    "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100"));
+                    "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100");
+                if (isSqlServer)
+                    table.HasCheckConstraint(
+                        "CK_FinanceSettings_BaseCurrencyCanonical_C3",
+                        "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+            });
             entity.HasIndex(s => s.TenantId).IsUnique();
             entity.Property(s => s.ApInvoicePriceTolerancePercent).HasPrecision(5, 2);
             entity.Property(s => s.ApInvoiceQuantityTolerancePercent).HasPrecision(5, 2);

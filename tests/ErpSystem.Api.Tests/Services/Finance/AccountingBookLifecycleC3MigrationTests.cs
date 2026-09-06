@@ -28,6 +28,9 @@ public sealed class AccountingBookLifecycleC3MigrationTests
             .And.Contain("Latin1_General_100_BIN2")
             .And.Contain("DATALENGTH")
             .And.Contain("UPPER(LTRIM(RTRIM")
+            .And.Contain("NOT LIKE N'[A-Z]'")
+            .And.Contain("LIKE N'%[^A-Z0-9_]%'")
+            .And.Contain("NOT LIKE N'[A-Z][A-Z][A-Z]'")
             .And.Contain("ALL_ACTIVE_BOOKS")
             .And.Contain("ALL_CLASSIFIED_BOOKS")
             .And.Contain("ALLCLASSIFIEDBOOKS")
@@ -65,7 +68,9 @@ public sealed class AccountingBookLifecycleC3MigrationTests
         {
             "CK_AccountingBooks_BookType", "CK_AccountingBooks_LifecycleStatus",
             "CK_AccountingBooks_BaseShape", "CK_AccountingBooks_DefaultType",
-            "CK_AccountingBooks_NoSelfBase", "CK_AccountingBooks_PostingLifecycle"
+            "CK_AccountingBooks_NoSelfBase", "CK_AccountingBooks_PostingLifecycle",
+            "CK_AccountingBooks_CodeCanonical", "CK_AccountingBooks_FunctionalCurrencyCanonical",
+            "CK_Tenants_BaseCurrencyCanonical_C3", "CK_FinanceSettings_BaseCurrencyCanonical_C3"
         });
 
         var down = migration.BuildDownOperations();

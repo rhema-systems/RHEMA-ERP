@@ -25,6 +25,8 @@ IF EXISTS (
         OR b.[Code] COLLATE Latin1_General_100_BIN2
            <> UPPER(LTRIM(RTRIM(b.[Code]))) COLLATE Latin1_General_100_BIN2
         OR DATALENGTH(b.[Code]) <> DATALENGTH(UPPER(LTRIM(RTRIM(b.[Code])))
+        OR LEFT(b.[Code], 1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+        OR b.[Code] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_]%'
         OR b.[Code] COLLATE Latin1_General_100_BIN2 IN (
             N'ALL' COLLATE Latin1_General_100_BIN2,
             N'ALL_ACTIVE_BOOKS' COLLATE Latin1_General_100_BIN2,
@@ -47,6 +49,24 @@ IF EXISTS (
     WHERE [IsDeleted] = 0 AND [IsActive] <> [AllowsPosting])
     THROW 51000, 'C3_LIFECYCLE_PREFLIGHT: legacy active/posting flags are inconsistent and require remediation.', 1;
 
+-- These are copied onto governed full books. Validate every live source row before adding
+-- constraints, including tenants not yet using Finance, so Up cannot partially mutate.
+IF EXISTS (
+    SELECT 1 FROM [Tenants] t
+    WHERE t.[IsDeleted] = 0 AND (t.[BaseCurrency] IS NULL OR DATALENGTH(t.[BaseCurrency]) <> 6
+       OR t.[BaseCurrency] COLLATE Latin1_General_100_BIN2
+          <> UPPER(LTRIM(RTRIM(t.[BaseCurrency]))) COLLATE Latin1_General_100_BIN2
+       OR t.[BaseCurrency] COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z][A-Z][A-Z]'))
+    THROW 51000, 'C3_CURRENCY_PREFLIGHT: tenant functional currency must be exactly three uppercase ASCII letters.', 1;
+
+IF EXISTS (
+    SELECT 1 FROM [FinanceSettings] fs
+    WHERE fs.[IsDeleted] = 0 AND (fs.[BaseCurrency] IS NULL OR DATALENGTH(fs.[BaseCurrency]) <> 6
+       OR fs.[BaseCurrency] COLLATE Latin1_General_100_BIN2
+          <> UPPER(LTRIM(RTRIM(fs.[BaseCurrency]))) COLLATE Latin1_General_100_BIN2
+       OR fs.[BaseCurrency] COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z][A-Z][A-Z]'))
+    THROW 51000, 'C3_CURRENCY_PREFLIGHT: Finance settings currency must be exactly three uppercase ASCII letters.', 1;
+
 IF EXISTS (
     SELECT 1
     FROM [AccountingBooks] b
@@ -67,6 +87,7 @@ IF EXISTS (
                <> UPPER(LTRIM(RTRIM(configured.BaseCurrency))) COLLATE Latin1_General_100_BIN2
             OR configured.BaseCurrency COLLATE Latin1_General_100_BIN2
                <> t.[BaseCurrency] COLLATE Latin1_General_100_BIN2
+            OR configured.BaseCurrency COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z][A-Z][A-Z]'
             OR DATALENGTH(configured.BaseCurrency) <> DATALENGTH(t.[BaseCurrency])))))
     THROW 51000, 'C3_CURRENCY_PREFLIGHT: full-book functional currency authority must be canonical and agree with Finance settings.', 1;
 
@@ -151,6 +172,10 @@ WHERE b.[IsDeleted] = 0;
         migrationBuilder.AddCheckConstraint("CK_AccountingBooks_DefaultType", "AccountingBooks", "[IsDeleted] = 1 OR ([BookType] = 1 AND [IsDefault] = 1) OR ([BookType] <> 1 AND [IsDefault] = 0)");
         migrationBuilder.AddCheckConstraint("CK_AccountingBooks_NoSelfBase", "AccountingBooks", "[IsDeleted] = 1 OR [BaseAccountingBookId] IS NULL OR [BaseAccountingBookId] <> [Id]");
         migrationBuilder.AddCheckConstraint("CK_AccountingBooks_PostingLifecycle", "AccountingBooks", "[IsDeleted] = 1 OR ([LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([LifecycleStatus] <> 4 AND [IsActive] = 0 AND [AllowsPosting] = 0)");
+        migrationBuilder.AddCheckConstraint("CK_AccountingBooks_CodeCanonical", "AccountingBooks", "[IsDeleted] = 1 OR ([Code] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Code]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([Code]) = DATALENGTH(UPPER(LTRIM(RTRIM([Code])))) AND LEFT([Code], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [Code] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [Code] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL', N'ALL_ACTIVE_BOOKS', N'ALL_CLASSIFIED_BOOKS', N'ALLCLASSIFIEDBOOKS'))");
+        migrationBuilder.AddCheckConstraint("CK_AccountingBooks_FunctionalCurrencyCanonical", "AccountingBooks", "[IsDeleted] = 1 OR [FunctionalCurrencyCode] IS NULL OR (DATALENGTH([FunctionalCurrencyCode]) = 6 AND [FunctionalCurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+        migrationBuilder.AddCheckConstraint("CK_Tenants_BaseCurrencyCanonical_C3", "Tenants", "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+        migrationBuilder.AddCheckConstraint("CK_FinanceSettings_BaseCurrencyCanonical_C3", "FinanceSettings", "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
 
         migrationBuilder.CreateIndex(name: "IX_AccountingBooks_TenantId_BaseAccountingBookId", table: "AccountingBooks", columns: new[] { "TenantId", "BaseAccountingBookId" });
         migrationBuilder.CreateIndex(name: "IX_AccountingBooks_TenantId_IsDefault", table: "AccountingBooks", columns: new[] { "TenantId", "IsDefault" }, unique: true, filter: "[IsDeleted] = 0 AND [IsDefault] = 1");
@@ -176,6 +201,10 @@ IF EXISTS (SELECT 1 FROM [AccountingBooks] WHERE [PendingLifecycleStatus] IS NOT
         migrationBuilder.DropCheckConstraint("CK_AccountingBooks_LifecycleStatus", "AccountingBooks");
         migrationBuilder.DropCheckConstraint("CK_AccountingBooks_NoSelfBase", "AccountingBooks");
         migrationBuilder.DropCheckConstraint("CK_AccountingBooks_PostingLifecycle", "AccountingBooks");
+        migrationBuilder.DropCheckConstraint("CK_AccountingBooks_CodeCanonical", "AccountingBooks");
+        migrationBuilder.DropCheckConstraint("CK_AccountingBooks_FunctionalCurrencyCanonical", "AccountingBooks");
+        migrationBuilder.DropCheckConstraint("CK_Tenants_BaseCurrencyCanonical_C3", "Tenants");
+        migrationBuilder.DropCheckConstraint("CK_FinanceSettings_BaseCurrencyCanonical_C3", "FinanceSettings");
         migrationBuilder.DropIndex("IX_AccountingBooks_TenantId_BaseAccountingBookId", "AccountingBooks");
         migrationBuilder.DropIndex("IX_AccountingBooks_TenantId_IsDefault", "AccountingBooks");
 

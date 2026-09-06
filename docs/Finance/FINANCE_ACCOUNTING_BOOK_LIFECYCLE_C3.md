@@ -16,7 +16,7 @@ the C2 read models.
 
 Every live book has:
 
-- a canonical stable code and stable relational ID;
+- a canonical `[A-Z][A-Z0-9_]*` stable code and stable relational ID;
 - a structural type: `PrimaryFull`, `ParallelFull`, or `Delta`;
 - a separately configured accounting purpose or principle;
 - a lifecycle status: `Draft`, `Configuring`, `Initializing`, `Active`,
@@ -28,6 +28,8 @@ Every live book has:
 There must be exactly one tenant primary/default full book. Full books have no
 base. A Delta book must reference another governed book in the same tenant and
 the graph must be acyclic. Reporting currency is not an accounting book.
+Tenant, Finance-settings, and full-book functional currencies use the same
+exact three-uppercase-ASCII-letter contract.
 
 ## Lifecycle and approval
 
@@ -52,12 +54,22 @@ posting path.
 Suspension stops new posting without erasing historical evidence. Retirement is
 terminal and physical deletion is not exposed.
 
+Delta advancement is validated across its complete same-tenant base chain at
+both request and approval. A Delta entering `Configuring` requires every base
+to be at least `Configuring`; one entering `Initializing` requires every base
+to be `Initializing` or `Active`. Suspending or retiring a base is blocked while
+any live direct or transitive Delta descendant remains, including Draft and
+Configuring descendants, because their governed advancement would otherwise be
+invalidated.
+
 ## Migration and deterministic seed
 
 The C3 forward migration is unapplied. Its first operation is a fail-before-
 mutation preflight. It requires canonical codes/currencies, one unambiguous
 primary/default authority, tenant-consistent book evidence, and a valid base
-graph. Stable C1 book IDs and immutable code snapshots are retained.
+graph. SQL Server check constraints retain the exact ASCII code and currency
+grammar for later direct writes. Stable C1 book IDs and immutable code
+snapshots are retained.
 
 The Finance classification manifest still recognizes `IFRS`,
 `LOCAL_STATUTORY`, and `MANAGEMENT` as deterministic seed instance codes, not
