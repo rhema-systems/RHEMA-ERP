@@ -14,6 +14,7 @@ public sealed class AccountingBookInitialization : TenantEntity
     public AccountingBookInitializationMode Mode { get; set; }
     public AccountingBookInitializationStatus InitializationStatus { get; set; } = AccountingBookInitializationStatus.Draft;
     public DateTime CutoffDate { get; set; }
+    public Guid CutoffFiscalPeriodId { get; set; }
     public Guid? SourceAccountingBookId { get; set; }
     [MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     [MaxLength(500)] public string Reason { get; set; } = string.Empty;
@@ -28,11 +29,16 @@ public sealed class AccountingBookInitialization : TenantEntity
     public Guid? WorkflowInstanceId { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTime? RejectedAtUtc { get; set; }
+    public Guid? DecidedByUserId { get; set; }
+    public DateTime? DecidedAtUtc { get; set; }
     [MaxLength(500)] public string? DecisionReason { get; set; }
     [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public AccountingBook AccountingBook { get; set; } = null!;
     public AccountingBook? SourceAccountingBook { get; set; }
+    public FiscalPeriod CutoffFiscalPeriod { get; set; } = null!;
     public AccountingBookInitialization? SupersedesInitialization { get; set; }
     public ICollection<AccountingBookInitializationLine> Lines { get; set; } = new List<AccountingBookInitializationLine>();
 }

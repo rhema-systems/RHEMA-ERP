@@ -948,9 +948,12 @@ public sealed class FixedAssetDepreciationFoundationTests
         SeedTenant(db, tenantId);
         var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
         var book = SeedBook(db, tenantId);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         var assetAccount = SeedAccount(db, tenantId, "1600", AccountType.Asset);
         var accumulatedAccount = SeedAccount(db, tenantId, "1699", AccountType.Asset);
         var expenseAccount = SeedAccount(db, tenantId, "6700", AccountType.Expense);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+            db, tenantId, book, assetAccount, accumulatedAccount, expenseAccount);
 
         db.FinanceSettings.Add(new FinanceSettings
         {

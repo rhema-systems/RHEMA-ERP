@@ -872,6 +872,8 @@ public sealed class FxFunctionalCurrencyGovernanceTests
                 }
             }
         }
+        foreach (var period in db.FiscalPeriods.Local.Where(item => item.TenantId == tenantId))
+            FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         db.SaveChanges();
     }
 

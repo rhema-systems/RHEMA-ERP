@@ -154,7 +154,7 @@ public sealed class AccountingBookPeriodInitializationC4ConcurrencySqlServerTest
 
     private static async Task<InitializationFixture> SeedInitializationAuthorityAsync(DisposableDatabase database)
     {
-        var tenant = Guid.NewGuid(); var book = Guid.NewGuid(); var openPeriod = Guid.NewGuid();
+        var tenant = Guid.NewGuid(); var book = Guid.NewGuid(); var openPeriod = Guid.NewGuid(); var cutoffPeriod = Guid.NewGuid();
         var debit = Guid.NewGuid(); var credit = Guid.NewGuid();
         await using var db = database.Context();
         await db.Database.EnsureCreatedAsync();
@@ -167,7 +167,7 @@ public sealed class AccountingBookPeriodInitializationC4ConcurrencySqlServerTest
             new FiscalPeriod { Id = openPeriod, TenantId = tenant, FiscalYearId = Guid.NewGuid(), PeriodName = "January 2026", PeriodCode = "2026-01",
                 PeriodNumber = 1, PeriodType = PeriodType.Monthly, StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
                 PeriodDays = 31, PeriodStatus = "Open", IsOpen = true },
-            new FiscalPeriod { Id = Guid.NewGuid(), TenantId = tenant, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025", PeriodCode = "2025-12",
+            new FiscalPeriod { Id = cutoffPeriod, TenantId = tenant, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025", PeriodCode = "2025-12",
                 PeriodNumber = 12, PeriodType = PeriodType.Monthly, StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2025, 12, 31),
                 PeriodDays = 31, PeriodStatus = "Closed", IsOpen = false, IsClosed = true });
         db.Accounts.AddRange(
@@ -182,12 +182,13 @@ public sealed class AccountingBookPeriodInitializationC4ConcurrencySqlServerTest
             new AccountAccountingBook { TenantId = tenant, AccountingBookId = book, AccountId = debit, AccountClassificationId = assetClass.Id, IsEnabled = true },
             new AccountAccountingBook { TenantId = tenant, AccountingBookId = book, AccountId = credit, AccountClassificationId = equityClass.Id, IsEnabled = true });
         await db.SaveChangesAsync();
-        return new InitializationFixture(tenant, book, openPeriod, debit, credit);
+        return new InitializationFixture(tenant, book, openPeriod, cutoffPeriod, debit, credit);
     }
 
     private static ConfigureAccountingBookInitializationDto InitializationRequest(InitializationFixture fixture, string key) => new()
     {
-        Mode = "IndependentOpeningBalances", CutoffDate = new DateTime(2025, 12, 31), IdempotencyKey = key, Reason = "Governed opening",
+        Mode = "IndependentOpeningBalances", CutoffDate = new DateTime(2025, 12, 31),
+        CutoffFiscalPeriodId = fixture.CutoffPeriodId, CutoffFiscalPeriodCode = "2025-12", IdempotencyKey = key, Reason = "Governed opening",
         Lines = new[]
         {
             new AccountingBookInitializationLineDto { AccountId = fixture.DebitAccountId, CurrencyCode = "GHS" },
@@ -243,7 +244,7 @@ public sealed class AccountingBookPeriodInitializationC4ConcurrencySqlServerTest
         }
     }
 
-    private sealed record InitializationFixture(Guid TenantId, Guid BookId, Guid OpenPeriodId, Guid DebitAccountId, Guid CreditAccountId);
+    private sealed record InitializationFixture(Guid TenantId, Guid BookId, Guid OpenPeriodId, Guid CutoffPeriodId, Guid DebitAccountId, Guid CreditAccountId);
 
     private sealed class DisposableDatabase : IAsyncDisposable
     {

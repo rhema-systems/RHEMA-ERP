@@ -195,10 +195,43 @@ public sealed class AccountingBookPeriodInitializationC4Tests
                 FiscalPeriodId = cutoff.Id, BookClassification = source.Code, Currency = "GHS", ClosingBalance = 0m });
         await db.SaveChangesAsync();
         var request = Independent(state, $"base-{mode}", 0m); request.Mode = mode; request.SourceAccountingBookId = source.Id;
+        request.SourceAccountingBookCode = source.Code;
 
         var result = await InitializationService(db, state.TenantId, Guid.NewGuid()).ConfigureAsync(state.Book.Id, request);
         result.SourceAccountingBookId.Should().Be(source.Id);
         result.IsBalanced.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Initialization_PureBaseCopyRejectsOpeningAdjustment()
+    {
+        await using var db = Context(); var state = Seed(db);
+        var source = new AccountingBook { TenantId = state.TenantId, Code = "SOURCE", Name = "Source", Purpose = "Reporting",
+            BookType = AccountingBookType.ParallelFull, LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS", IsActive = true, AllowsPosting = true };
+        db.AccountingBooks.Add(source); await db.SaveChangesAsync();
+        var request = Independent(state, "copy-adjustment", 0m); request.Mode = "BaseBookCopyAtCutoff";
+        request.SourceAccountingBookId = source.Id; request.SourceAccountingBookCode = source.Code;
+        request.Lines.First().OpeningAdjustment = 1m;
+
+        await FluentActions.Awaiting(() => InitializationService(db, state.TenantId, Guid.NewGuid()).ConfigureAsync(state.Book.Id, request))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*cannot contain opening adjustments*");
+    }
+
+    [Fact]
+    public async Task Initialization_LastDraftEditorBecomesMakerAndPriorDecisionEvidenceIsCleared()
+    {
+        await using var db = Context(); var state = Seed(db); await db.SaveChangesAsync();
+        var firstMaker = Guid.NewGuid();
+        await InitializationService(db, state.TenantId, firstMaker).ConfigureAsync(state.Book.Id, Independent(state, "draft-v1", 0m));
+        var entity = db.AccountingBookInitializations.Single();
+        entity.DecidedByUserId = Guid.NewGuid(); entity.DecidedAtUtc = DateTime.UtcNow; entity.DecisionReason = "obsolete";
+        entity.RowVersion = [7]; await db.SaveChangesAsync();
+        var secondMaker = Guid.NewGuid(); var revised = Independent(state, "draft-v2", 0m); revised.RowVersion = Convert.ToBase64String([7]);
+
+        var result = await InitializationService(db, state.TenantId, secondMaker).ConfigureAsync(state.Book.Id, revised);
+        result.PreparedByUserId.Should().Be(secondMaker);
+        result.DecidedByUserId.Should().BeNull(); result.DecisionReason.Should().BeNull();
     }
 
     [Fact]
@@ -217,6 +250,8 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         second.Version.Should().Be(2);
         second.SupersedesInitializationId.Should().Be(first.Id);
         db.AccountingBookInitializations.Single(item => item.Id == first.Id).InitializationStatus.Should().Be(AccountingBookInitializationStatus.Rejected);
+        first.ApprovedByUserId.Should().BeNull(); first.ApprovedAtUtc.Should().BeNull();
+        first.RejectedByUserId.Should().NotBeNull(); first.DecidedByUserId.Should().Be(first.RejectedByUserId);
     }
 
     [Fact]
@@ -244,10 +279,32 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         readiness.ReadyPeriodCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task ActivationReadiness_ReDerivesLatestEvidenceAndRejectsPendingBookClose()
+    {
+        await using var db = Context(); var state = Seed(db); await db.SaveChangesAsync();
+        var service = InitializationService(db, state.TenantId, Guid.NewGuid());
+        await service.ConfigureAsync(state.Book.Id, Independent(state, "readiness-fresh", 0m)); await service.SubmitAsync(state.Book.Id);
+        var initialization = db.AccountingBookInitializations.Single(); initialization.RowVersion = [5]; await db.SaveChangesAsync();
+        await InitializationService(db, state.TenantId, Guid.NewGuid()).ApproveAsync(state.Book.Id,
+            new DecideAccountingBookInitializationDto { Reason = "approved", RowVersion = Convert.ToBase64String([5]) });
+        var bookPeriod = new AccountingBookPeriod { TenantId = state.TenantId, AccountingBookId = state.Book.Id,
+            FiscalPeriodId = state.Period.Id, PeriodStatus = AccountingBookPeriodStatus.Open, PendingStatus = AccountingBookPeriodStatus.Closed };
+        db.AccountingBookPeriods.Add(bookPeriod); await db.SaveChangesAsync();
+
+        (await service.GetReadinessAsync(state.Book.Id)).IsReady.Should().BeFalse();
+        bookPeriod.PendingStatus = null;
+        db.AccountAccountingBooks.First().IsEnabled = false; await db.SaveChangesAsync();
+        var stale = await service.GetReadinessAsync(state.Book.Id);
+        stale.IsReady.Should().BeFalse(); stale.Blockers.Should().Contain(item => item.Contains("mapped", StringComparison.OrdinalIgnoreCase));
+    }
+
 
     private static ConfigureAccountingBookInitializationDto Independent(State state, string key, decimal firstDebit) => new()
     {
-        Mode = "IndependentOpeningBalances", CutoffDate = new DateTime(2025, 12, 31), IdempotencyKey = key, Reason = "Governed test opening",
+        Mode = "IndependentOpeningBalances", CutoffDate = new DateTime(2025, 12, 31),
+        CutoffFiscalPeriodId = state.CutoffPeriod.Id, CutoffFiscalPeriodCode = state.CutoffPeriod.PeriodCode,
+        IdempotencyKey = key, Reason = "Governed test opening",
         Lines = new[]
         {
             new AccountingBookInitializationLineDto { AccountId = state.Debit.Id, CurrencyCode = "GHS", OpeningDebit = firstDebit },
@@ -264,22 +321,27 @@ public sealed class AccountingBookPeriodInitializationC4Tests
             BookType = AccountingBookType.PrimaryFull, LifecycleStatus = AccountingBookLifecycleStatus.Initializing,
             FunctionalCurrencyCode = "GHS", IsDefault = true, IsActive = false, AllowsPosting = false };
         db.AccountingBooks.Add(book);
-        var period = new FiscalPeriod { TenantId = tenant, FiscalYearId = Guid.NewGuid(), PeriodName = "January 2026", PeriodCode = "2026-01",
+        var year2026 = FiscalYear(tenant, 2026); var year2025 = FiscalYear(tenant, 2025); db.FiscalYears.AddRange(year2025, year2026);
+        var period = new FiscalPeriod { TenantId = tenant, FiscalYearId = year2026.Id, PeriodName = "January 2026", PeriodCode = "2026-01",
             PeriodNumber = 1, PeriodType = PeriodType.Monthly, StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 1, 31),
             PeriodDays = 31, PeriodStatus = "Open", IsOpen = true };
         db.FiscalPeriods.Add(period);
-        db.FiscalPeriods.Add(new FiscalPeriod { TenantId = tenant, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025", PeriodCode = "2025-12",
+        var cutoffPeriod = new FiscalPeriod { TenantId = tenant, FiscalYearId = year2025.Id, PeriodName = "December 2025", PeriodCode = "2025-12",
             PeriodNumber = 12, PeriodType = PeriodType.Monthly, StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2025, 12, 31),
-            PeriodDays = 31, PeriodStatus = "Closed", IsOpen = false, IsClosed = true });
+            PeriodDays = 31, PeriodStatus = "Closed", IsOpen = false, IsClosed = true };
+        db.FiscalPeriods.Add(cutoffPeriod);
         var debit = Account(tenant, "1000", AccountType.Asset); var credit = Account(tenant, "3000", AccountType.Equity);
         db.Accounts.AddRange(debit, credit);
         var assetClass = Classification(tenant, book.Id, "ASSET", AccountType.Asset); var equityClass = Classification(tenant, book.Id, "EQUITY", AccountType.Equity);
         db.AccountClassifications.AddRange(assetClass, equityClass);
         db.AccountAccountingBooks.AddRange(Mapping(tenant, book.Id, debit.Id, assetClass.Id), Mapping(tenant, book.Id, credit.Id, equityClass.Id));
-        return new State(tenant, book, period, debit, credit);
+        return new State(tenant, book, period, cutoffPeriod, debit, credit);
     }
     private static Account Account(Guid tenant, string code, AccountType type) => new() { TenantId = tenant, AccountCode = code, AccountNumber = code,
         AccountName = code, AccountType = type, CurrencyCode = "GHS", Status = AccountStatus.Active };
+    private static FiscalYear FiscalYear(Guid tenant, int year) => new() { TenantId = tenant, FiscalYearName = $"FY {year}", FiscalYearCode = year.ToString(),
+        Year = year, FiscalYearType = "Calendar", StartDate = new DateTime(year, 1, 1), EndDate = new DateTime(year, 12, 31),
+        TotalDays = DateTime.IsLeapYear(year) ? 366 : 365, NumberOfPeriods = 12, Status = "Open", IsActive = true };
     private static AccountClassification Classification(Guid tenant, Guid book, string code, AccountType type) => new() { TenantId = tenant,
         AccountingBookId = book, Code = code, Name = code, CoreAccountType = type, Status = AccountClassificationStatus.Active, IsPostingClassification = true };
     private static AccountAccountingBook Mapping(Guid tenant, Guid book, Guid account, Guid classification) => new() { TenantId = tenant,
@@ -300,5 +362,5 @@ public sealed class AccountingBookPeriodInitializationC4Tests
           .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed }); return mock; }
     private static Mock<IFinanceAuditService> Audit()
     { var mock = new Mock<IFinanceAuditService>(); mock.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog()); return mock; }
-    private sealed record State(Guid TenantId, AccountingBook Book, FiscalPeriod Period, Account Debit, Account Credit);
+    private sealed record State(Guid TenantId, AccountingBook Book, FiscalPeriod Period, FiscalPeriod CutoffPeriod, Account Debit, Account Credit);
 }

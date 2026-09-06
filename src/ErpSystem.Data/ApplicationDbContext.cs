@@ -2933,16 +2933,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint("CK_AccountingBookInitializations_Status", "[IsDeleted] = 1 OR [InitializationStatus] IN (1, 2, 3, 4)");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_Balanced", "[IsDeleted] = 1 OR [TotalDebits] = [TotalCredits]");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_DecisionMakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_Coverage", "[RequiredAccountCount] >= 0 AND [CoveredAccountCount] >= 0 AND [CoveredAccountCount] <= [RequiredAccountCount]");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_SourceShape", "([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])");
-                table.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2, 4)) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 4 AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL)");
                 if (this.Database.IsSqlServer())
                 {
-                    table.HasCheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "DATALENGTH([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
-                    table.HasCheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "DATALENGTH([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "LEN([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] = RTRIM([EvidenceFingerprint]) AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "LEN([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] = RTRIM([ReconciliationFingerprint]) AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
                 }
             });
             entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.AccountingBookId, item.Id });
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.Version }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.InitializationStatus })
                 .IsUnique().HasFilter("[IsDeleted] = 0 AND [InitializationStatus] = 3");
@@ -2958,9 +2960,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(item => item.SourceAccountingBook).WithMany()
                 .HasForeignKey(item => new { item.TenantId, item.SourceAccountingBookId })
                 .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.CutoffFiscalPeriod).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.CutoffFiscalPeriodId })
+                .HasPrincipalKey(period => new { period.TenantId, period.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.SupersedesInitialization).WithMany()
-                .HasForeignKey(item => new { item.TenantId, item.SupersedesInitializationId })
-                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId, item.SupersedesInitializationId })
+                .HasPrincipalKey(item => new { item.TenantId, item.AccountingBookId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -2971,7 +2976,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint("CK_AccountingBookInitializationLines_NoDelete", "[IsDeleted] = 0");
                 table.HasCheckConstraint("CK_AccountingBookInitializationLines_Amounts", "[OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)");
                 if (this.Database.IsSqlServer())
-                    table.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "DATALENGTH([CurrencyCode]) = 3 AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
+                    table.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "LEN([CurrencyCode]) = 3 AND [CurrencyCode] = RTRIM([CurrencyCode]) AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
             });
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookInitializationId, item.AccountId }).IsUnique();
             entity.Property(item => item.CurrencyCode).HasMaxLength(3).IsRequired();

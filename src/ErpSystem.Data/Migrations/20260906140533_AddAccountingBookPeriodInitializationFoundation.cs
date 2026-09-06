@@ -76,7 +76,7 @@ IF EXISTS (
         OR b.[LifecycleStatus] NOT IN (1, 2, 3, 4, 5, 6)
         OR (b.[BookType] IN (1, 2) AND (
             b.[BaseAccountingBookId] IS NOT NULL OR b.[FunctionalCurrencyCode] IS NULL
-            OR DATALENGTH(b.[FunctionalCurrencyCode]) <> 6
+            OR LEN(b.[FunctionalCurrencyCode]) <> 3
             OR b.[FunctionalCurrencyCode] COLLATE Latin1_General_100_BIN2
                <> UPPER(LTRIM(RTRIM(b.[FunctionalCurrencyCode]))) COLLATE Latin1_General_100_BIN2
             OR b.[FunctionalCurrencyCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z][A-Z][A-Z]'))
@@ -95,6 +95,7 @@ IF EXISTS (
                     Mode = table.Column<int>(type: "int", nullable: false),
                     InitializationStatus = table.Column<int>(type: "int", nullable: false),
                     CutoffDate = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    CutoffFiscalPeriodId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     SourceAccountingBookId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     IdempotencyKey = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     Reason = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: false),
@@ -109,6 +110,10 @@ IF EXISTS (
                     WorkflowInstanceId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     ApprovedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     ApprovedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    RejectedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    RejectedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
+                    DecidedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    DecidedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: true),
                     DecisionReason = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
                     RowVersion = table.Column<byte[]>(type: "rowversion", rowVersion: true, nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
@@ -126,21 +131,23 @@ IF EXISTS (
                 {
                     table.PrimaryKey("PK_AccountingBookInitializations", x => x.Id);
                     table.UniqueConstraint("AK_AccountingBookInitializations_TenantId_Id", x => new { x.TenantId, x.Id });
-                    table.CheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2, 4)) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL)");
+                    table.UniqueConstraint("AK_AccountingBookInitializations_TenantId_AccountingBookId_Id", x => new { x.TenantId, x.AccountingBookId, x.Id });
+                    table.CheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 4 AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL)");
                     table.CheckConstraint("CK_AccountingBookInitializations_Balanced", "[IsDeleted] = 1 OR [TotalDebits] = [TotalCredits]");
                     table.CheckConstraint("CK_AccountingBookInitializations_Coverage", "[RequiredAccountCount] >= 0 AND [CoveredAccountCount] >= 0 AND [CoveredAccountCount] <= [RequiredAccountCount]");
-                    table.CheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "DATALENGTH([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.CheckConstraint("CK_AccountingBookInitializations_DecisionMakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+                    table.CheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "LEN([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] = RTRIM([EvidenceFingerprint]) AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
                     table.CheckConstraint("CK_AccountingBookInitializations_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
                     table.CheckConstraint("CK_AccountingBookInitializations_Mode", "[IsDeleted] = 1 OR [Mode] IN (1, 2, 3)");
                     table.CheckConstraint("CK_AccountingBookInitializations_NoDelete", "[IsDeleted] = 0");
-                    table.CheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "DATALENGTH([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.CheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "LEN([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] = RTRIM([ReconciliationFingerprint]) AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
                     table.CheckConstraint("CK_AccountingBookInitializations_SourceShape", "([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])");
                     table.CheckConstraint("CK_AccountingBookInitializations_Status", "[IsDeleted] = 1 OR [InitializationStatus] IN (1, 2, 3, 4)");
                     table.ForeignKey(
-                        name: "FK_AccountingBookInitializations_AccountingBookInitializations_TenantId_SupersedesInitializationId",
-                        columns: x => new { x.TenantId, x.SupersedesInitializationId },
+                        name: "FK_AccountingBookInitializations_AccountingBookInitializations_TenantId_AccountingBookId_SupersedesInitializationId",
+                        columns: x => new { x.TenantId, x.AccountingBookId, x.SupersedesInitializationId },
                         principalTable: "AccountingBookInitializations",
-                        principalColumns: new[] { "TenantId", "Id" },
+                        principalColumns: new[] { "TenantId", "AccountingBookId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_AccountingBookInitializations_AccountingBooks_TenantId_AccountingBookId",
@@ -152,6 +159,12 @@ IF EXISTS (
                         name: "FK_AccountingBookInitializations_AccountingBooks_TenantId_SourceAccountingBookId",
                         columns: x => new { x.TenantId, x.SourceAccountingBookId },
                         principalTable: "AccountingBooks",
+                        principalColumns: new[] { "TenantId", "Id" },
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_AccountingBookInitializations_FiscalPeriods_TenantId_CutoffFiscalPeriodId",
+                        columns: x => new { x.TenantId, x.CutoffFiscalPeriodId },
+                        principalTable: "FiscalPeriods",
                         principalColumns: new[] { "TenantId", "Id" },
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
@@ -243,7 +256,7 @@ IF EXISTS (
                 {
                     table.PrimaryKey("PK_AccountingBookInitializationLines", x => x.Id);
                     table.CheckConstraint("CK_AccountingBookInitializationLines_Amounts", "[OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)");
-                    table.CheckConstraint("CK_AccountingBookInitializationLines_Currency", "DATALENGTH([CurrencyCode]) = 3 AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
+                    table.CheckConstraint("CK_AccountingBookInitializationLines_Currency", "LEN([CurrencyCode]) = 3 AND [CurrencyCode] = RTRIM([CurrencyCode]) AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
                     table.CheckConstraint("CK_AccountingBookInitializationLines_NoDelete", "[IsDeleted] = 0");
                     table.ForeignKey(
                         name: "FK_AccountingBookInitializationLines_AccountingBookInitializations_TenantId_AccountingBookInitializationId",
@@ -301,9 +314,14 @@ IF EXISTS (
                 columns: new[] { "TenantId", "SourceAccountingBookId" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_AccountingBookInitializations_TenantId_SupersedesInitializationId",
+                name: "IX_AccountingBookInitializations_TenantId_AccountingBookId_SupersedesInitializationId",
                 table: "AccountingBookInitializations",
-                columns: new[] { "TenantId", "SupersedesInitializationId" });
+                columns: new[] { "TenantId", "AccountingBookId", "SupersedesInitializationId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_AccountingBookInitializations_TenantId_CutoffFiscalPeriodId",
+                table: "AccountingBookInitializations",
+                columns: new[] { "TenantId", "CutoffFiscalPeriodId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_AccountingBookPeriods_TenantId_AccountingBookId_FiscalPeriodId",

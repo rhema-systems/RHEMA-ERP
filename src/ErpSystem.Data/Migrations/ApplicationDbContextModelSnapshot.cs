@@ -9233,6 +9233,15 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("CutoffDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid>("CutoffFiscalPeriodId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("DecisionReason")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -9281,6 +9290,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<DateTime?>("RejectedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("RequiredAccountCount")
                         .HasColumnType("int");
 
@@ -9319,29 +9334,33 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TenantId", "CutoffFiscalPeriodId");
+
                     b.HasIndex("TenantId", "IdempotencyKey")
                         .IsUnique();
 
                     b.HasIndex("TenantId", "SourceAccountingBookId");
 
-                    b.HasIndex("TenantId", "SupersedesInitializationId");
-
                     b.HasIndex("TenantId", "AccountingBookId", "InitializationStatus")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0 AND [InitializationStatus] = 3");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "SupersedesInitializationId");
 
                     b.HasIndex("TenantId", "AccountingBookId", "Version")
                         .IsUnique();
 
                     b.ToTable("AccountingBookInitializations", null, t =>
                         {
-                            t.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2, 4)) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL)");
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 4 AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_AccountingBookInitializations_Balanced", "[IsDeleted] = 1 OR [TotalDebits] = [TotalCredits]");
 
                             t.HasCheckConstraint("CK_AccountingBookInitializations_Coverage", "[RequiredAccountCount] >= 0 AND [CoveredAccountCount] >= 0 AND [CoveredAccountCount] <= [RequiredAccountCount]");
 
-                            t.HasCheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "DATALENGTH([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_DecisionMakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "LEN([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] = RTRIM([EvidenceFingerprint]) AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
 
                             t.HasCheckConstraint("CK_AccountingBookInitializations_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
 
@@ -9349,7 +9368,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_AccountingBookInitializations_NoDelete", "[IsDeleted] = 0");
 
-                            t.HasCheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "DATALENGTH([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "LEN([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] = RTRIM([ReconciliationFingerprint]) AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
 
                             t.HasCheckConstraint("CK_AccountingBookInitializations_SourceShape", "([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])");
 
@@ -9427,7 +9446,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_AccountingBookInitializationLines_Amounts", "[OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)");
 
-                            t.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "DATALENGTH([CurrencyCode]) = 3 AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
+                            t.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "LEN([CurrencyCode]) = 3 AND [CurrencyCode] = RTRIM([CurrencyCode]) AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
 
                             t.HasCheckConstraint("CK_AccountingBookInitializationLines_NoDelete", "[IsDeleted] = 0");
                         });
@@ -168827,6 +168846,13 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "CutoffFiscalPeriod")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CutoffFiscalPeriodId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "SourceAccountingBook")
                         .WithMany()
                         .HasForeignKey("TenantId", "SourceAccountingBookId")
@@ -168835,11 +168861,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", "SupersedesInitialization")
                         .WithMany()
-                        .HasForeignKey("TenantId", "SupersedesInitializationId")
-                        .HasPrincipalKey("TenantId", "Id")
+                        .HasForeignKey("TenantId", "AccountingBookId", "SupersedesInitializationId")
+                        .HasPrincipalKey("TenantId", "AccountingBookId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("AccountingBook");
+
+                    b.Navigation("CutoffFiscalPeriod");
 
                     b.Navigation("SourceAccountingBook");
 

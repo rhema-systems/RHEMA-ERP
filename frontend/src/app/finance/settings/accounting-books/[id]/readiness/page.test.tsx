@@ -80,7 +80,7 @@ describe('accounting book C4 readiness', () => {
 
     it('loads governed preparation and submits exact mapped-account evidence', async () => {
         permissions.add('Finance.AccountingBooks.Initialization.Manage');
-        vi.mocked(financeDataService.prepareAccountingBookInitialization).mockResolvedValue({ accountingBookId: 'book-1', accountingBookCode: 'LOCAL', mode: 'IndependentOpeningBalances', cutoffDate: '2026-01-01', functionalCurrencyCode: 'GHS', accounts: [{ accountId: 'account-1', accountNumber: '1000', accountName: 'Cash', accountClassificationId: 'class-1', accountClassificationCode: 'CASH', authoritativeSignedBalance: 0 }] });
+        vi.mocked(financeDataService.prepareAccountingBookInitialization).mockResolvedValue({ accountingBookId: 'book-1', accountingBookCode: 'LOCAL', mode: 'IndependentOpeningBalances', cutoffDate: '2026-01-01', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', functionalCurrencyCode: 'GHS', accounts: [{ accountId: 'account-1', accountNumber: '1000', accountName: 'Cash', accountClassificationId: 'class-1', accountClassificationCode: 'CASH', authoritativeSignedBalance: 0 }] });
         render(<AccountingBookReadinessPage />);
         fireEvent.change(await screen.findByLabelText('Cutoff date'), { target: { value: '2026-01-01' } });
         fireEvent.change(screen.getByLabelText('Idempotency key'), { target: { value: 'init-1' } });
@@ -88,16 +88,32 @@ describe('accounting book C4 readiness', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Load governed preparation' }));
         expect(await screen.findByText('1000 — Cash')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Save draft evidence' }));
-        await waitFor(() => expect(financeDataService.configureAccountingBookInitialization).toHaveBeenCalledWith('book-1', expect.objectContaining({ mode: 'IndependentOpeningBalances', idempotencyKey: 'init-1', lines: [expect.objectContaining({ accountId: 'account-1', currencyCode: 'GHS' })] })));
+        await waitFor(() => expect(financeDataService.configureAccountingBookInitialization).toHaveBeenCalledWith('book-1', expect.objectContaining({ mode: 'IndependentOpeningBalances', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', idempotencyKey: 'init-1', lines: [expect.objectContaining({ accountId: 'account-1', currencyCode: 'GHS' })] })));
     });
 
     it('shows maker-checker initialization actions only under approval permission', async () => {
         permissions.add('Finance.AccountingBooks.Initialization.Approve');
-        vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue({ id: 'init', accountingBookId: 'book-1', version: 1, accountingBookCode: 'LOCAL', mode: 'IndependentOpeningBalances', status: 'PendingApproval', cutoffDate: '2026-01-01', idempotencyKey: 'key', reason: 'reason', totalDebits: 0, totalCredits: 0, requiredAccountCount: 1, coveredAccountCount: 1, isBalanced: true, isCoverageComplete: true, evidenceFingerprint: 'A'.repeat(64), reconciliationFingerprint: 'B'.repeat(64), preparedByUserId: 'maker', preparedAtUtc: '2026-01-01', rowVersion: 'AQ==', lines: [] });
+        vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue({ id: 'init', accountingBookId: 'book-1', version: 1, accountingBookCode: 'LOCAL', mode: 'IndependentOpeningBalances', status: 'PendingApproval', cutoffDate: '2026-01-01', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', idempotencyKey: 'key', reason: 'reason', totalDebits: 0, totalCredits: 0, requiredAccountCount: 1, coveredAccountCount: 1, isBalanced: true, isCoverageComplete: true, evidenceFingerprint: 'A'.repeat(64), reconciliationFingerprint: 'B'.repeat(64), preparedByUserId: 'maker', preparedAtUtc: '2026-01-01', rowVersion: 'AQ==', lines: [] });
         render(<AccountingBookReadinessPage />);
         fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
         fireEvent.change(screen.getByLabelText('Independent checker reason'), { target: { value: 'Evidence independently reconciled' } });
         fireEvent.click(screen.getByRole('button', { name: 'Confirm approve' }));
         await waitFor(() => expect(financeDataService.decideAccountingBookInitialization).toHaveBeenCalledWith('book-1', 'approve', 'Evidence independently reconciled', 'AQ=='));
+    });
+
+    it('shows rejection as decision evidence without presenting it as approval', async () => {
+        vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue({
+            id: 'init', accountingBookId: 'book-1', version: 2, accountingBookCode: 'LOCAL',
+            mode: 'IndependentOpeningBalances', status: 'Rejected', cutoffDate: '2026-01-01',
+            cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', idempotencyKey: 'key-2',
+            reason: 'reason', totalDebits: 0, totalCredits: 0, requiredAccountCount: 1, coveredAccountCount: 1,
+            isBalanced: true, isCoverageComplete: true, evidenceFingerprint: 'A'.repeat(64),
+            reconciliationFingerprint: 'B'.repeat(64), preparedByUserId: 'maker', preparedAtUtc: '2026-01-01',
+            rejectedByUserId: 'checker', rejectedAtUtc: '2026-01-02', decidedByUserId: 'checker',
+            decidedAtUtc: '2026-01-02', decisionReason: 'Opening evidence did not reconcile', rowVersion: 'AQ==', lines: [],
+        });
+        render(<AccountingBookReadinessPage />);
+        expect(await screen.findByText(/Rejected by checker — Opening evidence did not reconcile/)).toBeInTheDocument();
+        expect(screen.queryByText(/Approved by checker/)).not.toBeInTheDocument();
     });
 });

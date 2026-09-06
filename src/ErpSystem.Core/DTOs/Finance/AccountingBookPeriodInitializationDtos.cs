@@ -50,7 +50,10 @@ public sealed class ConfigureAccountingBookInitializationDto
 {
     public string Mode { get; set; } = string.Empty;
     public DateTime CutoffDate { get; set; }
+    public Guid CutoffFiscalPeriodId { get; set; }
+    public string CutoffFiscalPeriodCode { get; set; } = string.Empty;
     public Guid? SourceAccountingBookId { get; set; }
+    public string? SourceAccountingBookCode { get; set; }
     public string IdempotencyKey { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
     public IReadOnlyCollection<AccountingBookInitializationLineDto> Lines { get; set; } = Array.Empty<AccountingBookInitializationLineDto>();
@@ -67,6 +70,8 @@ public sealed class AccountingBookInitializationDto
     public string Mode { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public DateTime CutoffDate { get; set; }
+    public Guid CutoffFiscalPeriodId { get; set; }
+    public string CutoffFiscalPeriodCode { get; set; } = string.Empty;
     public Guid? SourceAccountingBookId { get; set; }
     public string? SourceAccountingBookCode { get; set; }
     public string IdempotencyKey { get; set; } = string.Empty;
@@ -83,6 +88,11 @@ public sealed class AccountingBookInitializationDto
     public DateTime PreparedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
+    public Guid? RejectedByUserId { get; set; }
+    public DateTime? RejectedAtUtc { get; set; }
+    public Guid? DecidedByUserId { get; set; }
+    public DateTime? DecidedAtUtc { get; set; }
+    public string? DecisionReason { get; set; }
     public string RowVersion { get; set; } = string.Empty;
     public IReadOnlyCollection<AccountingBookInitializationLineDto> Lines { get; set; } = Array.Empty<AccountingBookInitializationLineDto>();
 }
@@ -99,7 +109,10 @@ public sealed class AccountingBookInitializationPreparationDto
     public string AccountingBookCode { get; set; } = string.Empty;
     public string Mode { get; set; } = string.Empty;
     public DateTime CutoffDate { get; set; }
+    public Guid CutoffFiscalPeriodId { get; set; }
+    public string CutoffFiscalPeriodCode { get; set; } = string.Empty;
     public Guid? SourceAccountingBookId { get; set; }
+    public string? SourceAccountingBookCode { get; set; }
     public string FunctionalCurrencyCode { get; set; } = string.Empty;
     public IReadOnlyCollection<AccountingBookInitializationPreparationLineDto> Accounts { get; set; } = Array.Empty<AccountingBookInitializationPreparationLineDto>();
 }

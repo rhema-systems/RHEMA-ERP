@@ -25,9 +25,11 @@ public sealed class AccountingBookService : IAccountingBookService
     private readonly ICurrentUserService _currentUser;
     private readonly IWorkflowService? _workflow;
     private readonly IFinanceAuditService? _audit;
+    private readonly IAccountingBookInitializationService? _initialization;
 
-    public AccountingBookService(ApplicationDbContext db, ICurrentUserService currentUser, IWorkflowService workflow, IFinanceAuditService audit)
-    { _db = db; _currentUser = currentUser; _workflow = workflow; _audit = audit; }
+    public AccountingBookService(ApplicationDbContext db, ICurrentUserService currentUser, IWorkflowService workflow, IFinanceAuditService audit,
+        IAccountingBookInitializationService? initialization = null)
+    { _db = db; _currentUser = currentUser; _workflow = workflow; _audit = audit; _initialization = initialization; }
     // Kept for mapping-only legacy callers while DI and governed lifecycle operations use the complete constructor.
     public AccountingBookService(ApplicationDbContext db, ICurrentUserService currentUser)
     { _db = db; _currentUser = currentUser; }
@@ -440,23 +442,11 @@ public sealed class AccountingBookService : IAccountingBookService
     };
     private async Task<AccountingBookActivationReadinessDto> GetActivationReadinessAsync(AccountingBook book, CancellationToken ct)
     {
-        var blockers = new List<string>();
-        var initialization = await _db.AccountingBookInitializations.AsNoTracking()
-            .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted, ct);
-        if (initialization?.InitializationStatus != AccountingBookInitializationStatus.Approved)
-            blockers.Add("Approved initialization evidence is required.");
-        var firstPostingDate = initialization == null ? (DateTime?)null : initialization.CutoffDate.Date.AddDays(1);
-        if (firstPostingDate.HasValue && book.EffectiveFromUtc.HasValue && book.EffectiveFromUtc.Value.Date > firstPostingDate.Value)
-            firstPostingDate = book.EffectiveFromUtc.Value.Date;
-        var fiscalIds = firstPostingDate.HasValue ? await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted
-            && item.StartDate <= firstPostingDate.Value && item.EndDate >= firstPostingDate.Value).Select(item => item.Id).ToListAsync(ct) : new List<Guid>();
-        if (fiscalIds.Count != 1) blockers.Add("Exactly one tenant fiscal period must contain the book's first posting date.");
-        var openPeriods = await _db.AccountingBookPeriods.AsNoTracking().CountAsync(item => item.TenantId == TenantId
-            && item.AccountingBookId == book.Id && fiscalIds.Contains(item.FiscalPeriodId)
-            && item.PeriodStatus == AccountingBookPeriodStatus.Open && !item.IsDeleted, ct);
-        if (fiscalIds.Count == 1 && openPeriods != 1) blockers.Add("The book's first posting period must be governed and open.");
-        return new AccountingBookActivationReadinessDto { IsReady = blockers.Count == 0, Blockers = blockers,
-            InitializationFingerprint = initialization?.EvidenceFingerprint, ReadyPeriodCount = openPeriods, RequiredPeriodCount = fiscalIds.Count };
+        // Lifecycle request and approval both call this method inside their serializable boundary.
+        // The initialization service re-derives financial, source-book, fiscal/module and exact-book
+        // readiness rather than trusting a previously displayed readiness flag.
+        var authority = _initialization ?? new AccountingBookInitializationService(_db, _currentUser, _workflow!, _audit!);
+        return await authority.GetReadinessAsync(book.Id, ct);
     }
     private static object Snapshot(AccountingBook item) => new
     {

@@ -32,10 +32,10 @@ public sealed class AccountingBookPeriodInitializationC4MigrationSqlServerTests
 INSERT AccountingBookPeriods (Id,AccountingBookId,FiscalPeriodId,PeriodStatus,CreatedAt,IsDeleted,TenantId)
 VALUES ('{{Guid.NewGuid()}}','{{evidence.BookId}}','{{evidence.PeriodId}}',1,SYSUTCDATETIME(),0,'{{evidence.TenantId}}');
 INSERT AccountingBookInitializations
- (Id,AccountingBookId,Version,Mode,InitializationStatus,CutoffDate,IdempotencyKey,Reason,TotalDebits,TotalCredits,
+ (Id,AccountingBookId,Version,Mode,InitializationStatus,CutoffDate,CutoffFiscalPeriodId,IdempotencyKey,Reason,TotalDebits,TotalCredits,
   RequiredAccountCount,CoveredAccountCount,EvidenceFingerprint,ReconciliationFingerprint,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
 VALUES
- ('{{initializationId}}','{{evidence.BookId}}',1,1,1,SYSUTCDATETIME(),N'c4-sql-success',N'rehearsal',0,0,
+ ('{{initializationId}}','{{evidence.BookId}}',1,1,1,SYSUTCDATETIME(),'{{evidence.PeriodId}}',N'c4-sql-success',N'rehearsal',0,0,
   1,1,REPLICATE(N'A',64),REPLICATE(N'B',64),'{{Guid.NewGuid()}}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{{evidence.TenantId}}');
 INSERT AccountingBookInitializationLines
  (Id,AccountingBookInitializationId,AccountId,CurrencyCode,OpeningDebit,OpeningCredit,BaseBookSignedBalance,OpeningAdjustment,CreatedAt,IsDeleted,TenantId)
@@ -97,6 +97,42 @@ VALUES ('{{Guid.NewGuid()}}','{{initializationId}}','{{evidence.AccountId}}',N'g
         (await apply.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name IN (N'AccountingBookInitializations',N'AccountingBookInitializationLines')"))
             .Should().Be(0, "the complete C4 preflight must fail before the first CreateTable operation");
+    }
+
+    [SqlServerFact]
+    public async Task Migration_RejectsCrossTenantCutoff_AndCrossBookOrTenantSupersession()
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        var first = await database.CreatePredecessorAsync();
+        var second = await database.AddTenantAuthorityAsync();
+        await database.ApplyAsync(up: true);
+
+        var firstInitializationId = Guid.NewGuid();
+        await database.InsertInitializationAsync(
+            first.TenantId, first.BookId, first.PeriodId, firstInitializationId,
+            version: 1, key: "first", supersedesId: null);
+
+        var crossTenantCutoff = () => database.InsertInitializationAsync(
+            first.TenantId, first.BookId, second.PeriodId, Guid.NewGuid(),
+            version: 2, key: "bad-cutoff", supersedesId: null);
+        (await crossTenantCutoff.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(547);
+
+        var parallelBookId = Guid.NewGuid();
+        await database.ExecuteAsync($$"""
+INSERT AccountingBooks VALUES ('{{parallelBookId}}','{{first.TenantId}}',N'LOCAL_STATUTORY',2,2,N'GHS',NULL,0,0,0,NULL,0);
+""");
+        var crossBookSupersession = () => database.InsertInitializationAsync(
+            first.TenantId, parallelBookId, first.PeriodId, Guid.NewGuid(),
+            version: 1, key: "bad-book", supersedesId: firstInitializationId);
+        (await crossBookSupersession.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(547);
+
+        var crossTenantSupersession = () => database.InsertInitializationAsync(
+            second.TenantId, second.BookId, second.PeriodId, Guid.NewGuid(),
+            version: 1, key: "bad-tenant", supersedesId: firstInitializationId);
+        (await crossTenantSupersession.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(547);
+
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingBookInitializations"))
+            .Should().Be(1, "failed lineage writes must leave only the valid original authority");
     }
 
     private sealed class SqlServerFactAttribute : FactAttribute
@@ -164,6 +200,45 @@ INSERT Accounts VALUES ('{{accountId}}','{{tenantId}}');
 INSERT AccountingBooks VALUES ('{{bookId}}','{{tenantId}}',N'IFRS',1,2,N'GHS',NULL,1,0,0,NULL,0);
 """);
             return (tenantId, bookId, periodId, accountId);
+        }
+
+        public async Task<(Guid TenantId, Guid BookId, Guid PeriodId, Guid AccountId)> AddTenantAuthorityAsync()
+        {
+            var tenantId = Guid.NewGuid();
+            var bookId = Guid.NewGuid();
+            var yearId = Guid.NewGuid();
+            var periodId = Guid.NewGuid();
+            var accountId = Guid.NewGuid();
+            await ExecuteAsync($$"""
+INSERT Tenants VALUES ('{{tenantId}}',0);
+INSERT FiscalYears VALUES ('{{yearId}}','{{tenantId}}',0);
+INSERT FiscalPeriods VALUES ('{{periodId}}','{{tenantId}}','{{yearId}}',0);
+INSERT Accounts VALUES ('{{accountId}}','{{tenantId}}');
+INSERT AccountingBooks VALUES ('{{bookId}}','{{tenantId}}',N'IFRS',1,2,N'GHS',NULL,1,0,0,NULL,0);
+""");
+            return (tenantId, bookId, periodId, accountId);
+        }
+
+        public Task InsertInitializationAsync(
+            Guid tenantId,
+            Guid bookId,
+            Guid cutoffPeriodId,
+            Guid initializationId,
+            int version,
+            string key,
+            Guid? supersedesId)
+        {
+            var supersedes = supersedesId.HasValue ? $"'{supersedesId.Value}'" : "NULL";
+            return ExecuteAsync($$"""
+INSERT AccountingBookInitializations
+ (Id,AccountingBookId,Version,SupersedesInitializationId,Mode,InitializationStatus,CutoffDate,CutoffFiscalPeriodId,
+  IdempotencyKey,Reason,TotalDebits,TotalCredits,RequiredAccountCount,CoveredAccountCount,EvidenceFingerprint,
+  ReconciliationFingerprint,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
+VALUES
+ ('{{initializationId}}','{{bookId}}',{{version}},{{supersedes}},1,1,SYSUTCDATETIME(),'{{cutoffPeriodId}}',
+  N'{{key}}',N'rehearsal',0,0,0,0,REPLICATE(N'A',64),REPLICATE(N'B',64),'{{Guid.NewGuid()}}',
+  SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{{tenantId}}');
+""");
         }
 
         public async Task ApplyAsync(bool up)

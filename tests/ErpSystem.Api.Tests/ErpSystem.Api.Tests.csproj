@@ -143,6 +143,7 @@
     <Compile Include="Services\Finance\FinanceBudgetCommitmentServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
     <Compile Include="Services\Finance\AccountingBookClassificationAuthorityTests.cs" />
     <Compile Include="Services\Finance\MigrationRehearsalCorrectionTests.cs" />
     <Compile Include="Services\Finance\MigrationCompatibilitySqlServerTests.cs" />

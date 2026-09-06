@@ -35,7 +35,7 @@ can supersede it without rewriting history. Supported modes are:
 - `IndependentOpeningBalances`: opening evidence must reconcile to the selected book's posted/C2 authority
   at the cutoff.
 - `BaseBookCopyAtCutoff`: every mapped account must equal the authoritative source-book balance at cutoff.
-- `BaseBalancesPlusAdjustments`: the source balance plus the explicit adjustment must equal the proposed
+- `BaseBalancesWithOpeningAdjustments`: the source balance plus the explicit adjustment must equal the proposed
   opening amount.
 
 The preparation endpoint is read-only. It returns the exact tenant/book mapped-account set, active posting
@@ -71,10 +71,9 @@ posting or bypass the C1 representation lock.
 
 `AddAccountingBookPeriodInitializationFoundation` is an unapplied forward migration. Its first SQL operation
 preflights canonical tenant/book/fiscal lineage and conflicting predecessor evidence before adding schema.
-It may backfill exact-book period rows for already-active development books only where the existing global
-period state and book identity provide unambiguous truthful evidence. It never fabricates approved
-initialization fingerprints. Existing active/grandfathered books remain historical compatibility evidence;
-new activation requires C4 approval.
+It intentionally rejects Active, postable, or pending-Active predecessor books because the predecessor has
+no truthful immutable C4 readiness evidence to backfill. It never fabricates period authority or approved
+initialization fingerprints; retained databases require the reviewed reset or explicit remediation path.
 
 Operators must review migration-operation and guarded SQL Server success/fail-before-mutation/Down tests,
 generate the migration script without connecting, and run EF's no-pending-model gate. The migration must not

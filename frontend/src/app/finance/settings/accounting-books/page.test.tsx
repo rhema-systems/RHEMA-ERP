@@ -95,7 +95,7 @@ describe('accounting book settings', () => {
         expect(screen.getByText('Yes — structure locked')).toBeInTheDocument();
     });
 
-    it('separates manage and transition permissions and warns that C3 activation is blocked', async () => {
+    it('separates manage and transition permissions and shows current C4 readiness', async () => {
         permissions.add('Finance.AccountingBooks.Manage');
         permissions.add('Finance.AccountingBooks.Transitions.Request');
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([initializingBook]);
@@ -104,7 +104,7 @@ describe('accounting book settings', () => {
         expect(await screen.findByRole('button', { name: 'New accounting book' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Request transition' }));
-        expect(await screen.findByText('Activation is not ready in C3')).toBeInTheDocument();
+        expect(await screen.findByText('Activation readiness required')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
         expect(financeDataService.requestAccountingBookTransition).not.toHaveBeenCalled();
     });

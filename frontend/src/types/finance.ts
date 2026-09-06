@@ -224,11 +224,14 @@ export interface AccountingBookInitializationLine {
 export interface AccountingBookInitialization {
     id: string; accountingBookId: string; version: number; supersedesInitializationId?: string | null;
     accountingBookCode: string; mode: AccountingBookInitializationMode; status: AccountingBookInitializationStatus;
-    cutoffDate: string; sourceAccountingBookId?: string | null; sourceAccountingBookCode?: string | null;
+    cutoffDate: string; cutoffFiscalPeriodId: string; cutoffFiscalPeriodCode: string;
+    sourceAccountingBookId?: string | null; sourceAccountingBookCode?: string | null;
     idempotencyKey: string; reason: string; totalDebits: number; totalCredits: number;
     requiredAccountCount: number; coveredAccountCount: number; isBalanced: boolean; isCoverageComplete: boolean;
     evidenceFingerprint: string; reconciliationFingerprint: string; preparedByUserId: string; preparedAtUtc: string;
     approvedByUserId?: string | null; approvedAtUtc?: string | null; rowVersion: string;
+    rejectedByUserId?: string | null; rejectedAtUtc?: string | null;
+    decidedByUserId?: string | null; decidedAtUtc?: string | null; decisionReason?: string | null;
     lines: AccountingBookInitializationLine[];
 }
 export interface AccountingBookInitializationPreparationLine {
@@ -237,7 +240,8 @@ export interface AccountingBookInitializationPreparationLine {
 }
 export interface AccountingBookInitializationPreparation {
     accountingBookId: string; accountingBookCode: string; mode: AccountingBookInitializationMode;
-    cutoffDate: string; sourceAccountingBookId?: string | null; functionalCurrencyCode: string;
+    cutoffDate: string; cutoffFiscalPeriodId: string; cutoffFiscalPeriodCode: string;
+    sourceAccountingBookId?: string | null; sourceAccountingBookCode?: string | null; functionalCurrencyCode: string;
     accounts: AccountingBookInitializationPreparationLine[];
 }
 export interface AccountingBookActivationReadiness {

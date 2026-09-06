@@ -60,6 +60,13 @@ public sealed class AccountingBookPeriodInitializationC4MigrationTests
         tables["AccountingBookInitializationLines"].ForeignKeys.Should().Contain(item =>
             item.Name == "FK_AccountingBookInitializationLines_AccountingBookInitializations_TenantId_AccountingBookInitializationId"
             && item.Columns.SequenceEqual(new[] { "TenantId", "AccountingBookInitializationId" }));
+        tables["AccountingBookInitializations"].ForeignKeys.Should().Contain(item =>
+            item.Name == "FK_AccountingBookInitializations_FiscalPeriods_TenantId_CutoffFiscalPeriodId"
+            && item.Columns.SequenceEqual(new[] { "TenantId", "CutoffFiscalPeriodId" }));
+        tables["AccountingBookInitializations"].ForeignKeys.Should().Contain(item =>
+            item.Name == "FK_AccountingBookInitializations_AccountingBookInitializations_TenantId_AccountingBookId_SupersedesInitializationId"
+            && item.Columns.SequenceEqual(new[] { "TenantId", "AccountingBookId", "SupersedesInitializationId" })
+            && item.PrincipalColumns.SequenceEqual(new[] { "TenantId", "AccountingBookId", "Id" }));
 
         up.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
             && item.Name == "IX_AccountingBookPeriods_TenantId_AccountingBookId_FiscalPeriodId"
@@ -81,6 +88,13 @@ public sealed class AccountingBookPeriodInitializationC4MigrationTests
             "CK_AccountingBookInitializationLines_NoDelete",
             "CK_AccountingBookInitializationLines_Currency"
         });
+        tables["AccountingBookInitializations"].Columns.Should().Contain(item => item.Name == "CutoffFiscalPeriodId" && !item.IsNullable);
+        tables["AccountingBookInitializations"].CheckConstraints
+            .Single(item => item.Name == "CK_AccountingBookInitializations_EvidenceFingerprint").Sql
+            .Should().Contain("LEN([EvidenceFingerprint]) = 64").And.NotContain("DATALENGTH");
+        tables["AccountingBookInitializationLines"].CheckConstraints
+            .Single(item => item.Name == "CK_AccountingBookInitializationLines_Currency").Sql
+            .Should().Contain("LEN([CurrencyCode]) = 3").And.NotContain("DATALENGTH");
 
         var down = migration.BuildDownOperations();
         down[0].Should().BeOfType<SqlOperation>();
