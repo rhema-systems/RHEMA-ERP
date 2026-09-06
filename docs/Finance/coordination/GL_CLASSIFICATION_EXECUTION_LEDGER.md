@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C4 — book-period and governed initialization authority |
-| Status | `CORRECTION_IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f38036b7773ea27ef189e0617045b3481285e19c` |
 | Branch | `codex/finance-book-period-initialization-c4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C4 review cycle 1 returned `CHANGES_REQUIRED`; Sol Medium correction active |
+| Review status | Corrected C4 candidate `fb58f71a` under independent GPT-5.6 Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -611,3 +611,13 @@ generation, diff and clean-status checks. The coordinator dispatched all finding
 GPT-5.6 Sol Medium correction, including executable SQL success/failure coverage and full posting-consumer
 fixture repair without weakening the production gate. Integration and subsequent stages remain blocked; no
 database was accessed or mutated.
+
+The implementer completed the substantive C4 correction as
+`fb58f71a2fd59cc4fd846c3be86e5e4062a4b4d5` on top of the original four-commit candidate. The isolated
+worktree is clean, merge base remains exact and the full five-commit range passes `git diff --check`. The
+correction addresses SQL `nvarchar` length constraints; relational cutoff-period and same-book version
+lineage; version-safe activation readiness and fresh authority revalidation; effective-maker identity;
+source-book drift; explicit rejection evidence; pure-copy adjustment denial; documentation/UI text; and
+explicit exact-book-period setup across affected Finance posting fixtures. Independent GPT-5.6 Sol High
+re-review is active over every cycle-1 finding and the widened consumer regression gate. Integration,
+migration application, C5 work and configured-database access remain blocked pending approval.
