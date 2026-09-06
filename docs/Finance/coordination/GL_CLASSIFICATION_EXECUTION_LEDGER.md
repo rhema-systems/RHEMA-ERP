@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `IMPLEMENTATION_ACTIVE` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 implementation active; independent Sol High review pending a clean handoff |
+| Review status | Clean C3 candidate `a8de11c7` is under independent Sol High review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -418,3 +418,14 @@ AccountingEvent orchestration, book enumeration, automatic parallel posting, own
 persistent database operations remain prohibited. The C1 parallel-posting gate and C2 balance/exposure
 authority must remain unchanged. Independent review will use GPT-5.6 Sol High after a clean structured
 handoff.
+
+The C3 implementer completed a clean three-commit candidate at
+`a8de11c73d37faa1feef543d72ec9d9d5fc63b79`: `25510ef1` governs the Finance lifecycle,
+`6b4008a5` adds focused coverage, and `a8de11c7` adds the lifecycle UI. Git confirms the worktree is clean,
+the range is linear from exact base `81ac3dfea300689adc260326d7a97af68ddfc0d1`, and the full range passes
+`git diff --check`. The task API did not surface the completed turn's final handoff text, so the coordinator
+requested a read-only structured handoff reconciliation rather than retrying any implementation mutation.
+Independent GPT-5.6 Sol High review is active against the exact candidate and includes lifecycle/type/base
+invariants, concurrency, maker-checker/audit atomicity, migration preflight, API/UI permissions, activation
+fail-closed readiness, C1/C2 regression boundaries, and scope isolation. No C3 commit is approved for
+integration yet, no C4 work is authorized, and configured `RHEMAERP` remains untouched.
