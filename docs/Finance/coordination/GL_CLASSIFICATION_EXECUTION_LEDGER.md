@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `CHANGES_REQUIRED` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 review cycle 1 found material lineage/migration/UI gaps; Sol Medium correction active |
+| Review status | Corrected C3 candidate `0ebea93c` is under independent Sol High re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -441,3 +441,12 @@ sent a substantive GPT-5.6 Sol Medium correction requiring lifecycle-aware full-
 and approval, transitive dependent protection, binary/ASCII-safe migration and database constraints with
 fail-before-mutation SQL coverage, and UI parity with backend lock rules. C3 integration and C4 remain blocked;
 the migration remains unapplied and configured `RHEMAERP` remains untouched.
+
+The implementer completed the scoped C3 correction as
+`0ebea93c0e75681df844c4fbd834b7c36a481d7c` on top of the original three commits; the four-commit
+worktree is clean and the exact-base range passes `git diff --check`. The correction updates lifecycle-lineage
+authority, canonical migration/database constraints and UI structural-lock behavior with corresponding tests
+and documentation. Independent GPT-5.6 Sol High re-review is active over the complete range, and the
+coordinator requested a read-only structured handoff reconciliation because the task API again did not surface
+the completed turn text. Integration, C4, migration application and configured-database access remain blocked
+pending approval.
