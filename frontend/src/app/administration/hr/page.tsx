@@ -7,6 +7,7 @@ import {
   Users,
   Users2,
   UserRoundCheck,
+  Layers,
   ListTree,
   Wrench,
   GraduationCap,
@@ -59,6 +60,15 @@ export default function HrAdministrationPage() {
               description: 'Positions, skill requirements and grades.',
               href: '/administration/hr/positions',
               icon: Users,
+            },
+            {
+              // Area 17. Fifteen endpoints with no screen: the three GETs fed the job-description
+              // pickers while the nine writes had no caller anywhere, so the taxonomy was whatever
+              // the starter seed left and could not be corrected or extended.
+              title: 'Job Architecture',
+              description: 'Job families, sub-families and the career-level ladder.',
+              href: '/administration/hr/job-architecture',
+              icon: Layers,
             },
           ]}
         />

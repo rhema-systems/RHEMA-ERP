@@ -205,7 +205,12 @@ public static class JobAnalysisMappingExtensions
         entity.ExpiryDate = dto.ExpiryDate;
         entity.RevisionReason = dto.RevisionReason;
         entity.JobSummary = dto.JobSummary;
-        entity.Status = dto.Status;
+        // ⚠ Status is deliberately NOT assigned here. It is moved by submitting, reviewing and
+        // approving — the three paths that also carry the reviewer, the approver and the
+        // supersession of the previous version. An edit that could set it would let a caller mark a
+        // description Approved without any of that happening, and an edit that omitted it wrote
+        // 0 (Draft is 1), a value no enum member holds, leaving the record unable to move again.
+        // JobDescriptionService.UpdateAsync refuses a status that contradicts the record.
         entity.NextReviewDate = dto.NextReviewDate;
         entity.ReviewCycleMonths = dto.ReviewCycleMonths;
         entity.RoleIntrinsicValue = dto.RoleIntrinsicValue;
@@ -558,7 +563,8 @@ public static class JobAnalysisMappingExtensions
         entity.RecruitmentBudget = dto.RecruitmentBudget;
         entity.TrainingBudget = dto.TrainingBudget;
         entity.ActualSpent = dto.ActualSpent;
-        entity.Status = dto.Status;
+        // ⚠ Not assigned — see UpdateManpowerBudgetDto.Status. The correction dialog does not send
+        // a status, so this line wrote 0 over every budget it touched and left it unsubmittable.
         entity.BusinessJustification = dto.BusinessJustification;
     }
 

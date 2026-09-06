@@ -266,7 +266,19 @@ public class UpdateJobDescriptionDto : UpdateDtoBase
     [MaxLength(2000)]
     public string JobSummary { get; set; } = string.Empty;
 
-    public JobDescriptionStatus Status { get; set; }
+    /// <summary>
+    /// The status the caller believes the record is in. Optional, and never written.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was non-nullable and it WAS written, which made an omitted status corrupting rather
+    /// than harmless: <c>Draft = 1</c>, so a body without it bound to <b>0</b> — a value no member
+    /// of the enum holds. A record left on 0 is not authorable and not submittable, so it can never
+    /// move again; only a duplicate escapes it. Nullable now, so omitting it means "I am not
+    /// saying", and <see cref="ErpSystem.Core.Services.HR.JobDescriptionService"/> refuses a value
+    /// that contradicts the record rather than acting on it. Status is moved by submitting,
+    /// reviewing or approving — never by an edit.
+    /// </remarks>
+    public JobDescriptionStatus? Status { get; set; }
     public DateTime? NextReviewDate { get; set; }
     public int ReviewCycleMonths { get; set; }
 
@@ -847,7 +859,20 @@ public class UpdateManpowerBudgetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal ActualSpent { get; set; }
 
-    public ManpowerBudgetStatus Status { get; set; }
+    /// <summary>
+    /// The status the caller believes the budget is in. Optional, and never written.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The twin of the job description's own status hole, and unlike that one it had a caller.
+    /// It was non-nullable and assigned unconditionally, and the "Correct the budget" dialog on the
+    /// manpower budget screen does not send it — <c>Draft = 1</c>, so every correction would have
+    /// written <b>0</b>, and <c>SubmitForApprovalAsync</c> admits Draft only. A corrected budget
+    /// could then never be submitted, which closes FR-HR-135's chain and with it the approved
+    /// establishment that depends on it (D-2). No row was ever damaged only because the table is
+    /// still empty (ErpSystemDB, 2026-09-06: 0 budgets) — the correction dialog is newer than the
+    /// data. Status is moved by submit, approve and reject; never by an edit.
+    /// </remarks>
+    public ManpowerBudgetStatus? Status { get; set; }
 
     [MaxLength(2000)]
     public string? BusinessJustification { get; set; }

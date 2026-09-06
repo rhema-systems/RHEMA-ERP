@@ -10,6 +10,7 @@ import {
   GitBranch,
   Loader2,
   Lock,
+  Pencil,
   Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -18,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { EmptyState } from '@/components/hr/common/EmptyState';
 import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
 import { DutyItemsPanel } from '@/components/hr/job-analysis/DutyItemsPanel';
 import { EquipmentToolsPanel } from '@/components/hr/job-analysis/EquipmentToolsPanel';
@@ -58,7 +60,12 @@ export default function JobDescriptionDetailPage() {
   const { hasAnyPermission, hasAnyRole } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
 
-  const { data: jd, isLoading } = useQuery({
+  const {
+    data: jd,
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
     queryKey: ['job-description', id],
     queryFn: () => jobArchitectureService.getJobDescriptionDetail(id),
     enabled: !!id,
@@ -97,11 +104,35 @@ export default function JobDescriptionDetailPage() {
     }
   };
 
-  if (isLoading || !jd) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
         Loading…
+      </div>
+    );
+  }
+
+  /**
+   * ⚠ A failed read used to fall into the branch above and spin for ever — `isLoading || !jd` is
+   * true for a 404 and for a 500 alike, so the screen said "Loading…" about a request that had
+   * already come back and failed. Someone arriving here from the register reads that as a dead
+   * link rather than as an error they can act on, and it hides the one detail that matters: which
+   * request failed and why.
+   */
+  if (isError || !jd) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Job description" description="" backHref="/hr/job-descriptions" />
+        <EmptyState
+          icon={AlertTriangle}
+          title="Could not load this job description"
+          description={
+            error instanceof Error
+              ? error.message
+              : 'It may have been removed, or you may not have permission to read it.'
+          }
+        />
       </div>
     );
   }
@@ -155,6 +186,18 @@ export default function JobDescriptionDetailPage() {
         backHref="/hr/job-descriptions"
         actions={
           <div className="flex flex-wrap gap-2">
+            {/*
+              The title, summary, classification and valuation live on the record itself, not in the
+              tabs below — and until this button existed there was no way back to them. `canAuthor`
+              is the same gate the tabs use: Draft or UnderRevision, and Write.
+            */}
+            {canAuthor && (
+              <Button variant="outline" onClick={() => router.push(`/hr/job-descriptions/${id}/edit`)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit details
+              </Button>
+            )}
+
             {status === 'Draft' || status === 'UnderRevision' ? (
               <Button
                 onClick={() => run('submit', () => jobArchitectureService.submitJobDescription(id), 'Submitted for review')}

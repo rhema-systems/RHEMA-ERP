@@ -769,6 +769,11 @@ export interface CreateJobDescription {
   jobLevelId?: string | null;
   staffLevelId?: string | null;
   suggestedSalaryGradeId?: string | null;
+  /**
+   * ⚠ On both the create and the update DTO, and on neither form. It is here so an edit can carry
+   * it back unchanged — `UpdateEntity` replaces every column, so omitting it nulls it.
+   */
+  intendedEmploymentType?: string | null;
   unionId?: string | null;
   isBargainingUnitRole?: boolean;
   occupationCode?: string | null;
@@ -783,7 +788,14 @@ export interface CreateJobDescription {
   approvalAuthorityNotes?: string | null;
 }
 
-/** ⚠ `id` is required and must match the route — the API compares them. */
+/**
+ * ⚠ `id` is required and must match the route — the API compares them.
+ *
+ * ⚠ `status` is NOT a transition. The API never writes it (submit, review and approve own it) and
+ * refuses a value that contradicts the record, so send back the one that was read. It is required
+ * here rather than optional because the update is a REPLACE: a caller assembling this payload is
+ * round-tripping a whole document, and a status it cannot state is a document it has not read.
+ */
 export interface UpdateJobDescription extends CreateJobDescription {
   id: string;
   status: JobDescriptionStatus;

@@ -572,6 +572,15 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity.Status == JobDescriptionStatus.Approved)
             throw JobArchitectureException.InvalidState("Cannot update an approved job description. Create a new version instead.");
 
+        // ⚠ An edit does not move the status, and a caller who thinks it does is told so rather
+        // than left to believe it worked. Sending the record's current status is how a client
+        // round-trips the whole document (the update is a replace), so that is accepted; anything
+        // else is an attempted transition through the wrong door.
+        if (updateDto.Status.HasValue && updateDto.Status.Value != entity.Status)
+            throw JobArchitectureException.Invalid(
+                $"A job description's status is not changed by editing it. This one is {entity.Status}; " +
+                "use submit, review or approve to move it.");
+
         await RequireCoherentClassificationAsync(
             updateDto.JobFamilyId, updateDto.JobSubFamilyId, updateDto.JobLevelId, cancellationToken);
 
@@ -2041,6 +2050,14 @@ public class ManpowerBudgetService : IManpowerBudgetService
 
         if (entity.Status == ManpowerBudgetStatus.Approved)
             throw JobArchitectureException.InvalidState("Cannot update an approved budget.");
+
+        // A correction does not move the budget through its chain — submit, approve and reject do.
+        // A caller who sends the current status is round-tripping the record and is fine; one who
+        // sends a different status is told, rather than left believing the transition happened.
+        if (updateDto.Status.HasValue && updateDto.Status.Value != entity.Status)
+            throw JobArchitectureException.Invalid(
+                $"A manpower budget's status is not changed by correcting it. This one is {entity.Status}; " +
+                "use submit, approve or reject to move it.");
 
         updateDto.UpdateEntity(entity);
         entity.TotalBudget = updateDto.SalaryBudget + updateDto.BenefitsBudget + updateDto.RecruitmentBudget + updateDto.TrainingBudget;

@@ -3763,6 +3763,11 @@ export const navigationItems: NavItem[] = [
             ],
           },
           { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
+          // Area 17. `api/hr/job-architecture` carried fifteen endpoints and no screen: its three
+          // GETs fed the job-description pickers while all nine writes had no caller anywhere in
+          // the product, so the taxonomy was whatever the starter seed left behind — uncorrectable,
+          // and absent entirely on a tenant whose seed probe was satisfied by someone else's rows.
+          { title: 'Job Architecture', href: '/administration/hr/job-architecture', icon: FolderTree },
           // Master data behind the job description's bargaining-unit clause, which
           // until now could never be filled in: there was no register and no picker.
           { title: 'Unions', href: '/administration/hr/unions', icon: Users2 },
