@@ -1,5 +1,5 @@
 import React from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -111,6 +111,25 @@ describe('tender award currency presentation', () => {
     });
     render(<TenderAward {...tenderProps} />);
     expect(await screen.findByText('EUR 51,000.00')).toBeVisible();
+  });
+
+  it.each(['GHS', 'USD', 'EUR'])('submits the displayed %s bid currency without changing the amount', async (currency) => {
+    render(<TenderAward {...tenderProps} bids={[{ id: 'bid-1', currency }]} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Recommend' }));
+    expect(screen.getByRole('spinbutton', { name: `Award Amount (${currency}) *` })).toHaveValue(52000);
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Recommendation', exact: true }));
+    await waitFor(() => expect(mocks.createAward).toHaveBeenCalledWith(expect.objectContaining({
+      tenderId: 'tender-1', tenderBidId: 'bid-1', awardedAmount: 52000, currency,
+    })));
+  });
+
+  it('submits the tender currency when the saved bid has no currency', async () => {
+    render(<TenderAward {...tenderProps} bids={[{ id: 'bid-1' }]} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Recommend' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Recommendation', exact: true }));
+    await waitFor(() => expect(mocks.createAward).toHaveBeenCalledWith(expect.objectContaining({
+      awardedAmount: 52000, currency: 'GHS',
+    })));
   });
 
   it('keeps the separate create-award entry point and its verification in the saved bid currency', async () => {
