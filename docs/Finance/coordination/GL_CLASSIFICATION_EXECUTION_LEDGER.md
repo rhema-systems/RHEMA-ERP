@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C5 implementation active; independent GPT-5.6 Sol High review required before integration |
+| Review status | Clean C5 candidate `68490c9c73b0311b1cdd97dbef141be1263c0afc`; independent GPT-5.6 Sol High review active before integration |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -668,3 +668,13 @@ Maker-checker, concurrency, immutable approved-use evidence, permissions, govern
 fail-closed migration and guarded SQL tests are required. AccountingEvent schema/orchestration, journal
 fan-out, automatic parallel posting and all producer-module changes remain prohibited until a later separately
 reviewed stage.
+
+The C5 implementer completed a clean two-commit candidate at
+`68490c9c73b0311b1cdd97dbef141be1263c0afc` from exact base
+`bb50aeed3635b040fe4bb3217a1ab87b7de79cc3`. Its ordered ancestry is `54a21cac` (Finance applicability
+authority) and `68490c9c` (governed applicability UI). The isolated worktree is clean and the full range passes
+`git diff --check`. A read-only structured-handoff reconciliation has been requested because the completed
+task turn did not expose final handoff text. Independent GPT-5.6 Sol High review is active across accounting,
+schema, lifecycle/readiness, deterministic selection/fingerprint, maker-checker, concurrency, migration,
+API/UI permission and C1-C4 regression boundaries. No C5 commit is approved for integration, no migration
+was applied and configured `RHEMAERP` remains untouched.
