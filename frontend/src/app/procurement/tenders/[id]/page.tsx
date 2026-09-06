@@ -64,10 +64,12 @@ import { Calculator, Shield } from 'lucide-react';
 import { getTenderPublicationNotificationMessage, getTenderPublicationPresentation } from '@/lib/procurement-tender-publication';
 import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
 import { getTenderScheduleError } from '@/lib/tender-schedule';
-import { TenderHeaderControlActions } from '@/components/procurement/tenders/TenderHeaderControlActions';
 import { TenderRevisionsPanel } from '@/components/procurement/tenders/TenderRevisionsPanel';
 import { useAuth } from '@/hooks/use-auth';
-import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import {
+  getProcurementProblemMessage,
+  getTenderStageVisibility,
+} from '@/lib/procurement-tender-header-actions';
 
 const tenderDetailTabs = [
   'overview',
@@ -400,12 +402,10 @@ export default function TenderDetailPage() {
 
   const publicationPresentation = getTenderPublicationPresentation(tender);
   const evaluationRoute = getTenderEvaluationRoute(tender);
-  const isPublishedStage = ['Published', 'Closed', 'Awarded'].includes(
-    tender.status
-  );
+  const { publishedStage: isPublishedStage, awardStage: showAwardStage } =
+    getTenderStageVisibility(tender.status);
   const hasSubmittedBids = tender.bidCount > 0;
   const showEvaluationStage = isPublishedStage && hasSubmittedBids;
-  const showAwardStage = ['Closed', 'Awarded'].includes(tender.status);
   const visibleActiveTab =
     (!showAwardStage && ['award', 'verification'].includes(activeTab)) ||
     (!showEvaluationStage && ['evaluators', 'qcbs'].includes(activeTab)) ||
@@ -461,15 +461,7 @@ export default function TenderDetailPage() {
               Publish Tender
             </Button>
           )}
-          {/* Document-register navigation lives in the process guide, not twice in the page chrome. */}
-          <TenderHeaderControlActions
-            tenderId={tenderId}
-            tenderType={tender.tenderType}
-            sourcingCaseId={tender.sourcingCaseId}
-            sourcingMethod={tender.sourcingMethod}
-            status={tender.status}
-            bidCount={tender.bidCount}
-          />
+          {/* Stage navigation belongs to the process sidebar, not duplicate header shortcuts. */}
           {tender.tenderType !== 'RFQ' && tender.status === 'Awarded' && (
             <Button
               variant="outline"
