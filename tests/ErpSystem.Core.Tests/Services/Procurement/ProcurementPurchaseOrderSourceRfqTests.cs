@@ -414,5 +414,67 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
         contractSource.SourceId.Should().Be(contract.Id);
         contractSource.ApprovedLines.Should().ContainSingle(item =>
             item.SourceLineId == bidItem.Id && item.LineTotal == 4_900);
+
+        // Preserve the approved snapshot while a later supply contract advances
+        // only the award lifecycle. The activation record is required proof.
+        purchaseOrder.Status = "Approved";
+        purchaseOrder.ApprovedAt = DateTime.UtcNow.AddMinutes(-10);
+        purchaseOrder.ApprovedById = Guid.NewGuid();
+        purchaseOrder.TotalAmount = 4_900;
+        purchaseOrder.OrderNumber = "PO-ACTIVATION-HANDOFF";
+        context.Add(purchaseOrder);
+        context.Add(new PurchaseOrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PurchaseOrderId = purchaseOrder.Id, ItemDescription = "Wireless keyboard",
+            OrderedQuantity = 10, UnitPrice = 490, UnitOfMeasure = "EA"
+        });
+        award.PurchaseOrderId = purchaseOrder.Id;
+        await context.SaveChangesAsync();
+        var originalHash = purchaseOrder.SourceIntegrityHash;
+        var originalSnapshot = purchaseOrder.SourceSnapshotJson;
+        await service.EvaluateCurrentAsync(purchaseOrder);
+
+        award.Status = "ContractSigned";
+        contract.ContractType = "Supply";
+        contract.ActivatedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync();
+        Func<Task> withoutActivation = () => service.EvaluateCurrentAsync(purchaseOrder);
+        await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
+            .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
+
+        var activation = new ProcurementContractActivation
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ContractId = contract.Id,
+            Status = ProcurementContractActivationStatus.Activated,
+            ActivatedAtUtc = contract.ActivatedAt, ActivatedById = Guid.NewGuid(),
+            DecidedAtUtc = contract.ActivatedAt, DecidedById = Guid.NewGuid(),
+            WorkflowInstanceId = Guid.NewGuid()
+        };
+        context.Add(activation);
+        await context.SaveChangesAsync();
+        await service.EvaluateCurrentAsync(purchaseOrder);
+        purchaseOrder.SourceIntegrityHash.Should().Be(originalHash);
+        purchaseOrder.SourceSnapshotJson.Should().Be(originalSnapshot);
+
+        contract.ContractValue = 4_800;
+        await context.SaveChangesAsync();
+        await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
+            .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
+        contract.ContractValue = 4_900;
+        activation.TenantId = Guid.NewGuid();
+        await context.SaveChangesAsync();
+        await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
+            .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
+        activation.TenantId = tenantId;
+        contract.Status = "Suspended";
+        await context.SaveChangesAsync();
+        await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
+            .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
+        contract.Status = "Active";
+        purchaseOrder.Status = "Draft";
+        await context.SaveChangesAsync();
+        await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
+            .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
     }
 }
