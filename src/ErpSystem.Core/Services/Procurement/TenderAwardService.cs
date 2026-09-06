@@ -182,12 +182,17 @@ public class TenderAwardService : ITenderAwardService
         {
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
+            if (tender.TenantId != _currentUserProvider.TenantId || tender.IsDeleted)
+                throw new UnauthorizedAccessException("The tender is not available in the current tenant.");
 
-            var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
+            var bids = (await _bidRepository.GetByTenderIdAsync(tenderId))
+                .Where(bid => bid.TenantId == tender.TenantId && bid.TenderId == tender.Id && !bid.IsDeleted)
+                .ToList();
 
             // Get all assigned evaluators for this tender
             var evaluators = await _evaluatorRepository.GetByTenderIdAsync(tenderId);
-            var totalAssignedEvaluators = evaluators.Count();
+            var totalAssignedEvaluators = evaluators.Count(evaluator =>
+                evaluator.TenantId == tender.TenantId && evaluator.TenderId == tender.Id && !evaluator.IsDeleted);
 
             var bidRecommendations = new List<BidRecommendationDto>();
             var evaluatedBidsCount = 0;
@@ -198,7 +203,12 @@ public class TenderAwardService : ITenderAwardService
             foreach (var bid in eligibleBids)
             {
                 var evaluations = await _evaluationRepository.GetByBidIdAsync(bid.Id);
-                var submittedEvaluations = evaluations.Where(e => e.Status == "Submitted").ToList();
+                // This advisory preview uses the same current-voter selection as readiness.
+                // Actual award approval still validates the retained locked score lineage.
+                var currentEvaluations = ProcurementTenderEvaluationProjectionPolicy.SelectCurrent(
+                    evaluations.Where(evaluation => evaluation.TenantId == tender.TenantId &&
+                                                    evaluation.TenderBidId == bid.Id && !evaluation.IsDeleted));
+                var submittedEvaluations = currentEvaluations.Where(e => e.Status == "Submitted").ToList();
 
                 // Only include bids that have at least one submitted evaluation
                 if (!submittedEvaluations.Any())

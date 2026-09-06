@@ -259,6 +259,7 @@ export function EvaluationCommitteeWorkspace({
           canAdminister={canAdminister}
           canEvaluate={canEvaluate}
           canApprove={canApprove}
+          onWorkflowUpdated={refresh}
           onBind={() => setAction({ type: 'bind' })}
           onActivate={() => setAction({ type: 'activate' })}
           onRetireDraft={() => setAction({ type: 'retireDraft' })}
