@@ -19,21 +19,18 @@ describe('award action chronology', () => {
     ]);
     expect(within(routine).queryByRole('button', { name: 'Invite for Negotiation' })).not.toBeInTheDocument();
     expect(within(routine).queryByRole('button', { name: 'Cancel Award' })).not.toBeInTheDocument();
-    expect(screen.getByText(/any required bond/)).toBeInTheDocument();
   });
 
-  it('keeps exception actions collapsed but discoverable and opens the original action callbacks', () => {
+  it('keeps all permitted actions visible without a disclosure and opens the original callbacks', () => {
     const actions = allActions();
     render(<AwardActions {...actions} />);
-    const summary = screen.getByText('Other actions');
-    expect(summary.closest('details')).not.toHaveAttribute('open');
-    fireEvent.click(summary);
-    expect(summary.closest('details')).toHaveAttribute('open');
-    const exceptions = screen.getByRole('group', { name: 'Exceptional award actions' });
+    expect(screen.queryByText('Other actions')).not.toBeInTheDocument();
+    const exceptions = screen.getByRole('group', { name: 'Other award actions' });
     expect(within(exceptions).getAllByRole('button').map((button) => button.textContent)).toEqual([
       'Invite for Negotiation', 'Cancel Award',
     ]);
     for (const name of ['Send Notification', 'Performance Bond', 'Create PO / Contract', 'Invite for Negotiation', 'Cancel Award']) {
+      expect(screen.getByRole('button', { name, exact: true })).toBeVisible();
       fireEvent.click(screen.getByRole('button', { name, exact: true }));
     }
     for (const action of Object.values(actions)) expect(action).toHaveBeenCalledTimes(1);
@@ -48,16 +45,15 @@ describe('award action chronology', () => {
   ] as const)('does not expose an action when its permitted callback %s is absent', (key, label) => {
     const actions = allActions();
     render(<AwardActions {...actions} {...{ [key]: undefined }} />);
-    fireEvent.click(screen.getByText('Other actions'));
     expect(screen.queryByRole('button', { name: label, exact: true })).not.toBeInTheDocument();
     expect(actions[key]).not.toHaveBeenCalled();
   });
 
-  it('does not invent a bond prerequisite or show an empty exceptions disclosure', () => {
+  it('does not invent a bond prerequisite or show an empty exception group', () => {
     const onCreate = vi.fn();
     render(<AwardActions onCreate={onCreate} />);
     expect(screen.getByRole('button', { name: 'Create PO / Contract' })).toBeEnabled();
-    expect(screen.queryByText('Other actions')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Other award actions' })).not.toBeInTheDocument();
   });
 
   it('does not render an empty actions card for a read-only actor', () => {
@@ -68,7 +64,6 @@ describe('award action chronology', () => {
   it('retains cancellation access even when an actor has no routine actions', () => {
     render(<AwardActions onCancel={vi.fn()} />);
     expect(screen.queryByRole('group', { name: 'Award follow-up actions' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('Other actions'));
     expect(screen.getByRole('button', { name: 'Cancel Award' })).toBeInTheDocument();
   });
 });

@@ -1,9 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { Ban, ChevronDown, Send, Shield, ShoppingCart, Users } from 'lucide-react';
+import { Ban, Send, Shield, ShoppingCart, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface AwardActionsProps {
   onNotify?: () => void;
@@ -27,9 +27,8 @@ export function AwardActions({
     <Card>
       <CardHeader>
         <CardTitle>Actions</CardTitle>
-        <CardDescription>Notify the awardee, address any required bond, then create the PO or contract.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         {hasRoutineActions && (
           <div role="group" aria-label="Award follow-up actions" className="flex flex-wrap items-center gap-3">
             {onNotify && <Button onClick={onNotify} className="bg-blue-600 hover:bg-blue-700">
@@ -48,25 +47,16 @@ export function AwardActions({
           </div>
         )}
         {hasOtherActions && (
-          <details className="group border-t pt-3">
-            <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded text-sm font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-              Other actions
-              <ChevronDown aria-hidden="true" className="h-4 w-4 transition-transform group-open:rotate-180" />
-            </summary>
-            <div role="group" aria-label="Exceptional award actions" className="mt-3 space-y-3">
-              <p className="text-sm text-muted-foreground">Use only when applicable; these are not routine next steps.</p>
-              <div className="flex flex-wrap items-center gap-3">
-                {onNegotiate && <Button onClick={onNegotiate} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
-                  <Users className="h-4 w-4 mr-2" />
-                  Invite for Negotiation
-                </Button>}
-                {onCancel && <Button variant="destructive" onClick={onCancel}>
-                  <Ban className="h-4 w-4 mr-2" />
-                  Cancel Award
-                </Button>}
-              </div>
-            </div>
-          </details>
+          <div role="group" aria-label="Other award actions" className="flex flex-wrap items-center gap-3 border-t pt-3">
+            {onNegotiate && <Button onClick={onNegotiate} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50">
+              <Users className="h-4 w-4 mr-2" />
+              Invite for Negotiation
+            </Button>}
+            {onCancel && <Button variant="destructive" onClick={onCancel}>
+              <Ban className="h-4 w-4 mr-2" />
+              Cancel Award
+            </Button>}
+          </div>
         )}
       </CardContent>
     </Card>
