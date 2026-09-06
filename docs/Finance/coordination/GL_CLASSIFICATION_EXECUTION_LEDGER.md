@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C5 cycle 2 `CHANGES_REQUIRED`; narrow GPT-5.6 Sol Medium governance/concurrency correction active |
+| Review status | Corrected C5 candidate `b375dda3043a40a586cfe9843f03f8a1524827b1`; independent GPT-5.6 Sol High re-review active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -710,3 +710,11 @@ two-context overlap. Review gates otherwise passed: zero-error rebuild, 19 C5 te
 discovery/script generation, exact ancestry, clean status and diff checks. The coordinator dispatched one
 narrow GPT-5.6 Sol Medium correction with explicit owner-facing rationale comments. Integration and C6 remain
 blocked; no database was accessed or mutated.
+
+The implementer completed the narrow cycle-2 C5 correction as
+`b375dda3043a40a586cfe9843f03f8a1524827b1` on top of the prior three-commit candidate. The resulting
+four-commit worktree is clean and its full range passes `git diff --check`. Independent GPT-5.6 Sol High
+re-review is active over retirement interval preservation, approved-policy SQL immutability, exact version
+lineage, reconstructible audit evidence and synchronized two-context Freeze concurrency coverage. A read-only
+structured handoff was requested because the task turn exposed no final text. Integration and C6 remain
+blocked pending approval; no migration was applied and configured `RHEMAERP` remains untouched.
