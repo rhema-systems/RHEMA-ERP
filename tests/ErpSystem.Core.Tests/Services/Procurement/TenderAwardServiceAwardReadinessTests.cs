@@ -1,3 +1,4 @@
+using System.Data;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
@@ -502,6 +503,156 @@ public sealed class TenderAwardServiceAwardReadinessTests
             It.IsAny<Guid>()), Times.Never);
     }
 
+    [Fact]
+    public async Task PurchaseOrderRunsReadsAndSerializableClaimInsideExecutionStrategy()
+    {
+        var fixture = new AwardFixture();
+        var request = fixture.PreparePurchaseOrder();
+
+        var result = await fixture.Service.CreatePurchaseOrderFromAwardAsync(request);
+
+        result.Status.Should().Be("Draft");
+        result.TotalAmount.Should().Be(100m);
+        result.ItemCount.Should().Be(1);
+        fixture.CreatedOrder!.Currency.Should().Be("GHS");
+        fixture.Events.Should().Equal("strategy", "read", "begin", "reserve", "order", "item", "claim", "bound", "commit");
+        fixture.UnitOfWork.Verify(unit => unit.BeginTransactionAsync(
+            IsolationLevel.Serializable, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.UnitOfWork.Verify(unit => unit.RollbackAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("reserve")]
+    [InlineData("item")]
+    [InlineData("claim")]
+    [InlineData("bound")]
+    public async Task PurchaseOrderFailureRollsBackOwnedTransaction(string failedStep)
+    {
+        var fixture = new AwardFixture();
+        var request = fixture.PreparePurchaseOrder();
+        fixture.FailAt = failedStep;
+
+        await fixture.Service.Invoking(service => service.CreatePurchaseOrderFromAwardAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("injected failure");
+
+        fixture.Events.Last().Should().Be("rollback");
+        fixture.UnitOfWork.Verify(unit => unit.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
+        fixture.UnitOfWork.Verify(unit => unit.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PurchaseOrderRetryReloadsAwardAfterRollbackAndCommitsOnlySuccessfulAttempt()
+    {
+        var fixture = new AwardFixture();
+        var request = fixture.PreparePurchaseOrder();
+        fixture.FailAt = "claim";
+        fixture.UnitOfWork.Setup(unit => unit.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task<PurchaseOrderFromAwardResponseDto>>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Func<Task<PurchaseOrderFromAwardResponseDto>> operation, CancellationToken _) =>
+            {
+                fixture.InStrategy = true;
+                try { return await operation(); }
+                catch (InvalidOperationException exception) when (exception.Message == "injected failure")
+                {
+                    fixture.FailAt = null;
+                    return await operation();
+                }
+            });
+
+        await fixture.Service.CreatePurchaseOrderFromAwardAsync(request);
+
+        fixture.Events.Count(item => item == "read").Should().Be(2);
+        fixture.Events.Should().ContainInOrder("rollback", "clear", "read", "begin");
+        fixture.UnitOfWork.Verify(unit => unit.ClearTrackedChanges(), Times.Once);
+        fixture.UnitOfWork.Verify(unit => unit.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        fixture.UnitOfWork.Verify(unit => unit.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PurchaseOrderRetryAfterUncertainCommitCannotCreateSecondOrder()
+    {
+        var fixture = new AwardFixture();
+        var request = fixture.PreparePurchaseOrder();
+        fixture.UnitOfWork.Setup(unit => unit.CommitAsync(It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                // Simulate SQL committing the claim but the connection losing
+                // its acknowledgement. The next attempt must see that claim.
+                fixture.PurchaseOrderAward!.PurchaseOrderId = fixture.CreatedOrder!.Id;
+                fixture.ActiveTransaction = false;
+                throw new TimeoutException("Commit acknowledgement lost");
+            });
+        fixture.UnitOfWork.Setup(unit => unit.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task<PurchaseOrderFromAwardResponseDto>>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Func<Task<PurchaseOrderFromAwardResponseDto>> operation, CancellationToken _) =>
+            {
+                fixture.InStrategy = true;
+                try { return await operation(); }
+                catch (TimeoutException) { return await operation(); }
+            });
+
+        await fixture.Service.Invoking(service => service.CreatePurchaseOrderFromAwardAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("Purchase order already exists*");
+
+        fixture.UnitOfWork.Verify(unit => unit.ClearTrackedChanges(), Times.Once);
+        fixture.Orders.Verify(repository => repository.CreatePurchaseOrderAsync(It.IsAny<PurchaseOrder>()), Times.Once);
+        fixture.UnitOfWork.Verify(unit => unit.BeginTransactionAsync(
+            IsolationLevel.Serializable, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PurchaseOrderLeavesCallerOwnedTransactionToCaller(bool fail)
+    {
+        var fixture = new AwardFixture();
+        var request = fixture.PreparePurchaseOrder();
+        fixture.ActiveTransaction = true;
+        fixture.InStrategy = true; // The caller owns the complete retry boundary.
+        fixture.FailAt = fail ? "claim" : null;
+
+        if (fail)
+            await fixture.Service.Invoking(service => service.CreatePurchaseOrderFromAwardAsync(request))
+                .Should().ThrowAsync<InvalidOperationException>();
+        else
+            await fixture.Service.CreatePurchaseOrderFromAwardAsync(request);
+
+        fixture.UnitOfWork.Verify(unit => unit.ExecuteInStrategyAsync(
+            It.IsAny<Func<Task<PurchaseOrderFromAwardResponseDto>>>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(unit => unit.BeginTransactionAsync(
+            It.IsAny<IsolationLevel>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(unit => unit.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(unit => unit.RollbackAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("duplicate")]
+    [InlineData("unapproved")]
+    [InlineData("tenant")]
+    [InlineData("auto-approve")]
+    public async Task PurchaseOrderStillRejectsInvalidAwardOrApprovalBypassBeforeMutation(string invalid)
+    {
+        var fixture = new AwardFixture();
+        var request = fixture.PreparePurchaseOrder();
+        if (invalid == "duplicate") fixture.PurchaseOrderAward!.PurchaseOrderId = Guid.NewGuid();
+        if (invalid == "unapproved") fixture.PurchaseOrderAward!.Status = "PendingApproval";
+        if (invalid == "tenant") fixture.PurchaseOrderAward!.TenantId = Guid.NewGuid();
+        if (invalid == "auto-approve")
+        {
+            request.AutoApprove = true;
+            fixture.PurchaseOrderSod.Setup(service => service.RejectApprovalBypassAsync(
+                It.IsAny<PurchaseOrder>(), "AwardAutoApprove", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Approval bypass denied"));
+        }
+
+        await fixture.Service.Invoking(service => service.CreatePurchaseOrderFromAwardAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>();
+
+        fixture.Orders.Verify(repository => repository.CreatePurchaseOrderAsync(It.IsAny<PurchaseOrder>()), Times.Never);
+        fixture.UnitOfWork.Verify(unit => unit.BeginTransactionAsync(
+            It.IsAny<IsolationLevel>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class AwardFixture
     {
         public AwardFixture()
@@ -527,6 +678,11 @@ public sealed class TenderAwardServiceAwardReadinessTests
             };
             CurrentUser.SetupGet(provider => provider.TenantId).Returns(TenantId);
             CurrentUser.SetupGet(provider => provider.UserId).Returns(UserId);
+            UnitOfWork.Setup(unit => unit.ExecuteInStrategyAsync(
+                    It.IsAny<Func<Task<PurchaseOrderFromAwardResponseDto>>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Func<Task<PurchaseOrderFromAwardResponseDto>> operation,
+                    CancellationToken _) => operation());
             TenderControls.Setup(service => service.IsControlledTenderMethodAsync(
                     Tender.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
@@ -542,14 +698,14 @@ public sealed class TenderAwardServiceAwardReadinessTests
 
             Service = new TenderAwardService(
                 Awards.Object, Tenders.Object, Bids.Object,
-                Mock.Of<ITenderBidItemRepository>(), Mock.Of<ITenderEvaluationRepository>(),
+                BidItems.Object, Mock.Of<ITenderEvaluationRepository>(),
                 Mock.Of<ITenderEvaluatorRepository>(), Notifications.Object,
-                Mock.Of<IPurchaseOrderRepository>(), Mock.Of<IPurchaseOrderItemRepository>(),
+                Orders.Object, OrderItems.Object,
                 Mock.Of<ITenderNegotiationRepository>(), UnitOfWork.Object, CurrentUser.Object,
                 TenderControls.Object, ExceptionalControls.Object, SourcingCases.Object,
                 Readiness.Object,
                 PurchaseOrderSources.Object,
-                Mock.Of<IProcurementPurchaseOrderSodService>(),
+                PurchaseOrderSod.Object,
                 Mock.Of<ILogger<TenderAwardService>>());
         }
 
@@ -569,5 +725,84 @@ public sealed class TenderAwardServiceAwardReadinessTests
         public Mock<IProcurementPurchaseOrderSourceService> PurchaseOrderSources { get; } = new();
         public Mock<ITenderNotificationService> Notifications { get; } = new();
         public TenderAwardService Service { get; }
+        public Mock<ITenderBidItemRepository> BidItems { get; } = new();
+        public Mock<IPurchaseOrderRepository> Orders { get; } = new();
+        public Mock<IPurchaseOrderItemRepository> OrderItems { get; } = new();
+        public Mock<IProcurementPurchaseOrderSodService> PurchaseOrderSod { get; } = new();
+        public List<string> Events { get; } = [];
+        public bool ActiveTransaction { get; set; }
+        public bool InStrategy { get; set; }
+        public string? FailAt { get; set; }
+        public TenderAward? PurchaseOrderAward { get; private set; }
+        public PurchaseOrder? CreatedOrder { get; private set; }
+
+        private void Step(string name)
+        {
+            InStrategy.Should().BeTrue("database operations must execute inside the retry strategy");
+            Events.Add(name);
+            if (FailAt == name) throw new InvalidOperationException("injected failure");
+        }
+
+        public CreatePurchaseOrderFromAwardDto PreparePurchaseOrder()
+        {
+            PurchaseOrderAward = new TenderAward
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, TenderId = Tender.Id,
+                TenderBidId = Bid.Id, BusinessPartnerId = Bid.BusinessPartnerId,
+                Status = "Awarded", Currency = "GHS", AwardedAmount = 100m
+            };
+            Awards.Setup(repository => repository.GetByIdAsync(PurchaseOrderAward.Id))
+                .Callback(() => Step("read")).ReturnsAsync(() => PurchaseOrderAward);
+            var source = new ProcurementPurchaseOrderSourceResolution
+            {
+                SourceType = ProcurementPurchaseOrderSourceType.TenderAward,
+                SourceId = PurchaseOrderAward.Id, CurrencyCode = "GHS",
+                PurchaseRequisitionRequestedById = Guid.NewGuid()
+            };
+            PurchaseOrderSources.Setup(service => service.ResolveAsync(
+                source.SourceType, source.SourceId, Bid.BusinessPartnerId,
+                It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(source);
+            BidItems.Setup(repository => repository.GetByBidIdAsync(Bid.Id))
+                .ReturnsAsync(new[] { new TenderBidItem
+                {
+                    Id = Guid.NewGuid(), OfferedQuantity = 2m, UnitPrice = 50m, TotalPrice = 100m,
+                    TenderItem = new TenderItem { Description = "Goods", UnitOfMeasure = "EA" }
+                } });
+            Orders.Setup(repository => repository.GenerateOrderNumberAsync()).ReturnsAsync("PO-TEST-001");
+            Orders.Setup(repository => repository.CreatePurchaseOrderAsync(It.IsAny<PurchaseOrder>()))
+                .Callback<PurchaseOrder>(order => { Step("order"); CreatedOrder = order; })
+                .ReturnsAsync((PurchaseOrder order) => order);
+            OrderItems.Setup(repository => repository.CreateItemAsync(It.IsAny<PurchaseOrderItem>()))
+                .Callback(() => Step("item")).ReturnsAsync((PurchaseOrderItem item) => item);
+            PurchaseOrderSources.Setup(service => service.ReserveAsync(source,
+                It.IsAny<IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine>>(),
+                100m, "GHS", It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback(() => { ActiveTransaction.Should().BeTrue(); Step("reserve"); });
+            PurchaseOrderSources.Setup(service => service.ClaimTenderAwardAsync(
+                PurchaseOrderAward.Id, It.IsAny<PurchaseOrder>(), It.IsAny<CancellationToken>()))
+                .Callback(() => { ActiveTransaction.Should().BeTrue(); Step("claim"); });
+            PurchaseOrderSources.Setup(service => service.RecordBoundAsync(
+                It.IsAny<PurchaseOrder>(), "TenderAwardPurchaseOrderCreated",
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback(() => { ActiveTransaction.Should().BeTrue(); Step("bound"); });
+            UnitOfWork.SetupGet(unit => unit.HasActiveTransaction).Returns(() => ActiveTransaction);
+            UnitOfWork.Setup(unit => unit.BeginTransactionAsync(
+                IsolationLevel.Serializable, It.IsAny<CancellationToken>()))
+                .Callback(() => { Step("begin"); ActiveTransaction = true; });
+            UnitOfWork.Setup(unit => unit.CommitAsync(It.IsAny<CancellationToken>()))
+                .Callback(() => { Step("commit"); ActiveTransaction = false; });
+            UnitOfWork.Setup(unit => unit.RollbackAsync(It.IsAny<CancellationToken>()))
+                .Callback(() => { Step("rollback"); ActiveTransaction = false; });
+            UnitOfWork.Setup(unit => unit.ClearTrackedChanges()).Callback(() => Events.Add("clear"));
+            UnitOfWork.Setup(unit => unit.ExecuteInStrategyAsync(
+                    It.IsAny<Func<Task<PurchaseOrderFromAwardResponseDto>>>(), It.IsAny<CancellationToken>()))
+                .Returns(async (Func<Task<PurchaseOrderFromAwardResponseDto>> operation, CancellationToken _) =>
+                {
+                    Events.Add("strategy"); InStrategy = true;
+                    try { return await operation(); }
+                    finally { InStrategy = false; }
+                });
+            return new CreatePurchaseOrderFromAwardDto { TenderAwardId = PurchaseOrderAward.Id };
+        }
     }
 }

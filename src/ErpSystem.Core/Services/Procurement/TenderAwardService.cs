@@ -636,7 +636,26 @@ public class TenderAwardService : ITenderAwardService
         };
     }
 
-    public async Task<PurchaseOrderFromAwardResponseDto> CreatePurchaseOrderFromAwardAsync(CreatePurchaseOrderFromAwardDto dto)
+    public Task<PurchaseOrderFromAwardResponseDto> CreatePurchaseOrderFromAwardAsync(CreatePurchaseOrderFromAwardDto dto)
+    {
+        // A caller-owned transaction must be retried by its owner as one unit.
+        // Otherwise SQL Server's retry strategy must enclose the explicit
+        // serializable transaction, including its reads and source claim.
+        if (_unitOfWork.HasActiveTransaction)
+            return CreatePurchaseOrderFromAwardCoreAsync(dto);
+
+        var attempt = 0;
+        return _unitOfWork.ExecuteInStrategyAsync(() =>
+        {
+            // Reload authoritative state on a replay, including a claim that
+            // may have committed before a transient connection failure.
+            if (attempt++ > 0)
+                _unitOfWork.ClearTrackedChanges();
+            return CreatePurchaseOrderFromAwardCoreAsync(dto);
+        });
+    }
+
+    private async Task<PurchaseOrderFromAwardResponseDto> CreatePurchaseOrderFromAwardCoreAsync(CreatePurchaseOrderFromAwardDto dto)
     {
         var ownsSourceClaimTransaction = false;
         try
