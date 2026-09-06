@@ -73,9 +73,7 @@ describe('award-readiness workspace authorization', () => {
   });
 
   it('does not expose Evaluate to a read-only actor', () => {
-    render(
-      <AwardReadinessWorkspace sourceType="Tender" sourceId="tender-1" />
-    );
+    render(<AwardReadinessWorkspace sourceType="Tender" sourceId="tender-1" />);
 
     expect(mocks.hasPermission).toHaveBeenCalledWith(
       'procurement.tender.approve'
@@ -87,4 +85,28 @@ describe('award-readiness workspace authorization', () => {
       screen.getByText('No award-readiness decision has been retained')
     ).toBeInTheDocument();
   });
+
+  it.each(['Tender', 'RequestForQuotation', 'ExceptionalSourcing'] as const)(
+    'does not show premature or duplicate header shortcuts for %s',
+    (sourceType) => {
+      render(
+        <AwardReadinessWorkspace sourceType={sourceType} sourceId="source-1" />
+      );
+      expect(
+        screen.getByRole('heading', { name: 'Award readiness' })
+      ).toBeVisible();
+      expect(
+        screen.queryByRole('link', { name: 'Committee controls' })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('link', { name: 'Bidder communications' })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('link', { name: 'Award verification' })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Refresh history' })
+      ).not.toBeInTheDocument();
+    }
+  );
 });

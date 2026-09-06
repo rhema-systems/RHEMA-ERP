@@ -5,12 +5,14 @@ import Link from 'next/link';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   ClipboardCheck,
   FileCheck2,
   FileLock2,
   History,
   Loader2,
   Route,
+  RefreshCw,
   Scale,
   ShieldCheck,
   UserCheck,
@@ -20,12 +22,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   awardReadinessGroupLabel,
   awardReadinessRemediationHref,
@@ -51,7 +48,11 @@ const formatDate = (value?: string) =>
     : '—';
 
 const shortId = (value?: string) =>
-  value ? (value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value) : '—';
+  value
+    ? value.length > 16
+      ? `${value.slice(0, 8)}…${value.slice(-6)}`
+      : value
+    : '—';
 
 const roleLabel = (value: string) =>
   value
@@ -86,9 +87,14 @@ const statusVariant = (
   )
     return 'default';
   if (
-    ['Blocked', 'Failed', 'Expired', 'Revoked', 'Recalled', 'Ineligible'].includes(
-      value
-    )
+    [
+      'Blocked',
+      'Failed',
+      'Expired',
+      'Revoked',
+      'Recalled',
+      'Ineligible',
+    ].includes(value)
   )
     return 'destructive';
   return value === 'NotApplicable' ? 'outline' : 'secondary';
@@ -105,6 +111,8 @@ export interface AwardReadinessRegisterProps {
   canEvaluate: boolean;
   isEvaluating: boolean;
   onEvaluate: () => void;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
 }
 
 export function AwardReadinessRegister({
@@ -118,7 +126,10 @@ export function AwardReadinessRegister({
   canEvaluate,
   isEvaluating,
   onEvaluate,
+  onRefresh,
+  isRefreshing = false,
 }: AwardReadinessRegisterProps) {
+  const [prerequisitesOpen, setPrerequisitesOpen] = React.useState(false);
   const serverAllowsEvaluation =
     !decision ||
     hasAwardReadinessAction(decision.allowedActions, 'EvaluateReadiness');
@@ -127,6 +138,49 @@ export function AwardReadinessRegister({
     isSodStatusLoading || Boolean(sodStatusError) || !sodStatus;
   const evaluationDisabled =
     isEvaluating || sodPreflightUnavailable || sodStatus?.allowed !== true;
+  const failedGroups =
+    decision?.prerequisiteGroups.filter((group) => group.status === 'Failed') ??
+    [];
+  const failedChecks = failedGroups.flatMap((group) =>
+    group.items.filter((item) => item.status === 'Failed')
+  );
+  const blockedReasons = [
+    ...new Set(
+      decision?.blockedReasons.length
+        ? decision.blockedReasons
+        : failedChecks.map((item) => item.message)
+    ),
+  ];
+  const summaryReasons = [
+    ...new Set(
+      blockedReasons.map((reason) => {
+        const check = failedChecks.find((item) =>
+          reason.startsWith(`${item.code}:`)
+        );
+        return (
+          check?.message ||
+          reason.replace(/^[A-Z][A-Z0-9]*(?:_[A-Za-z0-9-]+)+:\s+/, '')
+        );
+      })
+    ),
+  ];
+  const firstRemediation = decision?.isCurrent ? failedGroups[0] : undefined;
+  const supplierWarnings = [
+    ...new Set(
+      decision?.suppliers.flatMap((supplier) =>
+        supplier.warnings.map(
+          (warning) => `${supplier.partnerName}: ${warning}`
+        )
+      ) ?? []
+    ),
+  ];
+  const recoveryAction =
+    sodPreflightUnavailable && onRefresh ? (
+      <Button variant="outline" onClick={onRefresh} disabled={isRefreshing}>
+        <RefreshCw className="mr-2 h-4 w-4" />
+        Refresh checks
+      </Button>
+    ) : null;
 
   if (!decision) {
     return (
@@ -136,16 +190,15 @@ export function AwardReadinessRegister({
           isLoading={isSodStatusLoading}
           error={sodStatusError}
         />
+        {recoveryAction}
         <Card className="border-dashed" data-testid="award-readiness-empty">
-          <CardContent className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
-            <ShieldCheck className="mb-4 h-10 w-10 text-muted-foreground" />
+          <CardContent className="p-5">
             <h2 className="text-lg font-semibold">
               No award-readiness decision has been retained
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Run the authoritative server evaluation to retain the first
-              immutable decision. The client cannot mark this source ready or
-              supply an alternate recommendation.
+              Records recommendation approval and readiness; does not create an
+              award.
             </p>
             {showEvaluate && (
               <Button
@@ -165,33 +218,73 @@ export function AwardReadinessRegister({
 
   return (
     <div className="space-y-6" data-testid="award-readiness-register">
+      <ReadinessOverview decision={decision} />
       <EvaluatorAwardApproverSodStatus
         status={sodStatus}
         isLoading={isSodStatusLoading}
         error={sodStatusError}
       />
-      <ReadinessOverview decision={decision} />
-
-      {decision.blockedReasons.length > 0 && (
+      {recoveryAction}
+      {summaryReasons.length > 0 && (
         <Alert className="border-amber-500/40 bg-amber-500/5">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Award remains blocked</AlertTitle>
+          <AlertTitle>
+            {decision.isCurrent
+              ? 'Award remains blocked'
+              : 'Last recorded blockers'}
+          </AlertTitle>
           <AlertDescription>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              {decision.blockedReasons.map((reason, index) => (
+              {summaryReasons.slice(0, 3).map((reason, index) => (
                 <li key={`${reason}-${index}`}>{reason}</li>
               ))}
             </ul>
+            {summaryReasons.length > 3 && (
+              <AuditSection
+                title={`More blockers (${summaryReasons.length - 3})`}
+              >
+                <ul className="list-disc space-y-1 pl-5">
+                  {summaryReasons.slice(3).map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </AuditSection>
+            )}
           </AlertDescription>
         </Alert>
       )}
 
-      <div className="flex justify-end">
-        {decision.allowedActions.map((action) => (
-          <Badge key={action} variant="outline" className="mr-2">
-            Server action: {roleLabel(action)}
-          </Badge>
-        ))}
+      {supplierWarnings.length > 0 && (
+        <Alert className="border-amber-500/40 bg-amber-500/5">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Supplier warnings ({supplierWarnings.length})</AlertTitle>
+          <AlertDescription>
+            <p>{supplierWarnings[0]}</p>
+            {supplierWarnings.length > 1 && (
+              <AuditSection title="More supplier warnings">
+                <ul className="list-disc space-y-1 pl-5">
+                  {supplierWarnings.slice(1).map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </AuditSection>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        {firstRemediation && (
+          <Button
+            variant="outline"
+            onClick={() => setPrerequisitesOpen(true)}
+            aria-controls="award-readiness-prerequisite-details"
+            aria-expanded={prerequisitesOpen}
+          >
+            Review{' '}
+            {awardReadinessGroupLabel[firstRemediation.group].toLowerCase()}
+          </Button>
+        )}
         {showEvaluate ? (
           <Button onClick={onEvaluate} disabled={evaluationDisabled}>
             <ShieldCheck className="mr-2 h-4 w-4" />
@@ -205,24 +298,71 @@ export function AwardReadinessRegister({
         )}
       </div>
 
-      <PrerequisiteRegister
-        decision={decision}
-        sourceType={sourceType}
-        sourceId={sourceId}
-      />
-      <RecommendationAndActors decision={decision} />
-      <EvaluationLineage decision={decision} />
-      <SupplierLineage
-        decision={decision}
-        sourceType={sourceType}
-        sourceId={sourceId}
-      />
-      <AuthorityAndEvidence
-        decision={decision}
-        sourceType={sourceType}
-        sourceId={sourceId}
-      />
-      <DecisionHistory decision={decision} history={history} />
+      <div className="space-y-3" aria-label="Award audit details">
+        <AuditSection
+          title="Prerequisite checks"
+          id="award-readiness-prerequisite-details"
+          open={prerequisitesOpen}
+          onToggle={setPrerequisitesOpen}
+        >
+          {blockedReasons.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium">Original server blockers</h3>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                {blockedReasons.map((reason) => (
+                  <li key={reason} className="break-words">
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <PrerequisiteRegister
+            decision={decision}
+            sourceType={sourceType}
+            sourceId={sourceId}
+          />
+        </AuditSection>
+        <AuditSection title="Recommendation, evaluation and supplier records">
+          <RecommendationAndActors decision={decision} />
+          <EvaluationLineage decision={decision} />
+          <SupplierLineage
+            decision={decision}
+            sourceType={sourceType}
+            sourceId={sourceId}
+          />
+        </AuditSection>
+        <AuditSection title="Authority and evidence records">
+          <AuthorityAndEvidence
+            decision={decision}
+            sourceType={sourceType}
+            sourceId={sourceId}
+          />
+        </AuditSection>
+        <AuditSection title="Decision history and integrity">
+          {onRefresh && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCw
+                className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
+              />
+              Refresh history
+            </Button>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {decision.allowedActions.map((action) => (
+              <Badge key={action} variant="outline">
+                Server action: {roleLabel(action)}
+              </Badge>
+            ))}
+          </div>
+          <DecisionHistory decision={decision} history={history} />
+        </AuditSection>
+      </div>
     </div>
   );
 }
@@ -239,7 +379,7 @@ function EvaluatorAwardApproverSodStatus({
   if (isLoading) {
     return (
       <Card data-testid="award-readiness-sod-status">
-        <CardContent className="flex min-h-40 items-center justify-center p-6 text-sm text-muted-foreground">
+        <CardContent className="flex items-center p-4 text-sm text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           Checking current-actor evaluator and award-approver separation…
         </CardContent>
@@ -290,17 +430,13 @@ function EvaluatorAwardApproverSodStatus({
 
   return (
     <Card data-testid="award-readiness-sod-status">
-      <CardHeader>
+      <CardHeader className="p-4 pb-2">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
           <div>
-            <CardTitle className="flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-base">
               <Scale className="h-5 w-5" />
-              Evaluator versus award approver SOD
+              Independent approval check
             </CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Live, tenant-safe status for the authenticated actor; retained
-              award decisions below remain immutable history.
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge
@@ -316,241 +452,248 @@ function EvaluatorAwardApproverSodStatus({
                 ? 'Not applicable'
                 : presentation}
             </Badge>
-            <Badge variant={policyEffective ? 'default' : 'destructive'}>
-              {policyLabel}
-            </Badge>
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-5">
-        <Alert
-          className={
-            presentation === 'Blocked'
-              ? 'border-destructive/50 bg-destructive/5'
-              : presentation === 'Allowed'
-                ? 'border-emerald-500/40 bg-emerald-500/5'
-                : undefined
-          }
-        >
-          {presentation === 'Allowed' ? (
-            <CheckCircle2 className="h-4 w-4" />
-          ) : (
-            <AlertTriangle className="h-4 w-4" />
-          )}
-          <AlertTitle>{outcomeTitle}</AlertTitle>
-          <AlertDescription>
-            {status.message}{' '}
-            <span className="font-mono text-xs">{status.code}</span>
-          </AlertDescription>
-        </Alert>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Lineage
-            label="Current actor"
-            value={`${status.currentActorName} · ${
-              actorIsEvaluator ? 'Evaluator' : 'Not an evaluator'
-            }`}
-          />
-          <Lineage
-            label="Evaluator lineage"
-            value={`${uniqueEvaluatorCount} evaluator${
-              uniqueEvaluatorCount === 1 ? '' : 's'
-            } · ${status.evaluatorLineage.length} record${
-              status.evaluatorLineage.length === 1 ? '' : 's'
-            }`}
-          />
-          <Lineage
-            label="Independent approval actors"
-            value={String(status.independentApprovalActorUserIds.length)}
-          />
-          <Lineage
-            label="Readiness decision"
-            value={
-              status.readinessDecisionSequence === undefined
-                ? 'Not yet retained'
-                : `#${status.readinessDecisionSequence} · ${
-                    status.readinessDecisionIsCurrent
-                      ? 'Current'
-                      : 'Historical'
-                  }`
+      <CardContent className="space-y-3 p-4 pt-0">
+        {presentation === 'Allowed' && !actorIsEvaluator ? (
+          <p className="text-sm text-muted-foreground">
+            You are independent of the recorded evaluators.
+          </p>
+        ) : (
+          <Alert
+            className={
+              presentation === 'Blocked'
+                ? 'border-destructive/50 bg-destructive/5'
+                : presentation === 'Allowed'
+                  ? 'border-emerald-500/40 bg-emerald-500/5'
+                  : undefined
             }
-          />
-        </div>
+          >
+            {presentation === 'Allowed' ? (
+              <CheckCircle2 className="h-4 w-4" />
+            ) : (
+              <AlertTriangle className="h-4 w-4" />
+            )}
+            <AlertTitle>{outcomeTitle}</AlertTitle>
+            <AlertDescription>{status.message}</AlertDescription>
+          </Alert>
+        )}
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-md border p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Current actor and evaluator identities
-            </p>
-            <p className="mt-2 font-medium">{status.currentActorName}</p>
-            <p className="font-mono text-xs text-muted-foreground">
-              {status.currentActorUserId}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {status.currentActorRoles.length > 0 ? (
-                status.currentActorRoles.map((role) => (
-                  <Badge key={role} variant="outline">
-                    {roleLabel(role)}
+        <AuditSection title="Evaluator and approval audit details">
+          <p className="text-sm text-muted-foreground">{status.message}</p>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={policyEffective ? 'default' : 'destructive'}>
+              {policyLabel}
+            </Badge>
+            <span className="font-mono text-xs">{status.code}</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Lineage
+              label="Current actor"
+              value={`${status.currentActorName} · ${
+                actorIsEvaluator ? 'Evaluator' : 'Not an evaluator'
+              }`}
+            />
+            <Lineage
+              label="Evaluator lineage"
+              value={`${uniqueEvaluatorCount} evaluator${
+                uniqueEvaluatorCount === 1 ? '' : 's'
+              } · ${status.evaluatorLineage.length} record${
+                status.evaluatorLineage.length === 1 ? '' : 's'
+              }`}
+            />
+            <Lineage
+              label="Independent approval actors"
+              value={String(status.independentApprovalActorUserIds.length)}
+            />
+            <Lineage
+              label="Readiness decision"
+              value={
+                status.readinessDecisionSequence === undefined
+                  ? 'Not yet retained'
+                  : `#${status.readinessDecisionSequence} · ${
+                      status.readinessDecisionIsCurrent
+                        ? 'Current'
+                        : 'Historical'
+                    }`
+              }
+            />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-md border p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                Current actor and evaluator identities
+              </p>
+              <p className="mt-2 font-medium">{status.currentActorName}</p>
+              <p className="font-mono text-xs text-muted-foreground">
+                {status.currentActorUserId}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {status.currentActorRoles.length > 0 ? (
+                  status.currentActorRoles.map((role) => (
+                    <Badge key={role} variant="outline">
+                      {roleLabel(role)}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    No current actor roles returned.
+                  </span>
+                )}
+              </div>
+              <p className="mt-4 text-sm font-medium">
+                Retained evaluator user IDs
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {status.evaluatorUserIds.map((userId) => (
+                  <Badge key={userId} variant="secondary" className="font-mono">
+                    {shortId(userId)}
                   </Badge>
-                ))
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  No current actor roles returned.
-                </span>
-              )}
+                ))}
+              </div>
             </div>
-            <p className="mt-4 text-sm font-medium">
-              Retained evaluator user IDs
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {status.evaluatorUserIds.map((userId) => (
-                <Badge key={userId} variant="secondary" className="font-mono">
-                  {shortId(userId)}
-                </Badge>
-              ))}
-            </div>
-          </div>
 
-          <div className="rounded-md border p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Effective hard-stop and policy lineage
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Lineage
-                label="Control"
-                value={status.sodControlCode || '—'}
-              />
-              <Lineage
-                label="Policy"
-                value={
-                  status.sodPolicyCode
-                    ? `${status.sodPolicyCode} v${
-                        status.sodPolicyVersion ?? '—'
-                      }`
-                    : policyLabel
-                }
-              />
-              <Lineage label="Rule" value={status.sodRuleCode || '—'} />
-              <Lineage
-                label="Source method"
-                value={status.sourceMethodRuleCode || '—'}
-              />
-            </div>
-            <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
-              SOD decision {status.sodDecisionId || '—'} · policy{' '}
-              {status.sodPolicySetId || '—'} · rule {status.sodRuleId || '—'} ·
-              source key {status.sodSourceDecisionKey || '—'}
-            </p>
-          </div>
-        </div>
-
-        <div>
-          <div className="mb-3 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-            <div>
-              <h3 className="font-medium">Authoritative evaluator lineage</h3>
-              <p className="text-sm text-muted-foreground">
-                Committee appointments and retained or recalled score attempts
-                resolved by the server for this source.
+            <div className="rounded-md border p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                Effective hard-stop and policy lineage
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Lineage label="Control" value={status.sodControlCode || '—'} />
+                <Lineage
+                  label="Policy"
+                  value={
+                    status.sodPolicyCode
+                      ? `${status.sodPolicyCode} v${
+                          status.sodPolicyVersion ?? '—'
+                        }`
+                      : policyLabel
+                  }
+                />
+                <Lineage label="Rule" value={status.sodRuleCode || '—'} />
+                <Lineage
+                  label="Source method"
+                  value={status.sourceMethodRuleCode || '—'}
+                />
+              </div>
+              <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
+                SOD decision {status.sodDecisionId || '—'} · policy{' '}
+                {status.sodPolicySetId || '—'} · rule {status.sodRuleId || '—'}{' '}
+                · source key {status.sodSourceDecisionKey || '—'}
               </p>
             </div>
-            <Badge variant="outline">
-              {status.evaluatorLineage.length} lineage record
-              {status.evaluatorLineage.length === 1 ? '' : 's'}
-            </Badge>
           </div>
-          {status.evaluatorLineage.length === 0 ? (
-            <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-              No evaluator lineage was returned. The server must resolve
-              unambiguous evaluator history before readiness can be evaluated.
-            </p>
-          ) : (
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full min-w-[1060px] text-sm">
-                <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2">Family / evaluator</th>
-                    <th className="px-3 py-2">Phase / attempt</th>
-                    <th className="px-3 py-2">Evaluation lineage</th>
-                    <th className="px-3 py-2">Score subject</th>
-                    <th className="px-3 py-2">State</th>
-                    <th className="px-3 py-2">Evaluated / integrity</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {status.evaluatorLineage.map((lineage, index) => (
-                    <tr
-                      key={`${lineage.family}-${lineage.evaluatorUserId}-${
-                        lineage.scoreSheetId ?? lineage.evaluationId ?? index
-                      }`}
-                    >
-                      <td className="px-3 py-3">
-                        <p className="font-medium">
-                          {roleLabel(lineage.family)}
-                        </p>
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {shortId(lineage.evaluatorUserId)}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3">
-                        {lineage.phase || '—'}
-                        {lineage.attempt === undefined
-                          ? ''
-                          : ` · attempt ${lineage.attempt}`}
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs">
-                        <p>evaluation {shortId(lineage.evaluationId)}</p>
-                        <p>committee {shortId(lineage.committeeControlId)}</p>
-                        <p>appointment {shortId(lineage.appointmentId)}</p>
-                        <p>score {shortId(lineage.scoreSheetId)}</p>
-                      </td>
-                      <td className="px-3 py-3">
-                        <p>{lineage.scoreSubjectType || '—'}</p>
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {shortId(lineage.scoreSubjectId)}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3">
-                        <Badge
-                          variant={
-                            lineage.isRecalledAttempt
-                              ? 'destructive'
-                              : lineage.isRetainedAttempt
-                                ? 'default'
-                                : 'outline'
-                          }
-                        >
-                          {lineage.isRecalledAttempt
-                            ? 'Recalled'
-                            : lineage.isRetainedAttempt
-                              ? 'Retained'
-                              : 'Evaluation'}
-                        </Badge>
-                        {lineage.scoreStatus && (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {roleLabel(lineage.scoreStatus)}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-3 py-3">
-                        <p>{formatDate(lineage.evaluatedAtUtc)}</p>
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {shortId(lineage.integrityHash)}
-                        </p>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
 
-        <p className="break-all font-mono text-[11px] text-muted-foreground">
-          Readiness decision {status.readinessDecisionId || '—'} · source hash{' '}
-          {status.readinessSourceIntegrityHash || '—'} · decision hash{' '}
-          {status.readinessIntegrityHash || '—'} · correlation{' '}
-          {status.correlationId} · evaluated {formatDate(status.evaluatedAtUtc)}
-        </p>
+          <div>
+            <div className="mb-3 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+              <div>
+                <h3 className="font-medium">Authoritative evaluator lineage</h3>
+                <p className="text-sm text-muted-foreground">
+                  Committee appointments and retained or recalled score attempts
+                  resolved by the server for this source.
+                </p>
+              </div>
+              <Badge variant="outline">
+                {status.evaluatorLineage.length} lineage record
+                {status.evaluatorLineage.length === 1 ? '' : 's'}
+              </Badge>
+            </div>
+            {status.evaluatorLineage.length === 0 ? (
+              <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                No evaluator lineage was returned. The server must resolve
+                unambiguous evaluator history before readiness can be evaluated.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full min-w-[1060px] text-sm">
+                  <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2">Family / evaluator</th>
+                      <th className="px-3 py-2">Phase / attempt</th>
+                      <th className="px-3 py-2">Evaluation lineage</th>
+                      <th className="px-3 py-2">Score subject</th>
+                      <th className="px-3 py-2">State</th>
+                      <th className="px-3 py-2">Evaluated / integrity</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {status.evaluatorLineage.map((lineage, index) => (
+                      <tr
+                        key={`${lineage.family}-${lineage.evaluatorUserId}-${
+                          lineage.scoreSheetId ?? lineage.evaluationId ?? index
+                        }`}
+                      >
+                        <td className="px-3 py-3">
+                          <p className="font-medium">
+                            {roleLabel(lineage.family)}
+                          </p>
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {shortId(lineage.evaluatorUserId)}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3">
+                          {lineage.phase || '—'}
+                          {lineage.attempt === undefined
+                            ? ''
+                            : ` · attempt ${lineage.attempt}`}
+                        </td>
+                        <td className="px-3 py-3 font-mono text-xs">
+                          <p>evaluation {shortId(lineage.evaluationId)}</p>
+                          <p>committee {shortId(lineage.committeeControlId)}</p>
+                          <p>appointment {shortId(lineage.appointmentId)}</p>
+                          <p>score {shortId(lineage.scoreSheetId)}</p>
+                        </td>
+                        <td className="px-3 py-3">
+                          <p>{lineage.scoreSubjectType || '—'}</p>
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {shortId(lineage.scoreSubjectId)}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3">
+                          <Badge
+                            variant={
+                              lineage.isRecalledAttempt
+                                ? 'destructive'
+                                : lineage.isRetainedAttempt
+                                  ? 'default'
+                                  : 'outline'
+                            }
+                          >
+                            {lineage.isRecalledAttempt
+                              ? 'Recalled'
+                              : lineage.isRetainedAttempt
+                                ? 'Retained'
+                                : 'Evaluation'}
+                          </Badge>
+                          {lineage.scoreStatus && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {roleLabel(lineage.scoreStatus)}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          <p>{formatDate(lineage.evaluatedAtUtc)}</p>
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {shortId(lineage.integrityHash)}
+                          </p>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <p className="break-all font-mono text-[11px] text-muted-foreground">
+            Readiness decision {status.readinessDecisionId || '—'} · source hash{' '}
+            {status.readinessSourceIntegrityHash || '—'} · decision hash{' '}
+            {status.readinessIntegrityHash || '—'} · correlation{' '}
+            {status.correlationId} · evaluated{' '}
+            {formatDate(status.evaluatedAtUtc)}
+          </p>
+        </AuditSection>
       </CardContent>
     </Card>
   );
@@ -567,68 +710,43 @@ function ReadinessOverview({
   const applicableGroups = decision.prerequisiteGroups.filter(
     (group) => group.status !== 'NotApplicable'
   ).length;
-  const lockedAttempts = decision.evaluations.flatMap(
-    (evaluation) => evaluation.scoreAttempts
-  ).filter((attempt) => attempt.status === 'Locked').length;
-  const eligibleSuppliers = decision.suppliers.filter(
-    (supplier) => supplier.isEligible
-  ).length;
-  const cards = [
-    {
-      label: 'Server outcome',
-      value: decision.status,
-      detail: decision.isCurrent ? 'Current decision' : 'Historical / stale',
-      ok: decision.status === 'Ready' && decision.isCurrent,
-    },
-    {
-      label: 'Prerequisites',
-      value: `${passedGroups}/${applicableGroups}`,
-      detail: 'Applicable groups passed',
-      ok: passedGroups === applicableGroups,
-    },
-    {
-      label: 'Score lineage',
-      value: `${lockedAttempts} locked`,
-      detail: `${decision.evaluations.length} retained evaluation records`,
-      ok:
-        lockedAttempts > 0 ||
-        decision.prerequisiteGroups.some(
-          (group) =>
-            group.group === 'ScoreIntegrity' &&
-            group.status === 'NotApplicable'
-        ),
-    },
-    {
-      label: 'Suppliers',
-      value: `${eligibleSuppliers}/${decision.suppliers.length}`,
-      detail: 'Current eligible suppliers',
-      ok:
-        decision.suppliers.length > 0 &&
-        eligibleSuppliers === decision.suppliers.length,
-    },
-  ];
+  const ready =
+    decision.isReady && decision.status === 'Ready' && decision.isCurrent;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {cards.map((card) => (
-        <Card key={card.label}>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                {card.label}
-              </p>
-              {card.ok ? (
-                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-              ) : (
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-              )}
-            </div>
-            <p className="mt-2 text-xl font-semibold">{card.value}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{card.detail}</p>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <Card data-testid="award-readiness-outcome">
+      <CardContent className="flex items-start justify-between gap-4 p-4">
+        <div>
+          <p className="text-xs text-muted-foreground">
+            {decision.sourceReference}
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">
+            {!decision.isCurrent
+              ? 'Readiness must be rechecked'
+              : ready
+                ? 'Ready for award review'
+                : 'Resolve the remaining award checks'}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {decision.isCurrent
+              ? `${passedGroups} of ${applicableGroups} applicable checks passed.`
+              : 'This is a historical decision; re-evaluate the current source before continuing.'}
+            {ready && ' Award approval is a separate step.'}
+          </p>
+        </div>
+        <Badge
+          variant={ready ? 'default' : 'outline'}
+          className="shrink-0 gap-1"
+        >
+          {ready ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+          ) : (
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+          )}
+          {decision.isCurrent ? decision.status : 'Historical'}
+        </Badge>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -696,7 +814,9 @@ function PrerequisiteRegister({
                           {item.remediation}
                         </p>
                       )}
-                      {(item.lineageType || item.lineageId || item.lineageHash) && (
+                      {(item.lineageType ||
+                        item.lineageId ||
+                        item.lineageHash) && (
                         <p className="mt-2 break-all font-mono text-[11px] text-muted-foreground">
                           {item.lineageType ?? 'Lineage'} ·{' '}
                           {shortId(item.lineageId)}
@@ -746,7 +866,10 @@ function RecommendationAndActors({
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Lineage label="Subject type" value={recommendation.subjectType || '—'} />
+          <Lineage
+            label="Subject type"
+            value={recommendation.subjectType || '—'}
+          />
           <Lineage
             label="Recommended subject(s)"
             value={
@@ -940,7 +1063,10 @@ function SupplierLineage({
           />
         ) : (
           decision.suppliers.map((supplier) => (
-            <div key={supplier.businessPartnerId} className="rounded-md border p-4">
+            <div
+              key={supplier.businessPartnerId}
+              className="rounded-md border p-4"
+            >
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -973,7 +1099,10 @@ function SupplierLineage({
               </div>
               {(supplier.errors.length > 0 || supplier.warnings.length > 0) && (
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <IssueList title="Validation errors" values={supplier.errors} />
+                  <IssueList
+                    title="Validation errors"
+                    values={supplier.errors}
+                  />
                   <IssueList title="Warnings" values={supplier.warnings} />
                 </div>
               )}
@@ -988,7 +1117,10 @@ function SupplierLineage({
                 ) : (
                   <div className="grid gap-3 lg:grid-cols-2">
                     {supplier.prequalification.map((entry) => (
-                      <div key={entry.entryId} className="rounded-md bg-muted/30 p-3">
+                      <div
+                        key={entry.entryId}
+                        className="rounded-md bg-muted/30 p-3"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <p className="font-medium">
                             Category {shortId(entry.categoryId)}
@@ -1021,12 +1153,14 @@ function SupplierLineage({
           </h3>
           {decision.verifications.length === 0 ? (
             <div className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
-              No applicable completed verification snapshot was returned. Use the
-              existing award-verification control; this workspace does not
+              No applicable completed verification snapshot was returned. Use
+              the existing award-verification control; this workspace does not
               recreate its checklist or document UI.
               {sourceType !== 'RequestForQuotation' && (
                 <Button asChild variant="link" className="ml-1 h-auto p-0">
-                  <Link href={`/procurement/tenders/${sourceId}?tab=verification`}>
+                  <Link
+                    href={`/procurement/tenders/${sourceId}?tab=verification`}
+                  >
                     Open verification
                   </Link>
                 </Button>
@@ -1110,7 +1244,9 @@ function AuthorityAndEvidence({
           <div className="grid gap-3 sm:grid-cols-2">
             <Lineage
               label="Method rule"
-              value={authority.methodRuleCode || shortId(authority.methodRuleId)}
+              value={
+                authority.methodRuleCode || shortId(authority.methodRuleId)
+              }
             />
             <Lineage
               label="Authority route"
@@ -1139,8 +1275,8 @@ function AuthorityAndEvidence({
             />
           </div>
           <p className="text-sm text-muted-foreground">
-            Workflow decisions, evidence files, SOD, and approval execution remain
-            owned by their shared controls.
+            Workflow decisions, evidence files, SOD, and approval execution
+            remain owned by their shared controls.
           </p>
           <Button asChild variant="outline">
             <Link
@@ -1305,7 +1441,8 @@ function DecisionHistory({
         </div>
         <p className="break-all font-mono text-[11px] text-muted-foreground">
           Decision hash: {decision.integrityHash} · source hash:{' '}
-          {decision.sourceIntegrityHash} · idempotency: {decision.idempotencyKey}
+          {decision.sourceIntegrityHash} · idempotency:{' '}
+          {decision.idempotencyKey}
         </p>
       </CardContent>
     </Card>
@@ -1320,6 +1457,40 @@ function Lineage({ label, value }: { label: string; value: string }) {
       </p>
       <p className="mt-1 break-words text-sm font-medium">{value}</p>
     </div>
+  );
+}
+
+function AuditSection({
+  title,
+  children,
+  id,
+  open,
+  onToggle,
+}: {
+  title: string;
+  children: React.ReactNode;
+  id?: string;
+  open?: boolean;
+  onToggle?: (open: boolean) => void;
+}) {
+  return (
+    <details
+      id={id}
+      open={open}
+      onToggle={
+        onToggle ? (event) => onToggle(event.currentTarget.open) : undefined
+      }
+      className="group rounded-lg border bg-card"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+        {title}
+        <ChevronDown
+          className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="space-y-4 border-t p-4">{children}</div>
+    </details>
   );
 }
 
