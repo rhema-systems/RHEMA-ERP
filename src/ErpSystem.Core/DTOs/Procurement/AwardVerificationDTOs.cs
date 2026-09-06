@@ -28,6 +28,7 @@ public class AwardVerificationChecklistItemDto
     public string? Description { get; set; }
     public int DisplayOrder { get; set; }
     public bool IsRequired { get; set; }
+    public bool RequiresDocument { get; set; }
     public string? Category { get; set; }
     public bool IsActive { get; set; }
 }
@@ -65,6 +66,7 @@ public class CreateAwardVerificationChecklistItemDto
 
     public int DisplayOrder { get; set; } = 0;
     public bool IsRequired { get; set; } = true;
+    public bool RequiresDocument { get; set; }
 
     [MaxLength(50)]
     public string? Category { get; set; }
@@ -143,6 +145,7 @@ public class TenderAwardVerificationItemResultDto
     public string? ItemDescription { get; set; }
     public string? ItemCategory { get; set; }
     public bool IsRequired { get; set; }
+    public bool RequiresDocument { get; set; }
     public bool IsVerified { get; set; }
     public string Status { get; set; } = "Pending";
     public string? Comments { get; set; }

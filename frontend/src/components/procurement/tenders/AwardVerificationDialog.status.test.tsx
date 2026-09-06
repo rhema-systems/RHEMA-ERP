@@ -110,6 +110,28 @@ describe('saved award verification status', () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 
+  it('blocks verification when an explicitly required document is missing, even with notes', async () => {
+    const data = record('InProgress', 'Pending');
+    Object.assign(data.bidders[0].itemResults[0], { requiresDocument: true });
+    mocks.load.mockResolvedValue(data);
+    render(<AwardVerificationDialog {...props} />);
+    await screen.findByText('1 bidder(s) remaining');
+    fireEvent.click(screen.getByRole('button', { name: 'Pass', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder' }));
+    expect(mocks.verify).not.toHaveBeenCalled();
+    expect(screen.getByText('Document required: retain the supporting file for this check.')).toBeVisible();
+  });
+
+  it('does not complete a persisted passed review whose explicit document evidence is missing', async () => {
+    const data = record('InProgress', 'Passed');
+    Object.assign(data.bidders[0].itemResults[0], { requiresDocument: true });
+    mocks.load.mockResolvedValue(data);
+    render(<AwardVerificationDialog {...props} />);
+    await screen.findByText('Verified', { exact: true });
+    expect(screen.getByRole('button', { name: 'Complete Verification' })).toBeDisabled();
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
   it('counts only Passed/Verified bidders on the Results tab', async () => {
     const data = record();
     data.bidders.push({ ...data.bidders[0], id: 'pending-2', tenderBidId: 'bid-2', businessPartnerName: 'Pending Supplier', status: 'Pending' });

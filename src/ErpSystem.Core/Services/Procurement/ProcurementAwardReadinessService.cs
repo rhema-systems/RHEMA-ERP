@@ -1406,16 +1406,12 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             return;
         }
         var bidder = bidders[0];
-        var requiredItems = bidder.ItemResults.Where(item =>
-            !item.IsDeleted &&
-            item.ChecklistItem is { IsActive: true, IsRequired: true }).ToList();
+        var requiredItems = bidder.ItemResults.Where(AwardVerificationEvidencePolicy.IsRequired).ToList();
         var requiredPassed = requiredItems.Count != 0 &&
                              requiredItems.All(item =>
                                  item.IsVerified &&
-                                 item.Status is "Passed" or "NotApplicable");
-        var requiredEvidence = requiredItems.All(item =>
-            item.Status == "NotApplicable" ||
-            item.Documents.Any(document => !document.IsDeleted));
+                                 item.Status == "Passed");
+        var requiredEvidence = requiredItems.All(AwardVerificationEvidencePolicy.HasEvidence);
         var templateCurrent = verification.Template is { IsActive: true } &&
                               (!verification.CompletedDate.HasValue ||
                                (!verification.Template.UpdatedAt.HasValue ||
@@ -2735,6 +2731,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                     item.Status,
                     item.VerifiedDate,
                     item.VerifiedById,
+                    item.Comments,
+                    requiresDocument = item.ChecklistItem?.RequiresDocument,
                     documents = item.Documents.Where(document => !document.IsDeleted)
                         .OrderBy(document => document.Id)
                         .Select(document => new
