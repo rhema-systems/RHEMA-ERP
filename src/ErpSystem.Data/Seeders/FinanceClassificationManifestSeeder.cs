@@ -63,13 +63,18 @@ public sealed class FinanceClassificationManifestSeeder
 
     public async Task SeedAsync(Guid tenantId, DateTime seedDate, CancellationToken cancellationToken = default)
     {
-        var functionalCurrency = await _db.Tenants.AsNoTracking()
+        var tenantAuthority = await _db.Tenants.AsNoTracking()
             .Where(item => item.Id == tenantId)
-            .Select(item => item.BaseCurrency)
-            .SingleAsync(cancellationToken);
-        functionalCurrency = functionalCurrency.Trim().ToUpperInvariant();
-        if (functionalCurrency.Length != 3)
-            throw new InvalidOperationException("Tenant functional currency must be a canonical three-letter code before accounting books are seeded.");
+            .Select(item => new { item.BaseCurrency })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (tenantAuthority is null)
+            throw new InvalidOperationException(
+                $"Tenant functional-currency authority is missing for tenant '{tenantId}'. Persist the tenant before seeding Finance classifications.");
+
+        var functionalCurrency = tenantAuthority.BaseCurrency;
+        if (!IsCanonicalCurrencyCode(functionalCurrency))
+            throw new InvalidOperationException(
+                $"Tenant functional currency for tenant '{tenantId}' must be exactly three uppercase ASCII letters (for example, GHS) before accounting books are seeded.");
 
         var books = await _db.AccountingBooks.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync(cancellationToken);
         EnsureUnique(books.Select(item => item.Code), "accounting-book");
@@ -180,6 +185,9 @@ public sealed class FinanceClassificationManifestSeeder
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Applied Finance classification manifest {ManifestVersion} for tenant {TenantId}.", ManifestVersion, tenantId);
     }
+
+    private static bool IsCanonicalCurrencyCode(string? value) =>
+        value is { Length: 3 } && value.All(character => character is >= 'A' and <= 'Z');
 
     public static string? ResolveReviewedClassificationCode(string accountCode, AccountType accountType)
     {

@@ -337,6 +337,43 @@ public sealed class AccountingBookClassificationAuthorityTests
     }
 
     [Fact]
+    public async Task ManifestSeeder_MissingTenantAuthority_FailsWithGovernedError()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var seeder = new FinanceClassificationManifestSeeder(db, NullLogger.Instance);
+
+        await seeder.Invoking(item => item.SeedAsync(tenantId, DateTime.UtcNow))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"Tenant functional-currency authority is missing for tenant '{tenantId}'. Persist the tenant before seeding Finance classifications.");
+    }
+
+    [Theory]
+    [InlineData("ghs")]
+    [InlineData("GHS ")]
+    [InlineData("123")]
+    [InlineData("ÉÉÉ")]
+    public async Task ManifestSeeder_NoncanonicalTenantCurrency_FailsWithGovernedError(string currency)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Code = $"T-{tenantId:N}"[..20],
+            Name = "Tenant",
+            BaseCurrency = currency,
+            Status = TenantStatus.Active
+        });
+        await db.SaveChangesAsync();
+        var seeder = new FinanceClassificationManifestSeeder(db, NullLogger.Instance);
+
+        await seeder.Invoking(item => item.SeedAsync(tenantId, DateTime.UtcNow))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"Tenant functional currency for tenant '{tenantId}' must be exactly three uppercase ASCII letters (for example, GHS) before accounting books are seeded.");
+    }
+
+    [Fact]
     public async Task ManifestSeeder_UpgradesUntouchedV1BroadMappingsAcrossTenants_AndPreservesAdminRows()
     {
         await using var db = CreateContext();

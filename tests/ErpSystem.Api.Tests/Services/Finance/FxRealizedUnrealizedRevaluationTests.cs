@@ -1264,10 +1264,20 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                     CreatedBy = "Tests"
                 });
             }
+            // The manifest deliberately queries persisted tenant currency authority; saving the
+            // fixture here mirrors the production ordering instead of relying on a fallback.
+            await db.SaveChangesAsync();
             await new FinanceClassificationManifestSeeder(
                     db,
                     NullLogger<FinanceClassificationManifestSeeder>.Instance)
                 .SeedAsync(tenantId, new DateTime(2026, 1, 1));
+            // The manifest leaves newly configured books non-posting until C4. This fixture
+            // models the already-governed active IFRS authority required by its posting tests.
+            var postingBook = await db.AccountingBooks.SingleAsync(item =>
+                item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
+            postingBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+            postingBook.IsActive = true;
+            postingBook.AllowsPosting = true;
             db.BankAccounts.Add(new BankAccount
             {
                 Id = Guid.NewGuid(),
