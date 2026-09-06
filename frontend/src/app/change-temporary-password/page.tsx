@@ -62,8 +62,8 @@ export default function ChangeTemporaryPasswordPage() {
           </div>
           <CardTitle>Replace your temporary password</CardTitle>
           <CardDescription className="text-slate-600">
-            This one-time step activates the approved supplier account. No other
-            portal function is available until it is complete.
+            Choose a new password to continue using your account. You will need
+            to sign in again after saving it.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -126,7 +126,7 @@ export default function ChangeTemporaryPasswordPage() {
               type="submit"
             >
               <KeyRound className="mr-2 h-4 w-4" />
-              {busy ? 'Activating…' : 'Activate supplier account'}
+              {busy ? 'Changing password…' : 'Change password'}
             </Button>
           </form>
         </CardContent>
