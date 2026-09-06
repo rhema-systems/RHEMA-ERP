@@ -21,6 +21,77 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementGhanepsExchangeServiceTests
 {
+    [Theory]
+    [InlineData("Plan=APP")]
+    [InlineData(" plan = app ")]
+    public async Task LegacyPlanningMappingIsNotAnAwardRequirementAndCannotCreateExchange(string mapping)
+    {
+        await using var fixture = new Fixture();
+        fixture.ReplaceRawMappings([mapping]);
+        fixture.Context.Update(fixture.Decision);
+        await fixture.Context.SaveChangesAsync();
+        var retainedValue = fixture.Decision.ValueJson;
+
+        var result = await fixture.Service.GetAwardComplianceAsync(
+            ProcurementGhanepsSourceType.Tender, fixture.Tender.Id);
+        var options = await fixture.Service.GetOptionsAsync(
+            ProcurementGhanepsSourceType.Tender, fixture.Tender.Id);
+
+        result.HasApplicableMapping.Should().BeFalse();
+        result.IsCompliant.Should().BeFalse("no award exchange evidence has been created");
+        result.Code.Should().Be("PO_GHANEPS_AWARD_MAPPING_MISSING");
+        result.Message.Should().Contain("Planning/APP exchange is a separate control");
+        result.Mappings.Should().BeEmpty();
+        options.IsConfigured.Should().BeFalse();
+        options.Mappings.Should().BeEmpty();
+        options.AllowedActions.Should().BeEmpty();
+        options.ConfigurationValueHash.Should().HaveLength(64);
+        fixture.Decision.ValueJson.Should().Be(retainedValue);
+        await fixture.Invoking(item => item.PrepareAsync("legacy-plan-cannot-export", "PUB"))
+            .Should().ThrowAsync<ProcurementGhanepsExchangeValidationException>();
+        fixture.Context.Set<ProcurementGhanepsExchangeEvent>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task LegacyPlanningMappingDoesNotHideConfiguredAwardEvidenceRequirements()
+    {
+        await using var fixture = new Fixture();
+        var mapping = fixture.Mapping("AWARD", ProcurementGhanepsEventFamily.AwardNotification,
+            ProcurementGhanepsExchangeDirection.Export, [ProcurementGhanepsSourceType.Tender]);
+        fixture.ReplaceRawMappings(["Plan=APP", JsonSerializer.Serialize(mapping)]);
+        fixture.Context.Update(fixture.Decision);
+        await fixture.Context.SaveChangesAsync();
+        await fixture.SeedAwardLineageAsync(blockLatest: false);
+
+        var result = await fixture.Service.GetAwardComplianceAsync(
+            ProcurementGhanepsSourceType.Tender, fixture.Tender.Id);
+
+        result.HasApplicableMapping.Should().BeTrue();
+        result.IsCompliant.Should().BeFalse();
+        result.Code.Should().Be("PO_GHANEPS_EVIDENCE_INCOMPLETE");
+        result.Mappings.Should().ContainSingle(item => item.MappingKey == "AWARD" &&
+            !item.SuccessfulTransfer && !item.AcceptedAcknowledgement && !item.CompletedReconciliation);
+    }
+
+    [Theory]
+    [InlineData("Award=APP")]
+    [InlineData("Plan=AWARD")]
+    [InlineData("Plan=APP=ignored")]
+    [InlineData("{broken-json")]
+    [InlineData("{\"MappingKey\":\"AWARD\"}")]
+    public async Task LegacyPlanningCompatibilityStillRejectsEveryInvalidEventMapping(string invalid)
+    {
+        await using var fixture = new Fixture();
+        fixture.ReplaceRawMappings(["Plan=APP", invalid]);
+        fixture.Context.Update(fixture.Decision);
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.GetAwardComplianceAsync(
+                ProcurementGhanepsSourceType.Tender, fixture.Tender.Id))
+            .Should().ThrowAsync<ProcurementGhanepsExchangeValidationException>();
+        fixture.Context.Set<ProcurementGhanepsExchangeEvent>().Should().BeEmpty();
+    }
+
     [Fact]
     public async Task MissingEffectiveDec009IsAdvisoryForOptionsButMutationsRemainStrict()
     {
@@ -1356,7 +1427,9 @@ public sealed class ProcurementGhanepsExchangeServiceTests
         private readonly Mock<IProcurementSodGuardService> _sod = new();
         private readonly Mock<IProcurementControlEventService> _controlEvents = new();
         private readonly Mock<INotificationTopicPublisher> _notificationPublisher = new();
-        private readonly InMemoryDatabaseRoot _databaseRoot = new();
+        // Reuse EF's provider/model cache, not test data: every fixture still
+        // has a unique database name, while its peer contexts share that name.
+        private static readonly InMemoryDatabaseRoot _databaseRoot = new();
         private readonly string _databaseName = Guid.NewGuid().ToString("N");
         private Guid _tenantId;
         private Guid _actorId;
