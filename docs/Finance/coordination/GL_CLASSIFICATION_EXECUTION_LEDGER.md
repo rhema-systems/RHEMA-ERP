@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `REVIEW_REQUIRED` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C3 candidate `10654cdb` is under independent Sol High re-review |
+| Review status | C3 review cycle 3 found one remaining Delta creation/update lineage gap; correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -467,3 +467,13 @@ range passes `git diff --check`. The correction aligns runtime currency validati
 ASCII contract and adds guarded two-context SQL Server lifecycle-concurrency coverage. Final independent
 GPT-5.6 Sol High re-review is active over the complete C3 range and all prior findings. Integration, C4 and
 database operations remain blocked pending approval.
+
+Stage C3 independent review cycle 3 returned `CHANGES_REQUIRED` at clean HEAD `10654cdb`. Runtime ASCII
+currency parity is closed and 236 focused backend plus 16 frontend tests passed, with eight guarded SQL Server
+tests skipped because the test connection is absent. One P1 remains: Delta Create/Update validates ancestry
+for cycles but not every ancestor's lifecycle and invalidating pending transition, so it can attach new lineage
+below a Suspended/Retired/pending-invalidating base. The existing SQL race also begins with descendants already
+present and therefore does not prove create-versus-invalidation ordering. A narrow GPT-5.6 Sol Medium
+correction was dispatched requiring one full-lineage validator across Create/Update/request/approval and
+meaningful two-context SQL races for both winner orders against suspension/retirement approval. Integration,
+C4 and database operations remain blocked.
