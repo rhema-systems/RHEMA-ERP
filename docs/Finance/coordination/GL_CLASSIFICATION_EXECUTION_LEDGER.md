@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C5 candidate `b1f90e0e66dbdf640f98f25fc9772b3ee3de83cf`; independent GPT-5.6 Sol High re-review active |
+| Review status | C5 cycle 2 `CHANGES_REQUIRED`; narrow GPT-5.6 Sol Medium governance/concurrency correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -698,3 +698,15 @@ re-review is active over every cycle-1 temporal-version, nonempty-selection, cla
 authority-fingerprint, audit and executable SQL/concurrency finding. A read-only structured handoff was
 requested because the task turn again exposed no final text. Integration, C6 and all database migration work
 remain blocked pending approval; configured `RHEMAERP` remains untouched.
+
+Stage C5 independent review cycle 2 confirmed the zero-book, same-tenant full-book, account-type compatibility,
+authority-fingerprint, rule/book audit, rollback and C1-gate corrections, but returned `CHANGES_REQUIRED` at
+clean HEAD `b1f90e0e`. P1: retirement can extend an already bounded policy or create an invalid end-before-start
+future interval; approved policy structure/status and exact predecessor/version lineage are insufficiently
+guarded against direct SQL mutation. P2: policy and frozen-selection audit snapshots still omit complete
+workflow/actor/timestamp/idempotency evidence, and guarded Freeze concurrency tests do not prove synchronized
+two-context overlap. Review gates otherwise passed: zero-error rebuild, 19 C5 tests with 7 guarded SQL skips,
+315 widened C1-C5 tests with 23 guarded SQL skips, frontend 9/9, ESLint, EF no-pending-model, migration
+discovery/script generation, exact ancestry, clean status and diff checks. The coordinator dispatched one
+narrow GPT-5.6 Sol Medium correction with explicit owner-facing rationale comments. Integration and C6 remain
+blocked; no database was accessed or mutated.
