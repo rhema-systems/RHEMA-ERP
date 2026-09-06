@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `CHANGES_REQUIRED` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C3 production logic is sound; genuine SQL concurrency winner-order evidence remains required |
+| Review status | Final C3 candidate `df730e7b` is under independent Sol High evidence re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -494,3 +494,10 @@ coordinator dispatched a test/evidence-only GPT-5.6 Sol Medium correction requir
 and invalidation-first races for create/update/advance versus suspension/retirement approval. The reviewer
 otherwise recorded 244 backend and 16 frontend passes, 11 guarded SQL skips, EF no-pending-model and clean
 diff/status. Integration and C4 remain blocked; no database was accessed.
+
+The implementer completed the concurrency-evidence correction as
+`df730e7bea57451dc22ec4cb161700216b974de3`; the seven-commit C3 worktree is clean and the full range
+passes `git diff --check`. The commit is test-focused and is intended to prove synchronized two-transaction
+child-first and invalidation-first ordering for create/update/advance versus suspension/retirement approval.
+Independent GPT-5.6 Sol High review is active on the exact test design and full C3 regression boundary.
+Integration, C4 and database operations remain blocked pending approval.
