@@ -124,6 +124,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, tenderCurrenc
         tenderId,
         tenderBidId: selectedBidId,
         awardedAmount: parseFloat(awardAmount),
+        currency: getBidCurrency(selectedBidId),
         awardJustification: awardJustification.trim() || undefined,
         awardDate: new Date().toISOString(),
       };
@@ -651,7 +652,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, tenderCurrenc
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="awardAmount">Award Amount ({normalizeProcurementCurrency(tenderCurrency)}) *</Label>
+            <Label htmlFor="awardAmount">Award Amount ({getBidCurrency(selectedBidId)}) *</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="awardAmount"
