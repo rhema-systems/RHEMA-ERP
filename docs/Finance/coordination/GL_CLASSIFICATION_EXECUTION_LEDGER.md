@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C5 candidate `b375dda3043a40a586cfe9843f03f8a1524827b1`; independent GPT-5.6 Sol High re-review active |
+| Review status | C5 cycle 3 `CHANGES_REQUIRED`; final narrow GPT-5.6 Sol Medium SQL-retirement correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -718,3 +718,14 @@ re-review is active over retirement interval preservation, approved-policy SQL i
 lineage, reconstructible audit evidence and synchronized two-context Freeze concurrency coverage. A read-only
 structured handoff was requested because the task turn exposed no final text. Integration and C6 remain
 blocked pending approval; no migration was applied and configured `RHEMAERP` remains untouched.
+
+Stage C5 independent review cycle 3 accepted the runtime interval, lineage, audit and synchronized concurrency
+corrections but returned `CHANGES_REQUIRED` at clean HEAD `b375dda3` for one P1 SQL bypass and its P2 test
+masking. The migration trigger permits a direct Approved-to-Retired update that supplies only retired actor/time,
+without prior Pending/Approved maker-checker evidence or the exact minimum-bound endpoint; an open-ended retired
+row can consequently remain applicable indefinitely. Existing SQL mutation assertions are made after frozen
+evidence exists, so the older post-use guard can mask immediate Approved immutability. All other gates passed:
+zero-error build, 23 C5 tests with 8 guarded SQL skips, 319 widened tests with 24 guarded SQL skips, frontend
+9/9, ESLint, EF no-pending-model, migration discovery/idempotent script generation, exact ancestry, clean status
+and diff checks. The coordinator dispatched a final narrow GPT-5.6 Sol Medium trigger/test correction. No
+database was accessed or mutated; integration and C6 remain blocked.
