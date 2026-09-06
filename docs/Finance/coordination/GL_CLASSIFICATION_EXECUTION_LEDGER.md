@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `REVIEW_REQUIRED` |
+| Status | `APPROVED_PENDING_INTEGRATION` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Corrected C3 candidate `197913f2` is under independent Sol High concurrency review |
+| Review status | Final C3 candidate `197913f2` independently approved |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -519,3 +519,14 @@ production accounting-book graph-writer serialization, so this eighth commit is 
 is clean and the exact-base range passes `git diff --check`. Independent GPT-5.6 Sol High review is active on
 the new serialization boundary, deadlock/retry/idempotency and tenant scope, the deterministic race barriers
 and all prior C3/C1/C2 gates. Integration, C4 and database operations remain blocked pending approval.
+
+Independent GPT-5.6 Sol High review approved final clean C3 candidate
+`197913f2e9e544f9382049a99d021a4dc6a9e7d6`. The reviewer confirmed tenant-scoped SQL Server graph
+writers acquire `UPDLOCK, HOLDLOCK` authority inside the serializable retry boundary; post-reader barriers
+prove competing writers block at the real authority query; genuine CreateAsync and UpdateAsync/reparent races
+cover suspension and retirement request winner orders; pending invalidation honestly defines the approval-time
+attachment boundary; and durable assertions exclude invalid Delta lineage. Every earlier lifecycle, migration,
+canonical code/currency, permission, UI, audit, C4-readiness, C1 and C2 finding remains closed. Review gates
+passed 245 backend and 16 frontend tests with 11 guarded SQL skips, targeted ESLint, EF no-pending-model,
+eight-commit ancestry, diff check and clean status. No database was accessed. The approved commits may now be
+integrated locally in exact order; C4 remains blocked until coordinator integration verification completes.
