@@ -499,52 +499,20 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         };
     }
 
-    private async Task<List<AccountingBook>> GetActivePostingBooksAsync(bool persistFallback = true)
+    private async Task<List<AccountingBook>> GetActivePostingBooksAsync()
     {
-        if (_accountingBookService != null)
-        {
-            await _accountingBookService.EnsureTenantDefaultsAsync();
-        }
-
         var books = await _context.AccountingBooks
             .Where(book => book.TenantId == TenantId && !book.IsDeleted && book.IsActive && book.AllowsPosting)
             .OrderBy(book => book.SortOrder)
             .ThenBy(book => book.Name)
             .ToListAsync();
 
-        if (books.Count > 0)
-        {
-            return books;
-        }
+        // Book setup is governed master data in C3. Fixed Assets must never create a book as a
+        // side effect because that would bypass lifecycle, maker-checker and initialization gates.
+        if (books.Count == 0)
+            throw new InvalidOperationException("No active posting accounting book is configured for this tenant.");
 
-        var fallbackBook = new AccountingBook
-        {
-            TenantId = TenantId,
-            Code = "IFRS",
-            Name = "IFRS",
-            Description = "Primary corporate reporting book for IFRS financial statements.",
-            Purpose = "Primary",
-            IsActive = true,
-            IsDefault = true,
-            AllowsPosting = true,
-            IsSystemDefined = true,
-            SortOrder = 10,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = UserName
-        };
-
-        if (persistFallback)
-        {
-            _context.AccountingBooks.Add(fallbackBook);
-            await _context.SaveChangesAsync();
-            // Do not clear the shared tracker here. This helper runs inside asset acquisition and
-            // capitalization workflows; clearing it detaches the caller's FixedAsset immediately
-            // before register/book values are updated, producing a successful response without a
-            // persisted register change. The saved fallback book can safely remain tracked for the
-            // remainder of the unit of work.
-        }
-
-        return new List<AccountingBook> { fallbackBook };
+        return books;
     }
 
     private static AccountingBook GetDefaultBook(IReadOnlyList<AccountingBook> books)
@@ -684,7 +652,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         }
         var categoryDefaultsById = categoryRows.ToDictionary(category => category.Id);
 
-        var activeBooks = await GetActivePostingBooksAsync(persistFallback: !dryRun);
+        var activeBooks = await GetActivePostingBooksAsync();
         var booksByCode = activeBooks
             .GroupBy(book => NormalizeBookCode(book.Code), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);

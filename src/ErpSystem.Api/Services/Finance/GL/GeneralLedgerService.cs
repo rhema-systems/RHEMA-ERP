@@ -92,8 +92,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                     && !string.Equals(accountDto.AccountCode.Trim(), identity.NaturalAccountCode, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException(
                         $"Account code must match the Natural Account segment value '{identity.NaturalAccountCode}'.");
-                await _accountingBookService.EnsureTenantDefaultsAsync();
-
                 // 2. Parse AccountType safely
                 if (!Enum.TryParse<AccountType>(accountDto.AccountType, true, out var accountType))
                     throw new ArgumentException($"Invalid account type: {accountDto.AccountType}. Valid values are: {string.Join(", ", Enum.GetNames(typeof(AccountType)))}", nameof(accountDto.AccountType));

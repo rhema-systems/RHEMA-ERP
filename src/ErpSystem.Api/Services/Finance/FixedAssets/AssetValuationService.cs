@@ -432,11 +432,6 @@ public partial class AssetValuationService : IAssetValuationService
             .Include(a => a.Valuations)
             .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == assetId);
 
-        if (_accountingBookService != null)
-        {
-            await _accountingBookService.EnsureTenantDefaultsAsync(CancellationToken.None);
-        }
-
         return asset;
     }
 

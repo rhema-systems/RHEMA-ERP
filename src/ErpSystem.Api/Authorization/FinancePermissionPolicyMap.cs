@@ -107,7 +107,14 @@ public static class FinancePermissionPolicyMap
         var policies = controller switch
         {
             "Account" => AccountPolicy(action, methods),
-            "AccountingBooks" => One(FinancePermissions.ViewFinance),
+            "AccountingBooks" => action switch
+            {
+                "GetBooks" or "GetBook" => One(FinancePermissions.ViewFinance),
+                "Create" or "Update" => One(FinancePermissions.ManageAccountingBooks),
+                "RequestTransition" => One(FinancePermissions.RequestAccountingBookTransitions),
+                "ApproveTransition" or "RejectTransition" => One(FinancePermissions.ApproveAccountingBookTransitions),
+                _ => One(FinancePermissions.ViewFinance)
+            },
             "AccountClassifications" => ReadOrManage(action, methods, FinancePermissions.ManageChartOfAccounts),
             "AccountBookCurrencyPolicies" => action switch
             {

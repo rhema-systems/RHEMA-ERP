@@ -761,41 +761,18 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
 
     private async Task<List<AccountingBook>> GetActivePostingBooksAsync(CancellationToken cancellationToken)
     {
-        if (_accountingBookService != null)
-        {
-            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
-        }
-
         var books = await _context.AccountingBooks
             .Where(book => book.TenantId == TenantId && !book.IsDeleted && book.IsActive && book.AllowsPosting)
             .OrderBy(book => book.SortOrder)
             .ThenBy(book => book.Name)
             .ToListAsync(cancellationToken);
 
-        if (books.Count > 0)
-        {
-            return books;
-        }
+        // Depreciation consumes governed book authority; it cannot manufacture a posting book
+        // when setup is absent because C3 activation remains blocked pending C4 readiness.
+        if (books.Count == 0)
+            throw new InvalidOperationException("No active posting accounting book is configured for this tenant.");
 
-        var fallbackBook = new AccountingBook
-        {
-            TenantId = TenantId,
-            Code = "IFRS",
-            Name = "IFRS",
-            Description = "Primary corporate reporting book for IFRS financial statements.",
-            Purpose = "Primary",
-            IsActive = true,
-            IsDefault = true,
-            AllowsPosting = true,
-            IsSystemDefined = true,
-            SortOrder = 10,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUser.UserName ?? "system"
-        };
-
-        _context.AccountingBooks.Add(fallbackBook);
-        await _context.SaveChangesAsync(cancellationToken);
-        return new List<AccountingBook> { fallbackBook };
+        return books;
     }
 
     private async Task<Account> ResolveDepreciationAccountAsync(

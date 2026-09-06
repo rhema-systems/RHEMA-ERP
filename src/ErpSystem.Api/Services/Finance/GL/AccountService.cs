@@ -229,8 +229,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             int? take = null,
             CancellationToken cancellationToken = default)
         {
-            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
-
             IQueryable<Account> query = _unitOfWork.Accounts
                 .GetQueryable(a => a.TenantId == TenantId)
                 .Include(a => a.SegmentValues)
@@ -322,7 +320,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var now = DateTime.UtcNow;
-            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
             var identityService = _segmentIdentityService ?? throw new InvalidOperationException("The Finance account identity validator is unavailable.");
             var identity = await identityService.ValidateAndComposeAsync(TenantId, dto.SegmentValues, dto.AccountNumber, cancellationToken: cancellationToken);
             EnsureNaturalAccountCode(dto.AccountCode, identity.NaturalAccountCode);

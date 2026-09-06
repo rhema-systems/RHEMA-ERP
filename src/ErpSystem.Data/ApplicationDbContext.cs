@@ -2853,7 +2853,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<AccountingBook>(entity =>
         {
-            entity.ToTable("AccountingBooks");
+            entity.ToTable("AccountingBooks", table =>
+            {
+                // Deleted predecessor rows are retained as historical evidence and were not governed by C3.
+                // Live rows alone participate in the new structural contract and lifecycle invariants.
+                table.HasCheckConstraint("CK_AccountingBooks_BookType", "[IsDeleted] = 1 OR [BookType] IN (1, 2, 3)");
+                table.HasCheckConstraint("CK_AccountingBooks_LifecycleStatus", "[IsDeleted] = 1 OR [LifecycleStatus] IN (1, 2, 3, 4, 5, 6)");
+                table.HasCheckConstraint("CK_AccountingBooks_EffectiveDates", "[IsDeleted] = 1 OR [EffectiveToUtc] IS NULL OR [EffectiveFromUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]");
+                table.HasCheckConstraint("CK_AccountingBooks_BaseShape", "[IsDeleted] = 1 OR ([BookType] = 3 AND [BaseAccountingBookId] IS NOT NULL AND [FunctionalCurrencyCode] IS NULL) OR ([BookType] IN (1, 2) AND [BaseAccountingBookId] IS NULL AND [FunctionalCurrencyCode] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingBooks_DefaultType", "[IsDeleted] = 1 OR ([BookType] = 1 AND [IsDefault] = 1) OR ([BookType] <> 1 AND [IsDefault] = 0)");
+                table.HasCheckConstraint("CK_AccountingBooks_NoSelfBase", "[IsDeleted] = 1 OR [BaseAccountingBookId] IS NULL OR [BaseAccountingBookId] <> [Id]");
+                table.HasCheckConstraint("CK_AccountingBooks_PostingLifecycle", "[IsDeleted] = 1 OR ([LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([LifecycleStatus] <> 4 AND [IsActive] = 0 AND [AllowsPosting] = 0)");
+            });
             // Posting evidence uses tenant-qualified book identity so a corrupt foreign tenant
             // reference cannot be legitimized merely because GUIDs are globally unique.
             entity.HasAlternateKey(e => new { e.TenantId, e.Id });
@@ -2862,6 +2873,21 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Purpose).HasMaxLength(50);
+            entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3);
+            entity.Property(e => e.PendingTransitionReason).HasMaxLength(500);
+            entity.Property(e => e.TransitionDecisionReason).HasMaxLength(500);
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
+            // The filtered key makes the one-primary invariant concurrency-safe; service validation
+            // remains responsible for the richer PrimaryFull/default/full-book relationship.
+            entity.HasIndex(e => new { e.TenantId, e.IsDefault })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [IsDefault] = 1");
+            entity.HasIndex(e => new { e.TenantId, e.BaseAccountingBookId });
+            entity.HasOne(e => e.BaseAccountingBook)
+                .WithMany(e => e.DerivedBooks)
+                .HasForeignKey(e => new { e.TenantId, e.BaseAccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)

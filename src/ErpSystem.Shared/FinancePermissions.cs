@@ -28,6 +28,9 @@ public static class FinancePermissions
     public const string ManageFinanceAccessScopes = "Finance.AccessScopes.Manage";
 
     public const string ManageChartOfAccounts = "Finance.ChartOfAccounts.Manage";
+    public const string ManageAccountingBooks = "Finance.AccountingBooks.Manage";
+    public const string RequestAccountingBookTransitions = "Finance.AccountingBooks.Transitions.Request";
+    public const string ApproveAccountingBookTransitions = "Finance.AccountingBooks.Transitions.Approve";
     public const string ManageCodingDimensions = "Finance.Dimensions.Manage";
     public const string ManageDimensionCertification = "Finance.Dimensions.Certification.Manage";
     public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
@@ -176,6 +179,9 @@ public static class FinancePermissions
         new(ManageFinanceAccessScopes, "Manage Finance Access Scopes", "Assign effective-dated tenant and Finance-resource data scopes to users.", CategoryCore),
 
         new(ManageChartOfAccounts, "Manage Chart of Accounts", "Create, update, delete, and configure chart of accounts structures and account combinations.", CategoryGeneralLedger),
+        new(ManageAccountingBooks, "Manage Accounting Books", "Create and maintain governed accounting-book structures before accounting use or initialization.", CategoryGeneralLedger),
+        new(RequestAccountingBookTransitions, "Request Accounting Book Transitions", "Request governed accounting-book lifecycle transitions with immutable reason evidence.", CategoryGeneralLedger),
+        new(ApproveAccountingBookTransitions, "Approve Accounting Book Transitions", "Independently approve or reject accounting-book lifecycle transitions.", CategoryGeneralLedger),
         new(ManageCodingDimensions, "Manage Coding Dimensions", "Configure tenant-owned transaction dimensions, values, and certified account applicability rules.", CategoryGeneralLedger),
         new(ManageDimensionCertification, "Manage Dimension Certification", "Assess and promote recognized Finance dimension routes using governed readiness evidence.", CategoryGeneralLedger),
         new(CreateJournalEntries, "Create Journal Entries", "Create draft manual journal entries.", CategoryGeneralLedger),

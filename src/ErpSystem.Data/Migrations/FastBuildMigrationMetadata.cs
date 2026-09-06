@@ -236,3 +236,4 @@ namespace ErpSystem.Data.Migrations;
 // 20260903120000_EnforceFinanceClassificationSystemRoleCardinality deliberately carries its
 // DbContext/Migration attributes on the executable migration class. It is therefore already
 // discoverable when fast builds remove every *.Designer.cs and must not be redeclared here.
+// 20260905213000_AddGovernedAccountingBookLifecycle follows the same executable-metadata rule.

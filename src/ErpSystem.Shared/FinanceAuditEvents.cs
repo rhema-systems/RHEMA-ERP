@@ -11,6 +11,12 @@ public static class FinanceAuditEvents
     public const string AccountClassificationCreated = "Finance.GL.AccountClassification.Created";
     public const string AccountClassificationUpdated = "Finance.GL.AccountClassification.Updated";
     public const string AccountClassificationRetired = "Finance.GL.AccountClassification.Retired";
+    public const string AccountingBookCreated = "Finance.GL.AccountingBook.Created";
+    public const string AccountingBookUpdated = "Finance.GL.AccountingBook.Updated";
+    public const string AccountingBookTransitionRequested = "Finance.GL.AccountingBook.TransitionRequested";
+    public const string AccountingBookTransitionApproved = "Finance.GL.AccountingBook.TransitionApproved";
+    public const string AccountingBookTransitionApprovalStepCompleted = "Finance.GL.AccountingBook.TransitionApprovalStepCompleted";
+    public const string AccountingBookTransitionRejected = "Finance.GL.AccountingBook.TransitionRejected";
     public const string FxPolicyOverrideChanged = "Finance.FX.Policy.OverrideChanged";
     public const string FxPolicyOverrideRequested = "Finance.FX.Policy.OverrideRequested";
     public const string FxPolicyOverrideApproved = "Finance.FX.Policy.OverrideApproved";

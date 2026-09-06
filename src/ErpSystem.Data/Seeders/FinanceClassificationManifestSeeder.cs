@@ -63,6 +63,14 @@ public sealed class FinanceClassificationManifestSeeder
 
     public async Task SeedAsync(Guid tenantId, DateTime seedDate, CancellationToken cancellationToken = default)
     {
+        var functionalCurrency = await _db.Tenants.AsNoTracking()
+            .Where(item => item.Id == tenantId)
+            .Select(item => item.BaseCurrency)
+            .SingleAsync(cancellationToken);
+        functionalCurrency = functionalCurrency.Trim().ToUpperInvariant();
+        if (functionalCurrency.Length != 3)
+            throw new InvalidOperationException("Tenant functional currency must be a canonical three-letter code before accounting books are seeded.");
+
         var books = await _db.AccountingBooks.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToListAsync(cancellationToken);
         EnsureUnique(books.Select(item => item.Code), "accounting-book");
         foreach (var code in BookCodes)
@@ -74,7 +82,13 @@ public sealed class FinanceClassificationManifestSeeder
                     TenantId = tenantId, Code = code,
                     Name = code switch { "IFRS" => "IFRS Primary", "LOCAL_STATUTORY" => "Local Statutory", _ => "Management Reporting" },
                     Purpose = code == "IFRS" ? "Primary" : code == "LOCAL_STATUTORY" ? "Statutory" : "Management",
-                    IsActive = true, IsDefault = code == "IFRS", AllowsPosting = true, IsSystemDefined = true,
+                    BookType = code == "IFRS" ? AccountingBookType.PrimaryFull : AccountingBookType.ParallelFull,
+                    LifecycleStatus = AccountingBookLifecycleStatus.Configuring,
+                    FunctionalCurrencyCode = functionalCurrency,
+                    // Fresh C3 configuration is deliberately non-posting. Only migrated legacy
+                    // books may retain their pre-existing Active state; C4 will supply the first
+                    // governed readiness evidence for newly configured books.
+                    IsActive = false, IsDefault = code == "IFRS", AllowsPosting = false, IsSystemDefined = true,
                     SortOrder = Array.IndexOf(BookCodes, code) * 10 + 10, CreatedAt = seedDate,
                     CreatedBy = $"System ({ManifestVersion})"
                 };
