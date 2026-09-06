@@ -697,7 +697,9 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, tenderCurrenc
         tenderCurrency={tenderCurrency}
         bidders={getSelectedBiddersInfo()}
         onVerificationComplete={handleVerificationComplete}
-        onAwardBidder={(bidId, bidAmount) => handleSelectBid(bidId, bidAmount)}
+        onAwardBidder={canSubmitAwardRecommendation && readinessDecision?.isReady && readinessDecision.isCurrent
+          ? (bidId, bidAmount) => handleSelectBid(bidId, bidAmount)
+          : undefined}
       />
     </>
   );
