@@ -136,6 +136,48 @@ public sealed class AccountingBookLifecycleC3Tests
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*cycles are prohibited*");
     }
 
+    [Theory]
+    [InlineData(true, "Suspended")]
+    [InlineData(true, "Retired")]
+    [InlineData(true, "PendingSuspended")]
+    [InlineData(true, "PendingRetired")]
+    [InlineData(false, "Suspended")]
+    [InlineData(false, "Retired")]
+    [InlineData(false, "PendingSuspended")]
+    [InlineData(false, "PendingRetired")]
+    public async Task DeltaCreateAndStructuralUpdate_RejectInvalidDirectOrTransitiveBaseLineage(
+        bool invalidityIsDirect,
+        string invalidity)
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        var root = SeedBook(db, tenantId, "PRIMARY", AccountingBookType.PrimaryFull, isDefault: true,
+            status: AccountingBookLifecycleStatus.Active);
+        var validBase = SeedBook(db, tenantId, "VALID_FULL", AccountingBookType.ParallelFull,
+            status: AccountingBookLifecycleStatus.Active);
+        var invalidAncestor = invalidityIsDirect
+            ? SeedBook(db, tenantId, "INVALID_DIRECT", AccountingBookType.ParallelFull,
+                status: AccountingBookLifecycleStatus.Active)
+            : root;
+        ApplyInvalidity(invalidAncestor, invalidity);
+        var requestedBase = invalidityIsDirect
+            ? invalidAncestor
+            : SeedBook(db, tenantId, "DELTA_MIDDLE", AccountingBookType.Delta,
+                status: AccountingBookLifecycleStatus.Active);
+        if (!invalidityIsDirect) requestedBase.BaseAccountingBookId = invalidAncestor.Id;
+        var existing = SeedBook(db, tenantId, "DELTA_EXISTING", AccountingBookType.Delta,
+            status: AccountingBookLifecycleStatus.Draft);
+        existing.BaseAccountingBookId = validBase.Id;
+        await db.SaveChangesAsync();
+
+        var service = Service(db, tenantId);
+        await FluentActions.Awaiting(() => service.CreateAsync(Delta("DELTA_NEW", requestedBase.Id)))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*lineage is invalid*");
+        await FluentActions.Awaiting(() => service.UpdateAsync(existing.Id,
+                Delta(existing.Code, requestedBase.Id, Convert.ToBase64String([1]))))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*lineage is invalid*");
+    }
+
     [Fact]
     public async Task ActivationFailsClosedUntilC4Readiness_AndMakerCannotCheckOwnTransition()
     {
@@ -253,7 +295,7 @@ public sealed class AccountingBookLifecycleC3Tests
                     Reason = "approve", RowVersion = Convert.ToBase64String([1])
                 }))
             .Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Suspended*Initializing*");
+            .WithMessage("*ancestor IFRS is Suspended*");
         workflow.Verify(item => item.ProcessApprovalStepAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
             It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
         audit.Verify(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -343,6 +385,20 @@ public sealed class AccountingBookLifecycleC3Tests
         };
         db.AccountingBooks.Add(book);
         return book;
+    }
+
+    private static void ApplyInvalidity(AccountingBook book, string invalidity)
+    {
+        switch (invalidity)
+        {
+            case "Suspended": book.LifecycleStatus = AccountingBookLifecycleStatus.Suspended; break;
+            case "Retired": book.LifecycleStatus = AccountingBookLifecycleStatus.Retired; break;
+            case "PendingSuspended": book.PendingLifecycleStatus = AccountingBookLifecycleStatus.Suspended; break;
+            case "PendingRetired": book.PendingLifecycleStatus = AccountingBookLifecycleStatus.Retired; break;
+            default: throw new ArgumentOutOfRangeException(nameof(invalidity));
+        }
+        book.IsActive = book.LifecycleStatus == AccountingBookLifecycleStatus.Active;
+        book.AllowsPosting = book.IsActive;
     }
 
     private static CreateAccountingBookDto Full(string code, string type, Guid? baseId = null) => new()

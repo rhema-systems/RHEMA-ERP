@@ -96,7 +96,7 @@ public sealed class AccountingBookService : IAccountingBookService
         ApplyRowVersion(book, request.RowVersion);
         if (book.PendingLifecycleStatus.HasValue) throw new InvalidOperationException("The accounting book has a pending lifecycle transition.");
         if (book.LifecycleStatus == AccountingBookLifecycleStatus.Retired) throw new InvalidOperationException("A retired accounting book cannot be edited.");
-        var value = await ValidateStructureAsync(request, id, ct);
+        var value = await ValidateStructureAsync(request, book, ct);
         var structuralChange = book.Code != value.Code || book.Purpose != value.Purpose || book.BookType != value.Type
             || book.FunctionalCurrencyCode != value.FunctionalCurrency || book.BaseAccountingBookId != value.BaseBook?.Id
             || book.EffectiveFromUtc != request.EffectiveFromUtc || book.EffectiveToUtc != request.EffectiveToUtc;
@@ -173,8 +173,9 @@ public sealed class AccountingBookService : IAccountingBookService
         return await LoadDtoAsync(book.Id, ct);
     }, ct);
 
-    private async Task<(string Code, string Name, string? Description, string Purpose, AccountingBookType Type, string? FunctionalCurrency, AccountingBook? BaseBook)> ValidateStructureAsync(CreateAccountingBookDto request, Guid? currentId, CancellationToken ct)
+    private async Task<(string Code, string Name, string? Description, string Purpose, AccountingBookType Type, string? FunctionalCurrency, AccountingBook? BaseBook)> ValidateStructureAsync(CreateAccountingBookDto request, AccountingBook? currentBook, CancellationToken ct)
     {
+        var currentId = currentBook?.Id;
         if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Purpose))
             throw new InvalidOperationException("Accounting-book code, name and accounting purpose are required.");
         if (!Enum.TryParse<AccountingBookType>(request.BookType, true, out var type)) throw new InvalidOperationException("Accounting-book type is invalid.");
@@ -196,9 +197,18 @@ public sealed class AccountingBookService : IAccountingBookService
             if (!request.BaseAccountingBookId.HasValue || request.BaseAccountingBookId == currentId)
                 throw new InvalidOperationException("A Delta book requires a different same-tenant base book.");
             baseBook = await _db.AccountingBooks.SingleOrDefaultAsync(item => item.Id == request.BaseAccountingBookId && item.TenantId == TenantId
-                && !item.IsDeleted && item.LifecycleStatus != AccountingBookLifecycleStatus.Retired, ct)
+                && !item.IsDeleted, ct)
                 ?? throw new InvalidOperationException("Delta base book is invalid for this tenant.");
-            await EnsureAcyclicAsync(baseBook, currentId, ct);
+            var candidate = new AccountingBook
+            {
+                Id = currentId ?? Guid.NewGuid(),
+                TenantId = TenantId,
+                BookType = AccountingBookType.Delta,
+                LifecycleStatus = currentBook?.LifecycleStatus ?? AccountingBookLifecycleStatus.Draft,
+                BaseAccountingBookId = baseBook.Id,
+                Code = code
+            };
+            await ValidateFullDeltaLineageAsync(candidate, candidate.LifecycleStatus, ct);
             currency = null;
         }
         else
@@ -237,20 +247,6 @@ public sealed class AccountingBookService : IAccountingBookService
         return (code, request.Name.Trim(), Optional(request.Description), request.Purpose.Trim(), type, currency, baseBook);
     }
 
-    private async Task EnsureAcyclicAsync(AccountingBook baseBook, Guid? currentId, CancellationToken ct)
-    {
-        var seen = new HashSet<Guid>();
-        AccountingBook? cursor = baseBook;
-        while (cursor != null)
-        {
-            if (!seen.Add(cursor.Id) || currentId == cursor.Id) throw new InvalidOperationException("Accounting-book base cycles are prohibited.");
-            if (!cursor.BaseAccountingBookId.HasValue) return;
-            cursor = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item => item.Id == cursor.BaseAccountingBookId
-                && item.TenantId == TenantId && !item.IsDeleted, ct)
-                ?? throw new InvalidOperationException("Accounting-book base lineage is invalid for this tenant.");
-        }
-    }
-
     private static void ValidateTransition(AccountingBookLifecycleStatus current, AccountingBookLifecycleStatus target)
     {
         var valid = (current, target) switch
@@ -282,12 +278,25 @@ public sealed class AccountingBookService : IAccountingBookService
         // One tenant-scoped graph is used for both child advancement and ancestor invalidation.
         // A direct-only query is insufficient because Delta books may legitimately base on another
         // Delta, and a stale intermediate lifecycle would otherwise invalidate descendants silently.
+        var tenantBooks = await ValidateFullDeltaLineageAsync(book, target, ct);
+        ValidateDependentDeltaLineage(book, target, tenantBooks);
+    }
+
+    private async Task<IReadOnlyList<AccountingBook>> ValidateFullDeltaLineageAsync(
+        AccountingBook candidate,
+        AccountingBookLifecycleStatus target,
+        CancellationToken ct)
+    {
+        // Every structural and lifecycle writer scans the same tenant graph inside AtomicAsync's
+        // serializable transaction. Those range locks make child attachment and ancestor
+        // invalidation mutually visible; weakening this query can reintroduce invalid Delta trees.
         var tenantBooks = await _db.AccountingBooks.AsNoTracking()
             .Where(item => item.TenantId == TenantId && !item.IsDeleted)
             .ToListAsync(ct);
         var byId = tenantBooks.ToDictionary(item => item.Id);
-        ValidateOwnDeltaLineage(book, target, byId);
-        ValidateDependentDeltaLineage(book, target, tenantBooks);
+        byId[candidate.Id] = candidate;
+        ValidateOwnDeltaLineage(candidate, target, byId);
+        return tenantBooks;
     }
 
     private static void ValidateOwnDeltaLineage(
@@ -311,10 +320,12 @@ public sealed class AccountingBookService : IAccountingBookService
                 throw new InvalidOperationException("Delta base-book lineage is missing, retired, deleted or belongs to another tenant.");
             if (!seen.Add(baseBook.Id))
                 throw new InvalidOperationException("Accounting-book base cycles are prohibited.");
-            if (baseBook.LifecycleStatus == AccountingBookLifecycleStatus.Retired)
-                throw new InvalidOperationException("A Delta book cannot transition while any base-book ancestor is retired.");
+            if (baseBook.LifecycleStatus is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)
+                throw new InvalidOperationException(
+                    $"Delta base-book lineage is invalid because ancestor {baseBook.Code} is {baseBook.LifecycleStatus}.");
             if (baseBook.PendingLifecycleStatus is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)
-                throw new InvalidOperationException("A Delta book cannot advance while a base-book ancestor has a pending suspension or retirement.");
+                throw new InvalidOperationException(
+                    $"Delta base-book lineage is invalid because ancestor {baseBook.Code} has a pending {baseBook.PendingLifecycleStatus} transition.");
             if (!BaseStatusSupports(target, baseBook.LifecycleStatus))
                 throw new InvalidOperationException($"Base book {baseBook.Code} in {baseBook.LifecycleStatus} cannot support a Delta transition to {target}.");
             current = baseBook;

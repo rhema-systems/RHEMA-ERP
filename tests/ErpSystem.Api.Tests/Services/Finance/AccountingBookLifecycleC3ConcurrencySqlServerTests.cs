@@ -24,6 +24,69 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class AccountingBookLifecycleC3ConcurrencySqlServerTests
 {
     [SqlServerFact]
+    public async Task DeltaCreate_CommittingBeforeBaseSuspensionRequest_MakesSuspensionFailClosed()
+    {
+        // Once suspension is pending, attachment is already prohibited, so the only legitimate
+        // child-winning order is commit-before-request. The inverse order is exercised below at
+        // approval, where the pending/committed invalidation must make attachment fail closed.
+        await using var database = await DisposableDatabase.CreateAsync();
+        var tenantId = Guid.NewGuid();
+        var rootId = Guid.NewGuid();
+        await SeedTenantAsync(database, tenantId,
+            Book(rootId, tenantId, "PRIMARY", AccountingBookType.PrimaryFull,
+                AccountingBookLifecycleStatus.Active, isDefault: true));
+
+        var auditEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseAudit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gatedAudit = Audit(async eventType =>
+        {
+            if (eventType != FinanceAuditEvents.AccountingBookCreated) return;
+            auditEntered.TrySetResult();
+            await releaseAudit.Task;
+        });
+        var workflow = Workflow();
+        string rootVersion;
+        await using (var evidence = database.Context())
+            rootVersion = Convert.ToBase64String((await evidence.AccountingBooks.SingleAsync(item => item.Id == rootId)).RowVersion);
+        var create = Task.Run(async () =>
+        {
+            await using var context = database.Context();
+            return await CaptureAsync(() => Service(context, tenantId, Guid.NewGuid(), workflow.Object, gatedAudit.Object)
+                .CreateAsync(DeltaRequest("DELTA_CREATED_FIRST", rootId)));
+        });
+        await auditEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var suspend = Task.Run(async () =>
+        {
+            await using var context = database.Context();
+            return await CaptureAsync(() => Service(context, tenantId, Guid.NewGuid(), workflow.Object, Audit().Object)
+                .RequestTransitionAsync(rootId, new RequestAccountingBookTransitionDto
+                {
+                    TargetStatus = "Suspended", Reason = "suspension racing child creation", RowVersion = rootVersion
+                }));
+        });
+
+        releaseAudit.TrySetResult();
+        var outcomes = await Task.WhenAll(create, suspend);
+        outcomes[0].Success.Should().BeTrue();
+        outcomes[1].Success.Should().BeFalse();
+        outcomes[1].Error.Should().Contain("DELTA_CREATED_FIRST");
+        await AssertDurableAsync(database, tenantId, "DELTA_CREATED_FIRST",
+            AccountingBookLifecycleStatus.Active, deltaMustExist: true);
+    }
+
+    [SqlServerFact]
+    public async Task BaseSuspensionApproval_WinningRace_MakesDeltaCreateFailClosed()
+    {
+        await ApprovalWinningCreateRaceAsync(AccountingBookLifecycleStatus.Suspended);
+    }
+
+    [SqlServerFact]
+    public async Task BaseRetirementApproval_WinningRace_MakesTransitiveDeltaCreateFailClosed()
+    {
+        await ApprovalWinningCreateRaceAsync(AccountingBookLifecycleStatus.Retired);
+    }
+
+    [SqlServerFact]
     public async Task TransitiveDeltaApproval_RacingBaseSuspension_PreservesValidDurableLineage()
     {
         await using var database = await DisposableDatabase.CreateAsync();
@@ -120,6 +183,124 @@ public sealed class AccountingBookLifecycleC3ConcurrencySqlServerTests
         catch (InvalidOperationException exception) { return (false, exception.Message); }
     }
 
+    private static async Task ApprovalWinningCreateRaceAsync(AccountingBookLifecycleStatus target)
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        var tenantId = Guid.NewGuid();
+        var primaryId = Guid.NewGuid();
+        var baseId = target == AccountingBookLifecycleStatus.Suspended ? primaryId : Guid.NewGuid();
+        var maker = Guid.NewGuid();
+        var checker = Guid.NewGuid();
+        var primary = Book(primaryId, tenantId, "PRIMARY", AccountingBookType.PrimaryFull,
+            AccountingBookLifecycleStatus.Active, isDefault: true);
+        var books = target == AccountingBookLifecycleStatus.Suspended
+            ? new[] { primary }
+            : new[]
+            {
+                primary,
+                Book(baseId, tenantId, "DELTA_MIDDLE", AccountingBookType.Delta,
+                    AccountingBookLifecycleStatus.Configuring, baseId: primaryId)
+            };
+        await SeedTenantAsync(database, tenantId, books);
+
+        await using (var prepare = database.Context())
+        {
+            var baseBook = await prepare.AccountingBooks.SingleAsync(item => item.Id == baseId);
+            baseBook.PendingLifecycleStatus = target;
+            baseBook.PendingTransitionReason = $"approve {target}";
+            baseBook.TransitionRequestedByUserId = maker;
+            baseBook.TransitionRequestedAtUtc = DateTime.UtcNow;
+            baseBook.TransitionWorkflowInstanceId = Guid.NewGuid();
+            await prepare.SaveChangesAsync();
+        }
+
+        string baseVersion;
+        await using (var evidence = database.Context())
+            baseVersion = Convert.ToBase64String((await evidence.AccountingBooks.SingleAsync(item => item.Id == baseId)).RowVersion);
+
+        var approvalEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseApproval = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var workflow = Workflow(async () =>
+        {
+            approvalEntered.TrySetResult();
+            await releaseApproval.Task;
+        });
+        var approve = Task.Run(async () =>
+        {
+            await using var context = database.Context();
+            return await CaptureAsync(() => Service(context, tenantId, checker, workflow.Object, Audit().Object)
+                .ApproveTransitionAsync(baseId, new DecideAccountingBookTransitionDto
+                {
+                    Reason = $"checker approves {target}", RowVersion = baseVersion
+                }));
+        });
+        await approvalEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        const string childCode = "DELTA_RACING_APPROVAL";
+        var create = Task.Run(async () =>
+        {
+            await using var context = database.Context();
+            return await CaptureAsync(() => Service(context, tenantId, Guid.NewGuid(), Workflow().Object, Audit().Object)
+                .CreateAsync(DeltaRequest(childCode, baseId)));
+        });
+        releaseApproval.TrySetResult();
+        var outcomes = await Task.WhenAll(approve, create);
+        outcomes[0].Success.Should().BeTrue();
+        outcomes[1].Success.Should().BeFalse();
+        outcomes[1].Error.Should().Match(message =>
+            message.Contains(target.ToString(), StringComparison.OrdinalIgnoreCase)
+            || message.Contains("pending", StringComparison.OrdinalIgnoreCase));
+
+        await using var verify = database.Context();
+        var durableBase = await verify.AccountingBooks.AsNoTracking().SingleAsync(item => item.Id == baseId);
+        durableBase.LifecycleStatus.Should().Be(target);
+        durableBase.PendingLifecycleStatus.Should().BeNull();
+        (await verify.AccountingBooks.AsNoTracking().AnyAsync(item => item.TenantId == tenantId && item.Code == childCode))
+            .Should().BeFalse();
+    }
+
+    private static async Task SeedTenantAsync(DisposableDatabase database, Guid tenantId, params AccountingBook[] books)
+    {
+        await using var seed = database.Context();
+        await seed.Database.EnsureCreatedAsync();
+        seed.Tenants.Add(new Tenant
+        {
+            Id = tenantId, Code = $"C3{tenantId:N}"[..12].ToUpperInvariant(), Name = "C3 race",
+            Status = TenantStatus.Active, BaseCurrency = "GHS"
+        });
+        seed.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrency = "GHS"
+        });
+        seed.AccountingBooks.AddRange(books);
+        await seed.SaveChangesAsync();
+    }
+
+    private static CreateAccountingBookDto DeltaRequest(string code, Guid baseId) => new()
+    {
+        Code = code,
+        Name = code,
+        Purpose = "Adjustment",
+        BookType = nameof(AccountingBookType.Delta),
+        BaseAccountingBookId = baseId
+    };
+
+    private static async Task AssertDurableAsync(
+        DisposableDatabase database,
+        Guid tenantId,
+        string deltaCode,
+        AccountingBookLifecycleStatus expectedBaseStatus,
+        bool deltaMustExist)
+    {
+        await using var verify = database.Context();
+        var root = await verify.AccountingBooks.AsNoTracking()
+            .SingleAsync(item => item.TenantId == tenantId && item.BookType == AccountingBookType.PrimaryFull);
+        root.LifecycleStatus.Should().Be(expectedBaseStatus);
+        root.PendingLifecycleStatus.Should().BeNull();
+        (await verify.AccountingBooks.AsNoTracking().AnyAsync(item => item.TenantId == tenantId && item.Code == deltaCode))
+            .Should().Be(deltaMustExist);
+    }
+
     private static AccountingBook Book(Guid id, Guid tenantId, string code, AccountingBookType type,
         AccountingBookLifecycleStatus status, bool isDefault = false, Guid? baseId = null) => new()
     {
@@ -140,7 +321,7 @@ public sealed class AccountingBookLifecycleC3ConcurrencySqlServerTests
         return new AccountingBookService(db, current.Object, workflow, audit);
     }
 
-    private static Mock<IWorkflowService> Workflow()
+    private static Mock<IWorkflowService> Workflow(Func<Task>? beforeApprovalResult = null)
     {
         var workflow = new Mock<IWorkflowService>();
         workflow.Setup(item => item.HasActiveApprovalWorkflowAsync(It.IsAny<string>())).ReturnsAsync(true);
@@ -152,15 +333,23 @@ public sealed class AccountingBookLifecycleC3ConcurrencySqlServerTests
         workflow.Setup(item => item.CanUserApproveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(true);
         workflow.Setup(item => item.ProcessApprovalStepAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
                 It.IsAny<string>(), It.IsAny<string?>()))
-            .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
+            .Returns(async () =>
+            {
+                if (beforeApprovalResult != null) await beforeApprovalResult();
+                return new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed };
+            });
         return workflow;
     }
 
-    private static Mock<IFinanceAuditService> Audit()
+    private static Mock<IFinanceAuditService> Audit(Func<string, Task>? beforeRecord = null)
     {
         var audit = new Mock<IFinanceAuditService>();
         audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AuditLog());
+            .Returns(async (FinanceAuditEventDto evidence, CancellationToken _) =>
+            {
+                if (beforeRecord != null) await beforeRecord(evidence.EventType);
+                return new AuditLog();
+            });
         return audit;
     }
 
