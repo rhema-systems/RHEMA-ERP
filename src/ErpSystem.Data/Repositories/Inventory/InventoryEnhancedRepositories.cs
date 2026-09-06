@@ -942,6 +942,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
     {
         return await _dbSet
             .Where(r => r.Status == status && !r.IsDeleted)
+            .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .OrderByDescending(r => r.RequestDate)
             .ToListAsync();
@@ -952,6 +953,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
         if (projectId == Guid.Empty) return new List<InventoryRequisition>();
         return await _dbSet
             .Where(r => r.ProjectId == projectId && !r.IsDeleted)
+            .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .Include(r => r.RequestedBy)
             .OrderByDescending(r => r.RequestDate)
@@ -963,6 +965,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
         if (warehouseId == Guid.Empty) return new List<InventoryRequisition>();
         return await _dbSet
             .Where(r => r.WarehouseId == warehouseId && !r.IsDeleted)
+            .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .OrderByDescending(r => r.RequestDate)
             .ToListAsync();
@@ -973,6 +976,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
         if (departmentId == Guid.Empty) return new List<InventoryRequisition>();
         return await _dbSet
             .Where(r => r.DepartmentId == departmentId && !r.IsDeleted)
+            .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .OrderByDescending(r => r.RequestDate)
             .ToListAsync();
@@ -1004,6 +1008,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
     {
         return await _dbSet
             .Where(r => r.RequestDate >= fromDate && r.RequestDate <= toDate && !r.IsDeleted)
+            .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .OrderByDescending(r => r.RequestDate)
             .ToListAsync();
@@ -1013,6 +1018,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
     {
         return await _dbSet
             .Where(r => r.Status == RequisitionStatus.Submitted && !r.IsDeleted)
+            .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .Include(r => r.RequestedBy)
             .OrderBy(r => r.RequestDate)
@@ -1023,6 +1029,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
     {
         return await _dbSet
             .Where(r => (r.Status == RequisitionStatus.Approved || r.Status == RequisitionStatus.InProgress || r.Status == RequisitionStatus.PartiallyIssued) && !r.IsDeleted)
+            .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .Include(r => r.RequestedBy)
             .OrderBy(r => r.RequiredDate ?? r.RequestDate)
