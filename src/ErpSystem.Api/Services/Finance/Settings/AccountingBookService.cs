@@ -208,14 +208,18 @@ public sealed class AccountingBookService : IAccountingBookService
                 .Select(item => item.BaseCurrency).SingleOrDefaultAsync(ct);
             var tenantCurrency = await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId && !item.IsDeleted)
                 .Select(item => item.BaseCurrency).SingleOrDefaultAsync(ct);
-            if (string.IsNullOrWhiteSpace(setting) || string.IsNullOrWhiteSpace(tenantCurrency))
-                throw new InvalidOperationException("Tenant and Finance functional-currency authority must be configured before a full book is created.");
-            var canonical = setting.Trim().ToUpperInvariant();
-            if (!string.Equals(setting, canonical, StringComparison.Ordinal)
-                || !string.Equals(tenantCurrency, canonical, StringComparison.Ordinal))
-                throw new InvalidOperationException("Tenant and Finance functional-currency authority must agree in canonical uppercase form.");
-            currency = request.FunctionalCurrencyCode?.Trim().ToUpperInvariant();
-            if (canonical.Length != 3 || currency != canonical) throw new InvalidOperationException("Full books must use the tenant's exact functional currency.");
+            currency = request.FunctionalCurrencyCode;
+            // Match the SQL BIN2 constraints exactly. Unicode uppercasing and trimming would let
+            // non-ASCII or non-canonical evidence pass in non-SQL providers and fail only later.
+            if (!IsCanonicalCurrency(tenantCurrency)
+                || !IsCanonicalCurrency(setting)
+                || !IsCanonicalCurrency(currency))
+                throw new InvalidOperationException(
+                    "FUNCTIONAL_CURRENCY_INVALID: Tenant, Finance Settings, and requested full-book currencies must each be exactly three uppercase ASCII letters.");
+            if (!string.Equals(tenantCurrency, setting, StringComparison.Ordinal)
+                || !string.Equals(tenantCurrency, currency, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "FUNCTIONAL_CURRENCY_MISMATCH: Tenant, Finance Settings, and requested full-book currencies must match exactly.");
         }
         var otherPrimaryCount = await _db.AccountingBooks.CountAsync(item => item.TenantId == TenantId
             && item.BookType == AccountingBookType.PrimaryFull && item.IsDefault && item.Id != currentId && !item.IsDeleted, ct);
@@ -436,6 +440,8 @@ public sealed class AccountingBookService : IAccountingBookService
     private IWorkflowService Workflow() => _workflow ?? throw new InvalidOperationException("Finance workflow service is required for accounting-book lifecycle transitions.");
     private string ActorName() => _currentUser.UserName ?? "system";
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static bool IsCanonicalCurrency(string? value) => value is { Length: 3 }
+        && value.All(character => character is >= 'A' and <= 'Z');
 
     public async Task SyncAccountMappingsAsync(Account account, IReadOnlyCollection<AccountAccountingBookUpdateDto> requestedMappings, CancellationToken cancellationToken = default)
     {

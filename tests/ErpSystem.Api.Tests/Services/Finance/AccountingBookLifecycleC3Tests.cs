@@ -56,6 +56,63 @@ public sealed class AccountingBookLifecycleC3Tests
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*one primary/default*");
     }
 
+    [Theory]
+    [InlineData("123")]
+    [InlineData("GH!")]
+    [InlineData("ÉÉÉ")]
+    [InlineData("ghs")]
+    [InlineData("GHS ")]
+    public async Task Create_RejectsNonCanonicalTenantCurrency(string invalidCurrency)
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        await db.SaveChangesAsync();
+        db.Tenants.Single(item => item.Id == tenantId).BaseCurrency = invalidCurrency;
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => Service(db, tenantId).CreateAsync(Full("IFRS", "PrimaryFull")))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FUNCTIONAL_CURRENCY_INVALID:*");
+    }
+
+    [Theory]
+    [InlineData("123")]
+    [InlineData("GH!")]
+    [InlineData("ÉÉÉ")]
+    [InlineData("ghs")]
+    [InlineData("GHS ")]
+    public async Task Create_RejectsNonCanonicalFinanceSettingsCurrency(string invalidCurrency)
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        await db.SaveChangesAsync();
+        db.FinanceSettings.Single(item => item.TenantId == tenantId).BaseCurrency = invalidCurrency;
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => Service(db, tenantId).CreateAsync(Full("IFRS", "PrimaryFull")))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FUNCTIONAL_CURRENCY_INVALID:*");
+    }
+
+    [Theory]
+    [InlineData("123")]
+    [InlineData("GH!")]
+    [InlineData("ÉÉÉ")]
+    [InlineData("ghs")]
+    [InlineData("GHS ")]
+    public async Task Create_RejectsNonCanonicalRequestedCurrency(string invalidCurrency)
+    {
+        await using var db = NewDatabase();
+        var tenantId = SeedTenantAuthority(db);
+        await db.SaveChangesAsync();
+        var request = Full("IFRS", "PrimaryFull");
+        request.FunctionalCurrencyCode = invalidCurrency;
+
+        await FluentActions.Awaiting(() => Service(db, tenantId).CreateAsync(request))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FUNCTIONAL_CURRENCY_INVALID:*");
+    }
+
     [Fact]
     public async Task Delta_RequiresSameTenantBase_RejectsFullBaseAndCycles()
     {
