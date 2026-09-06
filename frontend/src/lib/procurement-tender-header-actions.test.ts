@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getProcurementProblemMessage,
   getTenderHeaderActions,
+  getTenderStageVisibility,
 } from './procurement-tender-header-actions';
 
 const input = {
@@ -16,6 +17,26 @@ const input = {
 };
 
 describe('tender header control actions', () => {
+  it.each(['Closed', 'UnderEvaluation', 'Evaluated', 'Awarded'])(
+    'retains bid and award navigation after closing: %s',
+    (status) => {
+      expect(getTenderStageVisibility(status)).toEqual({
+        publishedStage: true,
+        awardStage: true,
+      });
+      expect(getTenderHeaderActions({ ...input, status })).toMatchObject({
+        showCommitteeControls: true,
+        showAwardReadiness: true,
+        showGhanepsExchange: true,
+      });
+      expect(getTenderHeaderActions({ ...input, status, canReadProcurementRecords: false })).toMatchObject({
+        showCommitteeControls: false,
+        showAwardReadiness: false,
+        showGhanepsExchange: false,
+      });
+    }
+  );
+
   it.each([
     'Draft',
     'Submitted',
@@ -24,6 +45,10 @@ describe('tender header control actions', () => {
     'Cancelled',
     undefined,
   ])('hides later-stage navigation for %s tenders', (status) => {
+    expect(getTenderStageVisibility(status)).toEqual({
+      publishedStage: false,
+      awardStage: false,
+    });
     expect(getTenderHeaderActions({ ...input, status })).toMatchObject({
       showCommitteeControls: false,
       showAwardReadiness: false,

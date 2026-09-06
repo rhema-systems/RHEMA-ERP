@@ -31,12 +31,23 @@ const exceptionalMethods = new Set<ProcurementMethodType>([
 const normalizeMethod = (value?: ProcurementMethodType | number) =>
   typeof value === 'number' ? legacyMethodNames[value] : value;
 
+export function getTenderStageVisibility(status?: string) {
+  const normalized = status?.toLowerCase() ?? '';
+  const awardStage = ['closed', 'underevaluation', 'evaluated', 'awarded'].includes(
+    normalized
+  );
+  return {
+    publishedStage: normalized === 'published' || awardStage,
+    awardStage,
+  };
+}
+
 export function getTenderHeaderActions(input: TenderHeaderActionInput) {
   const isTender = input.tenderType !== 'RFQ';
   const visible = isTender && input.canReadProcurementRecords;
-  const status = input.status?.toLowerCase();
-  const published = ['published', 'closed', 'awarded'].includes(status ?? '');
-  const awardStage = ['closed', 'awarded'].includes(status ?? '');
+  const { publishedStage: published, awardStage } = getTenderStageVisibility(
+    input.status
+  );
   const hasSourcingCase = Boolean(input.sourcingCaseId?.trim());
   const method = normalizeMethod(input.sourcingMethod);
   const sourceQuery =
