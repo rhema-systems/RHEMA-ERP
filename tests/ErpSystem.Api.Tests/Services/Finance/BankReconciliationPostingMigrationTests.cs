@@ -106,6 +106,7 @@ public sealed class BankReconciliationPostingMigrationTests
         setup.BankAccount.Currency = "USD";
         setup.BankGlAccount.CurrencyCode = "USD";
         var period = db.FiscalPeriods.Local.Single(p => p.TenantId == tenantId);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var journalId = Guid.NewGuid();
         db.JournalEntries.Add(new JournalEntry
         {
@@ -122,6 +123,8 @@ public sealed class BankReconciliationPostingMigrationTests
             TotalCreditAmount = 625_000m,
             IsBalanced = true,
             FiscalPeriodId = period.Id,
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             PostingStatus = "Posted",
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
@@ -131,6 +134,7 @@ public sealed class BankReconciliationPostingMigrationTests
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             JournalEntryId = journalId,
+            AccountingBookId = book.Id,
             AccountId = setup.BankGlAccount.Id,
             FiscalPeriodId = period.Id,
             TransactionDate = new DateTime(2026, 7, 1),
@@ -174,6 +178,7 @@ public sealed class BankReconciliationPostingMigrationTests
         sourceSetup.BankGlAccount.CurrencyCode = "USD";
         destinationSetup.BankAccount.Currency = "EUR";
         destinationSetup.BankGlAccount.CurrencyCode = "EUR";
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var pairId = Guid.NewGuid();
         var journal = new JournalEntry
         {
@@ -190,6 +195,8 @@ public sealed class BankReconciliationPostingMigrationTests
             TotalCreditAmount = 1_520m,
             IsBalanced = true,
             FiscalPeriodId = db.FiscalPeriods.Local.Single(p => p.TenantId == tenantId).Id,
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             PostingStatus = "Posted",
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
@@ -1188,6 +1195,13 @@ public sealed class BankReconciliationPostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static void SeedPeriod(ApplicationDbContext db, Guid tenantId, string periodStatus)
@@ -1199,7 +1213,7 @@ public sealed class BankReconciliationPostingMigrationTests
         }
 
         var isOpen = string.Equals(periodStatus, "Open", StringComparison.OrdinalIgnoreCase);
-        db.FiscalPeriods.Add(new FiscalPeriod
+        var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -1215,7 +1229,9 @@ public sealed class BankReconciliationPostingMigrationTests
             IsOpen = isOpen,
             IsClosed = !isOpen,
             IsLocked = !isOpen
-        });
+        };
+        db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
     }
 
     private static Account SeedAccount(
@@ -1238,6 +1254,8 @@ public sealed class BankReconciliationPostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 

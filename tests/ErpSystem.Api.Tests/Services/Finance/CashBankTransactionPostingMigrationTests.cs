@@ -267,7 +267,14 @@ public sealed class CashBankTransactionPostingMigrationTests
 
         journal.Transactions.Single(t => t.AccountId == fixture.SourceBankGl.Id).CreditAmount.Should().Be(1_520m);
         journal.Transactions.Single(t => t.AccountId == fixture.DestinationBankGl.Id).DebitAmount.Should().Be(1_512m);
-        journal.Transactions.Single(t => t.AccountId == fixture.RealizedLoss.Id).DebitAmount.Should().Be(8m);
+        var realizedLossLines = journal.Transactions
+            .Where(t => t.AccountId == fixture.RealizedLoss.Id
+                && t.TransactionTag == "CashBankTransfer.RealizedFxLoss")
+            .ToList();
+        realizedLossLines.Should().HaveCount(2);
+        realizedLossLines.Sum(t => t.DebitAmount).Should().Be(8m);
+        realizedLossLines.Should().OnlyContain(t => t.CreditAmount == 0m && t.SourceDocumentLineId.HasValue);
+        realizedLossLines.Select(t => t.SourceDocumentLineId!.Value).Should().OnlyHaveUniqueItems();
         journal.Transactions.Single(t => t.AccountId == fixture.SourceBankGl.Id).ExchangeRateId.Should().Be(fixture.SourceRate.Id);
         journal.Transactions.Single(t => t.AccountId == fixture.DestinationBankGl.Id).ExchangeRateId.Should().Be(fixture.DestinationRate.Id);
 
@@ -341,7 +348,14 @@ public sealed class CashBankTransactionPostingMigrationTests
 
         preview.RealizedFxGainLossBaseAmount.Should().Be(20m);
         preview.RealizedFxOutcome.Should().Be("Gain");
-        journal.Transactions.Single(t => t.AccountId == fixture.RealizedGain.Id).CreditAmount.Should().Be(20m);
+        var realizedGainLines = journal.Transactions
+            .Where(t => t.AccountId == fixture.RealizedGain.Id
+                && t.TransactionTag == "CashBankTransfer.RealizedFxGain")
+            .ToList();
+        realizedGainLines.Should().HaveCount(2);
+        realizedGainLines.Sum(t => t.CreditAmount).Should().Be(20m);
+        realizedGainLines.Should().OnlyContain(t => t.DebitAmount == 0m && t.SourceDocumentLineId.HasValue);
+        realizedGainLines.Select(t => t.SourceDocumentLineId!.Value).Should().OnlyHaveUniqueItems();
     }
 
     [Fact]
@@ -808,6 +822,10 @@ public sealed class CashBankTransactionPostingMigrationTests
             TenantId = tenantId,
             Code = "IFRS",
             Name = "IFRS Primary",
+            Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
             IsDefault = true,
             IsActive = true,
             AllowsPosting = true
@@ -820,11 +838,18 @@ public sealed class CashBankTransactionPostingMigrationTests
         bool isOpen = true,
         bool isClosed = false)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = "FY2026", Year = 2026, FiscalYearType = "Calendar",
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            Status = "Open", IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -838,6 +863,7 @@ public sealed class CashBankTransactionPostingMigrationTests
             IsLocked = false
         };
 
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;

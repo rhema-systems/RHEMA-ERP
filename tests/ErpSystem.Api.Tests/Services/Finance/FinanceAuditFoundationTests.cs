@@ -460,6 +460,11 @@ public sealed class FinanceAuditFoundationTests
                 It.IsAny<string?>()))
             .Returns(Task.CompletedTask);
 
+        var budgetControl = new Mock<IFinanceBudgetControlService>();
+        budgetControl
+            .Setup(x => x.ValidateManualJournalForPostingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Guid>());
+
         return new JournalEntryService(
             db,
             currentUser.Object,
@@ -468,7 +473,8 @@ public sealed class FinanceAuditFoundationTests
             Mock.Of<INotificationService>(),
             Mock.Of<IAccountingBookService>(),
             engine,
-            auditService);
+            auditService,
+            budgetControl: budgetControl.Object);
     }
 
     private static AuditLogController CreateAuditLogController(ApplicationDbContext db, Guid tenantId)
@@ -529,15 +535,34 @@ public sealed class FinanceAuditFoundationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrency = "GHS",
+            ReferenceNumber = $"FIN-{code}", Status = "Active"
+        });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedPeriod(ApplicationDbContext db, Guid tenantId)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = "FY2026", Year = 2026, FiscalYearType = "Calendar",
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            Status = "Open", IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -551,7 +576,9 @@ public sealed class FinanceAuditFoundationTests
             IsLocked = false
         };
 
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -575,6 +602,8 @@ public sealed class FinanceAuditFoundationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 

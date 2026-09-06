@@ -545,7 +545,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
     private static async Task<(Account DebitAccount, Account CreditAccount)> SeedTenantPeriodAndAccountsAsync(ApplicationDbContext db, Guid tenantId)
     {
         SeedTenant(db, tenantId);
-        SeedPeriod(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
         var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
         var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
         var book = new AccountingBook
@@ -577,6 +577,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
                 Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccount.Id,
                 AccountingBookId = book.Id, AccountClassificationId = revenueClassification.Id, IsEnabled = true
             });
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         await db.SaveChangesAsync();
         return (debitAccount, creditAccount);
     }
@@ -600,11 +601,26 @@ public sealed class JournalEntryLifecycleBatch5Tests
         bool isClosed = false,
         bool isLocked = false)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = $"FY26-{tenantId.ToString("N")[..4]}",
+            Year = 2026,
+            StartDate = new DateTime(2026, 1, 1),
+            EndDate = new DateTime(2026, 12, 31),
+            TotalDays = 365,
+            NumberOfPeriods = 12,
+            Status = "Open",
+            IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
+            FiscalYear = fiscalYear,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -618,6 +634,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             IsLocked = isLocked
         };
 
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         return period;
     }

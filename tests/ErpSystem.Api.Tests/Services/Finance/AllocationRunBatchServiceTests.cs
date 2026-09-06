@@ -245,9 +245,12 @@ public sealed class AllocationRunBatchServiceTests
         var book = new AccountingBook
         {
             Id = Guid.NewGuid(), TenantId = tenantId, Code = "PRIMARY_FULL", Name = "Primary full book",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
         };
         db.AccountingBooks.Add(book);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         var expenseClassification = new AccountClassification
         {
             Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
@@ -330,11 +333,18 @@ public sealed class AllocationRunBatchServiceTests
 
     private static FiscalPeriod SeedPeriod(ApplicationDbContext db, Guid tenantId)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = "FY2026", Year = 2026, FiscalYearType = "Calendar",
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            Status = "Open", IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "January 2026",
             PeriodCode = "2026-01",
             PeriodNumber = 1,
@@ -347,6 +357,7 @@ public sealed class AllocationRunBatchServiceTests
             IsClosed = false,
             IsLocked = false
         };
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         return period;
     }

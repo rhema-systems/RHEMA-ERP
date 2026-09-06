@@ -787,6 +787,7 @@ public sealed class ArCreditNotePostingMigrationTests
         ArCreditNoteFixture fixture,
         decimal amount)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == fixture.CreditNote.TenantId && item.Code == "IFRS");
         var payment = new CustomerPayment
         {
             Id = Guid.NewGuid(),
@@ -827,6 +828,7 @@ public sealed class ArCreditNotePostingMigrationTests
             SourceDocumentReference = payment.PaymentNumber,
             IdempotencyKey = $"AR:CustomerPayment:{payment.TenantId:N}:{payment.Id:N}:Post",
             JournalEntryId = payment.JournalEntryId,
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             PostingDate = payment.PaymentDate,
             RequestedAt = DateTime.UtcNow,
@@ -875,6 +877,13 @@ public sealed class ArCreditNotePostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -902,6 +911,7 @@ public sealed class ArCreditNotePostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -929,6 +939,8 @@ public sealed class ArCreditNotePostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 
@@ -966,6 +978,7 @@ public sealed class ArCreditNotePostingMigrationTests
         Guid fiscalPeriodId,
         bool seedPostingEvent = true)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var invoice = new Invoice
         {
             Id = Guid.NewGuid(),
@@ -1001,6 +1014,7 @@ public sealed class ArCreditNotePostingMigrationTests
             TotalCreditAmount = amount,
             IsBalanced = true,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = invoiceDate,
@@ -1026,6 +1040,7 @@ public sealed class ArCreditNotePostingMigrationTests
                 SourceDocumentReference = invoice.InvoiceNumber,
                 IdempotencyKey = $"AR:CustomerInvoice:{tenantId:N}:{invoice.Id:N}:Post",
                 JournalEntryId = invoiceJournal.Id,
+                AccountingBookId = book.Id,
                 PostingStatus = "Posted",
                 PostingDate = invoiceDate,
                 RequestedAt = DateTime.UtcNow,

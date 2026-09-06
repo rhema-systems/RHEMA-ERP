@@ -1078,6 +1078,13 @@ public sealed class ApPaymentPostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -1105,6 +1112,7 @@ public sealed class ApPaymentPostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -1119,7 +1127,7 @@ public sealed class ApPaymentPostingMigrationTests
 
         var start = new DateTime(today.Year, today.Month, 1);
         var end = start.AddMonths(1).AddDays(-1);
-        db.FiscalPeriods.Add(new FiscalPeriod
+        var currentPeriod = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -1135,7 +1143,9 @@ public sealed class ApPaymentPostingMigrationTests
             IsOpen = seededPeriod.IsOpen,
             IsClosed = seededPeriod.IsClosed,
             IsLocked = seededPeriod.IsLocked
-        });
+        };
+        db.FiscalPeriods.Add(currentPeriod);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, currentPeriod);
     }
 
     private static Account SeedAccount(
@@ -1162,6 +1172,8 @@ public sealed class ApPaymentPostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 
@@ -1244,6 +1256,7 @@ public sealed class ApPaymentPostingMigrationTests
         Guid? fiscalPeriodId = null,
         bool seedPostingEvent = true)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(),
@@ -1285,6 +1298,7 @@ public sealed class ApPaymentPostingMigrationTests
             TotalCreditAmount = amount,
             IsBalanced = true,
             FiscalPeriodId = fiscalPeriodId ?? Guid.NewGuid(),
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = invoiceDate,
@@ -1310,6 +1324,7 @@ public sealed class ApPaymentPostingMigrationTests
                 SourceDocumentReference = invoice.InvoiceNumber,
                 IdempotencyKey = $"AP:VendorInvoice:{tenantId:N}:{invoice.Id:N}:Post",
                 JournalEntryId = invoiceJournal.Id,
+                AccountingBookId = book.Id,
                 PostingStatus = "Posted",
                 PostingDate = invoiceDate,
                 RequestedAt = DateTime.UtcNow,

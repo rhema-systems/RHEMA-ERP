@@ -1198,6 +1198,13 @@ public sealed class GhanaStatutoryTaxEngineTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(ApplicationDbContext db, Guid tenantId)
@@ -1220,6 +1227,7 @@ public sealed class GhanaStatutoryTaxEngineTests
             IsLocked = false
         };
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -1245,6 +1253,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             AllowDirectPosting = allowDirectPosting
         };
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 
@@ -1429,6 +1439,7 @@ public sealed class GhanaStatutoryTaxEngineTests
         decimal amount,
         Guid fiscalPeriodId)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var journalId = Guid.NewGuid();
         db.JournalEntries.Add(new JournalEntry
         {
@@ -1446,6 +1457,8 @@ public sealed class GhanaStatutoryTaxEngineTests
             TotalCreditAmount = amount,
             IsBalanced = true,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = postingDate,
@@ -1463,6 +1476,7 @@ public sealed class GhanaStatutoryTaxEngineTests
             PostingAction = "Post",
             SourceDocumentReference = reference,
             JournalEntryId = journalId,
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             PostingDate = postingDate,
             PostedAt = DateTime.UtcNow,

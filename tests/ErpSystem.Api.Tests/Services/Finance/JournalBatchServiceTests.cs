@@ -29,10 +29,12 @@ public sealed class JournalBatchServiceTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var period = SeedPeriod(db, tenantId);
+        var book = db.AccountingBooks.Local.Single(item =>
+            item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
         var journals = SeedJournals(db, tenantId, period.Id);
-        var activeWorkflowJournal = NewDraftJournal(tenantId, period.Id, "JE-2026-000003", "Workflow draft", "GL");
-        var subledgerJournal = NewDraftJournal(tenantId, period.Id, "JE-2026-000004", "AP generated draft", "AP");
-        var otherBookJournal = NewDraftJournal(tenantId, period.Id, "JE-2026-000005", "Tax book draft", "GL", "TAX");
+        var activeWorkflowJournal = NewDraftJournal(db, tenantId, period.Id, "JE-2026-000003", "Workflow draft", "GL");
+        var subledgerJournal = NewDraftJournal(db, tenantId, period.Id, "JE-2026-000004", "AP generated draft", "AP");
+        var otherBookJournal = NewDraftJournal(db, tenantId, period.Id, "JE-2026-000005", "Tax book draft", "GL", "TAX");
         db.JournalEntries.AddRange(activeWorkflowJournal, subledgerJournal, otherBookJournal);
 
         var entityType = new WorkflowEntityType
@@ -459,6 +461,8 @@ public sealed class JournalBatchServiceTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var period = SeedPeriod(db, tenantId);
+        var book = db.AccountingBooks.Local.Single(item =>
+            item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
         var batch = new JournalBatch
         {
             Id = Guid.NewGuid(),
@@ -493,7 +497,8 @@ public sealed class JournalBatchServiceTests
                     TotalCreditAmount = 1m,
                     IsBalanced = true,
                     FiscalPeriodId = period.Id,
-                    BookClassification = "IFRS",
+                    AccountingBookId = book.Id,
+                    BookClassification = book.Code,
                     PostingStatus = "Draft",
                     ApprovalStatus = "Draft",
                     Transactions =
@@ -503,6 +508,8 @@ public sealed class JournalBatchServiceTests
                             Id = Guid.NewGuid(),
                             TenantId = tenantId,
                             JournalEntryId = journalId,
+                            AccountingBookId = book.Id,
+                            BookClassification = book.Code,
                             AccountId = Guid.NewGuid(),
                             TransactionDate = new DateTime(2026, 7, 15),
                             DebitAmount = 1m,
@@ -514,6 +521,8 @@ public sealed class JournalBatchServiceTests
                             Id = Guid.NewGuid(),
                             TenantId = tenantId,
                             JournalEntryId = journalId,
+                            AccountingBookId = book.Id,
+                            BookClassification = book.Code,
                             AccountId = Guid.NewGuid(),
                             TransactionDate = new DateTime(2026, 7, 15),
                             CreditAmount = 1m,
@@ -735,11 +744,16 @@ public sealed class JournalBatchServiceTests
             .Returns(async (CreateJournalEntryDto dto, CancellationToken cancellationToken) =>
             {
                 var id = Guid.NewGuid();
+                var bookCode = dto.BookClassification ?? "IFRS";
+                var book = db.AccountingBooks.Single(item =>
+                    item.TenantId == tenantId && item.Code == bookCode && !item.IsDeleted);
                 var transactions = dto.Transactions.Select(line => new AccountTransaction
                 {
                     Id = Guid.NewGuid(),
                     TenantId = tenantId,
                     JournalEntryId = id,
+                    AccountingBookId = book.Id,
+                    BookClassification = book.Code,
                     AccountId = line.AccountId,
                     TransactionDate = dto.TransactionDate,
                     DebitAmount = line.TransactionType.Equals("Debit", StringComparison.OrdinalIgnoreCase) ? line.Amount : 0,
@@ -768,7 +782,8 @@ public sealed class JournalBatchServiceTests
                     TotalCreditAmount = transactions.Sum(line => line.CreditAmount),
                     IsBalanced = true,
                     FiscalPeriodId = dto.FiscalPeriodId!.Value,
-                    BookClassification = dto.BookClassification ?? "IFRS",
+                    AccountingBookId = book.Id,
+                    BookClassification = book.Code,
                     PostingStatus = "Draft",
                     ApprovalStatus = "Draft",
                     Transactions = transactions
@@ -865,11 +880,54 @@ public sealed class JournalBatchServiceTests
             Code = $"JBT-{tenantId:N}"[..12],
             BaseCurrency = "GHS"
         });
+        var primaryBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        var taxBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "TAX",
+            Name = "Tax Book",
+            Purpose = "Tax",
+            BookType = AccountingBookType.ParallelFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = false,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = $"FY26-{tenantId.ToString("N")[..4]}",
+            Year = 2026,
+            StartDate = new DateTime(2026, 1, 1),
+            EndDate = new DateTime(2026, 12, 31),
+            TotalDays = 365,
+            NumberOfPeriods = 12,
+            Status = "Open",
+            IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
+            FiscalYear = fiscalYear,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -881,12 +939,17 @@ public sealed class JournalBatchServiceTests
             IsClosed = false,
             IsLocked = false
         };
+        db.AccountingBooks.AddRange(primaryBook, taxBook);
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, primaryBook.Code);
         return period;
     }
 
     private static List<JournalEntry> SeedJournals(ApplicationDbContext db, Guid tenantId, Guid periodId)
     {
+        var book = db.AccountingBooks.Local.Single(item =>
+            item.TenantId == tenantId && item.Code == "IFRS" && !item.IsDeleted);
         var amounts = new[] { 100m, 200m };
         var journals = amounts.Select((amount, index) =>
         {
@@ -906,7 +969,8 @@ public sealed class JournalBatchServiceTests
                 IsBalanced = true,
                 BalanceDifference = 0,
                 FiscalPeriodId = periodId,
-                BookClassification = "IFRS",
+                AccountingBookId = book.Id,
+                BookClassification = book.Code,
                 PostingStatus = "Draft",
                 ApprovalStatus = "Draft",
                 Transactions =
@@ -916,6 +980,8 @@ public sealed class JournalBatchServiceTests
                         Id = Guid.NewGuid(),
                         TenantId = tenantId,
                         JournalEntryId = journalId,
+                        AccountingBookId = book.Id,
+                        BookClassification = book.Code,
                         AccountId = Guid.NewGuid(),
                         TransactionDate = new DateTime(2026, 7, 15),
                         DebitAmount = amount,
@@ -928,6 +994,8 @@ public sealed class JournalBatchServiceTests
                         Id = Guid.NewGuid(),
                         TenantId = tenantId,
                         JournalEntryId = journalId,
+                        AccountingBookId = book.Id,
+                        BookClassification = book.Code,
                         AccountId = Guid.NewGuid(),
                         TransactionDate = new DateTime(2026, 7, 15),
                         DebitAmount = 0,
@@ -943,13 +1011,17 @@ public sealed class JournalBatchServiceTests
     }
 
     private static JournalEntry NewDraftJournal(
+        ApplicationDbContext db,
         Guid tenantId,
         Guid periodId,
         string number,
         string description,
         string sourceModule,
         string bookClassification = "IFRS")
-        => new()
+    {
+        var book = db.AccountingBooks.Local.Single(item =>
+            item.TenantId == tenantId && item.Code == bookClassification && !item.IsDeleted);
+        return new()
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -964,9 +1036,11 @@ public sealed class JournalBatchServiceTests
             IsBalanced = true,
             BalanceDifference = 0m,
             FiscalPeriodId = periodId,
-            BookClassification = bookClassification,
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             PostingStatus = "Draft",
             ApprovalStatus = "Draft",
             Transactions = []
         };
+    }
 }

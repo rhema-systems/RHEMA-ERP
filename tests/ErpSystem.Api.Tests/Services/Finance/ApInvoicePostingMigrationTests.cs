@@ -151,7 +151,7 @@ public sealed class ApInvoicePostingMigrationTests
             "BuildApInvoicePostingRequestAsync",
             BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-        var request = await (Task<FinancePostingRequestDto>)build.Invoke(service, new object[]
+        var request = await (Task<FinancePostingRequestV2Dto>)build.Invoke(service, new object[]
         {
             fixture.Invoice,
             Array.Empty<Guid>(),
@@ -1369,6 +1369,13 @@ public sealed class ApInvoicePostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -1406,6 +1413,7 @@ public sealed class ApInvoicePostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -1433,6 +1441,8 @@ public sealed class ApInvoicePostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 

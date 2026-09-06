@@ -43,6 +43,8 @@ internal static class FinancePostingAuthorityFixture
         FiscalPeriod period,
         string accountingBookCode = "IFRS")
     {
+        // C4 makes exact-book period authority an inner posting gate, so tests must attach
+        // it to an already-governed tenant book instead of relying on a production fallback.
         var book = db.AccountingBooks.Local.SingleOrDefault(item =>
             item.TenantId == tenantId && item.Code == accountingBookCode && !item.IsDeleted);
         if (book == null)

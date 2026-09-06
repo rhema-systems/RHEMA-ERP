@@ -1159,6 +1159,23 @@ public sealed class FixedAssetDisposalFoundationTests
         var openPeriod = SeedPeriod(db, tenantId, new DateTime(2026, 7, 1), new DateTime(2026, 7, 31), "2026-07", isOpen: !closeDisposalPeriod);
         var book = SeedBook(db, tenantId);
         var accounts = SeedAccounts(db, tenantId, codePrefix);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, previousPeriod, book.Code);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, openPeriod, book.Code);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+            db,
+            tenantId,
+            book,
+            accounts.Asset,
+            accounts.AccumulatedDepreciation,
+            accounts.DepreciationExpense,
+            accounts.GainOnDisposal,
+            accounts.LossOnDisposal,
+            accounts.ProceedsClearing,
+            accounts.RevaluationSurplus,
+            accounts.RevaluationLoss,
+            accounts.ImpairmentLoss,
+            accounts.AccumulatedImpairment,
+            accounts.RetainedEarnings);
 
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -1481,7 +1498,7 @@ public sealed class FixedAssetDisposalFoundationTests
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            Code = $"IFRS-{tenantId.ToString("N")[..4]}",
+            Code = "IFRS",
             Name = "IFRS",
             Purpose = "Primary",
             IsActive = true,

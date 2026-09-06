@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Documents;
@@ -3246,7 +3247,9 @@ namespace ErpSystem.Api.Services.Finance.AR
             return new FinancePostingRequestV2Dto
             {
                 SourceModule = producer.Definition.PostingSourceModule,
-                OriginModuleCode = producer.Definition.ProducerModule,
+                // Dimension-route ownership uses the display/module name "Finance", while
+                // fiscal-period locking requires the canonical top-level module code FIN.
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
                 SourceDocumentType = producer.Definition.DocumentType,
                 SourceDocumentId = payment.Id,
                 SourceDocumentTenantId = payment.TenantId,
