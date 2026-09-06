@@ -556,11 +556,11 @@ public sealed class ProcurementPurchaseOrderComplianceService :
         {
             checks.Add(Check("contract", "Required contract", true,
                 "PO_CONTRACT_NOT_REQUIRED",
-                "The governed award does not require a contract before this purchase order.",
+                contract.Reason,
                 required: false));
             checks.Add(Check("signature", "Contract signatures", true,
                 "PO_CONTRACT_SIGNATURE_NOT_REQUIRED",
-                "Contract signature evidence is not applicable to this source.",
+                "No linked contract is being checked. Contract activation has not been verified.",
                 required: false));
             return;
         }
@@ -626,17 +626,47 @@ public sealed class ProcurementPurchaseOrderComplianceService :
             PurchaseOrder purchaseOrder,
             CancellationToken cancellationToken)
     {
+        // Read the saved tenant setting without creating defaults or changing
+        // configuration during a readiness/approval check. Missing settings
+        // retain ProcurementSettings' existing optional-contract default.
+        var setting = await _unitOfWork.Repository<ProcurementSettings>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => (bool?)item.RequireContractForPO)
+            .SingleOrDefaultAsync(cancellationToken);
+        var requiredBySettings = setting == true;
+        var settingsReason = requiredBySettings
+            ? "Purchase Order Settings: 'Require contract for PO' is on. Link an active signed contract before submitting or approving this purchase order."
+            : setting.HasValue
+                ? "Purchase Order Settings: 'Require contract for PO' is off; no contract is linked to this source."
+                : "No tenant contract requirement is configured; the default is optional and no contract is linked to this source.";
+
         if (purchaseOrder.ProcurementSourceType ==
-            ProcurementPurchaseOrderSourceType.Contract &&
-            purchaseOrder.ProcurementSourceId.HasValue)
+            ProcurementPurchaseOrderSourceType.Contract ||
+            purchaseOrder.ContractId.HasValue)
         {
+            var contractId = purchaseOrder.ProcurementSourceType ==
+                             ProcurementPurchaseOrderSourceType.Contract
+                ? purchaseOrder.ProcurementSourceId
+                : purchaseOrder.ContractId;
+            if (!contractId.HasValue ||
+                (purchaseOrder.ContractId.HasValue && purchaseOrder.ContractId != contractId))
+                return (true, null, "The required source contract reference is missing or inconsistent.");
+
             var exact = await _unitOfWork.Repository<Contract>()
                 .GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId &&
-                    item.Id == purchaseOrder.ProcurementSourceId.Value &&
+                    item.Id == contractId.Value &&
                     !item.IsDeleted)
                 .AsNoTracking()
                 .SingleOrDefaultAsync(cancellationToken);
+            if (exact is not null &&
+                ((purchaseOrder.TenderAwardId.HasValue &&
+                  exact.TenderAwardId != purchaseOrder.TenderAwardId.Value) ||
+                 (purchaseOrder.ProcurementSourceType == ProcurementPurchaseOrderSourceType.TenderAward &&
+                  exact.TenderAwardId != purchaseOrder.ProcurementSourceId)))
+                return (true, null, "The linked contract does not belong to the purchase order's awarded source.");
+
             return (true, exact,
                 exact is null
                     ? "The required source contract was not found in the current tenant."
@@ -665,16 +695,18 @@ public sealed class ProcurementPurchaseOrderComplianceService :
                 .OrderByDescending(item => item.ActivatedAt)
                 .ThenByDescending(item => item.CreatedAt)
                 .ToListAsync(cancellationToken);
-            var required = string.Equals(
+            var required = requiredBySettings || string.Equals(
                                award.Status,
                                "ContractSigned",
                                StringComparison.OrdinalIgnoreCase) ||
                            contracts.Count != 0;
             return (required, contracts.FirstOrDefault(),
-                "The tender award requires a complete active signed contract.");
+                requiredBySettings || !required
+                    ? settingsReason
+                    : "The tender award's existing contract requirement needs a complete active signed contract.");
         }
 
-        return (false, null, string.Empty);
+        return (requiredBySettings, null, settingsReason);
     }
 
     private async Task<(ProcurementGhanepsSourceType Type, Guid Id)?>
