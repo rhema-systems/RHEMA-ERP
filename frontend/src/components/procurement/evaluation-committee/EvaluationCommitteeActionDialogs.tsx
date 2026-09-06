@@ -142,7 +142,7 @@ export function EvaluationCommitteeActionDialogs({
     setMeetingMode('InPerson');
     setMeetingChannel('');
     setScheduledAt(toLocalDateTime());
-    setWorkflowDefinitionId(options?.workflows[0]?.id ?? '');
+    setWorkflowDefinitionId('');
   }, [action, options, readiness.sourceReference, readiness.sourceType]);
 
   const selectedCommittee = options?.committees.find(

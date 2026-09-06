@@ -8,6 +8,7 @@ import type {
   ProcurementEvaluationCommitteeControl,
   ProcurementEvaluationCommitteeReadiness,
   ProcurementEvaluationMeeting,
+  ProcurementEvaluationScoreSheet,
 } from '@/types/procurement-evaluation-committee';
 
 const readiness: ProcurementEvaluationCommitteeReadiness = {
@@ -77,6 +78,16 @@ const commonProps = {
 };
 
 describe('evaluation committee action evidence fields', () => {
+  it('requires an explicit recall workflow selection instead of choosing the first unrelated workflow', async () => {
+    render(<EvaluationCommitteeActionDialogs {...commonProps}
+      action={{ type: 'recall', scoreSheet: { id: 'sheet-1', phase: 'Combined', attempt: 1, scoreSubjectType: 'TenderEvaluation' } as ProcurementEvaluationScoreSheet }}
+      options={{ committees: [], users: [], workflows: [{ id: 'unrelated-1', name: 'Accounts Payable Invoice Approval', version: 1 }] }}
+    />);
+    expect(screen.getByRole('combobox')).toHaveTextContent('Select workflow');
+    expect(screen.getByRole('button', { name: 'Submit recall request' })).toBeDisabled();
+    expect(screen.queryByText('Accounts Payable Invoice Approval · v1')).not.toBeInTheDocument();
+  });
+
   it('allows activation without a manually entered evidence reference', () => {
     render(
       <EvaluationCommitteeActionDialogs
