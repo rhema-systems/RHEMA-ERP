@@ -376,6 +376,9 @@ export default function InventoryRequisitionsPage() {
                             {(status === 3 || status === 4 || status === 5) && (
                               <Button variant="ghost" size="sm" className="text-purple-600" onClick={() => handleIssue(req.id)} title="Issue Items"><Package className="h-4 w-4" /></Button>
                             )}
+                            {(status === 6 || status === 7) && (
+                              <Button variant="ghost" size="sm" onClick={() => handleIssue(req.id)} title="Issue vouchers"><ClipboardList className="h-4 w-4" /></Button>
+                            )}
                             {canReturn && (
                               <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => handleReturn(req.id)} title="Return Items"><CheckCircle className="h-4 w-4" /></Button>
                             )}
