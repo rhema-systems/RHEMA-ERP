@@ -457,6 +457,18 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
         purchaseOrder.SourceIntegrityHash.Should().Be(originalHash);
         purchaseOrder.SourceSnapshotJson.Should().Be(originalSnapshot);
 
+        // The receipt writer persists the spaced legacy status; source integrity
+        // must remain valid through receiving without rewriting approved history.
+        foreach (var receivingStatus in new[] { "Sent", "Acknowledged", "PartiallyReceived", "Partially Received", "Received" })
+        {
+            purchaseOrder.Status = receivingStatus;
+            await context.SaveChangesAsync();
+            await service.EvaluateCurrentAsync(purchaseOrder);
+            purchaseOrder.SourceIntegrityHash.Should().Be(originalHash);
+            purchaseOrder.SourceSnapshotJson.Should().Be(originalSnapshot);
+        }
+        purchaseOrder.Status = "Approved";
+
         contract.ContractValue = 4_800;
         await context.SaveChangesAsync();
         await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
@@ -472,9 +484,12 @@ public sealed class ProcurementPurchaseOrderSourceRfqTests
         await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
             .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
         contract.Status = "Active";
-        purchaseOrder.Status = "Draft";
-        await context.SaveChangesAsync();
-        await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
-            .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
+        foreach (var blockedStatus in new[] { "Draft", "Cancelled", "Rejected" })
+        {
+            purchaseOrder.Status = blockedStatus;
+            await context.SaveChangesAsync();
+            await withoutActivation.Should().ThrowAsync<ProcurementPurchaseOrderSourceValidationException>()
+                .Where(error => error.Code == "PO_SOURCE_LINEAGE_CHANGED");
+        }
     }
 }

@@ -486,7 +486,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         if (purchaseOrder.ProcurementCategory != ProcurementCategoryClass.Goods ||
             !purchaseOrder.ApprovedAt.HasValue ||
             !purchaseOrder.ApprovedById.HasValue || purchaseOrder.ApprovedById == Guid.Empty ||
-            purchaseOrder.Status is not ("Approved" or "Sent" or "Acknowledged" or "PartiallyReceived" or "Received"))
+            purchaseOrder.Status is not ("Approved" or "Sent" or "Acknowledged" or "PartiallyReceived" or "Partially Received" or "Received"))
             return false;
 
         var contracts = await _unitOfWork.Repository<Contract>()
