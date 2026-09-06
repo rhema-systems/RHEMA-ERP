@@ -251,6 +251,9 @@ public interface IInventoryValuationService
     /// </summary>
     void ResetProcessingAttempt();
 
+    /// <summary>Restores (or reverses) the captured original issue value of a governed Store Return Voucher line.</summary>
+    Task<decimal> ProcessReturnAsync(Guid returnVoucherLineId, bool reverse = false);
+
     Task<InventoryValuationSummaryDto> GetItemValuationAsync(Guid inventoryItemId);
     Task<IEnumerable<InventoryCostLayerDto>> GetCostLayersAsync(Guid inventoryItemId, Guid? warehouseId = null);
     Task<decimal> GetInventoryValueAsync(Guid? warehouseId = null, Guid? categoryId = null);
