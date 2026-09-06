@@ -208,6 +208,43 @@ export interface DecideAccountingBookTransition {
     rowVersion: string;
 }
 
+export type AccountingBookPeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
+export interface AccountingBookPeriod {
+    id: string; accountingBookId: string; accountingBookCode: string; fiscalPeriodId: string;
+    fiscalPeriodCode: string; startDate: string; endDate: string; status: AccountingBookPeriodStatus;
+    pendingStatus?: AccountingBookPeriodStatus | null; pendingReason?: string | null;
+    requestedByUserId?: string | null; requestedAtUtc?: string | null; rowVersion: string;
+}
+export type AccountingBookInitializationMode = 'IndependentOpeningBalances' | 'BaseBookCopyAtCutoff' | 'BaseBalancesWithOpeningAdjustments';
+export type AccountingBookInitializationStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected';
+export interface AccountingBookInitializationLine {
+    accountId: string; currencyCode: string; openingDebit: number; openingCredit: number;
+    baseBookSignedBalance: number; openingAdjustment: number;
+}
+export interface AccountingBookInitialization {
+    id: string; accountingBookId: string; version: number; supersedesInitializationId?: string | null;
+    accountingBookCode: string; mode: AccountingBookInitializationMode; status: AccountingBookInitializationStatus;
+    cutoffDate: string; sourceAccountingBookId?: string | null; sourceAccountingBookCode?: string | null;
+    idempotencyKey: string; reason: string; totalDebits: number; totalCredits: number;
+    requiredAccountCount: number; coveredAccountCount: number; isBalanced: boolean; isCoverageComplete: boolean;
+    evidenceFingerprint: string; reconciliationFingerprint: string; preparedByUserId: string; preparedAtUtc: string;
+    approvedByUserId?: string | null; approvedAtUtc?: string | null; rowVersion: string;
+    lines: AccountingBookInitializationLine[];
+}
+export interface AccountingBookInitializationPreparationLine {
+    accountId: string; accountNumber: string; accountName: string; accountClassificationId: string;
+    accountClassificationCode: string; authoritativeSignedBalance: number;
+}
+export interface AccountingBookInitializationPreparation {
+    accountingBookId: string; accountingBookCode: string; mode: AccountingBookInitializationMode;
+    cutoffDate: string; sourceAccountingBookId?: string | null; functionalCurrencyCode: string;
+    accounts: AccountingBookInitializationPreparationLine[];
+}
+export interface AccountingBookActivationReadiness {
+    isReady: boolean; blockers: string[]; initializationFingerprint?: string | null;
+    requiredPeriodCount: number; readyPeriodCount: number;
+}
+
 export interface AccountAccountingBook {
     id: string;
     accountId: string;

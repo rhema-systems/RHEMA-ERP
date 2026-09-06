@@ -171,6 +171,48 @@ class FinanceDataService {
         return apiService.post<AccountingBook>(`/finance/accounting-books/${id}/transitions/reject`, dto);
     }
 
+    async getAccountingBookPeriods(accountingBookId: string): Promise<import('@/types/finance').AccountingBookPeriod[]> {
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/periods`);
+    }
+
+    async createAccountingBookPeriod(accountingBookId: string, fiscalPeriodId: string): Promise<import('@/types/finance').AccountingBookPeriod> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/periods`, { fiscalPeriodId, initialStatus: 'Future' });
+    }
+
+    async requestAccountingBookPeriodTransition(accountingBookId: string, periodId: string, targetStatus: string, reason: string, rowVersion: string): Promise<import('@/types/finance').AccountingBookPeriod> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/periods/${periodId}/transitions`, { targetStatus, reason, rowVersion });
+    }
+
+    async decideAccountingBookPeriodTransition(accountingBookId: string, periodId: string, action: 'approve' | 'reject', reason: string, rowVersion: string): Promise<import('@/types/finance').AccountingBookPeriod> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/periods/${periodId}/transitions/${action}`, { reason, rowVersion });
+    }
+
+    async getAccountingBookInitialization(accountingBookId: string): Promise<import('@/types/finance').AccountingBookInitialization | null> {
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/initialization`);
+    }
+
+    async getAccountingBookActivationReadiness(accountingBookId: string): Promise<import('@/types/finance').AccountingBookActivationReadiness> {
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/initialization/readiness`);
+    }
+
+    async prepareAccountingBookInitialization(accountingBookId: string, mode: string, cutoffDate: string, sourceAccountingBookId?: string | null): Promise<import('@/types/finance').AccountingBookInitializationPreparation> {
+        const query = new URLSearchParams({ mode, cutoffDate });
+        if (sourceAccountingBookId) query.set('sourceAccountingBookId', sourceAccountingBookId);
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/initialization/preparation?${query}`);
+    }
+
+    async configureAccountingBookInitialization(accountingBookId: string, request: Record<string, unknown>): Promise<import('@/types/finance').AccountingBookInitialization> {
+        return apiService.put(`/finance/accounting-books/${accountingBookId}/initialization`, request);
+    }
+
+    async submitAccountingBookInitialization(accountingBookId: string): Promise<import('@/types/finance').AccountingBookInitialization> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/initialization/submit`, {});
+    }
+
+    async decideAccountingBookInitialization(accountingBookId: string, action: 'approve' | 'reject', reason: string, rowVersion: string): Promise<import('@/types/finance').AccountingBookInitialization> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/initialization/${action}`, { reason, rowVersion });
+    }
+
     async getAccountClassifications(accountingBookId?: string, includeInactive = false): Promise<AccountClassification[]> {
         const queryParams = new URLSearchParams();
         if (accountingBookId) queryParams.append('accountingBookId', accountingBookId);
