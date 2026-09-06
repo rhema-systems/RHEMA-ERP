@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C3 — governed accounting-book structure and lifecycle |
-| Status | `REVIEW_REQUIRED` |
+| Status | `CHANGES_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `81ac3dfea300689adc260326d7a97af68ddfc0d1` |
 | Branch | `codex/finance-accounting-book-lifecycle-c3` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C3 candidate `36fd5baf` is under independent Sol High re-review |
+| Review status | C3 production logic is sound; genuine SQL concurrency winner-order evidence remains required |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -484,3 +484,13 @@ exact-base range passes `git diff --check`. The correction reuses full lifecycle
 authority for Delta Create/Update and extends guarded relational race coverage. Final GPT-5.6 Sol High
 re-review is active over all C3 findings and regression boundaries. No integration, C4 dispatch, migration
 application or configured-database access is authorized before approval.
+
+The conclusive C3 review confirmed the production lineage correction at `36fd5baf` is sound, including
+Create/Update full ancestry validation, pending-state rules, transition revalidation, currency parity, UI and
+C1/C2 isolation. It nevertheless returned `CHANGES_REQUIRED` because the guarded SQL tests do not exercise
+structural `UpdateAsync`, retirement/advancement combinations, or genuine two-open-transaction winner orders;
+several current cases are predetermined by precommitted pending state or pre-existing descendants. The
+coordinator dispatched a test/evidence-only GPT-5.6 Sol Medium correction requiring synchronized child-first
+and invalidation-first races for create/update/advance versus suspension/retirement approval. The reviewer
+otherwise recorded 244 backend and 16 frontend passes, 11 guarded SQL skips, EF no-pending-model and clean
+diff/status. Integration and C4 remain blocked; no database was accessed.
