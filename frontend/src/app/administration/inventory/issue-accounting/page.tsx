@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -55,9 +56,12 @@ export default function InventoryIssueAccountingPage() {
   const [editing, setEditing] = useState<InventoryIssueAccountingRuleDto | null>(null);
   const [form, setForm] = useState<InventoryIssueAccountingRuleRequest>(blankForm());
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState<InventoryIssueAccountingRuleDto | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [ruleRows, optionRows] = await Promise.all([
         inventoryRequisitionService.getIssueAccountingRules(),
@@ -66,6 +70,9 @@ export default function InventoryIssueAccountingPage() {
       setRules(ruleRows);
       setOptions(optionRows);
     } catch (error) {
+      setRules([]);
+      setOptions(null);
+      setLoadError(errorMessage(error));
       toast.error(errorMessage(error));
     } finally {
       setLoading(false);
@@ -138,13 +145,13 @@ export default function InventoryIssueAccountingPage() {
   };
 
   const remove = async (rule: InventoryIssueAccountingRuleDto) => {
-    if (!window.confirm(`Delete the ${rule.inventoryCategoryCode} / ${rule.movementReasonName} rule?`)) return;
     try {
       await inventoryRequisitionService.deleteIssueAccountingRule(rule.id, rule.rowVersion);
       toast.success('Issue-accounting rule deleted.');
       await load();
     } catch (error) {
       toast.error(errorMessage(error));
+      return false;
     }
   };
 
@@ -157,10 +164,11 @@ export default function InventoryIssueAccountingPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
-          <Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />Add rule</Button>
+          <Button onClick={openCreate} disabled={loading || !options}><Plus className="mr-2 h-4 w-4" />Add rule</Button>
         </div>
       </div>
 
+      {loadError && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{loadError}</div>}
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">Effective mappings</CardTitle></CardHeader>
         <CardContent className="overflow-x-auto">
@@ -175,16 +183,20 @@ export default function InventoryIssueAccountingPage() {
                   <TableCell>{rule.treatment === 1 ? rule.expenseAccount : rule.fixedAssetCategory}</TableCell>
                   <TableCell className="whitespace-nowrap">{new Date(rule.effectiveFromUtc).toLocaleDateString()} — {rule.effectiveToUtc ? new Date(rule.effectiveToUtc).toLocaleDateString() : 'Open'}</TableCell>
                   <TableCell><Badge variant={rule.isActive ? 'default' : 'secondary'}>{rule.isActive ? 'Active' : 'Inactive'}</Badge></TableCell>
-                  <TableCell><div className="flex justify-end gap-1"><Button size="icon" variant="ghost" aria-label="Edit rule" onClick={() => openEdit(rule)}><Pencil className="h-4 w-4" /></Button><Button size="icon" variant="ghost" aria-label="Delete rule" onClick={() => void remove(rule)}><Trash2 className="h-4 w-4 text-destructive" /></Button></div></TableCell>
+                  <TableCell><div className="flex justify-end gap-1"><Button size="icon" variant="ghost" aria-label="Edit rule" onClick={() => openEdit(rule)}><Pencil className="h-4 w-4" /></Button><Button size="icon" variant="ghost" aria-label="Delete rule" onClick={() => setDeleting(rule)}><Trash2 className="h-4 w-4 text-destructive" /></Button></div></TableCell>
                 </TableRow>
               ))}
-              {!loading && rules.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No issue-accounting rules are configured.</TableCell></TableRow>}
+              {!loading && !loadError && rules.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No issue-accounting rules are configured.</TableCell></TableRow>}
               {loading && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Loading rules…</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
 
+      <ConfirmationDialog open={Boolean(deleting)} onOpenChange={open => { if (!open) setDeleting(null); }}
+        title="Delete issue-accounting rule?" variant="destructive" confirmText="Delete rule"
+        description={deleting ? `Delete the ${deleting.inventoryCategoryCode} / ${deleting.movementReasonName} rule? Future issues may be blocked without a replacement mapping.` : ''}
+        onConfirm={() => deleting ? remove(deleting) : false} />
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader><DialogTitle>{editing ? 'Edit' : 'Add'} issue-accounting rule</DialogTitle></DialogHeader>
