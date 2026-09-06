@@ -156,11 +156,56 @@ export interface AccountingBook {
     name: string;
     description?: string;
     purpose: string;
+    bookType?: AccountingBookType;
+    lifecycleStatus?: AccountingBookLifecycleStatus;
+    functionalCurrencyCode?: string | null;
+    effectiveFromUtc?: string | null;
+    effectiveToUtc?: string | null;
+    baseAccountingBookId?: string | null;
+    baseAccountingBookCode?: string | null;
+    initializationStartedAtUtc?: string | null;
     isActive: boolean;
     isDefault: boolean;
     allowsPosting: boolean;
     isSystemDefined: boolean;
     sortOrder: number;
+    pendingLifecycleStatus?: AccountingBookLifecycleStatus | null;
+    pendingTransitionReason?: string | null;
+    transitionRequestedByUserId?: string | null;
+    transitionRequestedAtUtc?: string | null;
+    transitionWorkflowInstanceId?: string | null;
+    hasAccountingUse?: boolean;
+    activationReady?: boolean;
+    readinessMessage?: string | null;
+    rowVersion?: string;
+}
+
+export type AccountingBookType = 'PrimaryFull' | 'ParallelFull' | 'Delta';
+export type AccountingBookLifecycleStatus = 'Draft' | 'Configuring' | 'Initializing' | 'Active' | 'Suspended' | 'Retired';
+
+export interface SaveAccountingBook {
+    code: string;
+    name: string;
+    description?: string;
+    purpose: string;
+    bookType: AccountingBookType;
+    functionalCurrencyCode?: string | null;
+    effectiveFromUtc?: string | null;
+    effectiveToUtc?: string | null;
+    baseAccountingBookId?: string | null;
+    sortOrder: number;
+    rowVersion?: string;
+}
+
+export interface RequestAccountingBookTransition {
+    targetStatus: AccountingBookLifecycleStatus;
+    reason: string;
+    rowVersion: string;
+}
+
+export interface DecideAccountingBookTransition {
+    reason: string;
+    rowVersion: string;
 }
 
 export interface AccountAccountingBook {

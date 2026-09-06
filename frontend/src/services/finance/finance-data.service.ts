@@ -7,6 +7,9 @@ import type {
     Account,
     AccountTransactionInquiryPage,
     AccountingBook,
+    DecideAccountingBookTransition,
+    RequestAccountingBookTransition,
+    SaveAccountingBook,
     AccountClassification,
     AccountClassificationWhereUsed,
     SaveAccountClassification,
@@ -142,6 +145,30 @@ class FinanceDataService {
 
         const endpoint = `/finance/accounting-books${queryParams.toString() ? `?${queryParams}` : ''}`;
         return apiService.get<AccountingBook[]>(endpoint);
+    }
+
+    async getAccountingBook(id: string): Promise<AccountingBook> {
+        return apiService.get<AccountingBook>(`/finance/accounting-books/${id}`);
+    }
+
+    async createAccountingBook(dto: SaveAccountingBook): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>('/finance/accounting-books', dto);
+    }
+
+    async updateAccountingBook(id: string, dto: SaveAccountingBook): Promise<AccountingBook> {
+        return apiService.put<AccountingBook>(`/finance/accounting-books/${id}`, dto);
+    }
+
+    async requestAccountingBookTransition(id: string, dto: RequestAccountingBookTransition): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>(`/finance/accounting-books/${id}/transitions`, dto);
+    }
+
+    async approveAccountingBookTransition(id: string, dto: DecideAccountingBookTransition): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>(`/finance/accounting-books/${id}/transitions/approve`, dto);
+    }
+
+    async rejectAccountingBookTransition(id: string, dto: DecideAccountingBookTransition): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>(`/finance/accounting-books/${id}/transitions/reject`, dto);
     }
 
     async getAccountClassifications(accountingBookId?: string, includeInactive = false): Promise<AccountClassification[]> {
