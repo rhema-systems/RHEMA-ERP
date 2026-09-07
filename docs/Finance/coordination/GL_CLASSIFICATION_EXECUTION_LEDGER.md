@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C6 — neutral AccountingEvent and atomic per-book orchestration |
-| Status | `IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f41e8e8fe81d5caceab635d6c143e7200b84a0ed` |
 | Branch | `codex/finance-accounting-event-c6` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C6 implementation active; independent GPT-5.6 Sol High accounting/schema/concurrency review required before integration |
+| Review status | Clean C6 candidate `79fbd960d661327aab4f8257ab145338f8ab7345`; independent GPT-5.6 Sol High accounting/schema/concurrency review active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -729,6 +729,16 @@ SQL concurrency/rollback tests are required. Legacy/direct callers remain protec
 `PARALLEL_BOOK_POSTING_DISABLED`, and the new orchestrator is disabled by default pending later enablement
 review. Generic balances may not commingle representations; Delta books, reporting-currency books, owner-
 module changes, producer enumeration and automatic cutover remain prohibited.
+
+The C6 implementer completed a clean two-commit candidate at
+`79fbd960d661327aab4f8257ab145338f8ab7345` from exact base
+`f41e8e8fe81d5caceab635d6c143e7200b84a0ed`. Its ordered ancestry is `4dd17765` (atomic AccountingEvent
+orchestration) and `79fbd960` (migration and atomicity gates). The isolated worktree is clean and the full
+range passes `git diff --check`. A read-only structured handoff has been requested because the task turn did
+not expose final text. Independent GPT-5.6 Sol High review is active across event/version/reversal identity,
+frozen C5 selection, exact event/book idempotency, outer-transaction atomicity, post-rollback failure evidence,
+balances, permissions, migration, guarded SQL concurrency and C1-C5 regression boundaries. No C6 commit is
+approved for integration, no migration was applied and configured `RHEMAERP` remains untouched.
 
 Stage C5 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `68490c9c`. Three P1
 gates remain: open-ended approved versions cannot be atomically superseded without retroactively removing
