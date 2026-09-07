@@ -27,15 +27,15 @@ ul,ol{padding-left:24px}li{margin:7px 0}footer{color:var(--muted);font-size:12px
 </head>
 <body>
 <header><strong>TDC ERP · Customer walkthrough</strong><span>7 September 2026 · DEFAULT tenant · Local UAT simulation · Browser print: Ctrl+P</span></header>
-<nav aria-label="Walkthrough sections"><a href="#part-a-30-minute-completed-record-demonstration">Start the 30-minute demo</a><a href="#account-card-keep-this-beside-you">Accounts</a><a href="#part-b-fresh-run-transaction-script">Fresh-run steps</a><a href="#part-c-alternative-procurement-routes">Alternative methods</a><a href="#part-d-if-something-unexpected-happens">Troubleshooting</a></nav>
+<nav aria-label="Walkthrough sections"><a href="#part-a-30-minute-completed-record-demonstration">Start the 30-minute demo</a><a href="#part-s-supplier-onboarding-before-the-budget-walkthrough">Supplier onboarding</a><a href="#account-card-keep-this-beside-you">Accounts</a><a href="#part-b-fresh-run-transaction-script">Fresh-run steps</a><a href="#part-c-alternative-procurement-routes">Alternative methods</a><a href="#part-d-if-something-unexpected-happens">Troubleshooting</a></nav>
 <main>
 <h1 id="tdc-customer-demonstration-uat-walkthrough">TDC customer demonstration &amp; UAT walkthrough</h1>
-<p><strong>Budget to procurement, receipt, invoice matching and Stores</strong><br />
-Prepared: <strong>7 September 2026, 09:04 UTC account check</strong> · Environment: <strong>localhost:3000 / DEFAULT</strong><br />
+<p><strong>Supplier onboarding, budget, procurement, receipt, invoice matching and Stores</strong><br>
+Prepared: <strong>7 September 2026, 09:04 UTC account check</strong> · Environment: <strong>localhost:3000 / DEFAULT</strong><br>
 All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULATION ONLY</strong>.</p>
 <h2 id="start-here-which-script-should-i-use-today">Start here — which script should I use today?</h2>
 <p><strong>For the customer session in 30 minutes, use Part A: the completed-record demonstration.</strong> It follows the actual record chain without repeating approvals, publishing another tender or posting stock again. Part B is the detailed fresh-transaction script for a prepared session, not a promise that an entire new procurement can be completed in 30 minutes.</p>
-<p>The main Goods/NCT example reached an active Supply contract, accepted receipt, issued GRN/MRN, an independently approved invoice, Stores issue/acknowledgement/return and a posted zero-variance count. The Petty example reached accepted receipt and issued GRN/MRN. These checkpoints were tested over several sessions, with fixes between stages. <strong>An uninterrupted rehearsal of this complete script has not been performed. Full UAT is not complete.</strong></p>
+<p>The Goods supplier-onboarding example reached approved supplier-portal access, with two contacts, two bank accounts and two verified test documents visible on both sides. The main Goods/NCT example then reached an active Supply contract, accepted receipt, issued GRN/MRN, an independently approved invoice, Stores issue/acknowledgement/return and a posted zero-variance count. The Petty example reached accepted receipt and issued GRN/MRN. These checkpoints were tested over several sessions, with fixes between stages. <strong>An uninterrupted rehearsal of this complete script has not been performed. Full UAT is not complete.</strong></p>
 <h3 id="important-before-the-customer-arrives">Important before the customer arrives</h3>
 <ul>
 <li><strong>Access:</strong> temporary Stores/Audit roles were removed after testing. New receipt, inspection, Stores issue/return and count actions need authorized role/scope setup first. Contract approval also used a temporary independent reviewer role that was removed. See the account matrix. No access changes were made while preparing this guide.</li>
@@ -62,8 +62,8 @@ All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULAT
 <tr>
 <td><code>procurementofficer</code></td>
 <td>Procurement Officer / <code>TDC_PROCUREMENT_OFFICER</code></td>
-<td>Budget, market analysis, plan, PR, tender, publication, committee organization, award notification, PO maker and contract activation submitter</td>
-<td>Role present; current browser account at preparation</td>
+<td>Supplier application-fee verification/token-delivery controls; budget, market analysis, plan, PR, tender, publication, committee organization, award notification, PO maker and contract activation submitter</td>
+<td>Role present; current browser account at preparation. Not the supplier document-review/registration approver.</td>
 </tr>
 <tr>
 <td><code>financereviewer</code></td>
@@ -80,7 +80,7 @@ All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULAT
 <tr>
 <td><code>procurementapprover</code></td>
 <td>Head of Procurement / <code>TDC_HEAD_OF_PROCUREMENT</code></td>
-<td>Second plan review, tender/PO approval; configured document/bond review; tested contract draft creator</td>
+<td>Supplier document verification and registration approval; second plan review, tender/PO approval; configured document/bond review; tested contract draft creator</td>
 <td>Role present; do not approve its own contract or use as final Harbourline award approver: supplier-onboarding segregation blocked the latter in UAT</td>
 </tr>
 <tr>
@@ -130,6 +130,12 @@ All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULAT
 <td>Harbourline Goods Supply Ltd supplier</td>
 <td>Supplier portal, bid and performance-bond submission</td>
 <td>Previously used supplier login; recheck privately before a supplier demonstration</td>
+</tr>
+<tr>
+<td>New applicant's own accessible email</td>
+<td>Applicant first; supplier user only after approval</td>
+<td>Fresh onboarding in Part S: email OTP, application token, then approved email/password login</td>
+<td>Supply a new email you control; do not invent an inbox or reuse Harbourline's existing email for a second registration</td>
 </tr>
 <tr>
 <td><code>admin</code></td>
@@ -191,55 +197,61 @@ All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULAT
 </thead>
 <tbody>
 <tr>
-<td>0–2</td>
-<td><code>procurementofficer</code></td>
+<td>0–3</td>
+<td><code>procurementapprover</code></td>
+<td><a href="http://localhost:3000/administration/procurement/registrations/a5e48ae9-11ad-41cc-91d4-6e7b06384f81">Harbourline approved registration</a></td>
+<td>Show APP260EFAA91E, Goods, Approved, Contacts (2), Bank Accounts (2) and both Verified test documents. “The applicant verified their email, completed the fee/token stage and submitted these details; an independent staff reviewer approved them. Approval created the supplier account.” Do not approve or charge again.</td>
+</tr>
+<tr>
+<td>3–5</td>
+<td>Sign out; sign in <code>procurementofficer</code></td>
 <td><a href="http://localhost:3000/procurement/planning/budgets/81efe55a-9741-49ad-8ece-6e2685c18391">Budget PB-2026-0001</a></td>
 <td>“The approved Operations Goods budget is GHS 100,000. Finance reviewed it independently.” Current campaign remaining amount is GHS 47,250 after the main purchase and Petty receipt, not the earlier GHS 48,000 snapshot.</td>
 </tr>
 <tr>
-<td>2–5</td>
+<td>5–7</td>
 <td>Same</td>
 <td><a href="http://localhost:3000/procurement/planning/market-analysis/2e485512-27d3-4321-804b-ba9203da5e42">Market analysis</a>, then <a href="http://localhost:3000/procurement/planning/plans/b3889e4f-5101-42ba-ad73-cb956cd768df">PP-2026-0001</a></td>
 <td>“Market analysis informed the Barcode estimate. The GHS 55,000 plan passed Department, Procurement, Finance and MD review, then publication.” Show two lines and workflow history.</td>
 </tr>
 <tr>
-<td>5–7</td>
+<td>7–9</td>
 <td>Same</td>
 <td><a href="http://localhost:3000/procurement/planning/app-submissions">APP submissions</a>, then <a href="http://localhost:3000/procurement/purchase-requisitions/b9a17bc2-eb37-44ba-8601-dbf7c64250fc">PR-2026-0001</a></td>
 <td>“The approved plan has a controlled manual exchange record. This is a simulated acknowledgement, not an actual GHANEPS transmission. The PR retains its source lines and approval.”</td>
 </tr>
 <tr>
-<td>7–12</td>
+<td>9–13</td>
 <td>Same</td>
 <td><a href="http://localhost:3000/procurement/tenders/55d2a153-a1ee-4217-9a8d-6014cd27a520">Tender TND-2026-0001</a>, then <a href="http://localhost:3000/procurement/bids/5367ed43-04bf-4b1e-a6c3-4d6b174b6b90">bid</a></td>
 <td>“Approved PR → sourcing decision → approved tender → controlled publication → supplier bid. After closing, committee attendance/quorum and opening permitted evaluation.” Show one GHS 52,000 bid and evaluation history. Proposal files are not tax-clearance evidence.</td>
 </tr>
 <tr>
-<td>12–16</td>
+<td>13–17</td>
 <td>Same</td>
 <td><a href="http://localhost:3000/procurement/awards/7b579964-b892-46a8-a713-475087cae333">Award</a>, <a href="http://localhost:3000/procurement/purchase-orders/a0eae5c8-1915-4c68-9e94-001354ae5a34">PO-2026-0001</a>, <a href="http://localhost:3000/procurement/contracts/8a6347b8-b82b-4393-8b1c-db9e01c86a14">Supply contract</a></td>
 <td>“The award, PO and active Supply contract represent the same GHS 52,000 purchase, not two purchases. Commitment must not double. The performance-bond lifecycle was simulated.” Contract activation preceded receiving.</td>
 </tr>
 <tr>
-<td>16–19</td>
+<td>17–20</td>
 <td>Same if read access permits; otherwise pre-authorized Stores viewer</td>
 <td>On the main PO, open Receipts / GRN-MRN areas</td>
 <td>Show REC260001 Accepted, inspection Closed, GRN-2026-0002 and MRN-2026-0002 Issued/Reconciled. “Only accepted goods move into stock and become eligible for invoicing.” Avoid an unverified live PDF promise.</td>
 </tr>
 <tr>
-<td>19–23</td>
+<td>20–24</td>
 <td>Sign out; sign in <code>ap.officer</code></td>
 <td><a href="http://localhost:3000/finance/ap/invoices/64e2e5a3-efe7-468c-a57f-cde051c67b76">Invoice VI-2026-00002</a></td>
 <td>Show GHS 52,000, matching Passed, Approved and Paid Amount zero. Explain <code>accounts.officer</code> → <code>finance.manager</code> → <code>financial.controller</code>; show history instead of repeating approvals. “The invoice was entered against accepted receipt quantities; it was not automatically generated as a supplier invoice PDF.”</td>
 </tr>
 <tr>
-<td>23–27</td>
+<td>24–28</td>
 <td>Prepared authorized Stores viewer only</td>
 <td><a href="http://localhost:3000/inventory/warehouse-items">Warehouse Items</a>, <a href="http://localhost:3000/inventory/requisitions">Requisitions</a>, <a href="http://localhost:3000/inventory/physical-counts">Physical Counts</a></td>
 <td>Show 2 PVC issued, recipient acknowledgement, 1 returned, and the historical zero-variance count. Current PVC is 19; Barcode is now 21 after Petty. If view access is unavailable, use the recorded results below and explicitly say this part is evidence review, not a live click demonstration.</td>
 </tr>
 <tr>
-<td>27–30</td>
+<td>28–30</td>
 <td><code>procurementofficer</code></td>
 <td><a href="http://localhost:3000/procurement/purchase-orders/f00862f4-712a-481b-8ee3-044489ff3934">Petty PO-2026-0002</a></td>
 <td>Show one Barcode at GHS 750, Received, REC260002 and issued GRN/MRN. Explain the shorter approved-quotation route. Close with the outstanding RFQ/QBS/QCBS/Emergency tests, not a claim that they passed.</td>
@@ -295,6 +307,61 @@ All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULAT
 </tbody>
 </table>
 <p>These stock/budget values are the last reconciled campaign position around <strong>08:30 UTC on 7 September</strong>, not live telemetry. Recheck before presenting if another team member has posted transactions. The historical count shows Barcode 20 because it preceded the Petty receipt; that is not a contradiction.</p>
+<h2 id="part-s-supplier-onboarding-before-the-budget-walkthrough">Part S — supplier onboarding, before the budget walkthrough</h2>
+<p><strong>Account sequence:</strong> new applicant/email owner → <code>procurementofficer</code> (fee verification/token delivery) → applicant (application and documents) → <code>procurementapprover</code> (document review and approval) → newly approved supplier/email login.</p>
+<p>For today's three-minute review, use the approved <strong>Harbourline Goods Supply Ltd / APP260EFAA91E / SUP260001</strong> record linked in Part A. The steps below are for a <strong>new</strong> application. A fresh run depends on an accessible inbox, OTP/token delivery and the approved local fee-posting arrangement; it is not a guaranteed three-minute registration.</p>
+<h3 id="s0.prepare-the-new-supplier-and-evidence">S0. Prepare the new supplier and evidence</h3>
+<ul>
+<li>New example name: <strong>Seabright Demo Goods Ltd — LOCAL UAT</strong>; registration category <strong>Goods</strong>. This is a proposed fresh fixture, not an already registered company.</li>
+<li>Use a <strong>new email you control</strong> and a designated test contact number. Write the email on your private presenter sheet. Do not invent an inbox or use the existing Harbourline email for a duplicate application.</li>
+<li>Have two clearly labelled simulated contacts and two <strong>DO NOT PAY</strong> bank-detail fixtures ready. Use approved dummy account numbers, not real customer banking details. Choose one primary contact and one primary bank account; the historical example used GHS and USD bank-account currencies, while procurement remained GHS.</li>
+<li>Have a business-registration placeholder and tax-clearance placeholder ready, clearly marked <strong>LOCAL UAT ONLY — NOT A VALID CERTIFICATE</strong>. The earlier test reused <code>docs/erp-architecture-diagram.pdf</code> for both upload slots; that proved document handling, not genuine statutory compliance. Use current simulated issue/expiry dates where required.</li>
+<li>Confirm the configured application fee and payment methods. The tested Goods application used <strong>GHS 100</strong>, which is a local configuration value, not a universal TDC/PPA fee.</li>
+<li>Obtain the required authorization for any new <strong>simulated fee reconciliation/Finance posting</strong> before S3. No real transfer or bank settlement is part of this demonstration, and this script does not authorize Finance-code/configuration changes. If that setup is not ready, review the existing reconciled application instead.</li>
+</ul>
+<h3 id="s1.applicant-verifies-the-email-and-starts-the-application">S1. Applicant verifies the email and starts the application</h3>
+<p><strong>Actor:</strong> applicant; no staff account and no approved supplier password yet. Sign out of staff access and open <a href="http://localhost:3000/supplier-application">Supplier application</a>.</p>
+<p>Select the start-application tab, verification channel <strong>Email</strong>, enter the new email, company name and <strong>Goods</strong> category. Complete the displayed security challenge if enabled. Click <strong>Send verification code</strong> once. The email owner retrieves the newest OTP privately, enters it in the verification field and clicks <strong>Verify and continue</strong>.</p>
+<p><strong>Pass:</strong> a new application reference appears, initially Draft, with restricted payment-only access. Record its reference; do not expect a full approved supplier account yet. The OTP verifies contact ownership; it is <strong>not</strong> the later application token or supplier password.</p>
+<h3 id="s2.applicant-records-the-configured-application-fee">S2. Applicant records the configured application fee</h3>
+<p><strong>Actor:</strong> same applicant → <a href="http://localhost:3000/supplier-application/portal">Applicant portal</a> → <strong>Payment</strong>.</p>
+<p>Check the displayed fee/currency. For the authorized local simulation, choose <strong>Bank Transfer</strong> and a unique reference such as <code>LOCAL-UAT-SEABRIGHT-APP-FEE-001</code>; click <strong>Record configured payment</strong> once. This records the applicant's claim, not proof that money settled.</p>
+<p><strong>Pass:</strong> payment pending trusted verification; applicant returns to token login. Application editing, uploads and Submit for review remain unavailable while payment is unverified. Do not record another payment merely because the application token has not arrived.</p>
+<h3 id="s3.procurement-officer-verifies-the-fee-and-delivers-the-token">S3. Procurement Officer verifies the fee and delivers the token</h3>
+<p><strong>Actor:</strong> sign in as <strong><code>procurementofficer</code> / DEFAULT</strong> → Administration → Procurement → <a href="http://localhost:3000/administration/procurement/supplier-onboarding-tokens">Supplier onboarding tokens</a>.</p>
+<p>Find the <strong>new</strong> application/company and pending payment. Open it → <strong>Verify and post</strong>. Check amount, currency, payer and the authorized independent evidence; complete <strong>Provider transaction / cashier receipt reference</strong> and retain a clear simulated-UAT verification note. In real processing, use authentic provider/bank/cashier evidence, not only the applicant's reference. In the authorized simulation, explicitly label the evidence and posting as a test, with no real-settlement assertion. Confirm once through the ERP dialog.</p>
+<p><strong>Pass:</strong> payment Reconciled/Posted, one receipt and balanced fee journal, token Active and delivery recorded. Historical reference <strong>SUP-REC-2026-000008</strong> belongs to Harbourline and must not be reused for the new application. This onboarding fee is separate from the later purchase budget and supplier invoice.</p>
+<p>If delivery fails after posting, use <strong>Retry token delivery</strong> only when the application exposes that recovery action. It rotates/delivers a fresh token without reposting the fee. Do not verify/post the same payment again. A “Sent” audit entry alone is not proof of usable inbox content; confirm the applicant received the token. The earlier redacted-email-body defect required repair, so never accept “Sensitive email content omitted…” as a usable token email.</p>
+<h3 id="s4.applicant-opens-the-full-application-with-the-emailed-token">S4. Applicant opens the full application with the emailed token</h3>
+<p><strong>Actor:</strong> applicant. Sign out of staff access → <a href="http://localhost:3000/supplier-application?tab=login">Application token login</a>. Enter the <strong>latest application token</strong> privately in its named field and submit once.</p>
+<p><strong>Pass:</strong> the correct company/application opens at the restricted applicant portal, with <strong>Token Active</strong>, <strong>Payment Reconciled</strong> and no outstanding payment action. Application/Documents editing is now available. This is still the applicant portal, not the approved supplier's external portal.</p>
+<h3 id="s5.capture-company-details-multiple-contacts-and-multiple-banks">S5. Capture company details, multiple contacts and multiple banks</h3>
+<p><strong>Actor:</strong> applicant → <strong>Application</strong>.</p>
+<p>Complete Company name, Email, Phone, Tax number, Physical address, City, Country and <strong>Goods</strong> category using the prepared simulated fixture. Keep the verified email consistent. Under <strong>Contact Persons → Add contact</strong>, enter both test contacts and select exactly one primary. Under <strong>Bank Accounts → Add bank account</strong>, enter both DO NOT PAY test accounts, their currencies and exactly one primary. Use the fields shown; do not enter internal business-partner IDs.</p>
+<p>Click <strong>Save application</strong>, reopen Application and inspect both lists.</p>
+<p><strong>Pass:</strong> company details persist; <strong>2 contacts and 2 bank accounts</strong>, one primary in each list. Seeing only a legacy primary-contact/account summary is not sufficient to pass the multiple-record requirement.</p>
+<h3 id="s6.upload-the-required-documents-and-submit-for-review">S6. Upload the required documents and submit for review</h3>
+<p><strong>Actor:</strong> applicant → <strong>Documents</strong>. Select each configured requirement by name and upload its corresponding labelled placeholder using the file picker. Enter required simulated issue/expiry metadata. Check that the files are present under the correct requirement and their scanning state is usable; the historical configuration required business registration and tax clearance.</p>
+<p>Return to the application header → <strong>Submit for review</strong> once.</p>
+<p><strong>Pass:</strong> Submitted with retained contacts, banks and required attachments. Submit/upload/delete editing should no longer be offered for the submitted application. A filename alone does not verify the document or approve the supplier.</p>
+<h3 id="s7.independent-staff-review-verifies-documents-and-approves-onboarding">S7. Independent staff review verifies documents and approves onboarding</h3>
+<p><strong>Actor:</strong> sign in as <strong><code>procurementapprover</code> / DEFAULT</strong> → Administration → Procurement → <a href="http://localhost:3000/administration/procurement/registrations">Registrations</a> → open the <strong>new</strong> Submitted application.</p>
+<p>Inspect Company Details, <strong>Contacts (2)</strong> and <strong>Bank Accounts (2)</strong>, including primary flags and currencies. Review each scanned-clean file and use its <strong>Verify</strong> confirmation with explicit UAT-only notes. Then use the registration's approval action and proper confirmation, documenting that these are simulated records and <strong>not genuine certificates, banking instructions or real procurement authorization</strong>.</p>
+<p><strong>Pass:</strong> both configured documents Verified; application Approved; separate supplier master/account created; correct DEFAULT mapping and supplier-scoped access. The reviewer is different from the applicant and fee-verifying Procurement Officer. <strong>Do not use <code>procurementofficer</code> for document verification:</strong> its attempted review returned a permission denial in the tested run despite a visible button. Do not bypass it by granting broad admin access.</p>
+<p>The application token/session is retired when approval transitions the applicant to a supplier account. Do not continue using token login for normal supplier operations. Retain this onboarding reviewer's identity: later award segregation may prevent the same person approving an award to this supplier.</p>
+<h3 id="s8.supplier-activates-the-approved-account-and-checks-both-data-views">S8. Supplier activates the approved account and checks both data views</h3>
+<p><strong>Actor:</strong> newly approved supplier/email owner. Retrieve the <strong>Supplier portal account approved</strong> email privately. Use the approved email identifier and emailed temporary password at the normal <a href="http://localhost:3000/login">ERP sign-in page</a>, not the application-token form.</p>
+<p>Complete <strong>Change password</strong> if prompted, keeping both temporary and replacement credentials out of the script/screenshots. If returned to login, sign in again with the replacement password; select DEFAULT if required. Open <a href="http://localhost:3000/external-portal">External portal</a> and the approved application/business-partner entry from its dashboard.</p>
+<p><strong>Pass:</strong> the correct supplier sees Company Details / Goods, both contacts, both masked bank accounts and the two Verified onboarding documents. Staff already checked the same collections at S7. Confirm the account is supplier-scoped, not a platform administrator. For the historical supplier, the review shortcut is <a href="http://localhost:3000/external-portal/business-partner/a5e48ae9-11ad-41cc-91d4-6e7b06384f81">Harbourline supplier details</a>; access it only under its authorized supplier account. This route uses the registration reference, not the separately created supplier-master ID.</p>
+<p><strong>Handoff:</strong> record the supplier number and approved login identifier, sign out, then use <code>procurementofficer</code> for Part B's budget/plan/PR work. In a fresh procurement, choose this <strong>new supplier</strong> at participation/award stages rather than silently switching back to Harbourline. The existing-record presentation still uses Harbourline throughout its original linked chain. TDC supplier onboarding is not by itself proof of genuine GHANEPS registration or tender-specific eligibility.</p>
+<h3 id="supplier-specific-recovery-and-acceptance-notes">Supplier-specific recovery and acceptance notes</h3>
+<ul>
+<li><strong>Expired/invalid OTP:</strong> use the latest message and the same email; do not guess repeatedly. The tested page lacked a resend control after a challenge; recovery used a reload/re-entry/new request while preserving CAPTCHA/rate limits. If an application was already created, locate it before requesting another to avoid duplicates. This remains a recorded UX limitation.</li>
+<li><strong>Payment posted but token missing:</strong> inspect delivery state; recover delivery only, never pay/post again. A retried token can supersede the previous token.</li>
+<li><strong>Form Completion looks low:</strong> the historical submitted application displayed 10% despite saved data. Inspect the actual fields and required documents rather than approving solely from the percentage.</li>
+<li><strong>Password/portal acceptance:</strong> the earlier run verified a completed password-change state and subsequent supplier login, but did not directly observe the change screen or independently prove old-token/old-password rejection in that slice. This guide does not convert those gaps into passes.</li>
+<li><strong>Evidence:</strong> U01 core flow passed with two contacts, two banks, two Verified placeholders and approved portal access (EV-U01-001–019). Genuine statutory compliance, all negative/security cases and a fresh uninterrupted onboarding rehearsal remain unaccepted. No new emails, fees, approvals or account changes were triggered by adding this section.</li>
+</ul>
 <h2 id="part-b-fresh-run-transaction-script">Part B — fresh-run transaction script</h2>
 <h3 id="b0.preparation-gate-do-this-before-a-live-fresh-demonstration">B0. Preparation gate — do this before a live fresh demonstration</h3>
 <ul class="contains-task-list">
@@ -551,6 +618,12 @@ All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULAT
 </thead>
 <tbody>
 <tr>
+<td>Supplier OTP → fee/token → details/documents → approval → portal login</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
 <td>Budget → plan → APP</td>
 <td></td>
 <td></td>
@@ -616,7 +689,7 @@ All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULAT
 <h3 id="architecture-and-evidence-references">Architecture and evidence references</h3>
 <ul>
 <li><strong>TDC ERP Architecture and Design Document (002).docx:</strong> FR-PR-004 (PO creation), FR-PR-005 (commitments), FR-PR-006 (receipt/certificate before matching), FR-PR-007 (PO/receipt/invoice matching before payment), FR-PR-008 (contract register including retention), FR-PR-010 (exceptions, evidence, Audit and MD), FR-PR-011 (GHANEPS controlled exchange). These passages were re-read for this guide. Exact test accounts, local thresholds, MRN/signature detail and scoring fixtures are configuration/implementation choices, not verbatim architectural mandates.</li>
-<li><a href="PROCUREMENT_INVENTORY_STORES_FRESH_UAT_TRACKER.md">Fresh campaign evidence and open observations</a>, particularly U02–U17 and EV-U17-028 through EV-U17-030.</li>
+<li><a href="PROCUREMENT_INVENTORY_STORES_FRESH_UAT_TRACKER.md">Fresh campaign evidence and open observations</a>, particularly supplier onboarding EV-U01-001–019, U02–U17 and EV-U17-028 through EV-U17-030.</li>
 <li><a href="PROCUREMENT_END_TO_END_UAT.md">Procurement test catalogue</a> and <a href="INVENTORY_STORES_END_TO_END_UAT.md">Inventory/Stores test catalogue</a>.</li>
 <li><a href="TDC_INVENTORY_STORES_ARCHITECTURE_REQUIREMENTS.md">Inventory/Stores architecture traceability</a> and <a href="QCBS_EVALUATION_FORMULA.md">QCBS formula reference</a>.</li>
 </ul>
