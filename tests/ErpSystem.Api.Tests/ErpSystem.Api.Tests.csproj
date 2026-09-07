@@ -235,6 +235,10 @@
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationSqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookApplicabilityC5ConcurrencySqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6Tests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6MigrationTests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6MigrationSqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\BookBalanceConsumerAuthorityC2Tests.cs" />
     <Compile Include="Services\Finance\GeneralLedgerPrimaryBalanceCompatibilityC2Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />

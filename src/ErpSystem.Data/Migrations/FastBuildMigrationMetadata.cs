@@ -239,3 +239,4 @@ namespace ErpSystem.Data.Migrations;
 // 20260905213000_AddGovernedAccountingBookLifecycle follows the same executable-metadata rule.
 // 20260906140533_AddAccountingBookPeriodInitializationFoundation also carries executable metadata.
 // 20260906190846_AddAccountingBookApplicabilityFoundation also carries executable metadata.
+// 20260907071922_AddAccountingEventOrchestrationFoundation also carries executable metadata.
