@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 cycle 3 `CHANGES_REQUIRED`; rollback-tracking correction active on GPT-5.6 Sol Medium |
+| Review status | C7 cycle 4 independent GPT-5.6 Sol High review active at clean corrected HEAD `a634b6fc4cb9e6317ddc04f0eee97db07c19f424` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -781,6 +781,20 @@ Reviewer gates otherwise passed a zero-error build, 43 focused C6/C7 tests with 
 passes with 37 guarded skips, EF parity, exact 455-migration discovery, no-connect script generation and clean
 ancestry/status/diff/credential checks. No database was accessed. The bounded Sol Medium correction is active;
 integration and Inventory reissue remain gated.
+
+The implementer completed the bounded C7 rollback-tracking correction as clean commit
+`a634b6fc4cb9e6317ddc04f0eee97db07c19f424` on top of `08107384`. Finance now confirms the owner ambient
+transaction has ended and clears the shared EF ChangeTracker itself before any fresh durable-failure query or
+write. The strengthened guarded migrated-SQL test uses a tracked `InventoryDisposalCase` transition in the same
+scoped context and Serializable transaction, deliberately performs no caller-side clear, and asserts that owner,
+C5, posting, receipt and leaf-GL changes remain absent after rollback while only the Failed event, one Failed
+attempt and Finance audit persist; recovery and exact retry remain covered. The correction changes only
+`AccountingEventService.cs` and its guarded concurrency test. Implementer validation passed a zero-error build,
+43 focused C6/C7 tests with 13 guarded SQL skips, EF model parity, exact 455-migration discovery and the exact
+C6-to-C7 no-connect script. A widened run reported 269 passes, 37 guarded skips and the same three unrelated
+baseline failures. The worktree is clean, the ledger is unchanged and no database was accessed. Independent
+GPT-5.6 Sol High cycle-4 review is active over the rollback boundary and all prior closures; integration and
+Inventory reissue remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
