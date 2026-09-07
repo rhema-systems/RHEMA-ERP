@@ -90,6 +90,7 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   canRenderPurchaseRequisitionApprovalActions,
   canUsePurchaseRequisitionApprovalActions,
+  getRequisitionSourcingEntryAction,
 } from '@/lib/purchase-requisition-actions';
 
 const PRStatuses = [
@@ -144,15 +145,6 @@ const formatMoney = (amount: number, currency?: string) =>
     currency: currency || 'GHS',
     maximumFractionDigits: 2,
   }).format(amount);
-
-const tenderMethods = new Set<ProcurementMethodType>([
-  'NationalCompetitiveTendering',
-  'InternationalCompetitiveTendering',
-  'RestrictedTendering',
-  'SingleSource',
-  'QualityBasedSelection',
-  'QualityAndCostBasedSelection',
-]);
 
 const formatMethod = (method?: ProcurementMethodType) =>
   method
@@ -584,13 +576,15 @@ export default function PurchaseRequisitionDetailPage() {
     sourcingPresentation.canEnterSourcing &&
     sourcingCaseReadiness?.isMethodCompliant === true &&
     resolvedMethod === 'RequestForQuotation';
-  const canCreateTender =
-    approved &&
-    sourcingPresentation.canEnterSourcing &&
-    sourcingCaseReadiness?.isMethodCompliant === true &&
-    Boolean(resolvedMethod && tenderMethods.has(resolvedMethod)) &&
-    !existingTenderSource &&
-    !activeSourcingCaseIsStale;
+  const sourcingEntryAction = getRequisitionSourcingEntryAction({
+    approved,
+    canEnterSourcing: sourcingPresentation.canEnterSourcing,
+    isMethodCompliant: sourcingCaseReadiness?.isMethodCompliant,
+    method: resolvedMethod,
+    hasExistingSource: Boolean(existingTenderSource),
+    isSourceStale: activeSourcingCaseIsStale,
+  });
+  const canCreateTender = sourcingEntryAction.enabled;
 
   return (
     <div ref={documentRef} className="space-y-6">
@@ -654,11 +648,11 @@ export default function PurchaseRequisitionDetailPage() {
                 : undefined}
             >
               <FileText className="h-4 w-4 mr-2" />
-              Create Tender
+              {sourcingEntryAction.label}
             </Button>
           )}
 
-          {approved && (
+          {approved && (resolvedMethod !== 'PettyPurchase' || canConvertToPO) && (
             <Button
               onClick={handleConvertToPO}
               disabled={!canConvertToPO}
@@ -669,7 +663,7 @@ export default function PurchaseRequisitionDetailPage() {
             </Button>
           )}
 
-          {approved && (
+          {approved && resolvedMethod !== 'PettyPurchase' && (
             <Button
               variant="outline"
               onClick={handleCreateRfq}
