@@ -209,6 +209,7 @@ public class TenderService : ITenderService
         try
         {
             ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
+            _ = ValidateBidValidityPeriod(dto.BidValidityPeriodDays);
             await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, _currentUserProvider.TenantId,
                 dto.EvaluationTemplateId, dto.UseQCBSEvaluation, dto.TechnicalWeight,
                 dto.FinancialWeight, dto.MinimumTechnicalScore);
@@ -283,6 +284,7 @@ public class TenderService : ITenderService
                 TechnicalWeight = dto.TechnicalWeight,
                 FinancialWeight = dto.FinancialWeight,
                 TermsAndConditions = dto.TermsAndConditions,
+                BidValidityPeriodDays = ValidateBidValidityPeriod(dto.BidValidityPeriodDays),
                 RequiredDocuments = dto.RequiredDocuments,
                 RequiresAcceptanceDeclaration = dto.RequiresAcceptanceDeclaration,
                 EvaluationTemplateId = dto.EvaluationTemplateId,
@@ -378,6 +380,7 @@ public class TenderService : ITenderService
                 throw new InvalidOperationException("Only draft tenders can be updated");
             }
             ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
+            _ = ValidateBidValidityPeriod(dto.BidValidityPeriodDays);
             await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender.TenantId,
                 dto.EvaluationTemplateId, dto.UseQCBSEvaluation, dto.TechnicalWeight,
                 dto.FinancialWeight, dto.MinimumTechnicalScore);
@@ -418,6 +421,7 @@ public class TenderService : ITenderService
             tender.TechnicalWeight = dto.TechnicalWeight;
             tender.FinancialWeight = dto.FinancialWeight;
             tender.TermsAndConditions = dto.TermsAndConditions;
+            tender.BidValidityPeriodDays = ValidateBidValidityPeriod(dto.BidValidityPeriodDays);
             tender.RequiredDocuments = dto.RequiredDocuments;
             tender.RequiresAcceptanceDeclaration = dto.RequiresAcceptanceDeclaration;
             tender.EvaluationTemplateId = dto.EvaluationTemplateId;
@@ -1724,6 +1728,7 @@ public class TenderService : ITenderService
             TechnicalWeight = tender.TechnicalWeight,
             FinancialWeight = tender.FinancialWeight,
             TermsAndConditions = tender.TermsAndConditions,
+            BidValidityPeriodDays = tender.BidValidityPeriodDays,
             RequiredDocuments = tender.RequiredDocuments,
             RequiresAcceptanceDeclaration = tender.RequiresAcceptanceDeclaration,
             AcceptanceDeclarationDocumentPath = tender.AcceptanceDeclarationDocumentPath,
@@ -1848,6 +1853,13 @@ public class TenderService : ITenderService
                 "TENDER_DEADLINE_PASSED",
                 "The tender submission deadline must be in the future when it is published.");
         ValidateTenderSchedule(request.SubmissionDeadline, request.OpeningDate);
+    }
+
+    private static int? ValidateBidValidityPeriod(int? days)
+    {
+        if (days.HasValue && (days.Value <= 0 || days.Value > (DateTime.MaxValue - DateTime.UtcNow).TotalDays))
+            throw new InvalidOperationException("Enter a positive bid-validity period in calendar days from the tender terms.");
+        return days;
     }
 
     internal static void ValidateTenderSchedule(

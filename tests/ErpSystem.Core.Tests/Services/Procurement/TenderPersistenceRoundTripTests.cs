@@ -262,6 +262,7 @@ public sealed class TenderPersistenceRoundTripTests
             TechnicalWeight = 70,
             FinancialWeight = 30,
             TermsAndConditions = "Initial terms",
+            BidValidityPeriodDays = 60,
             RequiredDocuments = "[{\"documentType\":\"TaxClearance\"}]",
             RequiresAcceptanceDeclaration = true,
             EvaluationTemplateId = firstTemplateId,
@@ -269,6 +270,7 @@ public sealed class TenderPersistenceRoundTripTests
         });
 
         created.EvaluationTemplateId.Should().Be(firstTemplateId);
+        created.BidValidityPeriodDays.Should().Be(60);
         created.UseQCBSEvaluation.Should().BeTrue();
         created.TechnicalWeight.Should().Be(70);
         created.FinancialWeight.Should().Be(30);
@@ -278,6 +280,7 @@ public sealed class TenderPersistenceRoundTripTests
         reopenedAfterCreate.Should().NotBeNull();
         reopenedAfterCreate!.EvaluationTemplateId.Should().Be(firstTemplateId);
         reopenedAfterCreate.EvaluationTemplateName.Should().Be("Template A");
+        reopenedAfterCreate.BidValidityPeriodDays.Should().Be(60);
         reopenedAfterCreate.RequiredDocuments.Should().Contain("TaxClearance");
         reopenedAfterCreate.RequiresAcceptanceDeclaration.Should().BeTrue();
 
@@ -308,6 +311,7 @@ public sealed class TenderPersistenceRoundTripTests
             TechnicalWeight = 65,
             FinancialWeight = 35,
             TermsAndConditions = "Updated terms",
+            BidValidityPeriodDays = 90,
             RequiredDocuments = "[{\"documentType\":\"SSNIT\"}]",
             RequiresAcceptanceDeclaration = false,
             EvaluationTemplateId = secondTemplateId,
@@ -319,6 +323,7 @@ public sealed class TenderPersistenceRoundTripTests
         reopenedAfterUpdate!.EvaluationTemplateId.Should().Be(secondTemplateId);
         reopenedAfterUpdate.EvaluationTemplateName.Should().Be("Template B");
         reopenedAfterUpdate.Title.Should().Be("Updated tender");
+        reopenedAfterUpdate.BidValidityPeriodDays.Should().Be(90);
         reopenedAfterUpdate.MinimumPerformanceRating.Should().Be(5);
         reopenedAfterUpdate.PriceWeightage.Should().Be(50);
         reopenedAfterUpdate.QualityWeightage.Should().Be(25);

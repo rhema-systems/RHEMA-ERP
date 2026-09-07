@@ -735,6 +735,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             blocked.Add("No Published tender-document template is effective for the locked policy, profile, and procurement method.");
         if (!source.SubmissionDeadlineUtc.HasValue)
             blocked.Add("The source submission deadline is required before binding its tender-document register.");
+        if (source.Tender?.BidValidityPeriodDays.HasValue == true &&
+            source.Tender.Status != "Approved" && !IsSourcePublished(source))
+            blocked.Add("Approve the tender and its validity terms before binding the document register.");
         if (source.SourcingCase.MethodRule.IsDeleted || !source.SourcingCase.MethodRule.IsEnabled ||
             !source.SourcingCase.MethodRule.IsAllowed ||
             source.SourcingCase.MethodRule.Method != source.SourcingCase.SelectedMethod)
@@ -765,6 +768,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 : $"{effectiveTemplate.TemplateCode}/v{effectiveTemplate.Version}",
             EffectiveSubmissionDeadlineUtc = source.SubmissionDeadlineUtc,
             OpeningScheduledAtUtc = source.OpeningScheduledAtUtc,
+            BidValidityPeriodDays = source.Tender?.BidValidityPeriodDays,
             CurrencyCode = source.CurrencyCode,
             Ready = blocked.Count == 0,
             BlockedReasons = blocked,
@@ -808,7 +812,32 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             throw Validation("TENDER_DOCUMENT_SOURCE_DEADLINE_REQUIRED",
                 "Set the source submission deadline before binding the tender-document register.");
         var deadline = EnsureUtc(request.SubmissionDeadlineUtc);
-        var validity = EnsureUtc(request.BidValidityUntilUtc);
+        var approvedDays = source.Tender?.BidValidityPeriodDays;
+        if (approvedDays.HasValue && source.Tender!.Status != "Approved" && !IsSourcePublished(source))
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_NOT_APPROVED",
+                "Approve the tender and its validity terms before binding the document register.");
+        if (approvedDays.HasValue && request.BidValidityPeriodDays.HasValue &&
+            request.BidValidityPeriodDays != approvedDays)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_MISMATCH",
+                "The validity period must match the saved tender terms; it cannot be changed during binding.");
+        var validityDays = approvedDays ?? request.BidValidityPeriodDays;
+        if (!validityDays.HasValue || validityDays.Value <= 0)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_REQUIRED",
+                "Record the positive bid-validity period in calendar days stated in the approved tender document.");
+        if (!approvedDays.HasValue && (string.IsNullOrWhiteSpace(request.BidValidityTermsReference) ||
+            request.BidValidityTermsReference.Trim().Length > 500))
+            throw Validation("TENDER_DOCUMENT_VALIDITY_REFERENCE_REQUIRED",
+                "Identify the approved document and clause stating the bid-validity period (up to 500 characters). Do not assume a duration.");
+        var validityBasis = request.ScheduleChange is null ? deadline : EnsureUtc(request.ScheduleChange.SubmissionDeadlineUtc);
+        DateTime validity;
+        try { validity = ProcurementBidValidity.Calculate(validityBasis, validityDays.Value); }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_INVALID", "The validity period produces an invalid expiry date.");
+        }
+        if (request.BidValidityUntilUtc.HasValue && EnsureUtc(request.BidValidityUntilUtc.Value) != validity)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_MISMATCH",
+                "Bid validity is calculated from the submission deadline and approved period; a different expiry cannot be supplied.");
         var opening = request.OpeningScheduledAtUtc.HasValue
             ? EnsureUtc(request.OpeningScheduledAtUtc.Value)
             : (DateTime?)null;
@@ -880,7 +909,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordRegisterEventAsync(register, source, "RegisterBound",
                 ProcurementControlEventResult.Succeeded, null, RegisterSnapshot(register),
-                "Exact published template, sourcing lineage, deadlines, validity, and fee mode were bound.",
+                $"Exact published template, sourcing lineage and issue terms bound. Bid validity: {validityDays.Value} calendar days from {validityBasis:O}; " +
+                (approvedDays.HasValue ? $"saved tender terms {source.Reference}." :
+                    $"transcribed from approved document clause {request.BidValidityTermsReference!.Trim()}; version {template.Id}; checksum {template.ContentChecksumSha256}."),
                 [], correlation, now, cancellationToken);
             if (request.ScheduleChange is { } schedule)
             {

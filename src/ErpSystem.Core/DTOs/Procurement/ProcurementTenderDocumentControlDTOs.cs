@@ -176,6 +176,7 @@ public sealed class ProcurementTenderDocumentRegisterReadinessDto
     public DateTime? EffectiveSubmissionDeadlineUtc { get; set; }
     public DateTime? OpeningScheduledAtUtc { get; set; }
     public DateTime? EffectiveBidValidityUntilUtc { get; set; }
+    public int? BidValidityPeriodDays { get; set; }
     public ProcurementTenderDocumentFeeMode? FeeMode { get; set; }
     public decimal? FeeAmount { get; set; }
     public string? CurrencyCode { get; set; }
@@ -335,7 +336,9 @@ public sealed class BindProcurementTenderDocumentRegisterRequest
     public Guid TemplateVersionId { get; set; }
     public DateTime SubmissionDeadlineUtc { get; set; }
     public DateTime? OpeningScheduledAtUtc { get; set; }
-    public DateTime BidValidityUntilUtc { get; set; }
+    public DateTime? BidValidityUntilUtc { get; set; }
+    public int? BidValidityPeriodDays { get; set; }
+    public string? BidValidityTermsReference { get; set; }
     public ProcurementTenderDocumentFeeMode FeeMode { get; set; }
     [Range(typeof(decimal), "0", "9999999999999999")] public decimal FeeAmount { get; set; }
     [Required, StringLength(3)] public string CurrencyCode { get; set; } = string.Empty;

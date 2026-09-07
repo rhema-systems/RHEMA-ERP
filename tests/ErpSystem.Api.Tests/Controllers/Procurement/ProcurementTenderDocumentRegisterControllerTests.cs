@@ -120,6 +120,7 @@ public sealed class ProcurementTenderDocumentRegisterControllerTests
         var request = new BindProcurementTenderDocumentRegisterRequest
         {
             SourceType = ProcurementTenderDocumentSourceType.Tender, SourceId = Guid.NewGuid(),
+            BidValidityPeriodDays = 45, BidValidityTermsReference = "Approved document clause 18",
             SubmissionDeadlineUtc = DateTime.UtcNow.AddHours(-2), OpeningScheduledAtUtc = DateTime.UtcNow.AddHours(-1),
             ScheduleChange = new BindProcurementTenderDocumentScheduleChangeRequest
             {

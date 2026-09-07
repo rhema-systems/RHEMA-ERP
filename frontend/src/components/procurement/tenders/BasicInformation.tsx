@@ -504,6 +504,13 @@ export default function BasicInformation({
 
           {/* Terms and Conditions */}
           <div className="space-y-2">
+            <Label htmlFor="bidValidityPeriodDays">Bid validity period (calendar days)</Label>
+            <Input id="bidValidityPeriodDays" type="number" min={1} step={1}
+              value={formData.bidValidityPeriodDays ?? ''}
+              onChange={(event) => updateFormData({ bidValidityPeriodDays: event.target.value ? Number(event.target.value) : null })} />
+            <p className="text-xs text-gray-500">Enter the period stated in the tender terms, counted from submission closing. It is reviewed with this tender and used to calculate expiry during document binding. No default is assumed.</p>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="termsAndConditions">Terms and Conditions</Label>
             <Textarea
               id="termsAndConditions"

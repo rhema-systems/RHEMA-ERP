@@ -100,6 +100,7 @@ export interface TenderFormData {
   evaluationCriteriaJson: string;
   notes: string;
   termsAndConditions: string;
+  bidValidityPeriodDays?: number | null;
 
   // QCBS Evaluation Settings
   useQCBSEvaluation: boolean;
