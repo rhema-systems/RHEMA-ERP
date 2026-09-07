@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `COMPLETE` |
+| Phase | Post-Phase-6 Stage C6 — neutral AccountingEvent and atomic per-book orchestration |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
-| Branch | `codex/finance-book-applicability-c5` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-book-applicability-c5` |
+| Exact base | `f41e8e8fe81d5caceab635d6c143e7200b84a0ed` |
+| Branch | `codex/finance-accounting-event-c6` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-accounting-event-c6` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
+| Primary HEAD at activation | `f41e8e8fe81d5caceab635d6c143e7200b84a0ed` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C5 candidate `23938652533960fc80529cd87aae2b3abee9c888` approved and integrated; C6 orchestration dispatch pending |
+| Review status | C6 implementation active; independent GPT-5.6 Sol High accounting/schema/concurrency review required before integration |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -716,6 +716,19 @@ ESLint, EF no-pending-model, no-connect migration discovery and full-range diff/
 `20260906190846_AddAccountingBookApplicabilityFoundation` remains unapplied; configured `RHEMAERP` was not
 accessed or mutated. Stage C5 is complete. AccountingEvent orchestration, per-book journal fan-out and
 automatic parallel posting remain disabled pending separately reviewed C6 authority.
+
+Stage C6 was dispatched to the existing implementing task on GPT-5.6 Sol Medium from fresh exact primary base
+`f41e8e8fe81d5caceab635d6c143e7200b84a0ed`, using isolated branch
+`codex/finance-accounting-event-c6` and worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-accounting-event-c6`. C6 is limited to
+Finance-owned neutral AccountingEvent identity/version/correction/reversal lineage, frozen C5 selection
+evidence, per-book representation state, and atomic same-database orchestration through the existing single-
+book posting leaf. Durable post-rollback failure evidence, exact event/version/book idempotency, group-level
+reversal using the original frozen book set, permissions/audit, an unapplied fail-closed migration and guarded
+SQL concurrency/rollback tests are required. Legacy/direct callers remain protected by
+`PARALLEL_BOOK_POSTING_DISABLED`, and the new orchestrator is disabled by default pending later enablement
+review. Generic balances may not commingle representations; Delta books, reporting-currency books, owner-
+module changes, producer enumeration and automatic cutover remain prohibited.
 
 Stage C5 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `68490c9c`. Three P1
 gates remain: open-ended approved versions cannot be atomically superseded without retroactively removing
