@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | User authorized recommended staged Finance-approval design; C7 implementation active |
+| Review status | C7 clean candidate `8ac41e69`; independent GPT-5.6 Sol High review active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -700,6 +700,19 @@ not weaken C1-C6 authority, auto-approve, let producers select books, enumerate 
 Inventory/Sales/HR modules in C7. An unapplied migration is allowed only if genuinely required for durable
 approval/execution state and must receive independent Sol High review. After clean approval/integration, the
 Inventory packet will be reissued on Terra Medium from a fresh exact base.
+
+The C7 implementer completed one clean commit,
+`8ac41e69b3ce1789c79d81302dd162a0c1def41b`, from the exact base. The Finance-only candidate adds neutral
+prepare/approve/reject/approved-execution contracts, a stable ambient execution-participant identity, internal
+C5 resolution/freeze binding, maker/checker and participant-bound retry authority, and an unapplied C7 state/
+trigger migration. It exposes no execution HTTP endpoint and leaves C6/C7 disabled by default. Implementer
+validation passed a zero-error build, 39 focused C6/C7 tests with 11 guarded SQL skips, 10/10 C7 tests, EF
+model parity and an exact C6-to-C7 no-connect idempotent script. A wider run reported 293 passes, 31 guarded
+skips and six documented baseline-family failures. The worktree is clean, the ledger blob equals the base,
+no owner module changed and no database was accessed. Independent GPT-5.6 Sol High review is active over
+accounting atomicity, maker-checker security, participant trust/transaction boundaries, idempotency, durable
+post-rollback failure evidence, migration/SQL authority and C1-C6 regression preservation. Integration and
+the Inventory reissue remain blocked pending approval.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
