@@ -284,6 +284,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
                 SelectionOrder = item.SelectionOrder, AccountingBookCodeSnapshot = item.AccountingBookCode, AuthorityFingerprint = item.AuthorityFingerprint }).ToList() };
         _db.AccountingBookSelectionEvidence.Add(evidence);
         await _db.SaveChangesAsync(cancellationToken);
+        resolved.SelectionEvidenceId = evidence.Id;
         await _audit.RecordAsync(new FinanceAuditEventDto { TenantId = TenantId, EventType = FinanceAuditEvents.AccountingBookSelectionFrozen,
             SourceModule = resolved.OriginatingModuleCode, SourceDocumentType = resolved.SourceDocumentType, SourceDocumentId = evidence.Id,
             Resource = "Finance.AccountingBookSelectionEvidence", ResourceId = evidence.Id.ToString(), IdempotencyKey = evidence.IdempotencyKey,
@@ -541,7 +542,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
     private static string NormalizeModule(string value) { var module = NormalizeIdentity(value, "Originating module code"); if (!FinanceModuleLockCatalog.Definitions.Any(item => item.Code == module)) throw new InvalidOperationException("ORIGIN_MODULE_NOT_REGISTERED: originating module code is not in the canonical Finance period-lock catalog."); return module; }
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static void RequirePreviewHash(string? value, string label) { if (value is null || value.Length != 64 || value.Any(character => !Uri.IsHexDigit(character)) || value != value.ToUpperInvariant()) throw new InvalidOperationException($"A canonical 64-character preview {label} is required before freezing selection evidence."); }
-    private static AccountingBookSelectionDto MapEvidence(AccountingBookSelectionEvidence item) => new() { PolicyId = item.AccountingBookApplicabilityPolicyId,
+    private static AccountingBookSelectionDto MapEvidence(AccountingBookSelectionEvidence item) => new() { SelectionEvidenceId = item.Id, PolicyId = item.AccountingBookApplicabilityPolicyId,
         RuleId = item.AccountingBookApplicabilityRuleId, PolicyVersion = item.PolicyVersion, EffectiveDate = item.EffectiveDate,
         OriginatingModuleCode = item.OriginatingModuleCode, SourceDocumentType = item.SourceDocumentType, PostingAction = item.PostingAction,
         UsedPrimaryOnlyFallback = !item.AccountingBookApplicabilityPolicyId.HasValue, CalculationInputHash = item.CalculationInputHash,
@@ -569,6 +570,9 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
     private Guid Actor() => Guid.TryParse(_currentUser.UserId, out var id) && id != Guid.Empty ? id : throw new UnauthorizedAccessException("An authenticated Finance user is required.");
     private string ActorName() => _currentUser.UserName ?? "system";
     private sealed record SelectionValidation(IReadOnlyList<AccountingBookSelectionBlockerDto> Blockers);
-    private Task<T> AtomicAsync<T>(Func<Task<T>> action, CancellationToken ct) => !_db.Database.IsRelational() ? action() : _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+    private Task<T> AtomicAsync<T>(Func<Task<T>> action, CancellationToken ct) =>
+        !_db.Database.IsRelational() || _db.Database.CurrentTransaction is not null
+            ? action()
+            : _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
     { await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct); try { var result = await action(); await tx.CommitAsync(ct); return result; } catch { await tx.RollbackAsync(ct); _db.ChangeTracker.Clear(); throw; } });
 }

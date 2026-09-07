@@ -101,6 +101,7 @@ public class ResolveAccountingBookApplicabilityDto
 
 public sealed class AccountingBookSelectionDto
 {
+    public Guid? SelectionEvidenceId { get; set; }
     public Guid? PolicyId { get; set; }
     public Guid? RuleId { get; set; }
     public int? PolicyVersion { get; set; }

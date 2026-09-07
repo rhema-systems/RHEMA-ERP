@@ -815,6 +815,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookPeriodService, ErpSystem.Api.Services.Finance.Settings.AccountingBookPeriodService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookInitializationService, ErpSystem.Api.Services.Finance.Settings.AccountingBookInitializationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookApplicabilityService, ErpSystem.Api.Services.Finance.Settings.AccountingBookApplicabilityService>();
+            services.AddOptions<ErpSystem.Api.Services.Finance.GL.AccountingEventOptions>()
+                .BindConfiguration(ErpSystem.Api.Services.Finance.GL.AccountingEventOptions.SectionName);
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingEventService, ErpSystem.Api.Services.Finance.GL.AccountingEventService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountClassificationService, ErpSystem.Api.Services.Finance.Settings.AccountClassificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountBookCurrencyPolicyService, ErpSystem.Api.Services.Finance.MultiCurrency.AccountBookCurrencyPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService, ErpSystem.Api.Services.Finance.GL.FinanceAccountProvisioningService>();
@@ -899,7 +902,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAuditService, ErpSystem.Api.Services.Finance.FinanceAuditService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccessScopeService, ErpSystem.Api.Services.Finance.Security.FinanceAccessScopeService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceReversalPolicyService, ErpSystem.Api.Services.Finance.FinanceReversalPolicyService>();
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancePostingEngine, ErpSystem.Api.Services.Finance.GL.FinancePostingEngine>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinancePostingEngine>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinancePostingEngine>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinancePostingEngine>());
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IBookBalanceReadModelService, ErpSystem.Api.Services.Finance.GL.BookBalanceReadModelService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISubledgerSettlementReadModelService, ErpSystem.Api.Services.Finance.SubledgerSettlementReadModelService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IOpeningBalanceService, ErpSystem.Api.Services.Finance.Migration.OpeningBalanceService>();

@@ -134,6 +134,13 @@ public static class FinancePermissionPolicyMap
                 "Resolve" or "Freeze" => One(FinancePermissions.ResolveAccountingBookApplicability),
                 _ => One(FinancePermissions.ManageAccountingBookApplicabilityPolicy)
             },
+            "AccountingEvents" => action switch
+            {
+                "Get" or "GetBook" => One(FinancePermissions.ViewAccountingEvents),
+                "Create" => One(FinancePermissions.PrepareAccountingEvents),
+                "Release" => One(FinancePermissions.OrchestrateAccountingEvents),
+                _ => One(FinancePermissions.ViewAccountingEvents)
+            },
             "AccountClassifications" => ReadOrManage(action, methods, FinancePermissions.ManageChartOfAccounts),
             "AccountBookCurrencyPolicies" => action switch
             {

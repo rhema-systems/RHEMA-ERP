@@ -39,6 +39,9 @@ public static class FinancePermissions
     public const string ManageAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Manage";
     public const string ApproveAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Approve";
     public const string ResolveAccountingBookApplicability = "Finance.AccountingBooks.Applicability.Resolve";
+    public const string ViewAccountingEvents = "Finance.AccountingEvents.Read";
+    public const string PrepareAccountingEvents = "Finance.AccountingEvents.Prepare";
+    public const string OrchestrateAccountingEvents = "Finance.AccountingEvents.Orchestrate";
     public const string ManageCodingDimensions = "Finance.Dimensions.Manage";
     public const string ManageDimensionCertification = "Finance.Dimensions.Certification.Manage";
     public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
@@ -198,6 +201,9 @@ public static class FinancePermissions
         new(ManageAccountingBookApplicabilityPolicy, "Manage Accounting Book Applicability Policy", "Create and submit effective-dated book-selection policy versions.", CategoryGeneralLedger),
         new(ApproveAccountingBookApplicabilityPolicy, "Approve Accounting Book Applicability Policy", "Independently approve, reject, or retire book-selection policies.", CategoryGeneralLedger),
         new(ResolveAccountingBookApplicability, "Resolve Accounting Book Applicability", "Resolve and freeze governed book-selection evidence without posting.", CategoryGeneralLedger),
+        new(ViewAccountingEvents, "View Accounting Events", "View canonical event groups and exact-book posting evidence.", CategoryGeneralLedger),
+        new(PrepareAccountingEvents, "Prepare Accounting Events", "Prepare an immutable accounting event for independent release.", CategoryGeneralLedger),
+        new(OrchestrateAccountingEvents, "Orchestrate Accounting Events", "Create an atomic set of governed accounting-book representations.", CategoryGeneralLedger),
         new(ManageCodingDimensions, "Manage Coding Dimensions", "Configure tenant-owned transaction dimensions, values, and certified account applicability rules.", CategoryGeneralLedger),
         new(ManageDimensionCertification, "Manage Dimension Certification", "Assess and promote recognized Finance dimension routes using governed readiness evidence.", CategoryGeneralLedger),
         new(CreateJournalEntries, "Create Journal Entries", "Create draft manual journal entries.", CategoryGeneralLedger),

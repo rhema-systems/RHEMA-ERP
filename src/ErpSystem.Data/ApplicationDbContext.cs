@@ -130,6 +130,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AccountingBookApplicabilityRuleBook> AccountingBookApplicabilityRuleBooks { get; set; }
     public DbSet<AccountingBookSelectionEvidence> AccountingBookSelectionEvidence { get; set; }
     public DbSet<AccountingBookSelectionEvidenceBook> AccountingBookSelectionEvidenceBooks { get; set; }
+    public DbSet<AccountingEvent> AccountingEvents { get; set; }
+    public DbSet<AccountingEventPosting> AccountingEventPostings { get; set; }
+    public DbSet<AccountingEventAttempt> AccountingEventAttempts { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
     public DbSet<AccountBookCurrencyPolicy> AccountBookCurrencyPolicies { get; set; }
     public DbSet<AccountClassification> AccountClassifications { get; set; }
@@ -2907,6 +2910,88 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEvent>(entity =>
+        {
+            entity.ToTable("AccountingEvents", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEvents_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingEvents_Status", "[Status] IN ('PendingApproval','Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_AccountingEvents_MakerChecker", "[ReleasedByUserId] IS NULL OR [ReleasedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingEvents_Kind", "[EventKind] IN ('Original','Correction','Reversal')");
+                table.HasCheckConstraint("CK_AccountingEvents_Version", "[Version] > 0");
+                table.HasCheckConstraint("CK_AccountingEvents_Lineage", "([EventKind] = 'Original' AND [Version] = 1 AND [RootAccountingEventId] = [Id] AND [SupersedesAccountingEventId] IS NULL AND [CorrectsAccountingEventId] IS NULL AND [ReversesAccountingEventId] IS NULL) OR ([EventKind] = 'Correction' AND [Version] > 1 AND [SupersedesAccountingEventId] = [CorrectsAccountingEventId] AND [CorrectsAccountingEventId] IS NOT NULL AND [ReversesAccountingEventId] IS NULL) OR ([EventKind] = 'Reversal' AND [Version] > 1 AND [SupersedesAccountingEventId] = [ReversesAccountingEventId] AND [ReversesAccountingEventId] IS NOT NULL AND [CorrectsAccountingEventId] IS NULL)");
+                table.HasCheckConstraint("CK_AccountingEvents_ResultShape", "([Status] = 'PendingApproval' AND [AccountingBookSelectionEvidenceId] IS NULL AND [ReleasedByUserId] IS NULL AND [ReleasedAtUtc] IS NULL AND [ReleaseReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Pending' AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [AccountingBookSelectionEvidenceId] IS NOT NULL AND LEN([SelectionFingerprint]) = 64 AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingEvents_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingEvents_SelectionFingerprint", "[SelectionFingerprint] = '' OR (LEN([SelectionFingerprint]) = 64 AND [SelectionFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%')");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id, item.Version });
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.RootAccountingEventId, item.Version }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.OriginatingModuleCode, item.SourceDocumentType, item.SourceDocumentId, item.PostingAction, item.Version }).IsUnique();
+            entity.Property(item => item.EventDate).HasColumnType("date");
+            entity.HasOne(item => item.RootAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.RootAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SupersedesAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SupersedesAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.CorrectsAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.CorrectsAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ReversesAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.ReversesAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBookSelectionEvidence).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEventPosting>(entity =>
+        {
+            entity.ToTable("AccountingEventPostings", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEventPostings_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingEventPostings_Status", "[Status] IN ('Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_AccountingEventPostings_EventVersion", "[EventVersion] > 0");
+                table.HasCheckConstraint("CK_AccountingEventPostings_ResultShape", "([Status] = 'Pending' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [FinancePostingEventId] IS NOT NULL AND [JournalEntryId] IS NOT NULL AND [PostedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [FailureMessage] IS NOT NULL)");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingEventPostings_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.EventVersion, item.AccountingBookId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.EventVersion, item.SelectionOrder }).IsUnique();
+            entity.HasOne(item => item.AccountingEvent).WithMany(item => item.Postings)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingEventId, item.EventVersion })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Version }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FinancePostingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.FinancePostingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.JournalEntry).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.JournalEntryId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEventAttempt>(entity =>
+        {
+            entity.ToTable("AccountingEventAttempts", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEventAttempts_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingEventAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_AccountingEventAttempts_Number", "[AttemptNumber] > 0");
+                table.HasCheckConstraint("CK_AccountingEventAttempts_ResultShape", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingEventAttempts_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.AttemptNumber }).IsUnique();
+            entity.HasOne(item => item.AccountingEvent).WithMany(item => item.Attempts)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountingBookApplicabilityPolicy>(entity =>
