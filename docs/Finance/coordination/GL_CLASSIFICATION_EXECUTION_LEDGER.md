@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C5 candidate `4f33dbf64c9016e4d01cdbe03180fea72162e3d2`; independent GPT-5.6 Sol High approval review active |
+| Review status | C5 cycle 4 `CHANGES_REQUIRED`; final insert-governance/test correction active on GPT-5.6 Sol Medium |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -678,6 +678,18 @@ task turn did not expose final handoff text. Independent GPT-5.6 Sol High review
 schema, lifecycle/readiness, deterministic selection/fingerprint, maker-checker, concurrency, migration,
 API/UI permission and C1-C4 regression boundaries. No C5 commit is approved for integration, no migration
 was applied and configured `RHEMAERP` remains untouched.
+
+Stage C5 independent review cycle 4 confirmed the direct bare-retirement path is closed, including prior
+Pending identity, distinct checker, minimum-bound endpoint and post-retirement immutability, but returned
+`CHANGES_REQUIRED` at clean HEAD `4f33dbf6` for one P1 insert path and one P2 masking gap. SQL can insert a
+Draft or PendingApproval policy preseeded with fabricated Pending retirement evidence because the request-shape
+constraint is not status-coupled and the retirement trigger governs only updates; those fields can survive
+approval and later satisfy retirement. The Approved mutation matrix also still runs mostly after frozen evidence,
+so the post-use guard can mask immediate Approved immutability. Review gates otherwise passed a zero-error
+build, 23 C5 tests with 8 guarded SQL skips, 319 widened tests with 24 guarded SQL skips, frontend 9/9, ESLint,
+EF no-pending-model, discovery/script generation, exact ancestry, clean status and diff checks. A final insert-
+governance and unmasked-test correction was dispatched on GPT-5.6 Sol Medium. No database was accessed or
+mutated; integration and C6 remain blocked.
 
 Stage C5 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `68490c9c`. Three P1
 gates remain: open-ended approved versions cannot be atomically superseded without retroactively removing
