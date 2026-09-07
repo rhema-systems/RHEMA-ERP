@@ -21,6 +21,44 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementAwardReadinessEvaluatorSodTests
 {
     [Theory]
+    [InlineData(ProcurementMethodType.PettyPurchase, false)]
+    [InlineData(ProcurementMethodType.SingleSource, true)]
+    [InlineData(ProcurementMethodType.RestrictedTendering, true)]
+    public async Task NegotiationEvidenceIsRequiredOnlyForNegotiatedMethods(
+        ProcurementMethodType method, bool negotiationRequired)
+    {
+        await using var fixture = new Fixture();
+        var source = await fixture.AddExceptionalTenderAsync(Guid.NewGuid());
+        var control = await fixture.Context.Set<ProcurementExceptionalSourcingControl>().SingleAsync();
+        control.Method = method;
+        var supplier = new BusinessPartner
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            PartnerCode = "TEST-EXCEPTION", PartnerName = "Test quotation supplier",
+            PartnerType = "Supplier", IsActive = true,
+            ApprovalStatus = "Approved", RegistrationStatus = "Approved",
+            ApprovedById = Guid.NewGuid()
+        };
+        var bid = new TenderBid
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = source.Id,
+            BusinessPartnerId = supplier.Id, BidNumber = "TEST-QUOTE",
+            Status = "Submitted", TotalBidAmount = 750, Currency = "GHS"
+        };
+        control.RecommendedBidId = bid.Id;
+        fixture.Context.AddRange(supplier, bid);
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(source.Type, source.Id,
+            new EvaluateProcurementAwardReadinessRequest { IdempotencyKey = $"evidence-{method}" },
+            $"evidence-{method}");
+
+        result.BlockedReasons.Any(reason => reason.Contains("Negotiation minutes", StringComparison.Ordinal))
+            .Should().Be(negotiationRequired);
+        result.IsReady.Should().BeFalse("other missing approval and supplier prerequisites must still block");
+    }
+
+    [Theory]
     [InlineData("legacy-submitter", true)]
     [InlineData("approvers-only", true)]
     [InlineData("unknown-actor", false)]
