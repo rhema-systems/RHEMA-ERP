@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C6 cycle 3 `APPROVED`; four-commit integration complete, coordinator verification active |
+| Review status | C6 cycle 3 `APPROVED`; integrated and coordinator-verified; stage complete |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -650,6 +650,25 @@ discovery, no-connect script generation, exact ancestry, clean status, diff and 
 coordinator integrated the four approved commits locally as `7c9150e3`, `b7d3375b`, `0d5643c3` and
 `a9cd1ac2` without conflict. Primary verification is active; the C6 migration remains unapplied, the
 orchestrator remains disabled by default, and configured `RHEMAERP` remains untouched.
+
+Coordinator C6 verification completed successfully. All 25 task-owned tracked blobs are byte-identical to
+the independently approved candidate; the test project built from isolated output with 0 errors and 1,189
+existing warnings, and focused C6 tests passed 29 with 10 guarded SQL skips. The primary range and dirty-tree
+diff checks pass while all unrelated work remains preserved. The exact candidate had already passed the
+independent widened 348-test, EF no-pending-model, 454-migration discovery and no-connect script gates; the
+coordinator did not terminate the user's live API process merely to duplicate the default-output EF build.
+No migration or database mutation occurred. Stage C6 is complete, but its orchestrator remains disabled by
+default pending the separately reviewed enablement gate.
+
+The next authorized owner packet is Inventory. It is bounded to replacing `InventoryDisposalService`'s legacy
+single-book/V1 construction with one neutral AccountingEvent economic intent through the Finance-owned C6
+boundary, plus its directly affected tests and straightforward adapter wiring. Inventory must not enumerate
+books, select applicability, call the posting leaf once per book, enable C6, or alter Finance accounting
+rules. Existing source-side rejection of `ALL_ACTIVE_BOOKS`, source identity, economics, transaction boundary,
+retry semantics and owner state transition must remain intact. The packet must prove one intent, exact retry,
+tenant/source authority, disabled-by-default behavior, zero partial mutation on failure and no remaining active
+Inventory V1 constructor. Use GPT-5.6 Terra Medium for this bounded owner conversion; route any substantive
+Finance/schema/posting correction back to Sol Medium and retain Sol High independent review.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
