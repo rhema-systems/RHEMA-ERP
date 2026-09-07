@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C6 — neutral AccountingEvent and atomic per-book orchestration |
-| Status | `REVIEW_REQUIRED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f41e8e8fe81d5caceab635d6c143e7200b84a0ed` |
 | Branch | `codex/finance-accounting-event-c6` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Clean C6 candidate `79fbd960d661327aab4f8257ab145338f8ab7345`; independent GPT-5.6 Sol High accounting/schema/concurrency review active |
+| Review status | C6 cycle 1 `CHANGES_REQUIRED`; substantive GPT-5.6 Sol Medium atomicity/identity correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -596,6 +596,19 @@ review is active across the accounting, lifecycle, period-lock, cutoff, maker-ch
 concurrency, API/UI permission and C1/C2/C3 regression boundaries. A separate read-only structured-handoff
 reconciliation was requested because the completed task turn did not expose its final text. No C4 commit is
 approved for integration, no migration was applied and configured `RHEMAERP` remains untouched.
+
+Stage C6 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `79fbd960`. P1 gates:
+the real C5 Freeze flushes an intermediate Pending event that violates the migration trigger; request
+fingerprints use collision-prone delimiters; the posting-leaf sibling bypass is not bound to the exact event/
+frozen selection and leaf evidence is not exclusively owned; raced release retries omit in-lock checker/reason
+comparison; and database successor lineage omits the canonical economic-source identity. P2 gates: Posted/
+Failed outcomes and attempt state are insufficiently immutable/finishable, while guarded SQL concurrency tests
+are unsynchronized, use EnsureCreated and mock the exact real-Freeze/migrated-schema boundary. Review gates
+otherwise passed a zero-error build, 11 C6 tests with 7 skips, 330 widened tests with 31 skips, EF no-pending-
+model, 454-migration discovery, idempotent script generation, exact ancestry, clean status and diff checks.
+The coordinator dispatched all seven findings for one substantive GPT-5.6 Sol Medium correction with explicit
+owner-facing invariant comments. Integration and later stages remain blocked; no database was accessed or
+mutated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
