@@ -1,8 +1,10 @@
 using System.Reflection;
+using System.Collections.Immutable;
 using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -56,7 +58,7 @@ public sealed class AccountingEventC6Tests
         typeof(FinancePostingEngine).Assembly.GetType(
             "ErpSystem.Api.Services.Finance.GL.AccountingEventPostingAuthority")!.GetProperties()
             .Select(item => item.Name).Should().Contain([
-                "AccountingEventId", "AccountingBookSelectionEvidenceId", "AccountingBookId", "AuthorityFingerprint"]);
+                "AccountingEventId", "AccountingBookSelectionEvidenceId", "AccountingBookId", "AuthorityFingerprint", "OrderedSelectedBookIds"]);
     }
 
     [Fact]
@@ -82,8 +84,9 @@ public sealed class AccountingEventC6Tests
         var engine = new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit.Object);
         var interfaceType = typeof(FinancePostingEngine).Assembly.GetType("ErpSystem.Api.Services.Finance.GL.IAccountingEventPostingLeaf")!;
         var authorityType = typeof(FinancePostingEngine).Assembly.GetType("ErpSystem.Api.Services.Finance.GL.AccountingEventPostingAuthority")!;
+        var forgedBookId = Guid.NewGuid();
         var forgedAuthority = Activator.CreateInstance(authorityType,
-            [eventId, evidenceId, Guid.NewGuid(), new string('B', 64)])!;
+            [eventId, evidenceId, forgedBookId, new string('B', 64), ImmutableArray.Create(forgedBookId)])!;
         var task = (Task)interfaceType.GetMethod("PostAsync")!.Invoke(engine,
             [Request().PostingRequest, forgedAuthority, CancellationToken.None])!;
 
@@ -94,6 +97,99 @@ public sealed class AccountingEventC6Tests
         db.ChangeTracker.Entries<FinancePostingEvent>().Should().BeEmpty();
         db.ChangeTracker.Entries<JournalEntry>().Should().BeEmpty();
         db.ChangeTracker.Entries<AccountBalance>().Should().BeEmpty();
+        audit.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnrelatedDirectPostingMatch_IsNotAcceptedForSelectedOrUnselectedBook(bool useSelectedBook)
+    {
+        await using var db = Context(); var tenantId = Guid.NewGuid(); var eventId = Guid.NewGuid(); var evidenceId = Guid.NewGuid();
+        var selectedBook = Guid.NewGuid(); var matchedBook = useSelectedBook ? selectedBook : Guid.NewGuid();
+        var request = Request().PostingRequest;
+        var accountingEvent = new AccountingEvent
+        {
+            Id = eventId, TenantId = tenantId, Version = 1, RootAccountingEventId = eventId,
+            AccountingBookSelectionEvidenceId = evidenceId, Status = AccountingEventStatuses.Pending,
+            Postings = [new AccountingEventPosting
+            {
+                TenantId = tenantId, EventVersion = 1, AccountingBookId = selectedBook, SelectionOrder = 1,
+                AccountingBookCodeSnapshot = "IFRS", AuthorityFingerprint = new string('A', 64), Status = AccountingEventStatuses.Pending
+            }]
+        };
+        var unrelated = new FinancePostingEvent
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = matchedBook,
+            SourceDocumentType = request.SourceDocumentType, SourceDocumentId = request.SourceDocumentId,
+            PostingAction = request.PostingAction, PostingStatus = "Posted"
+        };
+        db.AddRange(accountingEvent, unrelated); await db.SaveChangesAsync();
+        var user = new Mock<ICurrentUserService>(); user.SetupGet(item => item.TenantId).Returns(tenantId);
+        var audit = new Mock<IFinanceAuditService>();
+        var engine = new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit.Object);
+        var interfaceType = typeof(FinancePostingEngine).Assembly.GetType("ErpSystem.Api.Services.Finance.GL.IAccountingEventPostingLeaf")!;
+        var authorityType = typeof(FinancePostingEngine).Assembly.GetType("ErpSystem.Api.Services.Finance.GL.AccountingEventPostingAuthority")!;
+        var authority = Activator.CreateInstance(authorityType,
+            [eventId, evidenceId, selectedBook, new string('A', 64), ImmutableArray.Create(selectedBook)])!;
+        var task = (Task)interfaceType.GetMethod("PostAsync")!.Invoke(engine,
+            [request, authority, CancellationToken.None])!;
+
+        await FluentActions.Awaiting(async () => await task).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("ACCOUNTING_EVENT_UNRELATED_POSTING_MATCH:*");
+        db.ChangeTracker.Entries().Should().OnlyContain(item => item.State == EntityState.Unchanged);
+        audit.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task NonPostedJournal_CannotEstablishAccountingEventSiblingOwnership()
+    {
+        await using var db = Context(); var tenantId = Guid.NewGuid(); var eventId = Guid.NewGuid(); var evidenceId = Guid.NewGuid();
+        var bookId = Guid.NewGuid(); var postingEventId = Guid.NewGuid(); var journalId = Guid.NewGuid();
+        var request = Request().PostingRequest;
+        var accountingEvent = new AccountingEvent
+        {
+            Id = eventId, TenantId = tenantId, Version = 1, RootAccountingEventId = eventId,
+            AccountingBookSelectionEvidenceId = evidenceId, Status = AccountingEventStatuses.Pending,
+            Postings = [new AccountingEventPosting
+            {
+                TenantId = tenantId, EventVersion = 1, AccountingBookId = bookId, SelectionOrder = 1,
+                AccountingBookCodeSnapshot = "IFRS", AuthorityFingerprint = new string('A', 64),
+                Status = AccountingEventStatuses.Posted, FinancePostingEventId = postingEventId,
+                JournalEntryId = journalId, PostedAtUtc = DateTime.UtcNow
+            }]
+        };
+        var selectionBook = new AccountingBookSelectionEvidenceBook
+        {
+            TenantId = tenantId, AccountingBookSelectionEvidenceId = evidenceId, AccountingBookId = bookId,
+            SelectionOrder = 1, AccountingBookCodeSnapshot = "IFRS", AuthorityFingerprint = new string('A', 64)
+        };
+        var journal = new JournalEntry
+        {
+            Id = journalId, TenantId = tenantId, AccountingBookId = bookId,
+            BookClassification = "IFRS", PostingStatus = "Draft"
+        };
+        var postingEvent = new FinancePostingEvent
+        {
+            Id = postingEventId, TenantId = tenantId, AccountingBookId = bookId,
+            BookClassification = "IFRS", JournalEntryId = journalId, PostingStatus = "Posted",
+            SourceDocumentType = request.SourceDocumentType, SourceDocumentId = request.SourceDocumentId,
+            PostingAction = request.PostingAction
+        };
+        db.AddRange(accountingEvent, selectionBook, journal, postingEvent); await db.SaveChangesAsync();
+        var user = new Mock<ICurrentUserService>(); user.SetupGet(item => item.TenantId).Returns(tenantId);
+        var audit = new Mock<IFinanceAuditService>();
+        var engine = new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit.Object);
+        var interfaceType = typeof(FinancePostingEngine).Assembly.GetType("ErpSystem.Api.Services.Finance.GL.IAccountingEventPostingLeaf")!;
+        var authorityType = typeof(FinancePostingEngine).Assembly.GetType("ErpSystem.Api.Services.Finance.GL.AccountingEventPostingAuthority")!;
+        var authority = Activator.CreateInstance(authorityType,
+            [eventId, evidenceId, bookId, new string('A', 64), ImmutableArray.Create(bookId)])!;
+        var task = (Task)interfaceType.GetMethod("PostAsync")!.Invoke(engine,
+            [request, authority, CancellationToken.None])!;
+
+        await FluentActions.Awaiting(async () => await task).Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("ACCOUNTING_EVENT_UNRELATED_POSTING_MATCH:*");
+        db.ChangeTracker.Entries().Should().OnlyContain(item => item.State == EntityState.Unchanged);
         audit.VerifyNoOtherCalls();
     }
 
@@ -110,6 +206,42 @@ public sealed class AccountingEventC6Tests
         FluentActions.Invoking(() => InvokeReleaseMatch(item, checker, "Changed"))
             .Should().Throw<TargetInvocationException>().Which.InnerException.Should().BeOfType<InvalidOperationException>()
             .Which.Message.Should().StartWith("ACCOUNTING_EVENT_RELEASE_REASON_CONFLICT:");
+    }
+
+    [Theory]
+    [InlineData("UNKNOWN", "GOODS.RECEIPT", "POST")]
+    [InlineData("ALL", "GOODS.RECEIPT", "POST")]
+    [InlineData("INV", "1RECEIPT", "POST")]
+    [InlineData("INV", "GOODS/RECEIPT", "POST")]
+    [InlineData("INV", "GÓODS", "POST")]
+    [InlineData("INV", "GOODS.RECEIPT", "POST!")]
+    public void PreparedIdentityNormalizer_RejectsNonCanonicalOrUnknownIdentity(string module, string document, string action)
+    {
+        FluentActions.Invoking(() => FinancePreparedIdentityNormalizer.Normalize(module, document, action))
+            .Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void PreparedIdentityNormalizer_AcceptsRegisteredAsciiCanonicalIdentity()
+    {
+        FinancePreparedIdentityNormalizer.Normalize(" inv ", " goods.receipt ", " post ")
+            .Should().Be(new FinancePreparedIdentityNormalizer.Identity("INV", "GOODS.RECEIPT", "POST"));
+    }
+
+    [Fact]
+    public void FingerprintDateEncoding_IsPortableAndExplicitForEveryDateTimeKind()
+    {
+        var method = typeof(AccountingEventService).GetMethod("CanonicalDateTime", BindingFlags.NonPublic | BindingFlags.Static)!;
+        string Encode(DateTime value) => (string)method.Invoke(null, [value])!;
+        var ticks = new DateTime(2026, 9, 7, 12, 34, 56, DateTimeKind.Unspecified).Ticks;
+        var unspecified = new DateTime(ticks, DateTimeKind.Unspecified);
+        var utcWallClock = new DateTime(ticks, DateTimeKind.Utc);
+        var local = new DateTime(ticks, DateTimeKind.Local);
+
+        Encode(unspecified).Should().Be(Encode(utcWallClock));
+        Encode(local).Should().Be(Encode(local.ToUniversalTime()));
+        Encode(utcWallClock.AddTicks(1)).Should().NotBe(Encode(utcWallClock));
+        Encode(utcWallClock.AddDays(1)).Should().NotBe(Encode(utcWallClock));
     }
 
     [Fact]

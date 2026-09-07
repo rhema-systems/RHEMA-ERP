@@ -231,7 +231,7 @@ IF EXISTS (
                     table.CheckConstraint("CK_AccountingEventPostings_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
                     table.CheckConstraint("CK_AccountingEventPostings_EventVersion", "[EventVersion] > 0");
                     table.CheckConstraint("CK_AccountingEventPostings_NoDelete", "[IsDeleted] = 0");
-                    table.CheckConstraint("CK_AccountingEventPostings_ResultShape", "([Status] = 'Pending' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [FinancePostingEventId] IS NOT NULL AND [JournalEntryId] IS NOT NULL AND [PostedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [FailureMessage] IS NOT NULL)");
+                    table.CheckConstraint("CK_AccountingEventPostings_ResultShape", "([Status] = 'Pending' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [FinancePostingEventId] IS NOT NULL AND [JournalEntryId] IS NOT NULL AND [PostedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NOT NULL)");
                     table.CheckConstraint("CK_AccountingEventPostings_Status", "[Status] IN ('Pending','Posted','Failed')");
                     table.ForeignKey(
                         name: "FK_AccountingEventPostings_AccountingBooks_TenantId_AccountingBookId",
@@ -361,7 +361,14 @@ BEGIN
        OR DATALENGTH(i.[OriginatingModuleCode])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[OriginatingModuleCode]))))
        OR DATALENGTH(i.[SourceDocumentType])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[SourceDocumentType]))))
        OR DATALENGTH(i.[PostingAction])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[PostingAction]))))
-       OR DATALENGTH(i.[IdempotencyKey])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[IdempotencyKey])))))
+       OR DATALENGTH(i.[IdempotencyKey])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))))
+       OR i.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')
+       OR LEFT(i.[SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+       OR i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+       OR i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
+       OR LEFT(i.[PostingAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+       OR i.[PostingAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+       OR i.[PostingAction] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS'))
         THROW 51000, 'C6_EVENT_IDENTITY: canonical nonblank tenant, source, action, actor and idempotency identity is required.', 1;
 
     IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
@@ -453,6 +460,9 @@ BEGIN
           OR d.[SelectionOrder]<>i.[SelectionOrder] OR d.[AccountingBookCodeSnapshot]<>i.[AccountingBookCodeSnapshot]
           OR d.[AuthorityFingerprint]<>i.[AuthorityFingerprint] OR d.[Status]<>N'Pending' OR i.[Status] NOT IN (N'Posted',N'Failed'))
         THROW 51000, 'C6_POSTING_IMMUTABLE: only Pending-to-final result completion is permitted.', 1;
+    IF EXISTS (SELECT 1 FROM inserted p WHERE p.[Status]<>N'Posted'
+       AND (p.[FinancePostingEventId] IS NOT NULL OR p.[JournalEntryId] IS NOT NULL OR p.[PostedAtUtc] IS NOT NULL))
+        THROW 51000, 'C6_POSTING_RESULT: only a Posted exact-book representation may own leaf result evidence.', 1;
     IF EXISTS (SELECT 1 FROM inserted p JOIN [AccountingEvents] e WITH (UPDLOCK,HOLDLOCK)
        ON e.[TenantId]=p.[TenantId] AND e.[Id]=p.[AccountingEventId]
        LEFT JOIN [AccountingBookSelectionEvidenceBooks] eb WITH (UPDLOCK,HOLDLOCK)

@@ -19,7 +19,6 @@ public sealed class AccountingBookApplicabilityService : IAccountingBookApplicab
 {
     public const string WorkflowEntityType = "AccountingBookApplicabilityPolicy";
     private static readonly Regex CanonicalCode = new("^[A-Z][A-Z0-9_]*$", RegexOptions.CultureInvariant);
-    private static readonly Regex CanonicalIdentity = new("^[A-Z][A-Z0-9_.-]*$", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> PseudoSelectors = new(StringComparer.Ordinal)
         { "ALL", "ALL_ACTIVE_BOOKS", "ALL_CLASSIFIED_BOOKS", "ALLCLASSIFIEDBOOKS" };
     private readonly ApplicationDbContext _db;
@@ -538,8 +537,8 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_BOOK_SELECTION_LOCK_FAILED: selection ev
         return (module, NormalizeIdentity(request.SourceDocumentType, "Source document type"), NormalizeIdentity(request.PostingAction, "Posting action"));
     }
     private static string NormalizeCode(string value, string label) { var normalized = value?.Trim().ToUpperInvariant() ?? ""; if (!CanonicalCode.IsMatch(normalized) || PseudoSelectors.Contains(normalized)) throw new InvalidOperationException($"{label} must be canonical and cannot be a pseudo selector."); return normalized; }
-    private static string NormalizeIdentity(string value, string label) { var normalized = value?.Trim().ToUpperInvariant() ?? ""; if (!CanonicalIdentity.IsMatch(normalized) || PseudoSelectors.Contains(normalized)) throw new InvalidOperationException($"{label} must be a canonical stable identity and cannot be a pseudo selector."); return normalized; }
-    private static string NormalizeModule(string value) { var module = NormalizeIdentity(value, "Originating module code"); if (!FinanceModuleLockCatalog.Definitions.Any(item => item.Code == module)) throw new InvalidOperationException("ORIGIN_MODULE_NOT_REGISTERED: originating module code is not in the canonical Finance period-lock catalog."); return module; }
+    private static string NormalizeIdentity(string value, string label) => FinancePreparedIdentityNormalizer.NormalizeValue(value, label);
+    private static string NormalizeModule(string value) => FinancePreparedIdentityNormalizer.NormalizeModule(value);
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static void RequirePreviewHash(string? value, string label) { if (value is null || value.Length != 64 || value.Any(character => !Uri.IsHexDigit(character)) || value != value.ToUpperInvariant()) throw new InvalidOperationException($"A canonical 64-character preview {label} is required before freezing selection evidence."); }
     private static AccountingBookSelectionDto MapEvidence(AccountingBookSelectionEvidence item) => new() { SelectionEvidenceId = item.Id, PolicyId = item.AccountingBookApplicabilityPolicyId,

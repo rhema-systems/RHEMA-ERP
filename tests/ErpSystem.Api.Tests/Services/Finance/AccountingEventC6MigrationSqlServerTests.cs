@@ -102,7 +102,31 @@ INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingS
 INSERT AccountingEventPostings(Id,AccountingEventId,EventVersion,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,Status,
  FinancePostingEventId,JournalEntryId,PostedAtUtc,CreatedAt,IsDeleted,TenantId)
  VALUES('{originalPosting}','{original}',1,'{book}',0,N'PRIMARY',REPLICATE('C',64),N'Posted','{leaf}','{journal}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');
-UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHERE Id='{original}';
+UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHERE Id='{original}';");
+
+        var successorMutations = new[]
+        {
+            (Name: "module", Module: "INV", Document: "JOURNAL", SourceId: source, Action: "POST"),
+            (Name: "document type", Module: "FIN", Document: "UNRELATED", SourceId: source, Action: "POST"),
+            (Name: "document id", Module: "FIN", Document: "JOURNAL", SourceId: Guid.NewGuid(), Action: "POST"),
+            (Name: "posting action", Module: "FIN", Document: "JOURNAL", SourceId: source, Action: "ADJUST")
+        };
+        foreach (var mutation in successorMutations)
+        {
+            var rejectedSuccessor = Guid.NewGuid();
+            await FluentActions.Awaiting(() => db.ExecuteAsync($@"
+INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocumentId,PostingAction,IdempotencyKey,EventKind,Version,RootAccountingEventId,
+ SupersedesAccountingEventId,ReversesAccountingEventId,SelectionFingerprint,RequestFingerprint,Status,EventDate,RequestedAtUtc,RequestedByUserId,
+ PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
+ VALUES('{rejectedSuccessor}',N'{mutation.Module}',N'{mutation.Document}','{mutation.SourceId}',N'{mutation.Action}',N'REJECT-{rejectedSuccessor:N}',N'Reversal',2,
+ '{original}','{original}','{original}',REPLICATE('B',64),REPLICATE('D',64),N'PendingApproval',CONVERT(date,'2026-09-08'),SYSUTCDATETIME(),
+ '{maker}','{maker}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');"))
+                .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_LINEAGE*", $"a successor cannot mutate its predecessor {mutation.Name}");
+            (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE TenantId='{tenant}' AND Version=2"))
+                .Should().Be(0, "each rejected successor statement must leave zero C6 mutation");
+        }
+
+        await db.ExecuteAsync($@"
 INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocumentId,PostingAction,IdempotencyKey,EventKind,Version,RootAccountingEventId,
  SupersedesAccountingEventId,ReversesAccountingEventId,SelectionFingerprint,RequestFingerprint,Status,EventDate,RequestedAtUtc,RequestedByUserId,
  PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
@@ -159,6 +183,102 @@ UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHE
     }
 
     [SqlServerFact]
+    public async Task CorrectionAcceptsOnlyExactSelectedBookSiblingsAndRejectsUnrelatedRepresentationReuse()
+    {
+        await using var db = await DisposableDatabase.CreateAsync();
+        await db.CreatePredecessorAsync();
+        await db.ApplyAsync(up: true);
+        var tenant = Guid.NewGuid(); var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
+        var firstBook = Guid.NewGuid(); var secondBook = Guid.NewGuid(); var unselectedBook = Guid.NewGuid();
+        var evidence = Guid.NewGuid(); var source = Guid.NewGuid(); var original = Guid.NewGuid(); var correction = Guid.NewGuid();
+        var originalFirstLeaf = Guid.NewGuid(); var originalSecondLeaf = Guid.NewGuid();
+        var originalFirstJournal = Guid.NewGuid(); var originalSecondJournal = Guid.NewGuid();
+        var correctionFirstPosting = Guid.NewGuid(); var correctionSecondPosting = Guid.NewGuid();
+        await db.ExecuteAsync($@"
+INSERT Tenants(Id) VALUES('{tenant}');
+INSERT AccountingBooks(Id,TenantId,Code) VALUES('{firstBook}','{tenant}',N'PRIMARY'),('{secondBook}','{tenant}',N'STAT'),('{unselectedBook}','{tenant}',N'UNSELECTED');
+INSERT AccountingBookSelectionEvidence(Id,TenantId,OriginatingModuleCode,SourceDocumentType,PostingAction,EffectiveDate,IdempotencyKey,SelectionFingerprint,IsDeleted)
+ VALUES('{evidence}','{tenant}',N'FIN',N'JOURNAL-ENTRY.V2',N'POST.EXACT_V2',CONVERT(date,'2026-09-07'),N'CORRECTION-SELECTION',REPLICATE('B',64),0);
+INSERT AccountingBookSelectionEvidenceBooks(Id,TenantId,AccountingBookSelectionEvidenceId,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,IsDeleted)
+ VALUES('{Guid.NewGuid()}','{tenant}','{evidence}','{firstBook}',0,N'PRIMARY',REPLICATE('C',64),0),
+       ('{Guid.NewGuid()}','{tenant}','{evidence}','{secondBook}',1,N'STAT',REPLICATE('D',64),0);
+INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocumentId,PostingAction,IdempotencyKey,EventKind,Version,RootAccountingEventId,
+ AccountingBookSelectionEvidenceId,SelectionFingerprint,RequestFingerprint,Status,EventDate,RequestedAtUtc,RequestedByUserId,PreparedByUserId,PreparedAtUtc,
+ ReleasedByUserId,ReleasedAtUtc,ReleaseReason,CreatedAt,IsDeleted,TenantId)
+ VALUES('{original}',N'FIN',N'JOURNAL-ENTRY.V2','{source}',N'POST.EXACT_V2',N'CORRECTION-ORIGINAL',N'Original',1,'{original}','{evidence}',REPLICATE('B',64),
+ REPLICATE('A',64),N'Pending',CONVERT(date,'2026-09-07'),SYSUTCDATETIME(),'{maker}','{maker}',SYSUTCDATETIME(),'{checker}',SYSUTCDATETIME(),N'release',SYSUTCDATETIME(),0,'{tenant}');
+INSERT JournalEntries(Id,TenantId,AccountingBookId,PostingStatus) VALUES('{originalFirstJournal}','{tenant}','{firstBook}',N'Posted'),('{originalSecondJournal}','{tenant}','{secondBook}',N'Posted');
+INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus,SourceModule,OriginModuleCode,SourceDocumentType,SourceDocumentId,PostingAction)
+ VALUES('{originalFirstLeaf}','{tenant}','{firstBook}','{originalFirstJournal}',N'Posted',N'FIN',N'FIN',N'JOURNAL-ENTRY.V2','{source}',N'POST.EXACT_V2'),
+       ('{originalSecondLeaf}','{tenant}','{secondBook}','{originalSecondJournal}',N'Posted',N'FIN',N'FIN',N'JOURNAL-ENTRY.V2','{source}',N'POST.EXACT_V2');
+INSERT AccountingEventPostings(Id,AccountingEventId,EventVersion,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,Status,
+ FinancePostingEventId,JournalEntryId,PostedAtUtc,CreatedAt,IsDeleted,TenantId)
+ VALUES('{Guid.NewGuid()}','{original}',1,'{firstBook}',0,N'PRIMARY',REPLICATE('C',64),N'Posted','{originalFirstLeaf}','{originalFirstJournal}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}'),
+       ('{Guid.NewGuid()}','{original}',1,'{secondBook}',1,N'STAT',REPLICATE('D',64),N'Posted','{originalSecondLeaf}','{originalSecondJournal}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');
+UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHERE Id='{original}';
+INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocumentId,PostingAction,IdempotencyKey,EventKind,Version,RootAccountingEventId,
+ SupersedesAccountingEventId,CorrectsAccountingEventId,AccountingBookSelectionEvidenceId,SelectionFingerprint,RequestFingerprint,Status,EventDate,RequestedAtUtc,
+ RequestedByUserId,PreparedByUserId,PreparedAtUtc,ReleasedByUserId,ReleasedAtUtc,ReleaseReason,CreatedAt,IsDeleted,TenantId)
+ VALUES('{correction}',N'FIN',N'JOURNAL-ENTRY.V2','{source}',N'POST.EXACT_V2',N'CORRECTION-EXACT',N'Correction',2,'{original}','{original}','{original}',
+ '{evidence}',REPLICATE('B',64),REPLICATE('E',64),N'Pending',CONVERT(date,'2026-09-09'),SYSUTCDATETIME(),'{maker}','{maker}',SYSUTCDATETIME(),
+ '{checker}',SYSUTCDATETIME(),N'correct',SYSUTCDATETIME(),0,'{tenant}');
+INSERT AccountingEventPostings(Id,AccountingEventId,EventVersion,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,Status,CreatedAt,IsDeleted,TenantId)
+ VALUES('{correctionFirstPosting}','{correction}',2,'{firstBook}',0,N'PRIMARY',REPLICATE('C',64),N'Pending',SYSUTCDATETIME(),0,'{tenant}'),
+       ('{correctionSecondPosting}','{correction}',2,'{secondBook}',1,N'STAT',REPLICATE('D',64),N'Pending',SYSUTCDATETIME(),0,'{tenant}');");
+
+        var unrelatedSelectedJournal = Guid.NewGuid(); var unrelatedSelectedLeaf = Guid.NewGuid();
+        var unrelatedUnselectedJournal = Guid.NewGuid(); var unrelatedUnselectedLeaf = Guid.NewGuid();
+        await db.ExecuteAsync($@"
+INSERT JournalEntries(Id,TenantId,AccountingBookId,PostingStatus) VALUES('{unrelatedSelectedJournal}','{tenant}','{firstBook}',N'Posted'),('{unrelatedUnselectedJournal}','{tenant}','{unselectedBook}',N'Posted');
+INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus,SourceModule,OriginModuleCode,SourceDocumentType,SourceDocumentId,PostingAction)
+ VALUES('{unrelatedSelectedLeaf}','{tenant}','{firstBook}','{unrelatedSelectedJournal}',N'Posted',N'GL',N'FIN',N'AccountingEventCorrection','{Guid.NewGuid()}',N'POST.EXACT_V2'),
+       ('{unrelatedUnselectedLeaf}','{tenant}','{unselectedBook}','{unrelatedUnselectedJournal}',N'Posted',N'GL',N'FIN',N'AccountingEventCorrection','{correction}',N'POST.EXACT_V2');");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"UPDATE AccountingEventPostings SET Status=N'Failed',FinancePostingEventId='{unrelatedSelectedLeaf}',
+ JournalEntryId='{unrelatedSelectedJournal}',PostedAtUtc=SYSUTCDATETIME(),FailureMessage=N'failed after leaf' WHERE Id='{correctionFirstPosting}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*CK_AccountingEventPostings_ResultShape*");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEventPostings WHERE Id='{correctionFirstPosting}' AND Status='Pending' AND FinancePostingEventId IS NULL AND JournalEntryId IS NULL AND PostedAtUtc IS NULL AND FailureMessage IS NULL"))
+            .Should().Be(1, "a Failed row cannot retain or own leaf result evidence");
+        foreach (var unrelated in new[]
+                 {
+                     (Leaf: unrelatedSelectedLeaf, Journal: unrelatedSelectedJournal),
+                     (Leaf: unrelatedUnselectedLeaf, Journal: unrelatedUnselectedJournal)
+                 })
+        {
+            await FluentActions.Awaiting(() => db.ExecuteAsync($@"UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{unrelated.Leaf}',
+ JournalEntryId='{unrelated.Journal}',PostedAtUtc=SYSUTCDATETIME() WHERE Id='{correctionFirstPosting}'"))
+                .Should().ThrowAsync<SqlException>().WithMessage("*C6_POSTING_RESULT*");
+            (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEventPostings WHERE AccountingEventId='{correction}' AND (Status<>'Pending' OR FinancePostingEventId IS NOT NULL OR JournalEntryId IS NOT NULL)"))
+                .Should().Be(0, "unrelated direct representations must leave zero C6 result mutation");
+            (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE TenantId='{tenant}' AND Status='Pending' AND Id='{correction}'"))
+                .Should().Be(1, "the canonical correction aggregate must remain unchanged");
+            (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEventAttempts WHERE TenantId='{tenant}'"))
+                .Should().Be(0, "rejected direct evidence cannot manufacture C6 attempt history");
+        }
+
+        var firstJournal = Guid.NewGuid(); var firstLeaf = Guid.NewGuid();
+        var secondJournal = Guid.NewGuid(); var secondLeaf = Guid.NewGuid();
+        await db.ExecuteAsync($@"
+INSERT JournalEntries(Id,TenantId,AccountingBookId,PostingStatus) VALUES('{firstJournal}','{tenant}','{firstBook}',N'Posted'),('{secondJournal}','{tenant}','{secondBook}',N'Posted');
+INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus,SourceModule,OriginModuleCode,SourceDocumentType,SourceDocumentId,PostingAction)
+ VALUES('{firstLeaf}','{tenant}','{firstBook}','{firstJournal}',N'Posted',N'GL',N'FIN',N'AccountingEventCorrection','{correction}',N'POST.EXACT_V2'),
+       ('{secondLeaf}','{tenant}','{secondBook}','{secondJournal}',N'Posted',N'GL',N'FIN',N'AccountingEventCorrection','{correction}',N'POST.EXACT_V2');
+UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{firstLeaf}',JournalEntryId='{firstJournal}',PostedAtUtc=SYSUTCDATETIME()
+ WHERE Id='{correctionFirstPosting}';");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{firstLeaf}',
+ JournalEntryId='{firstJournal}',PostedAtUtc=SYSUTCDATETIME() WHERE Id='{correctionSecondPosting}'"))
+            .Should().ThrowAsync<SqlException>();
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEventPostings WHERE Id='{correctionSecondPosting}' AND Status='Pending' AND FinancePostingEventId IS NULL AND JournalEntryId IS NULL"))
+            .Should().Be(1, "leaf reuse denial must roll back without mutating its sibling");
+        await db.ExecuteAsync($@"UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{secondLeaf}',JournalEntryId='{secondJournal}',PostedAtUtc=SYSUTCDATETIME()
+ WHERE Id='{correctionSecondPosting}';
+UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHERE Id='{correction}';");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEventPostings WHERE AccountingEventId='{correction}' AND Status='Posted'"))
+            .Should().Be(2, "both legitimate exact-book correction siblings are durable");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE Id='{correction}' AND Status='Posted'"))
+            .Should().Be(1);
+    }
+
+    [SqlServerFact]
     public async Task ConcurrentSameTenantIdempotencyPersistsExactlyOneEvent()
     {
         await using var db = await DisposableDatabase.CreateAsync();
@@ -188,25 +308,57 @@ UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHE
     }
 
     [SqlServerFact]
-    public async Task CanonicalEventSourceRejectsLowerCaseAndTrailingSpaceBeforePersistence()
+    public async Task CanonicalEventSourceRejectsUnsupportedPseudoAndNonAsciiIdentityBeforePersistence()
     {
         await using var db = await DisposableDatabase.CreateAsync();
         await db.CreatePredecessorAsync();
         await db.ApplyAsync(up: true);
         var tenant = Guid.NewGuid(); var actor = Guid.NewGuid();
         await db.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');");
-        await FluentActions.Awaiting(() => db.ExecuteAsync(EventInsert(tenant, Guid.NewGuid(), actor, "CASE-KEY", "post", "PendingApproval")))
-            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_IDENTITY*");
-        await FluentActions.Awaiting(() => db.ExecuteAsync(EventInsert(tenant, Guid.NewGuid(), actor, "SPACE-KEY", "POST ", "PendingApproval")))
-            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_IDENTITY*");
-        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE TenantId='{tenant}'")).Should().Be(0);
+        var invalid = new[]
+        {
+            (Key: "MODULE-LOWER", Module: "fin", Document: "JOURNAL", Action: "POST"),
+            (Key: "MODULE-UNKNOWN", Module: "UNKNOWN", Document: "JOURNAL", Action: "POST"),
+            (Key: "MODULE-PSEUDO", Module: "ALL", Document: "JOURNAL", Action: "POST"),
+            (Key: "DOCUMENT-PSEUDO-ALL", Module: "FIN", Document: "ALL", Action: "POST"),
+            (Key: "DOCUMENT-PSEUDO", Module: "FIN", Document: "ALL_ACTIVE_BOOKS", Action: "POST"),
+            (Key: "DOCUMENT-PSEUDO-CLASSIFIED", Module: "FIN", Document: "ALL_CLASSIFIED_BOOKS", Action: "POST"),
+            (Key: "DOCUMENT-PSEUDO-COMPACT", Module: "FIN", Document: "ALLCLASSIFIEDBOOKS", Action: "POST"),
+            (Key: "DOCUMENT-DIGIT", Module: "FIN", Document: "1JOURNAL", Action: "POST"),
+            (Key: "DOCUMENT-PUNCTUATION", Module: "FIN", Document: "JOURNAL$", Action: "POST"),
+            (Key: "DOCUMENT-SPACE", Module: "FIN", Document: "JOUR NAL", Action: "POST"),
+            (Key: "DOCUMENT-NONASCII", Module: "FIN", Document: "JOURNÁL", Action: "POST"),
+            (Key: "ACTION-PSEUDO", Module: "FIN", Document: "JOURNAL", Action: "ALL"),
+            (Key: "ACTION-PSEUDO-ACTIVE", Module: "FIN", Document: "JOURNAL", Action: "ALL_ACTIVE_BOOKS"),
+            (Key: "ACTION-PSEUDO-CLASSIFIED", Module: "FIN", Document: "JOURNAL", Action: "ALL_CLASSIFIED_BOOKS"),
+            (Key: "ACTION-PSEUDO-COMPACT", Module: "FIN", Document: "JOURNAL", Action: "ALLCLASSIFIEDBOOKS"),
+            (Key: "ACTION-DIGIT", Module: "FIN", Document: "JOURNAL", Action: "1POST"),
+            (Key: "ACTION-PUNCTUATION", Module: "FIN", Document: "JOURNAL", Action: "POST$"),
+            (Key: "ACTION-SPACE", Module: "FIN", Document: "JOURNAL", Action: "POST NOW"),
+            (Key: "ACTION-NONASCII", Module: "FIN", Document: "JOURNAL", Action: "PÓST"),
+            (Key: "ACTION-TRAILING", Module: "FIN", Document: "JOURNAL", Action: "POST ")
+        };
+        foreach (var candidate in invalid)
+        {
+            await FluentActions.Awaiting(() => db.ExecuteAsync(EventInsert(tenant, Guid.NewGuid(), actor,
+                    candidate.Key, candidate.Action, "PendingApproval", candidate.Module, candidate.Document)))
+                .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_IDENTITY*");
+            (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE TenantId='{tenant}'"))
+                .Should().Be(0, $"{candidate.Key} must fail atomically before a C6 event is inserted");
+        }
+
+        var canonical = Guid.NewGuid();
+        await db.ExecuteAsync(EventInsert(tenant, canonical, actor, "CANONICAL-KEY", "POST.EXACT_V2", "PendingApproval", "FIN", "JOURNAL-ENTRY.V2"));
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE Id='{canonical}' AND OriginatingModuleCode='FIN' AND SourceDocumentType='JOURNAL-ENTRY.V2' AND PostingAction='POST.EXACT_V2'"))
+            .Should().Be(1);
     }
 
-    private static string EventInsert(Guid tenant, Guid id, Guid actor, string key, string action, string status) => $@"
+    private static string EventInsert(Guid tenant, Guid id, Guid actor, string key, string action, string status,
+        string module = "FIN", string documentType = "JOURNAL") => $@"
 INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocumentId,PostingAction,IdempotencyKey,EventKind,Version,RootAccountingEventId,
  SelectionFingerprint,RequestFingerprint,Status,EventDate,RequestedAtUtc,RequestedByUserId,PreparedByUserId,PreparedAtUtc,
  ReleasedByUserId,ReleasedAtUtc,ReleaseReason,CompletedAtUtc,FailureMessage,CreatedAt,IsDeleted,TenantId)
-VALUES('{id}',N'FIN',N'JOURNAL','{Guid.NewGuid()}',N'{action}',N'{key}',N'Original',1,'{id}',N'',REPLICATE('A',64),N'{status}',CONVERT(date,'2026-09-07'),
+VALUES('{id}',N'{module}',N'{documentType}','{Guid.NewGuid()}',N'{action}',N'{key}',N'Original',1,'{id}',N'',REPLICATE('A',64),N'{status}',CONVERT(date,'2026-09-07'),
  SYSUTCDATETIME(),'{actor}','{actor}',SYSUTCDATETIME(),{(status == "PendingApproval" ? "NULL,NULL,NULL,NULL,NULL" : $"'{Guid.NewGuid()}',SYSUTCDATETIME(),N'release',SYSUTCDATETIME(),N'leaf failed'")},SYSUTCDATETIME(),0,'{tenant}');";
 
     private sealed class SqlServerFactAttribute : FactAttribute

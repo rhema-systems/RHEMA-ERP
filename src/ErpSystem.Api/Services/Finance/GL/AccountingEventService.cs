@@ -1,5 +1,6 @@
 using System.Data;
 using System.Globalization;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using ErpSystem.Core.DTOs.Finance;
@@ -48,6 +49,9 @@ public sealed class AccountingEventService : IAccountingEventService
         if (!_options.Enabled) throw new InvalidOperationException("ACCOUNTING_EVENT_ORCHESTRATION_DISABLED: C6 multi-book release is not enabled.");
         var tenantId = _currentUser.GetRequiredFinanceTenantId();
         var actor = RequireActor();
+        var posting = request.PostingRequest ?? throw new InvalidOperationException("A Finance posting request is required.");
+        var preparedIdentity = FinancePreparedIdentityNormalizer.Normalize(
+            posting.OriginModuleCode ?? posting.SourceModule, posting.SourceDocumentType, posting.PostingAction);
         var key = CanonicalKey(request.SelectionIdempotencyKey);
         var existing = await FindByKeyAsync(tenantId, key, cancellationToken);
         if (existing is not null)
@@ -77,16 +81,15 @@ public sealed class AccountingEventService : IAccountingEventService
                 if (lineage.Target is not null
                     && !string.Equals(request.ExpectedSelectionFingerprint, lineage.Target.SelectionFingerprint, StringComparison.Ordinal))
                     throw new InvalidOperationException("ACCOUNTING_EVENT_LINEAGE_SELECTION_CONFLICT: corrections and reversals must bind the target's frozen selection fingerprint.");
-                var posting = request.PostingRequest;
                 var now = DateTime.UtcNow;
                 prepared = new AccountingEvent
                 {
                     Id = eventId, TenantId = tenantId, RootAccountingEventId = rootId,
                     EventKind = lineage.Kind, Version = lineage.Version, SupersedesAccountingEventId = lineage.SupersedesId,
                     CorrectsAccountingEventId = lineage.CorrectsId, ReversesAccountingEventId = lineage.ReversesId,
-                    OriginatingModuleCode = (posting.OriginModuleCode ?? posting.SourceModule).Trim().ToUpperInvariant(),
-                    SourceDocumentType = posting.SourceDocumentType.Trim().ToUpperInvariant(), SourceDocumentId = posting.SourceDocumentId,
-                    PostingAction = posting.PostingAction.Trim().ToUpperInvariant(), IdempotencyKey = key,
+                    OriginatingModuleCode = preparedIdentity.OriginatingModuleCode,
+                    SourceDocumentType = preparedIdentity.SourceDocumentType, SourceDocumentId = posting.SourceDocumentId,
+                    PostingAction = preparedIdentity.PostingAction, IdempotencyKey = key,
                     SelectionFingerprint = request.ExpectedSelectionFingerprint, RequestFingerprint = fingerprint,
                     Status = AccountingEventStatuses.PendingApproval, EventDate = posting.PostingDate.Date,
                     RequestedAtUtc = now, RequestedByUserId = actor, PreparedByUserId = actor, PreparedAtUtc = now,
@@ -242,6 +245,8 @@ public sealed class AccountingEventService : IAccountingEventService
                     await _db.SaveChangesAsync(cancellationToken);
 
                     var selectedBookIds = attempted.Postings.Select(item => item.AccountingBookId).ToList();
+                    var orderedSelectedBookIds = attempted.Postings.OrderBy(item => item.SelectionOrder)
+                        .Select(item => item.AccountingBookId).ToImmutableArray();
                     var reservationConsumerBookId = await _db.AccountingBooks.AsNoTracking()
                         .Where(item => item.TenantId == tenantId && selectedBookIds.Contains(item.Id)
                             && item.BookType == AccountingBookType.PrimaryFull && !item.IsDeleted)
@@ -256,16 +261,19 @@ public sealed class AccountingEventService : IAccountingEventService
                                     ?? throw new InvalidOperationException("Original exact-book posting evidence is incomplete."),
                                 posting.PostingDate, posting.ReversalReason ?? "Exact AccountingEvent reversal", representationKey,
                                 new AccountingEventPostingAuthority(eventId, evidenceId, representation.AccountingBookId,
-                                    representation.AuthorityFingerprint), cancellationToken)
+                                    representation.AuthorityFingerprint, orderedSelectedBookIds), cancellationToken)
                             : await _leaf.PostAsync(CopyForBook(posting, representation.AccountingBookCodeSnapshot, representationKey,
                                     includeBudgetReservations: representation.AccountingBookId == reservationConsumerBookId,
                                     isCorrection: lineage.Kind == AccountingEventKinds.Correction, attempted),
                                 new AccountingEventPostingAuthority(eventId, evidenceId, representation.AccountingBookId,
-                                    representation.AuthorityFingerprint), cancellationToken);
+                                    representation.AuthorityFingerprint, orderedSelectedBookIds), cancellationToken);
                         representation.FinancePostingEventId = result.PostingEventId;
                         representation.JournalEntryId = result.JournalEntryId;
                         representation.PostedAtUtc = DateTime.UtcNow;
                         representation.Status = AccountingEventStatuses.Posted;
+                        // The next sibling's duplicate scan must be able to prove that every earlier cross-book
+                        // match is linked to this exact event/evidence/book context inside the outer transaction.
+                        await _db.SaveChangesAsync(cancellationToken);
                     }
 
                     // SQL authority validates that every child is Posted before the group can be released.
@@ -502,7 +510,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         static string? S(string? value) => value?.Trim();
         static string? U(string? value) => value?.Trim().ToUpperInvariant();
         static string? D(decimal? value) => value?.ToString("G29", CultureInfo.InvariantCulture);
-        static string? T(DateTime? value) => value?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        static string? T(DateTime? value) => CanonicalDateTime(value);
         static string? G(Guid? value) => value?.ToString("D");
         var canonical = new CanonicalFingerprintWriter("RHEMA-FINANCE-ACCOUNTING-EVENT-V2");
         void Add(string name, object? value) => canonical.Add(name, value switch
@@ -582,7 +590,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
             .ThenBy(item => item.DocumentLineId).ThenBy(item => item.TaxId).ThenBy(item => item.TaxGroupId)
             .ThenBy(item => item.PostingAccountId).ThenBy(item => item.BaseAmount).ThenBy(item => item.TaxableAmount)
             .ThenBy(item => item.TaxRate).ThenBy(item => item.TaxAmount).ThenBy(item => item.CompoundBasis)
-            .ThenBy(item => item.CalculationDate.ToUniversalTime()).ThenBy(item => item.IsManualOverride)
+            .ThenBy(item => CanonicalDateTime(item.CalculationDate), StringComparer.Ordinal).ThenBy(item => item.IsManualOverride)
             .ThenBy(item => S(item.OverrideReason), StringComparer.Ordinal).ToList();
         Add("taxes.count", taxes.Count);
         for (var index = 0; index < taxes.Count; index++)
@@ -598,6 +606,20 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
             Add($"{prefix}.manualOverride", tax.IsManualOverride); Add($"{prefix}.overrideReason", S(tax.OverrideReason));
         }
         return canonical.Hash();
+    }
+
+    private static string? CanonicalDateTime(DateTime? value)
+    {
+        if (!value.HasValue) return null;
+        var utc = value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
+        // Unspecified Finance inputs are deliberately UTC wall-clock values; Local inputs represent
+        // local instants and normalize to their equivalent UTC instant before hashing and ordering.
+        return utc.ToString("O", CultureInfo.InvariantCulture);
     }
 
     private sealed class CanonicalFingerprintWriter(string version)

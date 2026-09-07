@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Finance;
+using System.Collections.Immutable;
 
 namespace ErpSystem.Api.Services.Finance.GL;
 
@@ -26,4 +27,5 @@ internal readonly record struct AccountingEventPostingAuthority(
     Guid AccountingEventId,
     Guid AccountingBookSelectionEvidenceId,
     Guid AccountingBookId,
-    string AuthorityFingerprint);
+    string AuthorityFingerprint,
+    ImmutableArray<Guid> OrderedSelectedBookIds);

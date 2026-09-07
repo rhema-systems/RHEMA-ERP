@@ -28,9 +28,20 @@ public sealed class AccountingEventC6MigrationTests
             .And.Contain("C6_EVENT_SELECTION").And.Contain("C6_EVENT_RELEASE").And.Contain("C6_POSTING_RESULT");
         sql.Should().Contain("i.[AccountingBookSelectionEvidenceId]<>p.[AccountingBookSelectionEvidenceId]")
             .And.Contain("i.[EventKind]=N'Original' AND CONVERT(date,e.[EffectiveDate])<>i.[EventDate]")
+            .And.Contain("i.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2<>p.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2")
+            .And.Contain("i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2<>p.[SourceDocumentType] COLLATE Latin1_General_100_BIN2")
             .And.Contain("i.[SourceDocumentId]<>p.[SourceDocumentId]")
+            .And.Contain("i.[PostingAction] COLLATE Latin1_General_100_BIN2<>p.[PostingAction] COLLATE Latin1_General_100_BIN2")
             .And.Contain("C6_EVENT_OUTCOME_IMMUTABLE")
             .And.Contain("C6_ATTEMPT_FINAL_REQUIRED")
+            .And.Contain("only a Posted exact-book representation may own leaf result evidence")
+            .And.Contain("i.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')")
+            .And.Contain("LEFT(i.[SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'")
+            .And.Contain("i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'")
+            .And.Contain("i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')")
+            .And.Contain("LEFT(i.[PostingAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'")
+            .And.Contain("i.[PostingAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'")
+            .And.Contain("i.[PostingAction] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')")
             .And.Contain("f.[SourceDocumentId]<>e.[SourceDocumentId]")
             .And.Contain("DATALENGTH(i.[PostingAction])<>DATALENGTH(p.[PostingAction])")
             .And.Contain("DATALENGTH(f.[PostingAction])<>DATALENGTH(e.[PostingAction])")
@@ -42,6 +53,8 @@ public sealed class AccountingEventC6MigrationTests
         var events = operations.OfType<CreateTableOperation>().Single(item => item.Name == "AccountingEvents");
         events.UniqueConstraints.Should().Contain(item => item.Columns.SequenceEqual(new[] { "TenantId", "Id", "Version" }));
         var postings = operations.OfType<CreateTableOperation>().Single(item => item.Name == "AccountingEventPostings");
+        postings.CheckConstraints.Should().Contain(item => item.Name == "CK_AccountingEventPostings_ResultShape"
+            && item.Sql.Contains("[Status] = 'Failed' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL", StringComparison.Ordinal));
         postings.ForeignKeys.Should().Contain(item => item.Columns.SequenceEqual(new[] { "TenantId", "AccountingEventId", "EventVersion" })
             && item.PrincipalColumns.SequenceEqual(new[] { "TenantId", "Id", "Version" }));
         operations.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
