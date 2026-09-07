@@ -16,6 +16,63 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementPurchaseOrderComplianceServiceTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExceptionGhanepsUsesUnderlyingTenderAndRetainsMappingDecision(bool compliant)
+    {
+        await using var fixture = new Fixture();
+        var control = new ProcurementExceptionalSourcingControl
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = Guid.NewGuid()
+        };
+        fixture.PurchaseOrder.ProcurementSourceType = ProcurementPurchaseOrderSourceType.ApprovedException;
+        fixture.PurchaseOrder.ProcurementSourceId = control.Id;
+        fixture.Sources.Setup(x => x.EvaluateCurrentAsync(It.IsAny<PurchaseOrder>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPurchaseOrderSourceResolution());
+        fixture.Ghaneps.Setup(x => x.GetAwardComplianceAsync(ProcurementGhanepsSourceType.ExceptionalSourcing,
+                control.TenderId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementGhanepsComplianceDto
+            { HasApplicableMapping = true, IsCompliant = compliant, Code = "TEST_MAPPING", Message = "Configured mapping result." });
+        await fixture.SeedAsync(control);
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(x => x.Key == "ghaneps");
+
+        check.Required.Should().BeTrue();
+        check.Passed.Should().Be(compliant);
+        fixture.Ghaneps.Verify(x => x.GetAwardComplianceAsync(ProcurementGhanepsSourceType.ExceptionalSourcing,
+            control.TenderId, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Ghaneps.Verify(x => x.GetAwardComplianceAsync(It.IsAny<ProcurementGhanepsSourceType>(),
+            control.Id, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("foreign")]
+    [InlineData("deleted")]
+    [InlineData("empty-tender")]
+    public async Task InvalidExceptionGhanepsLineageDoesNotBecomeNotApplicable(string invalid)
+    {
+        await using var fixture = new Fixture();
+        var control = new ProcurementExceptionalSourcingControl
+        {
+            Id = Guid.NewGuid(), TenantId = invalid == "foreign" ? Guid.NewGuid() : fixture.TenantId,
+            TenderId = invalid == "empty-tender" ? Guid.Empty : Guid.NewGuid(), IsDeleted = invalid == "deleted"
+        };
+        fixture.PurchaseOrder.ProcurementSourceType = ProcurementPurchaseOrderSourceType.ApprovedException;
+        fixture.PurchaseOrder.ProcurementSourceId = control.Id;
+        fixture.Sources.Setup(x => x.EvaluateCurrentAsync(It.IsAny<PurchaseOrder>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPurchaseOrderSourceResolution());
+        if (invalid != "missing") await fixture.SeedAsync(control);
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(x => x.Key == "ghaneps");
+
+        check.Passed.Should().BeFalse();
+        check.Code.Should().Be("PO_GHANEPS_CHECK_FAILED");
+        fixture.Ghaneps.Verify(x => x.GetAwardComplianceAsync(It.IsAny<ProcurementGhanepsSourceType>(),
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task BlockedEnforcementReturnsTenChecksAndRecordsImmutableAudit()
     {
@@ -519,7 +576,7 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
                     Message = "Allowed"
                 });
 
-            var sources = new Mock<IProcurementPurchaseOrderSourceService>();
+            var sources = Sources;
             sources.Setup(item => item.EvaluateCurrentAsync(
                     It.IsAny<PurchaseOrder>(),
                     It.IsAny<CancellationToken>()))
@@ -543,7 +600,7 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
                     PartnerName = "Controlled Supplier"
                 });
 
-            var ghaneps = new Mock<IProcurementGhanepsExchangeService>();
+            var ghaneps = Ghaneps;
             var controlEvents = new Mock<IProcurementControlEventService>();
             controlEvents.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
@@ -577,6 +634,8 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
         public Guid UserId { get; }
         public PurchaseOrder PurchaseOrder { get; }
         public Mock<IProcurementRequisitionBudgetControlService> BudgetControl { get; }
+        public Mock<IProcurementPurchaseOrderSourceService> Sources { get; } = new();
+        public Mock<IProcurementGhanepsExchangeService> Ghaneps { get; } = new();
         public ProcurementPurchaseOrderComplianceService Service { get; }
         public List<ProcurementControlEventWriteRequest> ControlEvents { get; } = [];
         public List<NotificationTopicEvent> Notifications { get; } = [];
