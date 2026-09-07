@@ -33,6 +33,8 @@ public sealed class AccountingEvent : TenantEntity
     [MaxLength(500)] public string? ReleaseReason { get; set; }
     [MaxLength(20)] public string ProducerDecisionStatus { get; set; } = ProducerIntentDecisionStatuses.NotRequired;
     [MaxLength(100)] public string? ProducerParticipantIdentity { get; set; }
+    public string? ProducerIntentSnapshotJson { get; set; }
+    [MaxLength(64)] public string? ProducerIntentSnapshotHash { get; set; }
     public Guid? ProducerDecidedByUserId { get; set; }
     public DateTime? ProducerDecidedAtUtc { get; set; }
     [MaxLength(500)] public string? ProducerDecisionReason { get; set; }

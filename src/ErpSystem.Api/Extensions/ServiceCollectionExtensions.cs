@@ -817,9 +817,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookApplicabilityService, ErpSystem.Api.Services.Finance.Settings.AccountingBookApplicabilityService>();
             services.AddOptions<ErpSystem.Api.Services.Finance.GL.AccountingEventOptions>()
                 .BindConfiguration(ErpSystem.Api.Services.Finance.GL.AccountingEventOptions.SectionName);
-            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingEventService, ErpSystem.Api.Services.Finance.GL.AccountingEventService>();
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.AccountingEventService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingEventService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.AccountingEventService>());
             services.AddOptions<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentOptions>()
                 .BindConfiguration(ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentOptions.SectionName);
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.IFinanceProducerExecutionRegistry,
+                ErpSystem.Api.Services.Finance.GL.FinanceProducerExecutionRegistry>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceProducerIntentService, ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountClassificationService, ErpSystem.Api.Services.Finance.Settings.AccountClassificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountBookCurrencyPolicyService, ErpSystem.Api.Services.Finance.MultiCurrency.AccountBookCurrencyPolicyService>();

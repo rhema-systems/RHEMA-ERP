@@ -15,11 +15,12 @@ public sealed class FinanceProducerIntentC7MigrationTests
         operations.First().Should().BeOfType<SqlOperation>().Which.Sql.Should().Contain("C7_PREFLIGHT");
         operations.OfType<AddColumnOperation>().Select(item => item.Name).Should().BeEquivalentTo(
             "ProducerDecisionStatus", "ProducerParticipantIdentity", "ProducerDecidedByUserId",
-            "ProducerDecidedAtUtc", "ProducerDecisionReason");
+            "ProducerDecidedAtUtc", "ProducerDecisionReason", "ProducerIntentSnapshotJson", "ProducerIntentSnapshotHash");
         var sql = string.Join('\n', operations.OfType<SqlOperation>().Select(item => item.Sql));
         sql.Should().Contain("TR_AccountingEvents_C7ProducerDecision")
             .And.Contain("C7_MAKER_CHECKER").And.Contain("C7_DECISION_IMMUTABLE")
-            .And.Contain("C7_EXECUTION_GATE").And.Contain("Rejected");
+            .And.Contain("C7_EXECUTION_GATE").And.Contain("C7_INSERT_STATE")
+            .And.Contain("C7_DECISION_ONLY").And.Contain("Rejected");
     }
 
     [Fact]
@@ -27,7 +28,7 @@ public sealed class FinanceProducerIntentC7MigrationTests
     {
         var operations = Migration().DownOperations();
         operations.First().Should().BeOfType<SqlOperation>().Which.Sql.Should().Contain("C7_DOWN_REFUSED");
-        operations.OfType<DropColumnOperation>().Should().HaveCount(5);
+        operations.OfType<DropColumnOperation>().Should().HaveCount(7);
     }
 
     [Fact]

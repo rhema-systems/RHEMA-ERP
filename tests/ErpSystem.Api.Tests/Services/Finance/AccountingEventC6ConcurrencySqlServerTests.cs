@@ -47,7 +47,7 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         await using (var fail = database.Context())
         {
             var participant = new SqlOwnerParticipant(fail, "INVENTORY.DISPOSAL.V1", eventId, failAfterWrite: true);
-            await FluentActions.Awaiting(() => Service(fail, database.TenantId, database.MakerId).ExecuteApprovedAsync(eventId,
+            await FluentActions.Awaiting(() => ((ITrustedAccountingEventExecutor)Service(fail, database.TenantId, database.MakerId)).ExecuteApprovedAsync(eventId,
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, participant))
                 .Should().ThrowAsync<InvalidOperationException>().WithMessage("C7_OWNER_FAILURE");
         }
@@ -65,14 +65,14 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         await using (var retry = database.Context())
         {
             var participant = new SqlOwnerParticipant(retry, "inventory.disposal.v1", eventId, failAfterWrite: false);
-            (await Service(retry, database.TenantId, database.MakerId).ExecuteApprovedAsync(eventId,
+            (await ((ITrustedAccountingEventExecutor)Service(retry, database.TenantId, database.MakerId)).ExecuteApprovedAsync(eventId,
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, participant))
                 .Status.Should().Be(AccountingEventStatuses.Posted);
         }
         await using (var exactRetry = database.Context())
         {
             var mustNotRun = new SqlOwnerParticipant(exactRetry, "INVENTORY.DISPOSAL.V1", eventId, failAfterWrite: true);
-            (await Service(exactRetry, database.TenantId, database.MakerId).ExecuteApprovedAsync(eventId,
+            (await ((ITrustedAccountingEventExecutor)Service(exactRetry, database.TenantId, database.MakerId)).ExecuteApprovedAsync(eventId,
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, mustNotRun))
                 .Status.Should().Be(AccountingEventStatuses.Posted);
             (await exactRetry.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [C7OwnerEffects]").SingleAsync()).Should().Be(1);
@@ -143,6 +143,14 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             Release(sameId, Request(database, "RELEASE-SAME", sameRequest.PostingRequest.SourceDocumentId), database.CheckerId, "same governed release", sameRace.Contender));
         sameRace.AssertCompeted();
         same.Count(item => item.Error == null && item.Result != null && item.Result.Status == AccountingEventStatuses.Posted).Should().Be(2);
+        await using (var wrongPostedActor = database.Context())
+        {
+            var before = await wrongPostedActor.AccountingEventAttempts.CountAsync(item => item.AccountingEventId == sameId);
+            await FluentActions.Awaiting(() => Service(wrongPostedActor, database.TenantId, database.OtherCheckerId).ReleaseAsync(sameId,
+                new ReleaseAccountingEventDto { Reason = "same governed release", Request = sameRequest }))
+                .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_RELEASE_CHECKER_CONFLICT:*");
+            (await wrongPostedActor.AccountingEventAttempts.CountAsync(item => item.AccountingEventId == sameId)).Should().Be(before);
+        }
         var correction = Request(database, "RELEASE-SAME-CORRECTION", sameRequest.PostingRequest.SourceDocumentId);
         correction.EventKind = AccountingEventKinds.Correction; correction.CorrectsAccountingEventId = sameId;
         correction.SupersedesAccountingEventId = sameId; correction.PostingRequest.PostingDate = database.EventDate.AddDays(1);
@@ -206,6 +214,13 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             (await failed.AccountBalances.CountAsync()).Should().Be(0);
             (await failed.AccountingBookSelectionEvidence.CountAsync()).Should().Be(0);
             (await failed.Accounts.Where(x => x.Id == seeded.DebitId || x.Id == seeded.CreditId).SumAsync(x => x.Balance)).Should().Be(0m);
+        }
+        await using (var wrongFailedActor = database.Context())
+        {
+            await FluentActions.Awaiting(() => Service(wrongFailedActor, database.TenantId, database.OtherCheckerId)
+                .ReleaseAsync(eventId, new ReleaseAccountingEventDto { Reason = "independent release", Request = Request(database) }))
+                .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_RELEASE_CHECKER_CONFLICT:*");
+            (await wrongFailedActor.AccountingEventAttempts.CountAsync(item => item.AccountingEventId == eventId)).Should().Be(1);
         }
 
         await using (var repair = database.Context())
@@ -373,11 +388,14 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         Guid SecondLiabilityClassId, AccountingBookSelectionDto Selection);
 
     private sealed class SqlOwnerParticipant(ApplicationDbContext db, string identity, Guid effectId, bool failAfterWrite)
-        : IFinanceProducerExecutionParticipant
+        : IFinanceProducerExecutionHandler
     {
         public string ParticipantIdentity { get; } = identity;
+        public ApplicationDbContext DbContext => db;
+        public bool UsesExternalSideEffects => false;
+        public bool ManagesTransactions => false;
 
-        public async Task ExecuteAsync(CancellationToken cancellationToken = default)
+        public async Task ExecuteAsync(FinanceProducerExecutionContext context, CancellationToken cancellationToken)
         {
             await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO [C7OwnerEffects] ([Id]) VALUES ({effectId})", cancellationToken);
             if (failAfterWrite) throw new InvalidOperationException("C7_OWNER_FAILURE");

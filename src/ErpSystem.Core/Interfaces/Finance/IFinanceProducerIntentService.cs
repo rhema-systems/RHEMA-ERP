@@ -14,15 +14,5 @@ public interface IFinanceProducerIntentService
     Task<AccountingEventDto> RejectAsync(Guid accountingEventId, ProducerAccountingIntentDto intent,
         DecideProducerAccountingIntentDto decision, CancellationToken cancellationToken = default);
     Task<AccountingEventDto> ExecuteApprovedAsync(Guid accountingEventId, ProducerAccountingIntentDto intent,
-        IFinanceProducerExecutionParticipant participant, CancellationToken cancellationToken = default);
-}
-
-/// <summary>
-/// A narrowly scoped same-database participant invoked inside Finance's serializable C6 transaction.
-/// Implementations must use the ambient DbContext transaction and must not commit independently.
-/// </summary>
-public interface IFinanceProducerExecutionParticipant
-{
-    string ParticipantIdentity { get; }
-    Task ExecuteAsync(CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default);
 }

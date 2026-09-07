@@ -10137,6 +10137,13 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("ProducerIntentSnapshotHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ProducerIntentSnapshotJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("ProducerParticipantIdentity")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -10236,7 +10243,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_AccountingEvents_NoDelete", "[IsDeleted] = 0");
 
-                            t.HasCheckConstraint("CK_AccountingEvents_ProducerDecision", "([ProducerDecisionStatus] = 'NotRequired' AND [ProducerParticipantIdentity] IS NULL AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] = 'Pending' AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] IN ('Approved','Rejected') AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerDecidedByUserId] IS NOT NULL AND [ProducerDecidedAtUtc] IS NOT NULL AND [ProducerDecisionReason] IS NOT NULL)");
+                            t.HasCheckConstraint("CK_AccountingEvents_ProducerDecision", "([ProducerDecisionStatus] = 'NotRequired' AND [ProducerParticipantIdentity] IS NULL AND [ProducerIntentSnapshotJson] IS NULL AND [ProducerIntentSnapshotHash] IS NULL AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] = 'Pending' AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerIntentSnapshotJson] IS NOT NULL AND LEN([ProducerIntentSnapshotHash]) = 64 AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] IN ('Approved','Rejected') AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerIntentSnapshotJson] IS NOT NULL AND LEN([ProducerIntentSnapshotHash]) = 64 AND [ProducerDecidedByUserId] IS NOT NULL AND [ProducerDecidedAtUtc] IS NOT NULL AND [ProducerDecisionReason] IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_AccountingEvents_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
 

@@ -44,6 +44,8 @@ public sealed class AccountingEventDto
     public string? ReleaseReason { get; set; }
     public string ProducerDecisionStatus { get; set; } = string.Empty;
     public string? ProducerParticipantIdentity { get; set; }
+    public string? ProducerIntentSnapshotJson { get; set; }
+    public string? ProducerIntentSnapshotHash { get; set; }
     public Guid? ProducerDecidedByUserId { get; set; }
     public DateTime? ProducerDecidedAtUtc { get; set; }
     public string? ProducerDecisionReason { get; set; }

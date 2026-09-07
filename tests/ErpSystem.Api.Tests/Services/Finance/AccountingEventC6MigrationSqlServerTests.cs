@@ -14,6 +14,74 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class AccountingEventC6MigrationSqlServerTests
 {
     [SqlServerFact]
+    public async Task C7PreflightAndEmptyDown_AreExecutableAndScoped()
+    {
+        await using var preflight = await DisposableDatabase.CreateAsync();
+        await preflight.CreatePredecessorAsync();
+        await FluentActions.Awaiting(() => preflight.ApplyC7Async(up: true))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C7_PREFLIGHT*");
+        (await preflight.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('AccountingEvents') AND name LIKE 'Producer%'")).Should().Be(0);
+
+        await using var empty = await DisposableDatabase.CreateAsync();
+        await empty.CreatePredecessorAsync();
+        await empty.ApplyAsync(up: true);
+        await empty.ApplyC7Async(up: true);
+        (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('AccountingEvents') AND name LIKE 'Producer%'")).Should().Be(7);
+        await empty.ApplyC7Async(up: false);
+        (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('AccountingEvents') AND name LIKE 'Producer%'")).Should().Be(0);
+    }
+
+    [SqlServerFact]
+    public async Task C7SqlAuthority_AllowsExactDecisionOnly_AndRejectsPreseedCombinedMutationAndLossyDown()
+    {
+        await using var db = await DisposableDatabase.CreateAsync();
+        await db.CreatePredecessorAsync();
+        await db.ApplyAsync(up: true);
+        await db.ApplyC7Async(up: true);
+        var tenant = Guid.NewGuid(); var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
+        await db.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');");
+        var approvedId = Guid.NewGuid();
+        await db.ExecuteAsync(ProducerEventInsert(tenant, approvedId, maker, "C7-APPROVE"));
+        await db.ExecuteAsync($"UPDATE AccountingEvents SET ProducerDecisionStatus=N'Approved',ProducerDecidedByUserId='{checker}',ProducerDecidedAtUtc=SYSUTCDATETIME(),ProducerDecisionReason=N'reviewed' WHERE Id='{approvedId}';");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE Id='{approvedId}' AND Status='PendingApproval' AND ProducerDecisionStatus='Approved'")).Should().Be(1);
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEvents SET ProducerDecisionReason=N'changed' WHERE Id='{approvedId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C7_DECISION_IMMUTABLE*");
+        var rejectedId = Guid.NewGuid();
+        await db.ExecuteAsync(ProducerEventInsert(tenant, rejectedId, maker, "C7-REJECT"));
+        await db.ExecuteAsync($"UPDATE AccountingEvents SET ProducerDecisionStatus=N'Rejected',ProducerDecidedByUserId='{checker}',ProducerDecidedAtUtc=SYSUTCDATETIME(),ProducerDecisionReason=N'invalid evidence' WHERE Id='{rejectedId}';");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE Id='{rejectedId}' AND Status='PendingApproval' AND ProducerDecisionStatus='Rejected'")).Should().Be(1);
+
+        var concurrentId = Guid.NewGuid();
+        await db.ExecuteAsync(ProducerEventInsert(tenant, concurrentId, maker, "C7-CONCURRENT"));
+        await using (var winner = await db.OpenAsync())
+        await using (var loser = await db.OpenAsync())
+        await using (var winnerTx = (SqlTransaction)await winner.BeginTransactionAsync())
+        {
+            await using var winnerCommand = new SqlCommand($"UPDATE AccountingEvents SET ProducerDecisionStatus=N'Approved',ProducerDecidedByUserId='{checker}',ProducerDecidedAtUtc=SYSUTCDATETIME(),ProducerDecisionReason=N'concurrent approval' WHERE Id='{concurrentId}';", winner, winnerTx);
+            await winnerCommand.ExecuteNonQueryAsync();
+            await using var loserCommand = new SqlCommand($"UPDATE AccountingEvents SET ProducerDecisionStatus=N'Rejected',ProducerDecidedByUserId='{Guid.NewGuid()}',ProducerDecidedAtUtc=SYSUTCDATETIME(),ProducerDecisionReason=N'conflicting rejection' WHERE Id='{concurrentId}';", loser) { CommandTimeout = 30 };
+            var loserAttempt = loserCommand.ExecuteNonQueryAsync();
+            await Task.Delay(200);
+            loserAttempt.IsCompleted.Should().BeFalse("the row lock must serialize competing producer decisions");
+            await winnerTx.CommitAsync();
+            await FluentActions.Awaiting(async () => await loserAttempt).Should().ThrowAsync<SqlException>()
+                .WithMessage("*C7_DECISION_IMMUTABLE*");
+        }
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE Id='{concurrentId}' AND ProducerDecisionStatus='Approved'")).Should().Be(1);
+
+        var combinedId = Guid.NewGuid();
+        await db.ExecuteAsync(ProducerEventInsert(tenant, combinedId, maker, "C7-COMBINED"));
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEvents SET ProducerDecisionStatus=N'Approved',ProducerDecidedByUserId='{checker}',ProducerDecidedAtUtc=SYSUTCDATETIME(),ProducerDecisionReason=N'reviewed',Status=N'Pending',ReleasedByUserId='{checker}',ReleasedAtUtc=SYSUTCDATETIME(),ReleaseReason=N'reviewed' WHERE Id='{combinedId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C7_DECISION_ONLY*");
+
+        var preseed = ProducerEventInsert(tenant, Guid.NewGuid(), maker, "C7-PRESEED")
+            .Replace("N'Pending',N'INVENTORY.DISPOSAL.V1'", $"N'Approved',N'INVENTORY.DISPOSAL.V1'")
+            .Replace("NULL,NULL,NULL", $"'{checker}',SYSUTCDATETIME(),N'fabricated'");
+        await FluentActions.Awaiting(() => db.ExecuteAsync(preseed)).Should().ThrowAsync<SqlException>().WithMessage("*C7_INSERT_STATE*");
+        await FluentActions.Awaiting(() => db.ApplyC7Async(up: false)).Should().ThrowAsync<SqlException>().WithMessage("*C7_DOWN_REFUSED*");
+    }
+
+    [SqlServerFact]
     public async Task UpAndEmptyDownCreateAndRemoveOnlyC6Authority()
     {
         await using var db = await DisposableDatabase.CreateAsync();
@@ -361,6 +429,14 @@ INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocume
 VALUES('{id}',N'{module}',N'{documentType}','{Guid.NewGuid()}',N'{action}',N'{key}',N'Original',1,'{id}',N'',REPLICATE('A',64),N'{status}',CONVERT(date,'2026-09-07'),
  SYSUTCDATETIME(),'{actor}','{actor}',SYSUTCDATETIME(),{(status == "PendingApproval" ? "NULL,NULL,NULL,NULL,NULL" : $"'{Guid.NewGuid()}',SYSUTCDATETIME(),N'release',SYSUTCDATETIME(),N'leaf failed'")},SYSUTCDATETIME(),0,'{tenant}');";
 
+    private static string ProducerEventInsert(Guid tenant, Guid id, Guid maker, string key) => $@"
+INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocumentId,PostingAction,IdempotencyKey,EventKind,Version,RootAccountingEventId,
+ SelectionFingerprint,RequestFingerprint,Status,EventDate,RequestedAtUtc,RequestedByUserId,PreparedByUserId,PreparedAtUtc,
+ ProducerDecisionStatus,ProducerParticipantIdentity,ProducerIntentSnapshotJson,ProducerIntentSnapshotHash,
+ ProducerDecidedByUserId,ProducerDecidedAtUtc,ProducerDecisionReason,CreatedAt,IsDeleted,TenantId)
+VALUES('{id}',N'INV',N'INVENTORY_DISPOSAL','{Guid.NewGuid()}',N'DISPOSE',N'{key}',N'Original',1,'{id}',N'',REPLICATE('A',64),N'PendingApproval',CONVERT(date,'2026-09-07'),
+ SYSUTCDATETIME(),'{maker}','{maker}',SYSUTCDATETIME(),N'Pending',N'INVENTORY.DISPOSAL.V1',N'{{}}',REPLICATE('B',64),NULL,NULL,NULL,SYSUTCDATETIME(),0,'{tenant}');";
+
     private sealed class SqlServerFactAttribute : FactAttribute
     {
         public SqlServerFactAttribute()
@@ -410,6 +486,13 @@ CREATE TABLE FinancePostingEvents(Id uniqueidentifier NOT NULL CONSTRAINT PK_Fin
             var generator = context.GetService<IMigrationsSqlGenerator>(); var migration = new ExposedMigration();
             foreach (var command in generator.Generate(up ? migration.UpOperations() : migration.DownOperations())) await ExecuteAsync(command.CommandText);
         }
+        public async Task ApplyC7Async(bool up)
+        {
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection).Options;
+            await using var context = new ApplicationDbContext(options);
+            var generator = context.GetService<IMigrationsSqlGenerator>(); var migration = new ExposedC7Migration();
+            foreach (var command in generator.Generate(up ? migration.UpOperations() : migration.DownOperations())) await ExecuteAsync(command.CommandText);
+        }
         public async Task<SqlConnection> OpenAsync() { var connection = new SqlConnection(_connection); await connection.OpenAsync(); return connection; }
         public async Task ExecuteAsync(string sql) { await using var connection = await OpenAsync(); await using var command = new SqlCommand(sql, connection) { CommandTimeout = 120 }; await command.ExecuteNonQueryAsync(); }
         public async Task<T> ScalarAsync<T>(string sql) { await using var connection = await OpenAsync(); await using var command = new SqlCommand(sql, connection); return (T)Convert.ChangeType(await command.ExecuteScalarAsync(), typeof(T)); }
@@ -417,6 +500,11 @@ CREATE TABLE FinancePostingEvents(Id uniqueidentifier NOT NULL CONSTRAINT PK_Fin
         public async ValueTask DisposeAsync() { if (SafeName.IsMatch(_name)) await MasterAsync($"IF DB_ID(N'{_name}') IS NOT NULL BEGIN ALTER DATABASE [{_name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{_name}]; END"); }
 
         private sealed class ExposedMigration : AddAccountingEventOrchestrationFoundation
+        {
+            public IReadOnlyList<MigrationOperation> UpOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Up(b); return b.Operations; }
+            public IReadOnlyList<MigrationOperation> DownOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Down(b); return b.Operations; }
+        }
+        private sealed class ExposedC7Migration : AddProducerIntentStagingC7
         {
             public IReadOnlyList<MigrationOperation> UpOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Up(b); return b.Operations; }
             public IReadOnlyList<MigrationOperation> DownOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Down(b); return b.Operations; }

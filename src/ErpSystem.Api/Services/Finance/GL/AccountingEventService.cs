@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
@@ -16,8 +17,9 @@ using Microsoft.Extensions.Options;
 
 namespace ErpSystem.Api.Services.Finance.GL;
 
-public sealed class AccountingEventService : IAccountingEventService
+public sealed class AccountingEventService : IAccountingEventService, ITrustedAccountingEventExecutor
 {
+    private static readonly JsonSerializerOptions ProducerSnapshotJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IAccountingBookApplicabilityService _applicability;
@@ -58,6 +60,8 @@ public sealed class AccountingEventService : IAccountingEventService
         {
             RequireRetryMatch(existing, Fingerprint(request, key, existing.Version, existing.RootAccountingEventId));
             RequireProducerMakerMatch(existing, actor);
+            if (existing.ProducerDecisionStatus != ProducerIntentDecisionStatuses.NotRequired)
+                RequireSnapshotMatch(existing, request);
             return Map(existing);
         }
         var eventId = request.AccountingEventId.GetValueOrDefault(Guid.NewGuid());
@@ -75,6 +79,8 @@ public sealed class AccountingEventService : IAccountingEventService
                 {
                     RequireRetryMatch(raced, Fingerprint(request, key, raced.Version, raced.RootAccountingEventId));
                     RequireProducerMakerMatch(raced, actor);
+                    if (raced.ProducerDecisionStatus != ProducerIntentDecisionStatuses.NotRequired)
+                        RequireSnapshotMatch(raced, request);
                     prepared = raced; await tx.CommitAsync(cancellationToken); return;
                 }
                 var lineage = await ResolveLineageAsync(tenantId, request, cancellationToken);
@@ -84,6 +90,9 @@ public sealed class AccountingEventService : IAccountingEventService
                     && !string.Equals(request.ExpectedSelectionFingerprint, lineage.Target.SelectionFingerprint, StringComparison.Ordinal))
                     throw new InvalidOperationException("ACCOUNTING_EVENT_LINEAGE_SELECTION_CONFLICT: corrections and reversals must bind the target's frozen selection fingerprint.");
                 var now = DateTime.UtcNow;
+                request.AccountingEventId = eventId;
+                var producerSnapshot = string.IsNullOrWhiteSpace(request.ProducerParticipantIdentity)
+                    ? null : JsonSerializer.Serialize(request, ProducerSnapshotJsonOptions);
                 prepared = new AccountingEvent
                 {
                     Id = eventId, TenantId = tenantId, RootAccountingEventId = rootId,
@@ -99,6 +108,8 @@ public sealed class AccountingEventService : IAccountingEventService
                         ? ProducerIntentDecisionStatuses.NotRequired : ProducerIntentDecisionStatuses.Pending,
                     ProducerParticipantIdentity = string.IsNullOrWhiteSpace(request.ProducerParticipantIdentity)
                         ? null : request.ProducerParticipantIdentity.Trim().ToUpperInvariant(),
+                    ProducerIntentSnapshotJson = producerSnapshot,
+                    ProducerIntentSnapshotHash = producerSnapshot is null ? null : Sha256(producerSnapshot),
                     CreatedAt = now, CreatedBy = ActorName()
                 };
                 _db.AccountingEvents.Add(prepared);
@@ -153,6 +164,7 @@ public sealed class AccountingEventService : IAccountingEventService
                     ?? throw new KeyNotFoundException("AccountingEvent was not found.");
                 RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey),
                     prepared.Version, prepared.RootAccountingEventId));
+                RequireSnapshotMatch(prepared, release.Request);
                 var decidedStatus = approve ? ProducerIntentDecisionStatuses.Approved : ProducerIntentDecisionStatuses.Rejected;
                 if (prepared.ProducerDecisionStatus == decidedStatus)
                 {
@@ -184,8 +196,8 @@ public sealed class AccountingEventService : IAccountingEventService
         return Map(prepared!);
     }
 
-    public async Task<AccountingEventDto> ExecuteApprovedAsync(Guid accountingEventId, ReleaseAccountingEventDto release,
-        IFinanceProducerExecutionParticipant? participant = null, CancellationToken cancellationToken = default)
+    async Task<AccountingEventDto> ITrustedAccountingEventExecutor.ExecuteApprovedAsync(Guid accountingEventId, ReleaseAccountingEventDto release,
+        IFinanceProducerExecutionHandler handler, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(release);
         var tenantId = _currentUser.GetRequiredFinanceTenantId();
@@ -197,14 +209,15 @@ public sealed class AccountingEventService : IAccountingEventService
         release.Request.AccountingEventId = accountingEventId;
         RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey),
             prepared.Version, prepared.RootAccountingEventId));
-        RequireParticipantMatch(release.Request, participant);
-        return await OrchestrateAsync(release.Request, prepared.ProducerDecisionReason!, participant, cancellationToken);
+        RequireParticipantMatch(release.Request, handler);
+        RequireSnapshotMatch(prepared, release.Request);
+        return await OrchestrateAsync(release.Request, prepared.ProducerDecisionReason!, handler, cancellationToken);
     }
 
     private async Task<AccountingEventDto> OrchestrateAsync(
         CreateAccountingEventDto request,
         string releaseReason,
-        IFinanceProducerExecutionParticipant? participant,
+        IFinanceProducerExecutionHandler? participant,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -246,8 +259,10 @@ public sealed class AccountingEventService : IAccountingEventService
                     {
                         requestFingerprint = Fingerprint(request, key, raced.Version, raced.RootAccountingEventId);
                         RequireRetryMatch(raced, requestFingerprint);
-                        RequireReleaseMatch(raced, raced.ReleasedByUserId
-                            ?? throw new InvalidOperationException("Posted AccountingEvent approval evidence is incomplete."), releaseReason);
+                        var retryChecker = participant is null ? actorId : raced.ProducerDecidedByUserId
+                            ?? throw new InvalidOperationException("Posted producer AccountingEvent approval evidence is incomplete.");
+                        RequireReleaseMatch(raced, retryChecker, releaseReason);
+                        if (participant is not null) RequireSnapshotMatch(raced, request);
                         attempted = raced;
                         await transaction.CommitAsync(cancellationToken);
                         return;
@@ -263,6 +278,7 @@ public sealed class AccountingEventService : IAccountingEventService
                     RequireParticipantMatch(request, participant);
                     if (participant is not null && raced.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
                         throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: producer execution requires durable independent approval.");
+                    if (participant is not null) RequireSnapshotMatch(raced, request);
                     var lineage = new Lineage(raced.EventKind, raced.Version, raced.RootAccountingEventId,
                         raced.SupersedesAccountingEventId, raced.CorrectsAccountingEventId,
                         raced.ReversesAccountingEventId, null);
@@ -337,7 +353,15 @@ public sealed class AccountingEventService : IAccountingEventService
                     // The owner participant runs under this same serializable database transaction. Any owner
                     // or Finance failure therefore rolls every economic write back before failure evidence is appended.
                     if (participant is not null)
-                        await participant.ExecuteAsync(cancellationToken);
+                    {
+                        var ambientTransaction = _db.Database.CurrentTransaction
+                            ?? throw new InvalidOperationException("ACCOUNTING_EVENT_AMBIENT_TRANSACTION_REQUIRED: Finance transaction is unavailable.");
+                        var transactionId = ambientTransaction.TransactionId;
+                        await participant.ExecuteAsync(new FinanceProducerExecutionContext(tenantId, eventId,
+                            attempted.RequestFingerprint, attempted.ProducerIntentSnapshotJson!), cancellationToken);
+                        if (_db.Database.CurrentTransaction?.TransactionId != transactionId)
+                            throw new InvalidOperationException("ACCOUNTING_EVENT_PARTICIPANT_TRANSACTION_TAMPER: the owner adapter changed Finance's ambient transaction.");
+                    }
 
                     var selectedBookIds = attempted.Postings.Select(item => item.AccountingBookId).ToList();
                     var orderedSelectedBookIds = attempted.Postings.OrderBy(item => item.SelectionOrder)
@@ -770,7 +794,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
             throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_REASON_CONFLICT: a retry must retain the original normalized reason.");
     }
 
-    private static void RequireParticipantMatch(CreateAccountingEventDto request, IFinanceProducerExecutionParticipant? participant)
+    private static void RequireParticipantMatch(CreateAccountingEventDto request, IFinanceProducerExecutionHandler? participant)
     {
         var expected = request.ProducerParticipantIdentity?.Trim().ToUpperInvariant() ?? string.Empty;
         var actual = participant?.ParticipantIdentity?.Trim().ToUpperInvariant() ?? string.Empty;
@@ -778,6 +802,27 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         if (expected.Length == 0 || participant is null || !string.Equals(expected, actual, StringComparison.Ordinal))
             throw new InvalidOperationException("ACCOUNTING_EVENT_PARTICIPANT_CONFLICT: execution must retain the prepared owner participant identity.");
     }
+
+    private static void RequireSnapshotMatch(AccountingEvent item, CreateAccountingEventDto request)
+    {
+        if (string.IsNullOrWhiteSpace(item.ProducerIntentSnapshotJson)
+            || item.ProducerIntentSnapshotHash?.Length != 64
+            || !string.Equals(item.ProducerIntentSnapshotHash, Sha256(item.ProducerIntentSnapshotJson), StringComparison.Ordinal))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_INVALID: immutable producer intent evidence is missing or corrupted.");
+        var reconstructed = JsonSerializer.Deserialize<CreateAccountingEventDto>(item.ProducerIntentSnapshotJson, ProducerSnapshotJsonOptions)
+            ?? throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_INVALID: producer intent evidence cannot be reconstructed.");
+        var reconstructedFingerprint = Fingerprint(reconstructed, CanonicalKey(reconstructed.SelectionIdempotencyKey),
+            item.Version, item.RootAccountingEventId);
+        if (!string.Equals(reconstructedFingerprint, item.RequestFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_FINGERPRINT_CONFLICT: stored producer evidence is not bound to the request fingerprint.");
+        var candidateFingerprint = Fingerprint(request, CanonicalKey(request.SelectionIdempotencyKey),
+            item.Version, item.RootAccountingEventId);
+        if (!string.Equals(candidateFingerprint, reconstructedFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_REQUEST_CONFLICT: execution request differs from immutable prepared evidence.");
+    }
+
+    private static string Sha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static void RequireProducerDecisionMatch(AccountingEvent item, Guid checker, string normalizedReason)
     {
@@ -809,6 +854,8 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         ReleaseReason = item.ReleaseReason,
         ProducerDecisionStatus = item.ProducerDecisionStatus,
         ProducerParticipantIdentity = item.ProducerParticipantIdentity,
+        ProducerIntentSnapshotJson = item.ProducerIntentSnapshotJson,
+        ProducerIntentSnapshotHash = item.ProducerIntentSnapshotHash,
         ProducerDecidedByUserId = item.ProducerDecidedByUserId,
         ProducerDecidedAtUtc = item.ProducerDecidedAtUtc,
         ProducerDecisionReason = item.ProducerDecisionReason,
