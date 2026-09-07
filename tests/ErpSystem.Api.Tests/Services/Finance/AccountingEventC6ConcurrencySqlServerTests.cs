@@ -1,16 +1,19 @@
 using System.Data.Common;
 using System.Text.RegularExpressions;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -32,7 +35,6 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         await using (var setup = database.Context())
         {
             seeded = await SeedAsync(setup, database);
-            await setup.Database.ExecuteSqlRawAsync("CREATE TABLE [C7OwnerEffects] ([Id] uniqueidentifier NOT NULL PRIMARY KEY);");
         }
         var request = Request(database, "C7-OWNER-ATOMIC");
         request.ProducerParticipantIdentity = "INVENTORY.DISPOSAL.V1";
@@ -77,33 +79,52 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         await using (var fail = database.Context())
         {
             await using var tx = await fail.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-            await fail.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO [C7OwnerEffects] ([Id]) VALUES ({eventId})");
-            var executor = (ITrustedAccountingEventExecutor)Service(fail, database.TenantId, database.MakerId);
+            var ownerCase = await fail.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
+            ownerCase.Status = InventoryDisposalStatus.AuditVerified;
+            ownerCase.AuditVerifiedById = database.MakerId;
+            ownerCase.AuditVerifiedAtUtc = DateTime.UtcNow;
+            ownerCase.AuditFindings = "tracked owner effect inside the shared transaction";
+            var executor = (ITrustedAccountingEventExecutor)Service(fail, database.TenantId, database.MakerId, persistAudit: true);
             var failure = await FluentActions.Awaiting(() => executor.ExecuteApprovedInAmbientTransactionAsync(eventId,
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt))
                 .Should().ThrowAsync<InvalidOperationException>();
             await tx.RollbackAsync();
             await tx.DisposeAsync();
-            fail.ChangeTracker.Clear();
+            fail.ChangeTracker.Entries<InventoryDisposalCase>().Should().ContainSingle(
+                "the caller deliberately retains rolled-back owner tracking state");
             await executor.RecordApprovedFailureAfterRollbackAsync(eventId,
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt, failure.Which);
         }
         await using (var verifyFailure = database.Context())
         {
-            (await verifyFailure.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [C7OwnerEffects]").SingleAsync()).Should().Be(0);
+            var ownerCase = await verifyFailure.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
+            ownerCase.Status.Should().Be(InventoryDisposalStatus.Identified);
+            ownerCase.AuditVerifiedById.Should().BeNull();
+            ownerCase.AuditVerifiedAtUtc.Should().BeNull();
+            ownerCase.AuditFindings.Should().BeNull();
             var failed = await verifyFailure.AccountingEvents.Include(item => item.Attempts).Include(item => item.Postings)
                 .SingleAsync(item => item.Id == eventId);
             failed.Status.Should().Be(AccountingEventStatuses.Failed);
             failed.ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Approved);
             failed.Attempts.Should().ContainSingle(item => item.Status == AccountingEventStatuses.Failed);
             failed.Postings.Should().BeEmpty();
+            (await verifyFailure.AccountingBookSelectionEvidence.CountAsync()).Should().Be(0);
+            (await verifyFailure.AccountingEventProducerReceipts.CountAsync(item => item.AccountingEventId == eventId)).Should().Be(0);
+            (await verifyFailure.FinancePostingEvents.CountAsync()).Should().Be(0);
+            (await verifyFailure.JournalEntries.CountAsync()).Should().Be(0);
+            (await verifyFailure.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.AccountingEventFailed
+                && item.Resource == "Finance.AccountingEvent" && item.ResourceId == eventId.ToString())).Should().Be(1);
         }
 
         await using (var retry = database.Context())
         {
             await RepairSecondBookAsync(database, seeded);
             await using var tx = await retry.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-            await retry.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO [C7OwnerEffects] ([Id]) VALUES ({eventId})");
+            var ownerCase = await retry.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
+            ownerCase.Status = InventoryDisposalStatus.AuditVerified;
+            ownerCase.AuditVerifiedById = database.MakerId;
+            ownerCase.AuditVerifiedAtUtc = DateTime.UtcNow;
+            ownerCase.AuditFindings = "tracked owner effect committed on exact recovery";
             (await ((ITrustedAccountingEventExecutor)Service(retry, database.TenantId, database.MakerId)).ExecuteApprovedInAmbientTransactionAsync(eventId,
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt))
                 .Status.Should().Be(AccountingEventStatuses.Posted);
@@ -116,7 +137,8 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt))
                 .Status.Should().Be(AccountingEventStatuses.Posted);
             await tx.CommitAsync();
-            (await exactRetry.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [C7OwnerEffects]").SingleAsync()).Should().Be(1);
+            (await exactRetry.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId)).Status
+                .Should().Be(InventoryDisposalStatus.AuditVerified);
             (await exactRetry.AccountingEventProducerReceipts.CountAsync(item => item.AccountingEventId == eventId)).Should().Be(1);
             await FluentActions.Awaiting(() => exactRetry.Database.ExecuteSqlInterpolatedAsync(
                     $"UPDATE [AccountingEventProducerReceipts] SET [OwnerAction]={"TAMPER"} WHERE [AccountingEventId]={eventId}"))
@@ -344,13 +366,21 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         (await final.AccountCurrencyExposures.CountAsync(x => x.AccountId == seeded.DebitId || x.AccountId == seeded.CreditId)).Should().Be(0);
     }
 
-    private static AccountingEventService Service(ApplicationDbContext db, Guid tenant, Guid actor)
+    private static AccountingEventService Service(ApplicationDbContext db, Guid tenant, Guid actor, bool persistAudit = false)
     {
-        var user = User(tenant, actor); var audit = new Mock<IFinanceAuditService>();
-        audit.Setup(x => x.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
-        var leaf = new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit.Object);
-        var applicability = Applicability(db, tenant, actor, audit: audit.Object);
-        return new AccountingEventService(db, user.Object, applicability, leaf, audit.Object,
+        var user = User(tenant, actor);
+        IFinanceAuditService audit;
+        if (persistAudit)
+            audit = new FinanceAuditService(db, user.Object, new HttpContextAccessor());
+        else
+        {
+            var auditMock = new Mock<IFinanceAuditService>();
+            auditMock.Setup(x => x.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
+            audit = auditMock.Object;
+        }
+        var leaf = new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit);
+        var applicability = Applicability(db, tenant, actor, audit: audit);
+        return new AccountingEventService(db, user.Object, applicability, leaf, audit,
             Options.Create(new AccountingEventOptions { Enabled = true }));
     }
 
@@ -406,6 +436,26 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             debit, credit, pa, pl, sa, sl,
             Mapping(tenant, primary.Id, debit.Id, pa.Id), Mapping(tenant, primary.Id, credit.Id, pl.Id), Mapping(tenant, second.Id, debit.Id, sa.Id));
         await db.SaveChangesAsync();
+        var warehouse = new Warehouse { TenantId = tenant, Code = "C7-OWNER", Name = "C7 owner transaction", IsActive = true };
+        var owner = new ApplicationUser
+        {
+            Id = database.MakerId, TenantId = tenant, FirstName = "C7", LastName = "Owner", UserName = $"c7.owner.{database.MakerId:N}",
+            NormalizedUserName = $"C7.OWNER.{database.MakerId:N}", Email = $"{database.MakerId:N}@example.test",
+            NormalizedEmail = $"{database.MakerId:N}@EXAMPLE.TEST", IsActive = true
+        };
+        db.AddRange(warehouse, owner);
+        await db.SaveChangesAsync();
+        var disposal = new InventoryDisposalCase
+        {
+            TenantId = tenant, DisposalNumber = "C7-OWNER-001", WarehouseId = warehouse.Id,
+            Status = InventoryDisposalStatus.Identified, Method = InventoryDisposalMethod.WriteOff,
+            Reason = "C7 atomic rollback test", IdentificationDetails = "tracked owner effect sentinel",
+            RequestedById = owner.Id, RequestedAtUtc = DateTime.UtcNow, TotalQuantity = 1m, TotalValue = 100m,
+            IdempotencyKey = "C7-OWNER-001", PayloadHash = new string('A', 64), CorrelationId = "C7-OWNER-001",
+            IntegrityHash = new string('B', 64)
+        };
+        db.InventoryDisposalCases.Add(disposal);
+        await db.SaveChangesAsync();
         var maker = Applicability(db, tenant, database.MakerId, governedWorkflow: true);
         var draft = await maker.CreateDraftAsync(new SaveAccountingBookApplicabilityPolicyDto { PolicyCode = "C6_SQL", Name = "C6 SQL policy",
             EffectiveFrom = new DateTime(2026, 1, 1), Reason = "C6 migrated SQL authority", Rules = [new SaveAccountingBookApplicabilityRuleDto {
@@ -417,7 +467,7 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         var selection = await maker.ResolveAsync(new ResolveAccountingBookApplicabilityDto { EffectiveDate = database.EventDate,
             OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST" });
         database.CalculationInputHash = selection.CalculationInputHash; database.SelectionFingerprint = selection.SelectionFingerprint;
-        return new Seeded(primary.Id, second.Id, debit.Id, credit.Id, sa.Id, sl.Id, selection);
+        return new Seeded(primary.Id, second.Id, debit.Id, credit.Id, sa.Id, sl.Id, disposal.Id, selection);
     }
 
     private static async Task RepairSecondBookAsync(DisposableDatabase database, Seeded seeded)
@@ -449,7 +499,7 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
     private static AccountAccountingBook Mapping(Guid tenant, Guid book, Guid account, Guid classification) => new() { TenantId = tenant, AccountingBookId = book,
         AccountId = account, AccountClassificationId = classification, IsEnabled = true };
     private sealed record Seeded(Guid PrimaryBookId, Guid SecondBookId, Guid DebitId, Guid CreditId, Guid SecondAssetClassId,
-        Guid SecondLiabilityClassId, AccountingBookSelectionDto Selection);
+        Guid SecondLiabilityClassId, Guid DisposalCaseId, AccountingBookSelectionDto Selection);
 
     private sealed class SqlServerFactAttribute : FactAttribute
     {

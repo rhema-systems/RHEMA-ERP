@@ -222,6 +222,9 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
     {
         if (_db.Database.CurrentTransaction is not null)
             throw new InvalidOperationException("ACCOUNTING_EVENT_FAILURE_REQUIRES_ROLLBACK: owner transaction must be rolled back before durable failure evidence is written.");
+        // A database rollback does not restore EF tracking state. Finance owns this boundary so no
+        // rolled-back owner, selection, receipt, or posting state can leak into the fresh failure write.
+        _db.ChangeTracker.Clear();
         var tenantId = _currentUser.GetRequiredFinanceTenantId();
         var prepared = await Query().SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountingEventId
             && !item.IsDeleted, cancellationToken) ?? throw new KeyNotFoundException("AccountingEvent was not found.");
