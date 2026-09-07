@@ -729,13 +729,14 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             return;
         }
         var control = controls[0];
+        var petty = control.Method == ProcurementMethodType.PettyPurchase;
         state.Method = control.Method;
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Source,
             "EXCEPTIONAL_SOURCE_CURRENT",
             control.Status == ProcurementExceptionalSourcingControlStatus.Recommended &&
             tender.Status is not "Awarded" and not "Cancelled",
-            "The exceptional source has reached a negotiated recommendation and is not awarded.",
-            "Complete approval, negotiation, and recommendation before award.",
+            petty ? "The Petty Purchase has an approved quotation recommendation and is not awarded." : "The exceptional source has reached a negotiated recommendation and is not awarded.",
+            petty ? "Complete independent approval and quotation recommendation before award." : "Complete approval, negotiation, and recommendation before award.",
             "ProcurementExceptionalSourcingControl", control.Id, control.IntegrityHash);
         state.Authority = new ProcurementAwardReadinessAuthorityDto
         {
@@ -747,7 +748,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             WorkflowInstanceId = control.WorkflowInstanceId,
             ApprovalReference = control.PpaApprovalReference ??
                                 control.ManagingDirectorApprovalReference ??
-                                control.BoardApprovalReference,
+                                control.BoardApprovalReference ??
+                                (petty && control.WorkflowInstanceId.HasValue ? $"workflow:{control.WorkflowInstanceId.Value:N}" : null),
             ApprovedAtUtc = control.ApprovedAtUtc,
             ApprovedByUserId = control.ApprovedById,
             ApprovalActorUserIds = ParseGuids(control.ApprovalActorsJson)
@@ -775,7 +777,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             "ProcurementExceptionalSourcingControl", control.Id, control.IntegrityHash);
         state.Evaluations.Add(new ProcurementAwardReadinessEvaluationDto
         {
-            EvaluationType = "ExceptionalNegotiatedRecommendation",
+            EvaluationType = petty ? "PettyQuotationRecommendation" : "ExceptionalNegotiatedRecommendation",
             EvaluationId = control.Id,
             Phase = ProcurementEvaluationPhase.Combined,
             Status = control.Status.ToString(),
@@ -784,12 +786,15 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             IntegrityHash = control.IntegrityHash
         });
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Evaluation,
-            "EXCEPTIONAL_NEGOTIATION_EVALUATED",
+            petty ? "PETTY_QUOTATION_REVIEWED" : "EXCEPTIONAL_NEGOTIATION_EVALUATED",
+            petty ? bid is not null && bid.TotalBidAmount > 0 && bid.TotalBidAmount <= tender.EstimatedValue &&
+                control.ApprovedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
+                !string.IsNullOrWhiteSpace(control.SupplierSelectionEvidenceReference) :
             control.NegotiatedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
             !string.IsNullOrWhiteSpace(control.NegotiationMinutesEvidenceReference) &&
             !string.IsNullOrWhiteSpace(control.NegotiationOutcomeReference),
-            "Negotiation minutes, outcome, and resulting recommendation are retained.",
-            "Complete the negotiation record and recommendation.");
+            petty ? "The approved supplier quotation and recommendation are retained." : "Negotiation minutes, outcome, and resulting recommendation are retained.",
+            petty ? "Review and recommend the recorded quotation within the approved value." : "Complete the negotiation record and recommendation.");
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.ScoreIntegrity,
             "EXCEPTIONAL_SCORE_NOT_APPLICABLE",
             ProcurementAwardReadinessPrerequisiteStatus.NotApplicable,

@@ -33,15 +33,16 @@ export function getExceptionalSourcingActions(
   return {
     canSubmitApproval: control.status === Status.Prepared,
     canDecideApproval: control.status === Status.PendingApproval,
-    canNegotiate: control.status === Status.Approved,
-    canRecommend: control.status === Status.Negotiated,
+    canNegotiate: control.method !== 5 && control.status === Status.Approved,
+    canRecommend: control.method === 5 ? control.status === Status.Approved : control.status === Status.Negotiated,
     canAward: control.status === Status.Recommended,
-    canContract: control.status === Status.Awarded,
+    canContract: control.method !== 5 && control.status === Status.Awarded,
     canAccept: control.status === Status.Contracted,
     canFile: control.status === Status.Accepted && control.method !== 5,
     immutable:
       control.status === Status.Filed ||
       control.status === Status.Rejected ||
+      (control.status === Status.Awarded && control.method === 5) ||
       (control.status === Status.Accepted && control.method === 5),
   };
 }
@@ -64,6 +65,22 @@ export function validateExceptionalPreparation(
     return 'Supplier-selection evidence is required.';
   if (request.businessPartnerIds.length < readiness.minimumSupplierCount)
     return `Select at least ${readiness.minimumSupplierCount} eligible supplier${readiness.minimumSupplierCount === 1 ? '' : 's'}.`;
+  if (readiness.method === 5) {
+    if (request.businessPartnerIds.length !== 1) return 'Select exactly one supplier for Petty Purchase.';
+    const quote = request.quotation;
+    if (!quote?.reference.trim() || !quote.evidenceReference.trim()) return 'Enter the quotation reference and evidence.';
+    const lines = readiness.quotationItems ?? [];
+    if (!lines.length || quote.items.length !== lines.length || new Set(quote.items.map(item => item.tenderItemId)).size !== lines.length)
+      return 'Enter one price for every locked quotation item.';
+    let total = 0;
+    for (const line of lines) {
+      const price = quote.items.find(item => item.tenderItemId === line.tenderItemId)?.unitPrice;
+      if (!price || !Number.isFinite(price) || price <= 0 || Math.abs(price * 100 - Math.round(price * 100)) > 0.000001)
+        return 'Enter positive unit prices with at most two decimal places.';
+      total += Math.round(line.quantity * price * 100) / 100;
+    }
+    if (!readiness.estimatedValue || total > readiness.estimatedValue) return 'The quotation exceeds the approved requisition value.';
+  }
   for (const requirement of readiness.evidenceRequirements) {
     const supplied = request.evidenceChecklist.find(
       (item) => item.requirementKey === requirement.requirementKey

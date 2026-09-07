@@ -7,6 +7,7 @@ import {
 import { ProcurementExceptionalSourcingControlStatus as Status } from '@/types/procurement-exceptional-sourcing-control';
 
 const readiness = {
+  currency: 'GHS', estimatedValue: 750, quotationItems: [{ tenderItemId: 'item', description: 'Kit', quantity: 1, unitOfMeasure: 'EA' }],
   tenderId: 't', tenderNumber: 'T-1', tenderTitle: 'Tender', tenderStatus: 'Approved', method: 4,
   methodRuleCode: 'M', exceptionRuleCode: 'E', authorityRouteReference: 'A', minimumSupplierCount: 1,
   boardApprovalRequired: true, managingDirectorApprovalRequired: false, ppaApprovalRequired: true,
@@ -15,6 +16,7 @@ const readiness = {
 };
 
 const request = {
+  quotation: { reference: 'Q-1', evidenceReference: 'QUOTE-1', items: [{ tenderItemId: 'item', unitPrice: 750 }] },
   justification: 'A sufficiently detailed statutory justification.', justificationEvidenceReference: 'J-1',
   supplierSelectionEvidenceReference: 'S-1', businessPartnerIds: ['supplier'],
   evidenceChecklist: [{ requirementKey: 'K', evidenceReference: 'E-1', verificationReference: 'V-1' }],
@@ -45,5 +47,16 @@ describe('exceptional sourcing controls', () => {
       { ...readiness, method: 5, justificationRequired: false, postAwardFilingRequired: false },
       { ...request, justification: '', justificationEvidenceReference: '' },
     )).toBeNull();
+  });
+  it('uses quotation recommendation, not negotiation, after petty approval', () => {
+    expect(getExceptionalSourcingActions({ status: Status.Approved, method: 5 } as never))
+      .toMatchObject({ canNegotiate: false, canRecommend: true, canAward: false });
+  });
+  it('rejects extra suppliers, missing prices and quotations above the ceiling', () => {
+    const petty = { ...readiness, method: 5 };
+    expect(validateExceptionalPreparation(petty, { ...request, businessPartnerIds: ['a', 'b'] })).toContain('exactly one');
+    expect(validateExceptionalPreparation(petty, { ...request, quotation: undefined })).toContain('quotation reference');
+    expect(validateExceptionalPreparation(petty, { ...request, quotation: { ...request.quotation, items: [{ tenderItemId: 'item', unitPrice: 751 }] } })).toContain('exceeds');
+    expect(validateExceptionalPreparation(petty, { ...request, quotation: { ...request.quotation, items: [{ tenderItemId: 'foreign', unitPrice: 10 }] } })).toContain('positive unit prices');
   });
 });

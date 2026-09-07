@@ -221,6 +221,27 @@ public class TenderService : ITenderService
                 dto.SourcePurchaseRequisitionId,
                 requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
                 sourceType, $"new-tender:{dto.Title}", Guid.NewGuid().ToString("N"));
+            if (gate.SelectedMethod == ProcurementMethodType.PettyPurchase)
+            {
+                if (dto.TenderType != "PettyPurchase" || dto.SubmissionDeadline.HasValue || dto.OpeningDate.HasValue ||
+                    dto.EvaluationTemplateId.HasValue || dto.UseQCBSEvaluation || dto.AllowPartialBids)
+                    throw new ProcurementRequisitionSourcingValidationException("PETTY_PREPARATION_REQUIRED",
+                        "Use Petty Purchase preparation. Public bidding dates, scoring templates and partial bids do not apply.");
+                // The client cannot substitute items or quantities on the small-purchase route.
+                var sourceItems = await _unitOfWork.Repository<PurchaseRequisitionItem>().GetQueryable(item =>
+                    item.RequisitionId == dto.SourcePurchaseRequisitionId && item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted)
+                    .Include(item => item.InventoryItem).OrderBy(item => item.Id).ToListAsync();
+                if (sourceItems.Count == 0)
+                    throw new ProcurementRequisitionSourcingValidationException("PETTY_SOURCE_ITEMS_REQUIRED", "The approved requisition has no current items.");
+                dto.Items = sourceItems.Select((item, index) => new CreateTenderItemDto
+                {
+                    LineNumber = index + 1, ItemCode = item.InventoryItem?.ItemCode,
+                    Description = item.ItemDescription, Quantity = item.Quantity, UnitOfMeasure = item.UnitOfMeasure,
+                    Specifications = item.Specifications, RequiredDeliveryDate = item.RequiredDate
+                }).ToList();
+            }
+            else if (dto.TenderType == "PettyPurchase")
+                throw new ProcurementRequisitionSourcingValidationException("PETTY_METHOD_MISMATCH", "The locked sourcing case does not select Petty Purchase.");
             if (dto.SourceProcurementPlanItemId.HasValue &&
                 gate.SourcePlanItemId != dto.SourceProcurementPlanItemId.Value)
                 throw new ProcurementRequisitionSourcingValidationException(

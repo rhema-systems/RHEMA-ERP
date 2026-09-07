@@ -5,6 +5,10 @@ namespace ErpSystem.Core.DTOs.Procurement;
 
 public sealed class ProcurementExceptionalSourcingReadinessDto
 {
+    public Guid? SourceRequisitionId { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public decimal? EstimatedValue { get; set; }
+    public List<PettyPurchaseQuotationItemDto> QuotationItems { get; set; } = new();
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string TenderTitle { get; set; } = string.Empty;
@@ -43,6 +47,7 @@ public sealed class ProcurementExceptionalSupplierOptionDto
 
 public sealed class ProcurementExceptionalSourcingControlDto
 {
+    public Guid? SourceRequisitionId { get; set; }
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string TenderTitle { get; set; } = string.Empty;
@@ -120,11 +125,33 @@ public sealed class ProcurementExceptionalSourcingMilestoneDto
 
 public sealed class PrepareProcurementExceptionalSourcingRequest
 {
+    public PettyPurchaseQuotationRequest? Quotation { get; set; }
     [StringLength(2000)] public string Justification { get; set; } = string.Empty;
     [StringLength(500)] public string JustificationEvidenceReference { get; set; } = string.Empty;
     [Required, StringLength(500)] public string SupplierSelectionEvidenceReference { get; set; } = string.Empty;
     [MinLength(1)] public List<Guid> BusinessPartnerIds { get; set; } = new();
     [MinLength(1)] public List<ProcurementExceptionalEvidenceRequest> EvidenceChecklist { get; set; } = new();
+}
+
+public sealed class PettyPurchaseQuotationRequest
+{
+    [Required, StringLength(200)] public string Reference { get; set; } = string.Empty;
+    [Required, StringLength(500)] public string EvidenceReference { get; set; } = string.Empty;
+    [MinLength(1)] public List<PettyPurchaseQuotationPriceRequest> Items { get; set; } = new();
+}
+
+public sealed class PettyPurchaseQuotationPriceRequest
+{
+    public Guid TenderItemId { get; set; }
+    public decimal UnitPrice { get; set; }
+}
+
+public sealed class PettyPurchaseQuotationItemDto
+{
+    public Guid TenderItemId { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+    public string? UnitOfMeasure { get; set; }
 }
 
 public sealed class ProcurementExceptionalEvidenceRequest
