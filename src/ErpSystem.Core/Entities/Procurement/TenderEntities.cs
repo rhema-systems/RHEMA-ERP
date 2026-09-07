@@ -115,6 +115,10 @@ public class Tender : TenantEntity
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
 
+    /// <summary>Calendar days from submission closing, agreed with the tender terms. No default is assumed.</summary>
+    [Range(1, int.MaxValue)]
+    public int? BidValidityPeriodDays { get; set; }
+
     // Navigation Properties
     public new virtual ApplicationUser? CreatedBy { get; set; }
     public virtual ApplicationUser? PublishedBy { get; set; }

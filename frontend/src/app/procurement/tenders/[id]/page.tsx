@@ -832,7 +832,7 @@ export default function TenderDetailPage() {
             </Card>
           )}
 
-          {tender.termsAndConditions && (
+          {(tender.termsAndConditions || tender.bidValidityPeriodDays != null) && (
             <Card>
               <CardHeader>
                 <CardTitle>Terms and Conditions</CardTitle>
@@ -841,6 +841,7 @@ export default function TenderDetailPage() {
                 <p className="whitespace-pre-wrap">
                   {tender.termsAndConditions}
                 </p>
+                {tender.bidValidityPeriodDays != null && <p className="mt-2">Bid validity: {tender.bidValidityPeriodDays} calendar days from submission closing.</p>}
               </CardContent>
             </Card>
           )}

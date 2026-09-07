@@ -114,6 +114,30 @@ public sealed class ProcurementTenderDocumentRegisterControllerTests
         service.Verify(item => item.IssueAsync(request, "trace-issue", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task BindingForwardsThePendingScheduleRequestWithItsOriginalDates()
+    {
+        var request = new BindProcurementTenderDocumentRegisterRequest
+        {
+            SourceType = ProcurementTenderDocumentSourceType.Tender, SourceId = Guid.NewGuid(),
+            BidValidityPeriodDays = 45, BidValidityTermsReference = "Approved document clause 18",
+            SubmissionDeadlineUtc = DateTime.UtcNow.AddHours(-2), OpeningScheduledAtUtc = DateTime.UtcNow.AddHours(-1),
+            ScheduleChange = new BindProcurementTenderDocumentScheduleChangeRequest
+            {
+                SubmissionDeadlineUtc = DateTime.UtcNow.AddDays(2), OpeningScheduledAtUtc = DateTime.UtcNow.AddDays(2).AddHours(1),
+                Reason = "Preparation delayed", EvidenceReference = "UAT-SCHEDULE", WorkflowDefinitionId = Guid.NewGuid()
+            }
+        };
+        var service = new Mock<IProcurementTenderDocumentControlService>();
+        service.Setup(item => item.BindAsync(request, "bind-schedule-correlation", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementTenderDocumentRegisterDto { SourceId = request.SourceId, OriginalSubmissionDeadlineUtc = request.SubmissionDeadlineUtc });
+        var result = (CreatedAtActionResult)await Controller(service, "bind-schedule-correlation").Bind(request, default);
+        result.StatusCode.Should().Be(201);
+        result.Value.Should().BeOfType<ProcurementTenderDocumentRegisterDto>().Which.OriginalSubmissionDeadlineUtc.Should().Be(request.SubmissionDeadlineUtc);
+        service.Verify(item => item.BindAsync(request, "bind-schedule-correlation", It.IsAny<CancellationToken>()), Times.Once);
+        service.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [InlineData("TENDER_DOCUMENT_TENDER_NOT_PUBLISHED")]
     [InlineData("TENDER_DOCUMENT_RESCHEDULE_NOT_ALLOWED")]

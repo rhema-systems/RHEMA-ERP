@@ -24,6 +24,56 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementTenderDocumentControlServiceTests
 {
     [Fact]
+    public async Task BindingDerivesExpiryFromSavedTenderTermsAndProposedClosing()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        fixture.Tender.BidValidityPeriodDays = 45;
+        await fixture.Context.SaveChangesAsync();
+        var request = fixture.FirstBindingWithSchedule();
+        request.BidValidityPeriodDays = null;
+        request.BidValidityTermsReference = null;
+        var readiness = await fixture.Service.GetRegisterReadinessAsync(request.SourceType, request.SourceId);
+        readiness.BidValidityPeriodDays.Should().Be(45);
+        var result = await fixture.Service.BindAsync(request, "saved-validity-terms");
+        result.OriginalBidValidityUntilUtc.Should().Be(request.ScheduleChange!.SubmissionDeadlineUtc.AddDays(45));
+        fixture.Tender.SubmissionDeadline.Should().Be(request.SubmissionDeadlineUtc);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("zero")]
+    [InlineData("negative")]
+    [InlineData("overflow")]
+    [InlineData("reference")]
+    [InlineData("override")]
+    [InlineData("unapproved")]
+    public async Task InvalidValidityTermsFailBeforeRegisterCreation(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var request = fixture.FirstBindingWithSchedule();
+        switch (variant)
+        {
+            case "missing": request.BidValidityPeriodDays = null; break;
+            case "zero": request.BidValidityPeriodDays = 0; break;
+            case "negative": request.BidValidityPeriodDays = -1; break;
+            case "overflow": request.BidValidityPeriodDays = int.MaxValue; break;
+            case "reference": request.BidValidityTermsReference = " "; break;
+            case "override": fixture.Tender.BidValidityPeriodDays = 30; await fixture.Context.SaveChangesAsync(); break;
+            case "unapproved": fixture.Tender.BidValidityPeriodDays = 90; fixture.Tender.Status = "Draft"; await fixture.Context.SaveChangesAsync(); break;
+        }
+        var action = () => fixture.Service.BindAsync(request, "invalid-validity-terms");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>();
+        (await fixture.Context.ProcurementTenderDocumentRegisters.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public void ValidityCalculationPreservesTimeAcrossLeapDay()
+    {
+        var closing = new DateTime(2028, 2, 28, 16, 50, 27, DateTimeKind.Utc).AddMilliseconds(321);
+        ProcurementBidValidity.Calculate(closing, 2).Should().Be(new DateTime(2028, 3, 1, 16, 50, 27, DateTimeKind.Utc).AddMilliseconds(321));
+    }
+
+    [Fact]
     public async Task PublishedPolicyOptionsAreTenantSafeAndExposeExactProfileLineage()
     {
         await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
@@ -507,6 +557,112 @@ public sealed class ProcurementTenderDocumentControlServiceTests
         var ready = await fixture.Service.EnsurePublicationReadyAsync(ProcurementTenderDocumentSourceType.Tender,
             fixture.Tender.Id, request.NewValueUtc.Value, "publish-approved-schedule");
         ready.Ready.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FirstBindingCanRequestScheduleApprovalWithoutChangingSourceDates(bool expired)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        fixture.Tender.SubmissionDeadline = DateTime.UtcNow.AddHours(expired ? -2 : 2);
+        fixture.Tender.OpeningDate = fixture.Tender.SubmissionDeadline.Value.AddMinutes(5);
+        await fixture.Context.SaveChangesAsync();
+        var request = fixture.FirstBindingWithSchedule();
+        var readiness = await fixture.Service.GetRegisterReadinessAsync(ProcurementTenderDocumentSourceType.Tender, fixture.Tender.Id);
+        readiness.AllowedActions.Should().Contain("BindWithScheduleChange");
+        readiness.OpeningScheduledAtUtc.Should().Be(fixture.Tender.OpeningDate);
+        var original = fixture.Tender.SubmissionDeadline.Value;
+        var opening = fixture.Tender.OpeningDate;
+        var bound = await fixture.Service.BindAsync(request, "first-bind-schedule");
+        var replay = await fixture.Service.BindAsync(request, "first-bind-schedule");
+        replay.Id.Should().Be(bound.Id);
+        bound.OriginalSubmissionDeadlineUtc.Should().Be(original);
+        bound.EffectiveSubmissionDeadlineUtc.Should().Be(original);
+        bound.BoundAtUtc.Should().BeAfter(DateTime.UtcNow.AddMinutes(-1));
+        fixture.Tender.SubmissionDeadline.Should().Be(original);
+        fixture.Tender.OpeningDate.Should().Be(opening);
+        var change = bound.Changes.Should().ContainSingle().Subject;
+        change.Status.Should().Be(ProcurementTenderDocumentChangeStatus.PendingApproval);
+        change.NewValueUtc.Should().Be(request.ScheduleChange!.SubmissionDeadlineUtc);
+        (await fixture.Context.ProcurementTenderDocumentRegisters.CountAsync()).Should().Be(1);
+        (await fixture.Context.ProcurementTenderDocumentChanges.CountAsync()).Should().Be(1);
+        var publish = () => fixture.Service.EnsurePublicationReadyAsync(ProcurementTenderDocumentSourceType.Tender,
+            fixture.Tender.Id, original, "first-bind-publish-pending");
+        await publish.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>();
+        await fixture.CompleteChangeWorkflowAndSwitchActorAsync(change);
+        await fixture.Service.DecideChangeAsync(change.Id,
+            new DecideProcurementTenderDocumentChangeRequest { Action = "Approve", ApprovalReference = "FIRST-BIND-APPROVED", RowVersion = change.RowVersion },
+            "first-bind-approve");
+        var effective = await fixture.Service.GetRegisterAsync(ProcurementTenderDocumentSourceType.Tender, fixture.Tender.Id);
+        effective.OriginalSubmissionDeadlineUtc.Should().Be(original);
+        effective.EffectiveSubmissionDeadlineUtc.Should().Be(request.ScheduleChange.SubmissionDeadlineUtc);
+        fixture.Tender.SubmissionDeadline.Should().Be(request.ScheduleChange.SubmissionDeadlineUtc);
+        fixture.Tender.OpeningDate.Should().Be(request.ScheduleChange.OpeningScheduledAtUtc);
+        fixture.Tender.Status.Should().Be("Approved");
+        fixture.Tender.PublishDate.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FirstBindingExpiredWithoutScheduleRequestRemainsRejected()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        fixture.Tender.SubmissionDeadline = DateTime.UtcNow.AddHours(-2);
+        fixture.Tender.OpeningDate = DateTime.UtcNow.AddHours(-1);
+        await fixture.Context.SaveChangesAsync();
+        var action = () => fixture.BindAsync("no-schedule");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>()
+            .Where(error => error.Code == "TENDER_DOCUMENT_DEADLINE_ELAPSED");
+        (await fixture.Context.ProcurementTenderDocumentRegisters.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("published")]
+    [InlineData("historically-published")]
+    [InlineData("bid")]
+    [InlineData("statutory")]
+    [InlineData("prequalified")]
+    [InlineData("qcbs")]
+    public async Task FirstBindingScheduleRequestRejectsIneligibleSources(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        switch (variant)
+        {
+            case "published": fixture.Tender.Status = "Published"; fixture.Tender.PublishDate = DateTime.UtcNow; break;
+            case "historically-published": fixture.Tender.PublishedById = Guid.NewGuid(); break;
+            case "bid": fixture.Context.Add(new TenderBid { Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = fixture.Tender.Id, BusinessPartnerId = fixture.Supplier.Id }); break;
+            case "statutory": fixture.Context.Add(new ProcurementTenderControl { Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = fixture.Tender.Id }); break;
+            case "prequalified": fixture.Tender.RequiresPrequalification = true; break;
+            case "qcbs": fixture.Tender.UseQCBSEvaluation = true; break;
+        }
+        await fixture.Context.SaveChangesAsync();
+        var readiness = await fixture.Service.GetRegisterReadinessAsync(ProcurementTenderDocumentSourceType.Tender, fixture.Tender.Id);
+        readiness.AllowedActions.Should().NotContain("BindWithScheduleChange");
+        var action = () => fixture.Service.BindAsync(fixture.FirstBindingWithSchedule(), "first-bind-ineligible");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlConflictException>()
+            .Where(error => error.Code == "TENDER_DOCUMENT_RESCHEDULE_NOT_ALLOWED");
+        (await fixture.Context.ProcurementTenderDocumentRegisters.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("past")]
+    [InlineData("opening-before-deadline")]
+    [InlineData("beyond-validity")]
+    [InlineData("source-mismatch")]
+    public async Task FirstBindingScheduleRequestRejectsInvalidDatesBeforeWriting(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var request = fixture.FirstBindingWithSchedule();
+        switch (variant)
+        {
+            case "past": request.ScheduleChange!.SubmissionDeadlineUtc = DateTime.UtcNow.AddDays(-1); break;
+            case "opening-before-deadline": request.ScheduleChange!.OpeningScheduledAtUtc = request.ScheduleChange.SubmissionDeadlineUtc.AddMinutes(-1); break;
+            case "beyond-validity": request.BidValidityUntilUtc = request.ScheduleChange!.SubmissionDeadlineUtc.AddMinutes(-1); break;
+            case "source-mismatch": request.SubmissionDeadlineUtc = request.SubmissionDeadlineUtc.AddMinutes(1); break;
+        }
+        var action = () => fixture.Service.BindAsync(request, "first-bind-invalid");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>();
+        (await fixture.Context.ProcurementTenderDocumentRegisters.CountAsync()).Should().Be(0);
     }
 
     [Theory]
@@ -1598,10 +1754,27 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 SubmissionDeadlineUtc = Tender.SubmissionDeadline!.Value,
                 OpeningScheduledAtUtc = Tender.OpeningDate,
                 BidValidityUntilUtc = Tender.SubmissionDeadline.Value.AddDays(30),
+                BidValidityPeriodDays = 30,
+                BidValidityTermsReference = "Approved UAT document clause 1",
                 FeeMode = FeeMode,
                 FeeAmount = FeeMode == ProcurementTenderDocumentFeeMode.Paid ? 25m : 0m,
                 CurrencyCode = "GHS"
             }, correlation);
+
+        public BindProcurementTenderDocumentRegisterRequest FirstBindingWithSchedule() => new()
+        {
+            SourceType = ProcurementTenderDocumentSourceType.Tender, SourceId = Tender.Id,
+            TemplateVersionId = TemplateId, SubmissionDeadlineUtc = Tender.SubmissionDeadline!.Value,
+            OpeningScheduledAtUtc = Tender.OpeningDate,
+            BidValidityPeriodDays = 90, BidValidityTermsReference = "Approved UAT document clause 1",
+            FeeMode = FeeMode, CurrencyCode = "GHS",
+            ScheduleChange = new()
+            {
+                SubmissionDeadlineUtc = DateTime.UtcNow.AddDays(35), OpeningScheduledAtUtc = DateTime.UtcNow.AddDays(35).AddHours(1),
+                WorkflowDefinitionId = WorkflowDefinitionId, Reason = "Document preparation delayed publication",
+                EvidenceReference = "UAT-FIRST-BIND-SCHEDULE"
+            }
+        };
 
         public async Task<(RequestForQuotation Rfq, ProcurementTenderDocumentRegisterDto Register)> BindRfqAsync(
             string externalRecipientEmails)
@@ -1622,6 +1795,8 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 SourceId = rfq.Id, TemplateVersionId = TemplateId,
                 SubmissionDeadlineUtc = rfq.SubmissionDeadline!.Value,
                 BidValidityUntilUtc = rfq.SubmissionDeadline.Value.AddDays(30),
+                BidValidityPeriodDays = 30,
+                BidValidityTermsReference = "Approved UAT RFQ validity clause",
                 FeeMode = FeeMode, FeeAmount = 0m, CurrencyCode = "GHS"
             }, "bind-rfq");
             return (rfq, register);

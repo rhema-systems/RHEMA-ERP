@@ -67,6 +67,12 @@ export default function TenderReview({ formData, onSubmit, loading = false, butt
             <p className="text-sm">{formData.description}</p>
           </div>
         )}
+        {formData.bidValidityPeriodDays != null && (
+          <div className="mt-4">
+            <p className="text-sm text-gray-500">Bid validity</p>
+            <p className="text-sm">{formData.bidValidityPeriodDays} calendar days from submission closing</p>
+          </div>
+        )}
       </div>
 
       {/* Evaluation Template */}

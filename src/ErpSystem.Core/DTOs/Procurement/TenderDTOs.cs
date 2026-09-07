@@ -89,6 +89,7 @@ public class TenderDetailDto
     // Metadata
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
+    public int? BidValidityPeriodDays { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
 
     // Acceptance Declaration
@@ -193,6 +194,8 @@ public class CreateTenderDto
 
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
+    [Range(1, int.MaxValue)]
+    public int? BidValidityPeriodDays { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
 
     // Acceptance Declaration
@@ -263,6 +266,8 @@ public class UpdateTenderDto
 
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
+    [Range(1, int.MaxValue)]
+    public int? BidValidityPeriodDays { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
 
     // Acceptance Declaration

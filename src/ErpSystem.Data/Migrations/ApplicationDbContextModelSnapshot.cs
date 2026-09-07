@@ -134507,6 +134507,9 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.Tender", b =>
                 {
+                    b.Property<int?>("BidValidityPeriodDays")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -134683,6 +134686,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_Tenders_SourcingReleaseGuard");
                             t.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
+                            t.HasTrigger("TR_Tenders_BidValidityTerms_Immutable");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
