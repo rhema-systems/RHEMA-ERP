@@ -767,6 +767,40 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<PurchaseOrderDetailDto>> CreatePurchaseOrder([FromBody] CreatePurchaseOrderDto createDto)
     {
+        try
+        {
+            return await _unitOfWork.ExecuteInStrategyAsync<ActionResult<PurchaseOrderDetailDto>>(
+                () => CreatePurchaseOrderAttemptAsync(createDto), HttpContext.RequestAborted);
+        }
+        catch (SupplierEligibilityException ex)
+        {
+            _logger.LogWarning(ex,
+                "Supplier eligibility denied purchase order creation for {SupplierId}", createDto.SupplierId);
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, eligibility = ex.Result });
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "PO_SOURCE_FORBIDDEN", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "PO_SOURCE_FORBIDDEN", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating purchase order");
+            return StatusCode(500, "An error occurred while creating the purchase order");
+        }
+    }
+
+    // The source reservation and PO writes must share the retry strategy and
+    // serializable transaction. Each failed attempt rolls back before retry.
+    private async Task<ActionResult<PurchaseOrderDetailDto>> CreatePurchaseOrderAttemptAsync(CreatePurchaseOrderDto createDto)
+    {
         var ownsSourceClaimTransaction = false;
         try
         {
@@ -998,56 +1032,13 @@ public class PurchaseOrdersController : ControllerBase
             var createdPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
             return CreatedAtAction(nameof(GetPurchaseOrder), new { id = purchaseOrder.Id }, createdPurchaseOrder);
         }
-        catch (SupplierEligibilityException ex)
-        {
-            _logger.LogWarning(ex,
-                "Supplier eligibility denied purchase order creation for {SupplierId}", createDto.SupplierId);
-            return UnprocessableEntity(new
-            {
-                code = ex.Code,
-                message = ex.Message,
-                eligibility = ex.Result
-            });
-        }
-        catch (ProcurementPurchaseOrderSourceValidationException ex)
-        {
-            return UnprocessableEntity(new
-            {
-                code = ex.Code,
-                message = ex.Message,
-                correlationId = CorrelationId()
-            });
-        }
-        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                code = "PO_SOURCE_FORBIDDEN",
-                message = ex.Message,
-                correlationId = CorrelationId()
-            });
-        }
-        catch (ProcurementAccessAuthorizationException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                code = "PO_SOURCE_FORBIDDEN",
-                message = ex.Message,
-                correlationId = CorrelationId()
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating purchase order");
-            return StatusCode(500, "An error occurred while creating the purchase order");
-        }
         finally
         {
             if (ownsSourceClaimTransaction && _unitOfWork.HasActiveTransaction)
             {
                 try
                 {
-                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                    await _unitOfWork.RollbackAsync(CancellationToken.None);
                 }
                 catch (Exception rollbackException)
                 {

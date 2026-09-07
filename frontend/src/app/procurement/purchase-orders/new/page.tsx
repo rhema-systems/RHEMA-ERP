@@ -59,6 +59,7 @@ import {
   normalizeProcurementCurrency,
 } from '@/lib/procurement-currency';
 import { format } from 'date-fns';
+import { getPurchaseOrderItemMappingError } from '@/lib/purchase-order-item-mapping';
 
 interface POItemFormData extends CreatePurchaseOrderItemDto {
   tempId: string;
@@ -829,6 +830,8 @@ function NewPurchaseOrderPageContent() {
 
   // Save as draft
   const handleSaveDraft = async () => {
+    const mappingError = getPurchaseOrderItemMappingError(items);
+    if (mappingError) { toast.error(mappingError); return; }
     if (!selectedSource) {
       toast.error('Select an approved procurement source before creating the purchase order');
       return;
@@ -930,6 +933,8 @@ function NewPurchaseOrderPageContent() {
 
   // Submit for approval
   const handleSubmit = async () => {
+    const mappingError = getPurchaseOrderItemMappingError(items);
+    if (mappingError) { toast.error(mappingError); return; }
     if (!selectedSource) {
       toast.error('Select an approved procurement source before creating the purchase order');
       return;
@@ -1445,7 +1450,7 @@ function NewPurchaseOrderPageContent() {
                 <Package className="h-5 w-5" />
                 Order Items
               </CardTitle>
-              <CardDescription>Add items to this purchase order</CardDescription>
+              <CardDescription>{getPurchaseOrderItemMappingError(items) || 'Add items to this purchase order'}</CardDescription>
             </div>
             <Button 
               onClick={handleAddNewRow} 

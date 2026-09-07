@@ -50,6 +50,15 @@ async function getFriendlyErrorMessage(
         parsed?.detail ||
         parsed?.title ||
         (typeof parsed === 'string' ? parsed : message);
+      const validationErrors = parsed?.errors;
+      if (validationErrors && typeof validationErrors === 'object' && !Array.isArray(validationErrors)) {
+        const fields = Object.entries(validationErrors).flatMap(([field, errors]) =>
+          (Array.isArray(errors) ? errors : [errors])
+            .filter((error): error is string => typeof error === 'string' && error.trim().length > 0)
+            .map(error => `${field}: ${error}`)
+        );
+        if (fields.length > 0) message = `${message} ${fields.join(' ')}`;
+      }
     } catch {
       // not JSON, keep text
     }
