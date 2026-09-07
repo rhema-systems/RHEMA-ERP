@@ -12,7 +12,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 |---|---|
 | Phase | Post-Phase-6 Stage B2 — Inventory neutral AccountingEvent producer cutover |
 | Status | `IN_PROGRESS` |
-| Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
+| Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `69b357fd09cc6713ad9d9c18dbf6855e2afd6b2e` |
 | Branch | `codex/inventory-accounting-event-cutover` |
 | Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-cutover` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Terra Medium; substantive Finance corrections: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
-| Review status | Inventory owner packet dispatched; implementation pending |
+| Review status | `BLOCKED` on material Finance adapter and maker-checker workflow decision; Inventory worktree clean |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -669,6 +669,25 @@ retry semantics and owner state transition must remain intact. The packet must p
 tenant/source authority, disabled-by-default behavior, zero partial mutation on failure and no remaining active
 Inventory V1 constructor. Use GPT-5.6 Terra Medium for this bounded owner conversion; route any substantive
 Finance/schema/posting correction back to Sol Medium and retain Sol High independent review.
+
+The existing source task completed two short B2 turns with the isolated worktree still clean at the exact
+base and no exposed handoff or durable mutation. The coordinator reconciled HEAD, status and diff after each
+turn and did not retry any mutation blindly. To avoid an idle routine-handoff loop, the unchanged packet was
+recovery-dispatched to coordinator subagent `/root/inventory_cutover` on GPT-5.6 Terra Medium in the same
+isolated worktree and exact base. No scope or authority changed; independent Sol High review and every database,
+enablement and remote-operation gate remain in force.
+
+The recovery implementer reconciled the exact clean base and found a material contract/workflow blocker before
+editing. C6 intentionally exposes governed prepare and release operations, but preparing requires C5 preview
+fingerprints that only Finance applicability authority can derive; Inventory is prohibited from selecting
+applicable books. No Finance-owned producer-facing intent adapter currently owns that preview/freeze/prepare
+sequence. Moreover, release requires a distinct maker/checker and C6 is disabled by default, while Inventory's
+current synchronous completion posts its stock adjustment before Finance proceeds posting. Directly injecting C6 in
+the owner service would either bypass maker-checker, make the owner select books, leave a PendingApproval event
+while reporting completion, or fail after a durable stock mutation. Those are material accounting/product
+semantics outside a routine owner conversion. The Inventory worktree remains clean at exact base `69b357fd`;
+no database was accessed. B2, Sales and HR/Payroll are paused pending an explicit decision on a Finance-owned
+producer-intent adapter and the asynchronous versus atomic completion workflow.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
