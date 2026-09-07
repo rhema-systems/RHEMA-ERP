@@ -19,10 +19,16 @@ const readProblemMessage = async (response: Response, fallback: string) => {
   if (!payload.trim()) return fallback;
 
   try {
-    const parsed = JSON.parse(payload) as string | { detail?: string; message?: string; title?: string; code?: string };
+    const parsed = JSON.parse(payload) as string | {
+      detail?: string; message?: string; title?: string; code?: string;
+      errors?: Record<string, string[]>;
+    };
     if (typeof parsed === 'string') return parsed.trim() || fallback;
     const problem = parsed;
-    const message = problem.detail || problem.message || fallback;
+    const validationMessage = problem.errors
+      ? Object.values(problem.errors).flat().filter(value => typeof value === 'string').join(' ')
+      : '';
+    const message = problem.detail || problem.message || validationMessage || problem.title || fallback;
     return problem.code ? `${message} (${problem.code})` : message;
   } catch {
     return payload.trim() || fallback;
@@ -1211,7 +1217,7 @@ export const procurementPlanService = {
     const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/${planId}/items`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...data, requiredDate: data.requiredDate?.trim() || null }),
     });
     if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to add item'));
     return response.json();
@@ -1229,7 +1235,7 @@ export const procurementPlanService = {
     const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/items/${itemId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
+      body: JSON.stringify({ ...dto, requiredDate: dto.requiredDate?.trim() || null }),
     });
     if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update item'));
     return response.json();
