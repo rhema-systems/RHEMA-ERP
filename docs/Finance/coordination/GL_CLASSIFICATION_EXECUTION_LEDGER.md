@@ -19,7 +19,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `69b357fd09cc6713ad9d9c18dbf6855e2afd6b2e` |
 | Coordinator | Current primary Finance task |
-| Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
+| Recovery heartbeat | `finance-gl-cutover-coordinator` — paused while awaiting the material B2 workflow decision |
 | Model routing | Implementer: GPT-5.6 Terra Medium; substantive Finance corrections: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
 | Review status | `BLOCKED` on material Finance adapter and maker-checker workflow decision; Inventory worktree clean |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
