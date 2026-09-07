@@ -1,5 +1,11 @@
 # Fresh Supplier, Procurement, Inventory and Stores UAT
 
+## 7 September correction: optional validity page/clause note
+
+- The clause-reference requirement in the earlier validity-term entry below is superseded: **Validity page/clause note (optional)** can be blank. The selected approved document version and checksum are automatically retained in binding history, with an optional trimmed note (maximum 500 characters).
+- The positive calendar-day validity period, calculated expiry, exact-version eligibility, approval and schedule controls remain required. No default duration, new upload, schema change or Finance change is introduced. Walkthrough B8 is updated in Markdown and HTML. UAT remains paused pending verification; no live binding or approval is authorized by this UI correction.
+- Automated checks: Core build and **131 document-control tests passed**; **35 dialog tests** and scoped ESLint passed. The optional-note paragraph matches between Markdown and HTML. Browser/runtime verification remains pending.
+
 ## Campaign control
 
 | Field | Value |

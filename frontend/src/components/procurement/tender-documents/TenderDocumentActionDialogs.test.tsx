@@ -197,7 +197,7 @@ describe('first-binding schedule approval', () => {
         { target: { value: '90' } }
       );
       fireEvent.change(
-        screen.getByLabelText('Approved validity document/clause reference'),
+        screen.getByLabelText('Validity page/clause note (optional)'),
         { target: { value: 'Approved NCT document clause 18' } }
       );
     }
@@ -296,7 +296,7 @@ describe('first-binding schedule approval', () => {
       screen.getByLabelText('Bid validity period (calendar days)')
     ).toHaveAttribute('readonly');
     expect(
-      screen.queryByLabelText('Approved validity document/clause reference')
+      screen.queryByLabelText('Validity page/clause note (optional)')
     ).not.toBeInTheDocument();
     expect(
       screen.getByLabelText('Bid valid until (calculated)')
@@ -314,23 +314,27 @@ describe('first-binding schedule approval', () => {
       })
     );
   });
-  it('identifies the missing approved-term reference without discarding entered values', () => {
-    mountBinding(['Bind'], false);
-    fireEvent.change(
-      screen.getByLabelText('Approved validity document/clause reference'),
-      { target: { value: '' } }
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Bind immutable version' })
-    );
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Approved validity document/clause reference'
-    );
-    expect(
-      screen.getByLabelText('Bid validity period (calendar days)')
-    ).toHaveValue(90);
-    expect(api.bind).not.toHaveBeenCalled();
-  });
+  it.each(['', '   '])(
+    'binds the selected approved version with an omitted optional note (%j)',
+    async (note) => {
+      mountBinding(['Bind'], false);
+      fireEvent.change(
+        screen.getByLabelText('Validity page/clause note (optional)'),
+        { target: { value: note } }
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Bind immutable version' })
+      );
+      await waitFor(() => expect(api.bind).toHaveBeenCalledOnce());
+      expect(api.bind).toHaveBeenCalledWith(
+        expect.objectContaining({
+          templateVersionId: 'template',
+          bidValidityPeriodDays: 90,
+          bidValidityTermsReference: undefined,
+        })
+      );
+    }
+  );
   it('preserves the dates and reason when the server rejects binding', async () => {
     api.bind.mockRejectedValue(
       new Error('Schedule source changed; reload before continuing.')
