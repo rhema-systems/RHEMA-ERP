@@ -57,6 +57,7 @@ public sealed class AccountingEventService : IAccountingEventService
         if (existing is not null)
         {
             RequireRetryMatch(existing, Fingerprint(request, key, existing.Version, existing.RootAccountingEventId));
+            RequireProducerMakerMatch(existing, actor);
             return Map(existing);
         }
         var eventId = request.AccountingEventId.GetValueOrDefault(Guid.NewGuid());
@@ -73,6 +74,7 @@ public sealed class AccountingEventService : IAccountingEventService
                 if (raced is not null)
                 {
                     RequireRetryMatch(raced, Fingerprint(request, key, raced.Version, raced.RootAccountingEventId));
+                    RequireProducerMakerMatch(raced, actor);
                     prepared = raced; await tx.CommitAsync(cancellationToken); return;
                 }
                 var lineage = await ResolveLineageAsync(tenantId, request, cancellationToken);
@@ -93,6 +95,10 @@ public sealed class AccountingEventService : IAccountingEventService
                     SelectionFingerprint = request.ExpectedSelectionFingerprint, RequestFingerprint = fingerprint,
                     Status = AccountingEventStatuses.PendingApproval, EventDate = posting.PostingDate.Date,
                     RequestedAtUtc = now, RequestedByUserId = actor, PreparedByUserId = actor, PreparedAtUtc = now,
+                    ProducerDecisionStatus = string.IsNullOrWhiteSpace(request.ProducerParticipantIdentity)
+                        ? ProducerIntentDecisionStatuses.NotRequired : ProducerIntentDecisionStatuses.Pending,
+                    ProducerParticipantIdentity = string.IsNullOrWhiteSpace(request.ProducerParticipantIdentity)
+                        ? null : request.ProducerParticipantIdentity.Trim().ToUpperInvariant(),
                     CreatedAt = now, CreatedBy = ActorName()
                 };
                 _db.AccountingEvents.Add(prepared);
@@ -109,24 +115,100 @@ public sealed class AccountingEventService : IAccountingEventService
     {
         ArgumentNullException.ThrowIfNull(release);
         if (string.IsNullOrWhiteSpace(release.Reason)) throw new InvalidOperationException("A governed release reason is required.");
+        release.Request.AccountingEventId = accountingEventId;
+        return await OrchestrateAsync(release.Request, release.Reason.Trim(), null, cancellationToken);
+    }
+
+    public Task<AccountingEventDto> ApproveAsync(Guid accountingEventId, ReleaseAccountingEventDto release, CancellationToken cancellationToken = default)
+        => DecideAsync(accountingEventId, release, approve: true, cancellationToken);
+
+    public Task<AccountingEventDto> RejectAsync(Guid accountingEventId, ReleaseAccountingEventDto release, CancellationToken cancellationToken = default)
+        => DecideAsync(accountingEventId, release, approve: false, cancellationToken);
+
+    private async Task<AccountingEventDto> DecideAsync(Guid accountingEventId, ReleaseAccountingEventDto release,
+        bool approve, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(release);
+        if (string.IsNullOrWhiteSpace(release.Reason)) throw new InvalidOperationException("A governed release reason is required.");
+        if (!_options.Enabled) throw new InvalidOperationException("ACCOUNTING_EVENT_ORCHESTRATION_DISABLED: C6 multi-book release is not enabled.");
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var checker = RequireActor();
+        var normalizedReason = release.Reason.Trim();
+        release.Request.AccountingEventId = accountingEventId;
+        var strategy = _db.Database.CreateExecutionStrategy();
+        AccountingEvent? prepared = null;
+        await strategy.ExecuteAsync(async () =>
+        {
+            // Approval and its audit are one durable maker/checker boundary. SQL Server also takes the
+            // same event-key application lock used by prepare and execution so concurrent decisions fail closed.
+            await using var tx = _db.Database.IsRelational()
+                ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                if (tx is not null)
+                    await AcquireEventLockAsync(tenantId, CanonicalKey(release.Request.SelectionIdempotencyKey), cancellationToken);
+                prepared = await _db.AccountingEvents.SingleOrDefaultAsync(item => item.TenantId == tenantId
+                    && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
+                    ?? throw new KeyNotFoundException("AccountingEvent was not found.");
+                RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey),
+                    prepared.Version, prepared.RootAccountingEventId));
+                var decidedStatus = approve ? ProducerIntentDecisionStatuses.Approved : ProducerIntentDecisionStatuses.Rejected;
+                if (prepared.ProducerDecisionStatus == decidedStatus)
+                {
+                    RequireProducerDecisionMatch(prepared, checker, normalizedReason);
+                    if (tx is not null) await tx.CommitAsync(cancellationToken);
+                    return;
+                }
+                if (prepared.Status != AccountingEventStatuses.PendingApproval
+                    || prepared.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Pending)
+                    throw new InvalidOperationException("ACCOUNTING_EVENT_DECISION_CONFLICT: only pending maker evidence can be approved or rejected.");
+                if (prepared.PreparedByUserId == checker)
+                    throw new InvalidOperationException("The producer AccountingEvent checker must differ from its preparer.");
+                prepared.ProducerDecidedByUserId = checker;
+                prepared.ProducerDecidedAtUtc = DateTime.UtcNow;
+                prepared.ProducerDecisionReason = normalizedReason;
+                prepared.ProducerDecisionStatus = decidedStatus;
+                await _db.SaveChangesAsync(cancellationToken);
+                await AuditAsync(approve ? FinanceAuditEvents.ProducerAccountingIntentApproved
+                    : FinanceAuditEvents.ProducerAccountingIntentRejected, prepared, cancellationToken);
+                if (tx is not null) await tx.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (tx is not null) await tx.RollbackAsync(cancellationToken);
+                _db.ChangeTracker.Clear();
+                throw;
+            }
+        });
+        return Map(prepared!);
+    }
+
+    public async Task<AccountingEventDto> ExecuteApprovedAsync(Guid accountingEventId, ReleaseAccountingEventDto release,
+        IFinanceProducerExecutionParticipant? participant = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(release);
         var tenantId = _currentUser.GetRequiredFinanceTenantId();
         var prepared = await Query().SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("AccountingEvent was not found.");
-        var checker = RequireActor();
-        var normalizedReason = release.Reason.Trim();
-        RequireReleaseMatch(prepared, checker, normalizedReason);
+        if (prepared.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved
+            || prepared.Status is not (AccountingEventStatuses.PendingApproval or AccountingEventStatuses.Failed or AccountingEventStatuses.Posted))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: execution requires durable independent approval.");
         release.Request.AccountingEventId = accountingEventId;
         RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey),
             prepared.Version, prepared.RootAccountingEventId));
-        return await OrchestrateAsync(release.Request, normalizedReason, cancellationToken);
+        RequireParticipantMatch(release.Request, participant);
+        return await OrchestrateAsync(release.Request, prepared.ProducerDecisionReason!, participant, cancellationToken);
     }
 
     private async Task<AccountingEventDto> OrchestrateAsync(
         CreateAccountingEventDto request,
         string releaseReason,
+        IFinanceProducerExecutionParticipant? participant,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        RequireParticipantMatch(request, participant);
         if (!_options.Enabled)
             throw new InvalidOperationException("ACCOUNTING_EVENT_ORCHESTRATION_DISABLED: C6 multi-book release is not enabled.");
         if (!_db.Database.IsRelational())
@@ -164,7 +246,8 @@ public sealed class AccountingEventService : IAccountingEventService
                     {
                         requestFingerprint = Fingerprint(request, key, raced.Version, raced.RootAccountingEventId);
                         RequireRetryMatch(raced, requestFingerprint);
-                        RequireReleaseMatch(raced, actorId, releaseReason);
+                        RequireReleaseMatch(raced, raced.ReleasedByUserId
+                            ?? throw new InvalidOperationException("Posted AccountingEvent approval evidence is incomplete."), releaseReason);
                         attempted = raced;
                         await transaction.CommitAsync(cancellationToken);
                         return;
@@ -174,7 +257,12 @@ public sealed class AccountingEventService : IAccountingEventService
                         throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_IDENTITY_CONFLICT: the prepared event no longer matches its canonical release identity.");
                     requestFingerprint = Fingerprint(request, key, raced.Version, raced.RootAccountingEventId);
                     RequireRetryMatch(raced, requestFingerprint);
-                    RequireReleaseMatch(raced, actorId, releaseReason);
+                    var approvalCheckerId = participant is null ? actorId : raced.ProducerDecidedByUserId
+                        ?? throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: approved checker evidence is missing.");
+                    RequireReleaseMatch(raced, approvalCheckerId, releaseReason);
+                    RequireParticipantMatch(request, participant);
+                    if (participant is not null && raced.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
+                        throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: producer execution requires durable independent approval.");
                     var lineage = new Lineage(raced.EventKind, raced.Version, raced.RootAccountingEventId,
                         raced.SupersedesAccountingEventId, raced.CorrectsAccountingEventId,
                         raced.ReversesAccountingEventId, null);
@@ -223,7 +311,9 @@ public sealed class AccountingEventService : IAccountingEventService
                     attempted.Status = AccountingEventStatuses.Pending;
                     attempted.CompletedAtUtc = null;
                     attempted.FailureMessage = null;
-                    attempted.ReleasedByUserId ??= actorId;
+                    var releaseActorId = participant is null ? actorId : attempted.ProducerDecidedByUserId
+                        ?? throw new InvalidOperationException("Approved producer checker evidence is incomplete.");
+                    attempted.ReleasedByUserId ??= releaseActorId;
                     attempted.ReleasedAtUtc ??= now;
                     attempted.ReleaseReason ??= releaseReason;
                     attempted.AccountingBookSelectionEvidenceId = evidenceId;
@@ -243,6 +333,11 @@ public sealed class AccountingEventService : IAccountingEventService
                     // The internal leaf verifies database-backed event/evidence/book authority. Persist this
                     // valid Pending aggregate shape before invoking the first representation.
                     await _db.SaveChangesAsync(cancellationToken);
+
+                    // The owner participant runs under this same serializable database transaction. Any owner
+                    // or Finance failure therefore rolls every economic write back before failure evidence is appended.
+                    if (participant is not null)
+                        await participant.ExecuteAsync(cancellationToken);
 
                     var selectedBookIds = attempted.Postings.Select(item => item.AccountingBookId).ToList();
                     var orderedSelectedBookIds = attempted.Postings.OrderBy(item => item.SelectionOrder)
@@ -299,7 +394,10 @@ public sealed class AccountingEventService : IAccountingEventService
         catch (Exception ex)
         {
             _db.ChangeTracker.Clear();
-            await PersistFailureAsync(tenantId, actorId, eventId, key,
+            var approvalCheckerId = attempted?.ReleasedByUserId
+                ?? attempted?.ProducerDecidedByUserId
+                ?? actorId;
+            await PersistFailureAsync(tenantId, approvalCheckerId, eventId, key,
                 requestFingerprint ?? throw new InvalidOperationException("AccountingEvent release fingerprint was not resolved."), attempted,
                 releaseReason, releaseAttemptStartedAt ?? DateTime.UtcNow, ex, cancellationToken);
             throw;
@@ -526,6 +624,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         Add("event.reversesId", G(request.ReversesAccountingEventId));
         Add("selection.calculationInputHash", U(request.ExpectedCalculationInputHash));
         Add("selection.fingerprint", U(request.ExpectedSelectionFingerprint));
+        Add("producer.participantIdentity", U(request.ProducerParticipantIdentity));
         Add("posting.sourceModule", U(posting.SourceModule));
         Add("posting.originModule", U(posting.OriginModuleCode));
         Add("posting.documentType", U(posting.SourceDocumentType));
@@ -654,6 +753,13 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
             throw new InvalidOperationException("ACCOUNTING_EVENT_IDEMPOTENCY_CONFLICT: the key already identifies different immutable evidence.");
     }
 
+    private static void RequireProducerMakerMatch(AccountingEvent item, Guid maker)
+    {
+        if (item.ProducerDecisionStatus != ProducerIntentDecisionStatuses.NotRequired
+            && item.PreparedByUserId != maker)
+            throw new InvalidOperationException("ACCOUNTING_EVENT_MAKER_CONFLICT: a producer-intent retry must retain the original maker.");
+    }
+
     private static void RequireReleaseMatch(AccountingEvent item, Guid checker, string normalizedReason)
     {
         if (item.PreparedByUserId == checker)
@@ -662,6 +768,23 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
             throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_CHECKER_CONFLICT: a retry must retain the original checker.");
         if (item.ReleaseReason is not null && !string.Equals(item.ReleaseReason, normalizedReason, StringComparison.Ordinal))
             throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_REASON_CONFLICT: a retry must retain the original normalized reason.");
+    }
+
+    private static void RequireParticipantMatch(CreateAccountingEventDto request, IFinanceProducerExecutionParticipant? participant)
+    {
+        var expected = request.ProducerParticipantIdentity?.Trim().ToUpperInvariant() ?? string.Empty;
+        var actual = participant?.ParticipantIdentity?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (expected.Length == 0 && participant is null) return; // Existing Finance-only C6 callers have no owner participant.
+        if (expected.Length == 0 || participant is null || !string.Equals(expected, actual, StringComparison.Ordinal))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_PARTICIPANT_CONFLICT: execution must retain the prepared owner participant identity.");
+    }
+
+    private static void RequireProducerDecisionMatch(AccountingEvent item, Guid checker, string normalizedReason)
+    {
+        if (item.ProducerDecidedByUserId != checker)
+            throw new InvalidOperationException("ACCOUNTING_EVENT_DECISION_CHECKER_CONFLICT: a retry must retain the original checker.");
+        if (!string.Equals(item.ProducerDecisionReason, normalizedReason, StringComparison.Ordinal))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_DECISION_REASON_CONFLICT: a retry must retain the original normalized reason.");
     }
 
     private Guid RequireActor() => Guid.TryParse(_currentUser.UserId, out var actor) && actor != Guid.Empty
@@ -684,6 +807,11 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         PreparedByUserId = item.PreparedByUserId, PreparedAtUtc = item.PreparedAtUtc,
         ReleasedByUserId = item.ReleasedByUserId, ReleasedAtUtc = item.ReleasedAtUtc,
         ReleaseReason = item.ReleaseReason,
+        ProducerDecisionStatus = item.ProducerDecisionStatus,
+        ProducerParticipantIdentity = item.ProducerParticipantIdentity,
+        ProducerDecidedByUserId = item.ProducerDecidedByUserId,
+        ProducerDecidedAtUtc = item.ProducerDecidedAtUtc,
+        ProducerDecisionReason = item.ProducerDecisionReason,
         Postings = item.Postings.OrderBy(x => x.SelectionOrder).Select(x => new AccountingEventPostingDto
         {
             EventVersion = x.EventVersion, AccountingBookId = x.AccountingBookId, AccountingBookCode = x.AccountingBookCodeSnapshot,

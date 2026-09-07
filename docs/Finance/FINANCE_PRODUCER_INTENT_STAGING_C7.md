@@ -1,0 +1,9 @@
+# Finance producer-intent staging (C7)
+
+C7 gives owner modules a Finance-owned boundary for staging one neutral, balanced economic intent without selecting accounting books. Finance resolves the C5 preview, binds its hashes into C6 maker evidence, and keeps the request in `PendingApproval` until a different Finance user records an approval or rejection. Approval never posts and the adapter remains disabled unless both the C7 and existing C6 feature gates are explicitly enabled.
+
+Execution is a separate internal call. It requires the exact approved request, checker reason, source lineage, and stable participant identity. Finance freezes the C5 selection inside C6's serializable transaction, invokes the narrowly typed owner participant using that ambient transaction, and then creates each exact-book C6 representation. A participant or Finance failure rolls the whole economic transaction back before C6 appends durable failure evidence. Exact retries recover through the same key and immutable request fingerprint; conflicting maker, checker, reason, participant, payload, or lineage fails closed.
+
+The participant contract deliberately exposes no book collection, applicability decision, posting leaf, transaction commit, or HTTP execution endpoint. Owners may only apply their already-staged same-database mutation when Finance invokes them. C5 remains the book-selection authority, C6 remains the group posting/reversal authority, direct posting callers retain the C1 parallel-book rejection, and reversals continue to use the original frozen ordered book set.
+
+`20260907190000_AddProducerIntentStagingC7` is an unapplied, additive migration. It refuses an absent/partial C6 base, adds only producer decision evidence to `AccountingEvents`, and installs complementary maker/checker, immutability, participant-identity, and approved-only execution guards. It does not enable either runtime gate.

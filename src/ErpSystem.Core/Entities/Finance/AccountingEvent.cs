@@ -31,6 +31,11 @@ public sealed class AccountingEvent : TenantEntity
     public Guid? ReleasedByUserId { get; set; }
     public DateTime? ReleasedAtUtc { get; set; }
     [MaxLength(500)] public string? ReleaseReason { get; set; }
+    [MaxLength(20)] public string ProducerDecisionStatus { get; set; } = ProducerIntentDecisionStatuses.NotRequired;
+    [MaxLength(100)] public string? ProducerParticipantIdentity { get; set; }
+    public Guid? ProducerDecidedByUserId { get; set; }
+    public DateTime? ProducerDecidedAtUtc { get; set; }
+    [MaxLength(500)] public string? ProducerDecisionReason { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
     [MaxLength(1000)] public string? FailureMessage { get; set; }
 
@@ -90,4 +95,12 @@ public static class AccountingEventStatuses
     public const string Pending = "Pending";
     public const string Posted = "Posted";
     public const string Failed = "Failed";
+}
+
+public static class ProducerIntentDecisionStatuses
+{
+    public const string NotRequired = "NotRequired";
+    public const string Pending = "Pending";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
 }

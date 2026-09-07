@@ -10122,6 +10122,25 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
 
+                    b.Property<DateTime?>("ProducerDecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ProducerDecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProducerDecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ProducerDecisionStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ProducerParticipantIdentity")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateTime>("PreparedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -10216,6 +10235,8 @@ namespace ErpSystem.Data.Migrations
                             t.HasCheckConstraint("CK_AccountingEvents_MakerChecker", "[ReleasedByUserId] IS NULL OR [ReleasedByUserId] <> [PreparedByUserId]");
 
                             t.HasCheckConstraint("CK_AccountingEvents_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_ProducerDecision", "([ProducerDecisionStatus] = 'NotRequired' AND [ProducerParticipantIdentity] IS NULL AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] = 'Pending' AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] IN ('Approved','Rejected') AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerDecidedByUserId] IS NOT NULL AND [ProducerDecidedAtUtc] IS NOT NULL AND [ProducerDecisionReason] IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_AccountingEvents_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
 

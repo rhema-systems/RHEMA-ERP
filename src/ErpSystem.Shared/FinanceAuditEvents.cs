@@ -38,6 +38,8 @@ public static class FinanceAuditEvents
     public const string AccountingBookSelectionFrozen = "Finance.GL.AccountingBookApplicability.SelectionFrozen";
     public const string AccountingEventPosted = "Finance.GL.AccountingEvent.Posted";
     public const string AccountingEventPrepared = "Finance.GL.AccountingEvent.Prepared";
+    public const string ProducerAccountingIntentApproved = "Finance.GL.ProducerAccountingIntent.Approved";
+    public const string ProducerAccountingIntentRejected = "Finance.GL.ProducerAccountingIntent.Rejected";
     public const string AccountingEventFailed = "Finance.GL.AccountingEvent.Failed";
     public const string FxPolicyOverrideChanged = "Finance.FX.Policy.OverrideChanged";
     public const string FxPolicyOverrideRequested = "Finance.FX.Policy.OverrideRequested";

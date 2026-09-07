@@ -10,6 +10,8 @@ public sealed class CreateAccountingEventDto
     public string SelectionIdempotencyKey { get; set; } = string.Empty;
     public string ExpectedCalculationInputHash { get; set; } = string.Empty;
     public string ExpectedSelectionFingerprint { get; set; } = string.Empty;
+    /// <summary>Stable owner adapter identity; part of immutable C6 request evidence.</summary>
+    public string ProducerParticipantIdentity { get; set; } = string.Empty;
     /// <summary>The economic command. AccountingBookCode is ignored; C5 frozen evidence is authoritative.</summary>
     public FinancePostingRequestV2Dto PostingRequest { get; set; } = new();
 }
@@ -40,6 +42,11 @@ public sealed class AccountingEventDto
     public Guid? ReleasedByUserId { get; set; }
     public DateTime? ReleasedAtUtc { get; set; }
     public string? ReleaseReason { get; set; }
+    public string ProducerDecisionStatus { get; set; } = string.Empty;
+    public string? ProducerParticipantIdentity { get; set; }
+    public Guid? ProducerDecidedByUserId { get; set; }
+    public DateTime? ProducerDecidedAtUtc { get; set; }
+    public string? ProducerDecisionReason { get; set; }
     public string? FailureMessage { get; set; }
     public IReadOnlyList<AccountingEventPostingDto> Postings { get; set; } = [];
     public IReadOnlyList<AccountingEventAttemptDto> Attempts { get; set; } = [];
