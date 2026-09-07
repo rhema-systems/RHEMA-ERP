@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
@@ -55,6 +55,11 @@ import {
 } from './TenderDocumentEvidenceReview';
 import { TenderDocumentWorkflowReview } from './TenderDocumentWorkflowReview';
 import {
+  documentPreparationStages,
+  getDocumentPreparationState,
+} from './tender-document-preparation';
+import { workflowApiService } from '@/services/workflow-api.service';
+import {
   buildTenderDocumentLifecycleEvidence,
   buildTenderDocumentLifecycleRequest,
   usesAttachedPublicationEvidence,
@@ -65,7 +70,6 @@ import {
   hasAnyTenderDocumentAction,
   applyTenderDocumentContentArtifact,
   procurementMethodLabel,
-  tenderDocumentTemplateStatusLabel,
   validateTenderDocumentTemplate,
 } from '@/lib/procurement-tender-document';
 import { procurementControlEventService } from '@/services/procurement-control-event.service';
@@ -213,13 +217,41 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
   const isSubmittedContentStep =
     currentContentStep?.stepName.trim().toLowerCase() === 'submitted';
 
+  const workflowSummary = useQuery({
+    queryKey: [
+      'tender-document-workflow-review',
+      id,
+      contentWorkflow.data?.id,
+      contentWorkflow.data?.entityType,
+      contentWorkflow.data?.currentStepInstanceId,
+    ],
+    queryFn: () => {
+      if (!contentWorkflow.data)
+        throw new Error('The template workflow has not loaded.');
+      return workflowApiService.getWorkflowEntitySummary(
+        contentWorkflow.data.entityType,
+        id
+      );
+    },
+    enabled: Boolean(
+      contentWorkflow.data &&
+        template.data?.status === 'PendingApproval' &&
+        contentWorkflow.data.entityId.toLowerCase() === id.toLowerCase() &&
+        !isSubmittedContentStep &&
+        !isTemplateWorkflowCompleted(contentWorkflow.data.status)
+    ),
+  });
+
   const refresh = async () => {
     await Promise.all([
       template.refetch(),
       audit.refetch(),
       ...(template.data?.workflowInstanceId &&
       template.data.status === 'PendingApproval'
-        ? [contentWorkflow.refetch()]
+        ? [
+            contentWorkflow.refetch(),
+            ...(workflowSummary.isEnabled ? [workflowSummary.refetch()] : []),
+          ]
         : []),
     ]);
   };
@@ -357,8 +389,10 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           result.message || 'The workflow task could not be completed.'
         );
       }
-      toast.success('Controlled content sent to the approval step');
-      await contentWorkflow.refetch();
+      toast.success(
+        'Document sent for approval. The current reviewer is shown above.'
+      );
+      await refresh();
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -417,7 +451,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
       retire: () => service.retireTemplate(id, request),
     };
     const success = {
-      submit: 'Template submitted to the exact workflow',
+      submit: 'Document preparation started. Upload the tender document next.',
       publish: 'Approved template version published',
       reject: 'Template approval rejected',
       retire: 'Published template version retired',
@@ -485,6 +519,12 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
     );
 
   const item = template.data;
+  const preparation = getDocumentPreparationState(
+    item,
+    contentWorkflow.data,
+    workflowSummary.isError ? undefined : workflowSummary.data,
+    contentWorkflow.isError
+  );
   const usesAttachedEvidence = usesAttachedPublicationEvidence(
     lifecycleAction,
     item.contentWorkflowEvidenceDocumentId
@@ -517,7 +557,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           <Badge
             variant={item.status === 'Published' ? 'default' : 'secondary'}
           >
-            {tenderDocumentTemplateStatusLabel[item.status]}
+            {preparation.label}
           </Badge>
           <Button variant="outline" size="sm" onClick={() => void refresh()}>
             <RefreshCw className="mr-2 h-4 w-4" /> Refresh
@@ -553,18 +593,38 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           label="Policy"
           value={`${item.policySetCode} · v${item.policySetVersion}`}
         />
-        <Summary
-          label="Next stage"
-          value={
-            item.status === 'Published'
-              ? 'Reuse this approved version on compatible tenders'
-              : item.status === 'PendingApproval'
-                ? 'Complete file review, attachment and publication below'
-                : item.status === 'Retired'
-                  ? 'Clone a new Draft to make changes'
-                  : 'Save this setup, then submit for approval'
-          }
-        />
+        <Card
+          className="border-primary/30 bg-primary/5"
+          aria-label="Document preparation progress"
+        >
+          <CardContent className="space-y-2 p-4" aria-live="polite">
+            <ol
+              className="flex flex-wrap gap-x-3 gap-y-1 text-xs"
+              aria-label="Document preparation stages"
+            >
+              {documentPreparationStages.map((stage, index) => (
+                <li
+                  key={stage}
+                  aria-current={
+                    preparation.stage === index ? 'step' : undefined
+                  }
+                  className={
+                    preparation.stage === index
+                      ? 'font-semibold text-primary'
+                      : 'text-muted-foreground'
+                  }
+                >
+                  {index + 1}. {stage}
+                </li>
+              ))}
+            </ol>
+            <p className="text-sm font-semibold">{preparation.label}</p>
+            {preparation.owner && (
+              <p className="text-sm">Waiting with: {preparation.owner}</p>
+            )}
+            <p className="text-sm text-muted-foreground">{preparation.next}</p>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -674,16 +734,18 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                     <div className="space-y-3 rounded-md border bg-muted/30 p-3">
                       <div>
                         <div className="text-sm font-medium">
-                          Stage controlled content
+                          Upload tender document
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Upload to this template&apos;s exact Submitted task,
-                          then send that task to the independent approval step.
+                          Preparation has started, but the document has not been
+                          sent for approval. Choose and upload the file, then
+                          select Send for approval.
                         </div>
                       </div>
                       <Input
                         key={contentFile?.name ?? 'empty-content-file'}
                         type="file"
+                        aria-label="Tender document file"
                         accept=".pdf,.doc,.docx"
                         disabled={busy !== null}
                         onChange={(event) =>
@@ -707,7 +769,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                           }
                           onClick={() => void sendContentForApproval()}
                         >
-                          Send content for approval
+                          Send for approval
                         </Button>
                       </div>
                     </div>
@@ -822,7 +884,10 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
                 />
               </Field>
             </div>
-            <Line label="Submitted" value={formatDate(item.submittedAtUtc)} />
+            <Line
+              label="Preparation started"
+              value={formatDate(item.submittedAtUtc)}
+            />
             <Line label="Published" value={formatDate(item.publishedAtUtc)} />
           </CardContent>
         </Card>
@@ -925,7 +990,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
           allows('Submit', 'SubmitTemplate') &&
           item.status === 'Draft' && (
             <Button onClick={() => setLifecycleAction('submit')}>
-              Submit exact workflow
+              Start document preparation
             </Button>
           )}
         {canApprove &&
@@ -990,14 +1055,18 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {lifecycleAction
-                ? `${lifecycleAction[0].toUpperCase()}${lifecycleAction.slice(1)} controlled version`
-                : 'Lifecycle action'}
+              {lifecycleAction === 'submit'
+                ? 'Start document preparation'
+                : lifecycleAction
+                  ? `${lifecycleAction[0].toUpperCase()}${lifecycleAction.slice(1)} controlled version`
+                  : 'Lifecycle action'}
             </DialogTitle>
             <DialogDescription>
-              {usesAttachedEvidence
-                ? 'Attached document is used as publication evidence. The configured approval and publication checks still apply.'
-                : 'Reference evidence already managed by the shared evidence or workflow platform.'}
+              {lifecycleAction === 'submit'
+                ? 'This opens the upload step in one approval workflow. No file is needed yet and nothing is sent to the reviewer until you upload it and select Send for approval. This does not publish the tender.'
+                : usesAttachedEvidence
+                  ? 'Attached document is used as publication evidence. The configured approval and publication checks still apply.'
+                  : 'Reference evidence already managed by the shared evidence or workflow platform.'}
             </DialogDescription>
           </DialogHeader>
           <Field
@@ -1028,7 +1097,7 @@ export function TenderDocumentTemplateEditor({ id }: { id: string }) {
               onClick={() => void lifecycle()}
             >
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Confirm
+              {lifecycleAction === 'submit' ? 'Start preparation' : 'Confirm'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -194,7 +194,7 @@ Complete **Change password** if prompted, keeping both temporary and replacement
 - [ ] Use a unique reference prefix, for example `LOCAL-DEMO-20260907-A`. Let the ERP generate document numbers. Do not type the historical IDs into business fields.
 - [ ] Arrange a **fresh approved GHS 100,000 budget and GHS 55,000 plan**, or an explicitly approved equivalent allocation. The existing budget's GHS 47,250 remaining is insufficient for another GHS 55,000 PR. Do not silently increase it.
 - [ ] Use the existing known Goods items and a verified supplier. Fresh supplier onboarding needs an accessible email and OTP/token delivery, followed by approval and portal login. Reusing Harbourline skips onboarding; disclose that choice.
-- [ ] Check published workflow, method/threshold policy, compatible evaluation template and controlled tender-document version. Their local configuration is not automatically deployed by a code pull.
+- [ ] Check published workflow, method/threshold policy, compatible evaluation template and controlled tender-document version. Match the **exact policy version, source profile, procurement method and effective dates**. A document published for policy v5 is not automatically valid for v8. Their local configuration is not automatically deployed by a code pull.
 - [ ] Choose future submission/opening dates with enough time for bidding. The historical 5 September dates are expired. Use only authorized accelerated local-test windows, never represent them as compliant public-notice periods.
 - [ ] Prepare separately named, clearly labelled simulated technical proposal, commercial proposal, supplier compliance documents, delivery evidence and any bond/signed-contract evidence. No genuine certificates or signatures are being asserted.
 - [ ] Record opening warehouse quantities and values. If replaying the main quantities against today's balance, expected ending stock will differ from the historical figures.
@@ -279,7 +279,45 @@ Save the existing draft, Submit for Approval. **`procurementapprover`** independ
 
 **Actor:** `procurementofficer` → tender process sidebar → **Open document register**, under Controlled documents and publication.
 
-Bind the approved effective document/version, check issue/fee terms and the required publication/advertisement evidence. Obtain any pending document approval from the assigned reviewer. Return to the tender and **Publish Tender** after the readiness conditions pass. Do not issue documents to bidders before publication. After publication, record document issue/sale to the actual recipient using saved records; retain any fee/receipt evidence required by the terms.
+**First check whether an eligible Published document already exists.** If **Bind approved version** is available, reuse the matching approved document; do not create another workflow unnecessarily. If the register says no Published template matches the locked policy/profile/method, complete B8a–B8d below first.
+
+#### B8a. Prepare the document setup — Procurement Officer
+
+Open [Controlled tender documents](http://localhost:3000/procurement/tender-documents). Open an existing appropriate template and **Clone new Draft**, then open the newly created Draft from the register; alternatively use **New controlled Draft**. A clone does not itself change the procurement-policy version. In the Draft explicitly select the exact policy locked on this tender, its source profile and the applicable method, then save. For the current NCT demonstration these are **TDC-F05B-NCT · v8**, source **TDC-ACCEPTANCE-20260720201906**, **NCT only**, and **TDC Sourcing Approval · v1**. For another route, use its actual configured policy/method/workflow rather than copying this example.
+
+TDC supplies the tender document: requirements/specifications, submission instructions, eligibility/evaluation requirements and terms for bidders. This is **not** a bidder's technical/commercial proposal or supplier-registration certificate. Use an approved existing TDC document/template where appropriate; for this local simulation only, a clearly labelled sample PDF is acceptable. Prepare the file on your computer, but **upload is not available on the initial Draft**.
+
+Click **Start document preparation** (formerly **Submit exact workflow**). In the confirmation dialog enter the existing preparation/change reference in **Shared evidence reference**, add a comment, then **Start preparation**. For a simulation, use an explicitly labelled reference such as `LOCAL-UAT-NCT-DOCUMENT-PREPARATION-001`; it is a traceability note, **not the document upload or proof of approval**.
+
+**Expected:** One workflow starts and the page says **Awaiting document upload**, with the preparer shown under **Waiting with**. It has not reached the independent approver. Do not submit again or delete/recreate the Draft because no file was attached before starting.
+
+#### B8b. Upload and send — same Procurement Officer
+
+On the same template page, find **Upload tender document**. Click **Browse / Choose file**, select the tender PDF/DOC/DOCX, then **Upload controlled content**. Wait for a successful upload; choosing a file alone does not upload it. If it fails, correct the displayed error and retry the retained file.
+
+**Expected:** **Awaiting send for approval**. Click **Send for approval** (formerly **Send content for approval**). The existing workflow advances to review; this does **not** start a second approval workflow. The progress panel should show the current review step and actual pending reviewer(s). If assignment cannot be loaded, refresh to confirm it; do not guess a reviewer or resubmit.
+
+**Sequence:** Prepare → Upload → Review → Publish document. The two buttons mean **start preparation**, then **hand the uploaded file to the reviewer**; they are not two separate approvals.
+
+#### B8c. Verify the file and approve the workflow — independent reviewer
+
+Sign out and sign in as the assigned reviewer shown on the template. In the current **TDC Sourcing Approval · v1** setup, the approval step requires **TDC_HEAD_OF_PROCUREMENT**, held by **`procurementapprover`**; the preparer is `procurementofficer`. Verify the actual assignment before switching accounts.
+
+Open the **same template**, inspect its uploaded document in the document-review section, wait for a clean scan, and complete any required independent file verification. Then use **Approve workflow** and satisfy the configured checklist/signature requirements. File verification and workflow approval are distinct checks within this one process; approval does not automatically publish the document.
+
+**Expected:** Completed approval workflow. If content is not attached, the page says **Awaiting document attachment**. Do not bypass rejected, unsafe, unverified or otherwise ineligible evidence.
+
+#### B8d. Attach and publish the document, then publish the tender
+
+**`procurementofficer`:** select the reviewed, eligible file in **Controlled workflow evidence document**, then **Attach eligible content**. Only files allowed by the server's exact-workflow/policy checks may be used.
+
+**Authorized publisher (`procurementapprover` in this local setup):** open the same template and **Publish approved version**, review the confirmation and complete it. Attached controlled content supplies publication evidence; retain any additional reference required by the actual decision. All configured readiness checks still apply.
+
+**Expected:** **Document published**. This publishes the reusable controlled document, **not the tender advertisement**.
+
+**`procurementofficer`:** return to the original tender's process sidebar → **Open document register** → **Refresh** → **Bind approved version**. Check the exact approved version, issue/fee terms, submission/opening/bid-validity dates and required publication/advertisement evidence. If dates expired during preparation, use the supported unpublished rescheduling/approval process before publishing; do not edit SQL, backdate or bypass the deadline control.
+
+Return to the tender and **Publish Tender** only after its readiness conditions pass. Do not issue documents to bidders before tender publication. After publication, record document issue/sale to the actual recipient using saved records; retain any fee/receipt evidence required by the terms.
 
 **Pass:** Published with publication history and usable controlled documents. An open NCT is not invitation-only: zero invitations is not the same as zero eligible bidders. A recorded document recipient identifies who received that exact version; it does not turn NCT into a restricted supplier list.
 
@@ -429,6 +467,9 @@ All routes still require the approved source/budget controls and a PO for procur
 | USD or unexpected amount | Check saved GHS currency and source-line values before saving. 55,000 is the estimate; 52,000 is the main award; 48,000 was remaining budget before Petty; 47,250 is the later campaign remainder. |
 | Documents count is not what you expect | Check the tender's configured supporting requirements and their actual saved attachments. Proposal files and registration/tax/financial-statement evidence are different categories. |
 | Inspection says evidence missing | Upload delivery evidence to the PO's controlled evidence area, wait for usable DMS status and select that saved record in inspection. A typed reference alone is not an uploaded file. |
+| No Published template matches the tender | Compare its exact locked policy version/profile/method with the document template. Complete B8a–B8d for a matching version; do not change the tender's locked lineage or weaken readiness checks. |
+| Document was submitted without a file / generic Pending approval | Starting preparation intentionally precedes upload. Stay as the recorded preparer, upload the file, then Send for approval. Check the current task/Waiting with panel; do not create a duplicate request. Older running builds may still show the former button labels until refreshed after deployment. |
+| Approval is complete but tender is not published | Verify/attach eligible content and Publish approved version first, bind that document to the tender, then separately Publish Tender. These are different records and actions. |
 | Invoice quantities are unavailable/exceeded | Check accepted inspection quantity less already invoiced quantity for the same PO line. Do not invoice unreceived/rejected goods or duplicate the main receipt's completed invoice. |
 | Matching fails or account mapping is missing | Record the message/reference and hand the Finance-owned issue to its owner. Do not change source prices, tax or Finance implementation merely to get a green status. |
 | PDF/email is not visible | Do not repeatedly send notifications. Show the issued record/history only and disclose the presentation gap; verify delivery separately before promising the customer a PDF. |
