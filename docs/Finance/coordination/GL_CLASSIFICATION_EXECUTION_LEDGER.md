@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 corrected candidate `2a45d130`; independent GPT-5.6 Sol High cycle-2 review active |
+| Review status | C7 cycle 2 `CHANGES_REQUIRED`; final participant-boundary redesign active on GPT-5.6 Sol Medium |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -738,6 +738,20 @@ EF model parity, exact 455-migration discovery and the exact no-connect C6-to-C7
 the ledger is unchanged, no owner module changed and no database was accessed. Independent GPT-5.6 Sol High
 cycle-2 review is active across all six prior findings and preserved C1-C6 authority. Integration and Inventory
 remain gated.
+
+Stage C7 independent review cycle 2 confirmed that direct C6 actor binding, separate SQL decision transitions,
+frozen correction/reversal authority, drift-safe rejection and reconstructible snapshots are closed, but
+returned `CHANGES_REQUIRED` at clean HEAD `2a45d130` for one remaining P1. The participant registry still
+invokes arbitrary registered code with the raw `ApplicationDbContext` and trusts self-declared no-external-
+effect/no-transaction flags; a dishonest handler can commit, use another context, perform external I/O or do
+nothing before Finance detects only a changed transaction ID. A no-op also yields no deterministic owner-effect
+receipt. The bounded correction must remove that arbitrary callback surface in favor of a closed Finance-owned
+ambient-transaction execution contract with restricted capabilities and verifiable deterministic owner-effect
+evidence before representations. Guarded SQL must prove commit/rollback/context/no-op/failure attacks leave zero
+partial mutation and remain safely retryable. Reviewer gates otherwise passed a zero-error build, 42 focused
+C6/C7 tests with 13 guarded skips, 361 widened passes with 37 guarded skips, EF parity, exact 455-migration
+discovery, no-connect script generation and clean ancestry/status/diff/credential checks. The coordinator
+dispatched the final redesign on Sol Medium; no migration or database mutation occurred.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
