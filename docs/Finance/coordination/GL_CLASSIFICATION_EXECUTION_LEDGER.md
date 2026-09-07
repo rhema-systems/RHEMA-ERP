@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage B2 — Inventory neutral AccountingEvent producer cutover |
+| Phase | Post-Phase-6 Stage C7 — Finance-owned staged producer-intent adapter |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
-| Exact base | `69b357fd09cc6713ad9d9c18dbf6855e2afd6b2e` |
-| Branch | `codex/inventory-accounting-event-cutover` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-cutover` |
+| Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
+| Exact base | `b73e6886a78e03ac366410ace0e956a0f1227ae5` |
+| Branch | `codex/finance-producer-intent-staging-c7` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-producer-intent-c7` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `69b357fd09cc6713ad9d9c18dbf6855e2afd6b2e` |
+| Primary HEAD at activation | `b73e6886a78e03ac366410ace0e956a0f1227ae5` |
 | Coordinator | Current primary Finance task |
-| Recovery heartbeat | `finance-gl-cutover-coordinator` — paused while awaiting the material B2 workflow decision |
-| Model routing | Implementer: GPT-5.6 Terra Medium; substantive Finance corrections: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
-| Review status | `BLOCKED` on material Finance adapter and maker-checker workflow decision; Inventory worktree clean |
+| Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
+| Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
+| Review status | User authorized recommended staged Finance-approval design; C7 implementation active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -688,6 +688,18 @@ while reporting completion, or fail after a durable stock mutation. Those are ma
 semantics outside a routine owner conversion. The Inventory worktree remains clean at exact base `69b357fd`;
 no database was accessed. B2, Sales and HR/Payroll are paused pending an explicit decision on a Finance-owned
 producer-intent adapter and the asynchronous versus atomic completion workflow.
+
+The user approved the recommended staged Finance-approval design. Stage C7 is therefore authorized from fresh
+exact primary base `b73e6886a78e03ac366410ace0e956a0f1227ae5` on GPT-5.6 Sol Medium. C7 must add a
+Finance-owned producer-intent boundary that accepts one neutral economic intent, derives C5 resolution/freeze
+evidence inside Finance, records maker preparation and independent-checker approval, and exposes execution only
+after approval. It must define an ambient same-database execution contract so the later Inventory participant
+can post its already-staged stock adjustment and C6 book representations in one transaction, with durable
+failure evidence only after rollback and exact retry/recovery. The adapter remains disabled by default; it may
+not weaken C1-C6 authority, auto-approve, let producers select books, enumerate books in owner code, or change
+Inventory/Sales/HR modules in C7. An unapplied migration is allowed only if genuinely required for durable
+approval/execution state and must receive independent Sol High review. After clean approval/integration, the
+Inventory packet will be reissued on Terra Medium from a fresh exact base.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
