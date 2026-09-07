@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 cycle 3 independent GPT-5.6 Sol High review active at clean corrected HEAD `0810738480eace355871dc9b2806b9f8eaa7eb2d` |
+| Review status | C7 cycle 3 `CHANGES_REQUIRED`; rollback-tracking correction active on GPT-5.6 Sol Medium |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -768,6 +768,19 @@ no-connect C6-to-C7 script; the widened run reported 269 passes, 37 guarded skip
 baseline failures. The worktree, scope, credential and ledger checks are clean; no owner module changed and no
 database was accessed. Independent GPT-5.6 Sol High cycle-3 review is active over the sole residual participant-
 boundary P1 and all prior C7 closures. Integration and Inventory reissue remain gated.
+
+Stage C7 independent review cycle 3 confirmed that the callback/registry/raw-context P1 is closed, but returned
+`CHANGES_REQUIRED` at exact clean HEAD `0810738480eace355871dc9b2806b9f8eaa7eb2d` for one newly exposed P1.
+After the shared owner transaction rolls back, the durable-failure method reuses the same EF context without
+clearing its ChangeTracker; its later `SaveChangesAsync` can therefore replay rolled-back tracked owner, C5,
+posting or receipt entities outside the economic transaction. Existing guarded coverage masks the defect with
+a caller-side `ChangeTracker.Clear()` and a raw-SQL owner effect. The correction must establish clean tracking
+state inside Finance after confirming rollback and before any failure query/write, then prove on migrated SQL
+with a tracked EF owner mutation and no caller clear that only event/attempt/audit failure evidence persists.
+Reviewer gates otherwise passed a zero-error build, 43 focused C6/C7 tests with 13 guarded skips, 362 widened
+passes with 37 guarded skips, EF parity, exact 455-migration discovery, no-connect script generation and clean
+ancestry/status/diff/credential checks. No database was accessed. The bounded Sol Medium correction is active;
+integration and Inventory reissue remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
