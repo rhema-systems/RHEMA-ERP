@@ -1957,7 +1957,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             control.WorkflowInstanceId,
             control.ApprovedById,
             ParseGuids(control.ApprovalActorsJson),
-            cancellationToken);
+            cancellationToken,
+            knownSubmitterId: control.SubmittedForApprovalById,
+            expectedEntityId: source.Id,
+            expectedDefinitionId: control.WorkflowDefinitionId);
     }
 
     private async Task AddCommitteeScoreEvaluatorLineageAsync(
@@ -2156,7 +2159,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         Guid? workflowInstanceId,
         Guid? approvedById,
         IReadOnlyCollection<Guid> declaredActorIds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? knownSubmitterId = null,
+        Guid? expectedEntityId = null,
+        Guid? expectedDefinitionId = null)
     {
         var declared = declaredActorIds
             .Where(item => item != Guid.Empty)
@@ -2191,7 +2197,18 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .Select(item => item!.Value)
             .Distinct()
             .ToListAsync(cancellationToken);
-        if (workflow is null || actual.Count == 0 ||
+        // Legacy exceptional controls included the submitter in ApprovalActorsJson.
+        // Exclude only the exact workflow initiator when they did not approve.
+        // Keep all actual approvals and reject every other unmatched actor.
+        if (workflow is not null && knownSubmitterId.HasValue &&
+            workflow.InitiatedById == knownSubmitterId.Value &&
+            !actual.Contains(knownSubmitterId.Value) &&
+            approvedById != knownSubmitterId)
+            declared.Remove(knownSubmitterId.Value);
+        if (workflow is null || workflow.Status != WorkflowInstanceStatus.Completed ||
+            (expectedEntityId.HasValue && workflow.EntityId != expectedEntityId.Value) ||
+            (expectedDefinitionId.HasValue && workflow.WorkflowDefinitionId != expectedDefinitionId.Value) ||
+            actual.Count == 0 ||
             declared.Any(item => !actual.Contains(item)))
             throw AmbiguousEvaluatorLineage(
                 "Authority approval actors do not match the exact completed workflow lineage.");

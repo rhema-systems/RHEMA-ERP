@@ -78,6 +78,9 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
         var submitted = await fixture.Service.SubmitApprovalAsync(fixture.Tender.Id,
             new SubmitProcurementExceptionalApprovalRequest { RowVersion = prepared.RowVersion }, "submit");
 
+        (await fixture.Context.Set<ProcurementExceptionalSourcingControl>().SingleAsync())
+            .ApprovalActorsJson.Should().Be("[]", "submission is not an independent approval");
+
         fixture.CurrentUserId = Guid.NewGuid();
         fixture.Workflow.Setup(service => service.ProcessApprovalStepAsync(
                 "TenderException", fixture.Tender.Id, fixture.CurrentUserId, "approve", It.IsAny<string?>()))
