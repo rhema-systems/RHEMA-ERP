@@ -415,6 +415,19 @@ BEGIN
                WHERE d.[Id] IS NULL AND i.[PolicyStatus] IN (3,5))
         THROW 51000, 'C5_POLICY_TRANSITION_INVALID: approved or retired authority must be reached through a governed transition.', 1;
 
+    -- Retirement authority can originate only on an already-approved policy. Draft, pending-approval,
+    -- and rejected rows must remain retirement-clean, and approval cannot carry evidence prepared before
+    -- approval into the approved authority boundary.
+    IF EXISTS (
+        SELECT 1 FROM inserted i LEFT JOIN deleted d ON d.[Id]=i.[Id]
+        WHERE (i.[PolicyStatus] IN (1,2,4) OR (i.[PolicyStatus]=3 AND ISNULL(d.[PolicyStatus],0)<>3))
+          AND (i.[RetiredByUserId] IS NOT NULL OR i.[RetiredAtUtc] IS NOT NULL
+            OR i.[RetirementRequestedByUserId] IS NOT NULL OR i.[RetirementRequestedAtUtc] IS NOT NULL
+            OR i.[RetirementReason] IS NOT NULL OR i.[RetirementWorkflowInstanceId] IS NOT NULL
+            OR i.[RetirementDecisionStatus] IS NOT NULL OR i.[RetirementDecidedByUserId] IS NOT NULL
+            OR i.[RetirementDecidedAtUtc] IS NOT NULL OR i.[RetirementDecisionReason] IS NOT NULL)
+    ) THROW 51000, 'C5_POLICY_RETIREMENT_STATUS_INVALID: retirement evidence may originate only after governed policy approval.', 1;
+
     -- Retired policy authority is a closed historical fact. Even direct SQL must create the request in one
     -- committed update and approve that pre-existing request in a later update; a caller cannot synthesize
     -- request and decision evidence while retiring, nor rewrite any part of an already-retired row.

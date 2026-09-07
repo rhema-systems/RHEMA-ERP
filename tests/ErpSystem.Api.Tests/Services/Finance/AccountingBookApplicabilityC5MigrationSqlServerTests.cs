@@ -23,6 +23,44 @@ public sealed class AccountingBookApplicabilityC5MigrationSqlServerTests
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name LIKE N'AccountingBookApplicability%' OR name LIKE N'AccountingBookSelectionEvidence%'")).Should().Be(5);
         (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.triggers WHERE name LIKE N'TR_AccountingBook%C5%'")).Should().Be(5);
 
+        var draftPreseedPolicy = Guid.NewGuid();
+        var draftPreseed = () => database.ExecuteAsync($$"""
+INSERT AccountingBookApplicabilityPolicies
+ (Id,PolicyCode,Version,Name,EffectiveFrom,PolicyStatus,Reason,CreatedByUserId,PreparedByUserId,PreparedAtUtc,
+  RetirementRequestedByUserId,RetirementRequestedAtUtc,RetirementReason,RetirementWorkflowInstanceId,RetirementDecisionStatus,
+  CreatedAt,IsDeleted,TenantId)
+VALUES ('{{draftPreseedPolicy}}',N'DRAFT_PRESEED',1,N'Draft preseed',CONVERT(datetime2,'2026-01-01'),1,N'reason',
+ '{{Guid.NewGuid()}}','{{Guid.NewGuid()}}',SYSUTCDATETIME(),'{{Guid.NewGuid()}}',CONVERT(datetime2,'2026-09-05'),N'Premature',
+ '{{Guid.NewGuid()}}',N'Pending',SYSUTCDATETIME(),0,'{{first.TenantId}}');
+""");
+        (await draftPreseed.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{draftPreseedPolicy}'")).Should().Be(0);
+
+        var pendingCarryPolicy = Guid.NewGuid();
+        var pendingCarryRule = Guid.NewGuid();
+        await database.InsertDraftPolicyRuleAsync(first.TenantId, pendingCarryPolicy, pendingCarryRule, "PENDING_CARRY", "PENDING_CARRY_RULE", 9);
+        await database.InsertRuleBookAsync(first.TenantId, pendingCarryRule, first.BookId, "IFRS");
+        var pendingWorkflow = Guid.NewGuid();
+        var pendingPreseed = () => database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=2,WorkflowInstanceId='{{pendingWorkflow}}',
+ RetirementRequestedByUserId='{{Guid.NewGuid()}}',RetirementRequestedAtUtc=CONVERT(datetime2,'2026-09-05'),
+ RetirementReason=N'Premature',RetirementWorkflowInstanceId='{{Guid.NewGuid()}}',RetirementDecisionStatus=N'Pending'
+WHERE Id='{{pendingCarryPolicy}}';
+""");
+        (await pendingPreseed.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{pendingCarryPolicy}' AND PolicyStatus=1 AND WorkflowInstanceId IS NULL AND RetirementDecisionStatus IS NULL")).Should().Be(1);
+
+        await database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=2,WorkflowInstanceId='{pendingWorkflow}' WHERE Id='{pendingCarryPolicy}'");
+        var carryRetirementThroughApproval = () => database.ExecuteAsync($$"""
+UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=3,ApprovedByUserId='{{Guid.NewGuid()}}',ApprovedAtUtc=CONVERT(datetime2,'2026-09-06'),
+ DecidedByUserId='{{Guid.NewGuid()}}',DecidedAtUtc=CONVERT(datetime2,'2026-09-06'),DecisionReason=N'Approved',
+ RetirementRequestedByUserId='{{Guid.NewGuid()}}',RetirementRequestedAtUtc=CONVERT(datetime2,'2026-09-05'),
+ RetirementReason=N'Carry through',RetirementWorkflowInstanceId='{{Guid.NewGuid()}}',RetirementDecisionStatus=N'Pending'
+WHERE Id='{{pendingCarryPolicy}}';
+""");
+        (await carryRetirementThroughApproval.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{pendingCarryPolicy}' AND PolicyStatus=2 AND ApprovedByUserId IS NULL AND RetirementDecisionStatus IS NULL")).Should().Be(1);
+
         var policyId = Guid.NewGuid();
         var ruleId = Guid.NewGuid();
         await database.InsertDraftPolicyRuleAsync(first.TenantId, policyId, ruleId, "POLICY_A", "RULE_A", 10);
@@ -63,6 +101,24 @@ VALUES ('{{Guid.NewGuid()}}','{{deltaRule}}','{{deltaBook}}',1,N'DELTA',SYSUTCDA
         var mutateApprovedRule = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityRules SET SortOrder=2 WHERE Id='{ruleId}'");
         (await mutateApprovedRule.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
 
+        // The complete approved-authority mutation matrix is exercised before any frozen-use evidence exists.
+        foreach (var mutation in new[]
+        {
+            $"UPDATE AccountingBookApplicabilityPolicies SET PolicyCode=N'POLICY_REWRITTEN' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET Version=2,SupersedesPolicyId='{Guid.NewGuid()}' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET EffectiveFrom=DATEADD(day,-1,EffectiveFrom) WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET EffectiveTo=DATEADD(day,30,EffectiveFrom) WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET Name=N'Rewritten' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET Description=N'Rewritten description' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET ApprovedByUserId='{Guid.NewGuid()}' WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=1,ApprovedByUserId=NULL,ApprovedAtUtc=NULL WHERE Id='{policyId}'",
+            $"UPDATE AccountingBookApplicabilityPolicies SET RetirementRequestedByUserId='{Guid.NewGuid()}',RetirementRequestedAtUtc=SYSUTCDATETIME(),RetirementReason=N'Fake',RetirementWorkflowInstanceId='{Guid.NewGuid()}',RetirementDecisionStatus=N'Approved',RetirementDecidedByUserId='{Guid.NewGuid()}',RetirementDecidedAtUtc=SYSUTCDATETIME(),RetirementDecisionReason=N'Fake' WHERE Id='{policyId}'"
+        })
+        {
+            var mutateApproved = () => database.ExecuteAsync(mutation);
+            (await mutateApproved.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
+        }
+
         var bareRetiredBy = Guid.NewGuid();
         var bareRetirementWithoutRequest = () => database.ExecuteAsync($$"""
 UPDATE AccountingBookApplicabilityPolicies
@@ -73,11 +129,6 @@ WHERE Id='{{policyId}}';
         (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingBookApplicabilityPolicies WHERE Id='{policyId}' AND PolicyStatus=3 AND EffectiveTo IS NULL AND RetiredByUserId IS NULL AND RetiredAtUtc IS NULL"))
             .Should().Be(1);
 
-        // Approved authority is immutable immediately; frozen-use evidence is an additional boundary, not
-        // the condition that turns policy configuration into governed authority.
-        var mutateApprovedBeforeUse = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET Name=N'Rewritten before use' WHERE Id='{policyId}'");
-        (await mutateApprovedBeforeUse.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
-
         var evidenceId = Guid.NewGuid();
         await database.ExecuteAsync($$"""
 INSERT AccountingBookSelectionEvidence
@@ -87,23 +138,10 @@ INSERT AccountingBookSelectionEvidenceBooks
  (Id,AccountingBookSelectionEvidenceId,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,CreatedAt,IsDeleted,TenantId)
 VALUES ('{{Guid.NewGuid()}}','{{evidenceId}}','{{first.BookId}}',0,N'IFRS',REPLICATE('C',64),SYSUTCDATETIME(),0,'{{first.TenantId}}');
 """);
+        var mutatePolicyAfterUse = () => database.ExecuteAsync($"UPDATE AccountingBookApplicabilityPolicies SET EffectiveFrom=DATEADD(day,-1,EffectiveFrom) WHERE Id='{policyId}'");
+        (await mutatePolicyAfterUse.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
         var mutateFrozen = () => database.ExecuteAsync($"UPDATE AccountingBookSelectionEvidence SET PostingAction=N'REVERSE' WHERE Id='{evidenceId}'");
         (await mutateFrozen.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
-
-        foreach (var mutation in new[]
-        {
-            $"UPDATE AccountingBookApplicabilityPolicies SET Name=N'Rewritten' WHERE Id='{policyId}'",
-            $"UPDATE AccountingBookApplicabilityPolicies SET Version=2,SupersedesPolicyId='{Guid.NewGuid()}' WHERE Id='{policyId}'",
-            $"UPDATE AccountingBookApplicabilityPolicies SET EffectiveFrom=DATEADD(day,-1,EffectiveFrom) WHERE Id='{policyId}'",
-            $"UPDATE AccountingBookApplicabilityPolicies SET EffectiveTo=DATEADD(day,30,EffectiveFrom) WHERE Id='{policyId}'",
-            $"UPDATE AccountingBookApplicabilityPolicies SET ApprovedByUserId='{Guid.NewGuid()}' WHERE Id='{policyId}'",
-            $"UPDATE AccountingBookApplicabilityPolicies SET RetirementRequestedByUserId='{Guid.NewGuid()}',RetirementRequestedAtUtc=SYSUTCDATETIME(),RetirementReason=N'Fake',RetirementWorkflowInstanceId='{Guid.NewGuid()}',RetirementDecisionStatus=N'Approved',RetirementDecidedByUserId='{Guid.NewGuid()}',RetirementDecidedAtUtc=SYSUTCDATETIME(),RetirementDecisionReason=N'Fake' WHERE Id='{policyId}'",
-            $"UPDATE AccountingBookApplicabilityPolicies SET PolicyStatus=1,ApprovedByUserId=NULL,ApprovedAtUtc=NULL WHERE Id='{policyId}'"
-        })
-        {
-            var mutateApproved = () => database.ExecuteAsync(mutation);
-            (await mutateApproved.Should().ThrowAsync<SqlException>()).Which.Number.Should().Be(51000);
-        }
 
         var retirementDate = new DateTime(2026, 9, 6);
         var retirementMaker = Guid.NewGuid();
