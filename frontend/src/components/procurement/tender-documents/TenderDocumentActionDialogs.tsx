@@ -27,7 +27,10 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { TenderDocumentRecipientSelector } from './TenderDocumentRecipientSelector';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import {
+  businessPartnerService,
+  type BusinessPartnerDto,
+} from '@/services/businessPartnerService';
 import {
   hasAnyTenderDocumentAction,
   suggestedTenderDocumentSelection,
@@ -71,11 +74,22 @@ export function TenderDocumentActionDialogs({
   onChanged: () => Promise<void>;
 }) {
   const [bindOpen, setBindOpen] = useState(false);
+  const [bindSchedule, setBindSchedule] = useState(false);
+  const [bindDeadline, setBindDeadline] = useState('');
+  const [bindOpening, setBindOpening] = useState('');
+  const [bindWorkflow, setBindWorkflow] = useState('');
+  const [bindReason, setBindReason] = useState('');
+  const [bindEvidence, setBindEvidence] = useState('');
+  const [bindError, setBindError] = useState('');
+  const [bindRecorded, setBindRecorded] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
-  const [recipientMode, setRecipientMode] = useState<'saved' | 'new' | 'configured'>('saved');
+  const [recipientMode, setRecipientMode] = useState<
+    'saved' | 'new' | 'configured'
+  >('saved');
   const [issueError, setIssueError] = useState('');
   const [issueRefreshWarning, setIssueRefreshWarning] = useState('');
-  const [loadingRecipientContacts, setLoadingRecipientContacts] = useState(false);
+  const [loadingRecipientContacts, setLoadingRecipientContacts] =
+    useState(false);
   const [recipientContactNotice, setRecipientContactNotice] = useState('');
   const contactRequest = useRef(0);
   const contactEdits = useRef({ email: false, phone: false });
@@ -110,18 +124,25 @@ export function TenderDocumentActionDialogs({
   const [reason, setReason] = useState('');
   const [changeEvidence, setChangeEvidence] = useState('');
 
-  function updateIssueField<Key extends keyof typeof issue>(field: Key, value: (typeof issue)[Key]) {
+  function updateIssueField<Key extends keyof typeof issue>(
+    field: Key,
+    value: (typeof issue)[Key]
+  ) {
     // Merge with the latest state: a contact lookup may settle in the same input batch.
     setIssue((current) => ({ ...current, [field]: value }));
   }
 
-  useEffect(() => () => { contactRequest.current += 1; }, []);
+  useEffect(
+    () => () => {
+      contactRequest.current += 1;
+    },
+    []
+  );
 
   useEffect(() => {
-    setSubmissionDeadline(
-      localInput(readiness.effectiveSubmissionDeadlineUtc)
-    );
+    setSubmissionDeadline(localInput(readiness.effectiveSubmissionDeadlineUtc));
     setBidValidity(localInput(readiness.effectiveBidValidityUntilUtc));
+    setOpeningAt(localInput(readiness.openingScheduledAtUtc));
     setFeeMode(readiness.feeMode ?? 'Free');
     setFeeAmount(readiness.feeAmount ?? 0);
     setCurrencyCode(readiness.currencyCode ?? 'GHS');
@@ -136,9 +157,13 @@ export function TenderDocumentActionDialogs({
   }, [register]);
 
   useEffect(() => {
-    setTemplateVersionId(current => suggestedTenderDocumentSelection(
-      current, readiness.effectiveTemplateVersionId, approvedTemplates
-    ));
+    setTemplateVersionId((current) =>
+      suggestedTenderDocumentSelection(
+        current,
+        readiness.effectiveTemplateVersionId,
+        approvedTemplates
+      )
+    );
   }, [readiness.effectiveTemplateVersionId, approvedTemplates]);
 
   const run = async (
@@ -153,7 +178,10 @@ export function TenderDocumentActionDialogs({
       await onChanged();
       return true;
     } catch (error) {
-      const message = getProcurementProblemMessage(error, 'Controlled action failed');
+      const message = getProcurementProblemMessage(
+        error,
+        'Controlled action failed'
+      );
       toast.error(message);
       onError?.(message);
       return false;
@@ -163,6 +191,8 @@ export function TenderDocumentActionDialogs({
   };
 
   const bind = async () => {
+    if (busy || bindRecorded) return;
+    setBindError('');
     if (
       !templateVersionId ||
       !submissionDeadline ||
@@ -178,24 +208,84 @@ export function TenderDocumentActionDialogs({
       toast.error('Paid document binding requires a positive fee.');
       return;
     }
-    const completed = await run(
-      () =>
-        service.bind({
-          sourceType: readiness.sourceType,
-          sourceId: readiness.sourceId,
-          templateVersionId,
-          submissionDeadlineUtc: new Date(submissionDeadline).toISOString(),
-          openingScheduledAtUtc: openingAt
-            ? new Date(openingAt).toISOString()
-            : undefined,
-          bidValidityUntilUtc: new Date(bidValidity).toISOString(),
-          feeMode,
-          feeAmount: feeMode === 'Free' ? 0 : feeAmount,
-          currencyCode: currencyCode.toUpperCase(),
-        }),
-      'Exact approved tender-document version bound'
+    const originalDeadline = new Date(
+      readiness.effectiveSubmissionDeadlineUtc ?? ''
     );
-    if (completed) setBindOpen(false);
+    const proposedDeadline = new Date(bindDeadline);
+    const proposedOpening = new Date(bindOpening);
+    const validity = new Date(bidValidity);
+    if (
+      bindSchedule &&
+      (!canBindSchedule ||
+        !bindWorkflow ||
+        !bindReason.trim() ||
+        !bindEvidence.trim() ||
+        !Number.isFinite(proposedDeadline.getTime()) ||
+        !Number.isFinite(proposedOpening.getTime()) ||
+        proposedDeadline.getTime() <= Date.now() ||
+        proposedDeadline <= originalDeadline ||
+        proposedOpening <= proposedDeadline ||
+        (readiness.openingScheduledAtUtc &&
+          proposedOpening <= new Date(readiness.openingScheduledAtUtc)) ||
+        proposedDeadline >= validity)
+    ) {
+      setBindError(
+        'Choose a future submission deadline later than the original and before bid-validity expiry, a later opening after submission, and complete the approval workflow, reason and evidence reference.'
+      );
+      return;
+    }
+    if (!bindSchedule && originalDeadline.getTime() <= Date.now()) {
+      setBindError(
+        'The deadline has elapsed. Request new dates for approval before binding.'
+      );
+      return;
+    }
+    try {
+      setBusy(true);
+      await service.bind({
+        sourceType: readiness.sourceType,
+        sourceId: readiness.sourceId,
+        templateVersionId,
+        submissionDeadlineUtc: originalDeadline.toISOString(),
+        openingScheduledAtUtc: readiness.openingScheduledAtUtc,
+        bidValidityUntilUtc: new Date(bidValidity).toISOString(),
+        feeMode,
+        feeAmount: feeMode === 'Free' ? 0 : feeAmount,
+        currencyCode: currencyCode.toUpperCase(),
+        scheduleChange: bindSchedule
+          ? {
+              submissionDeadlineUtc: proposedDeadline.toISOString(),
+              openingScheduledAtUtc: proposedOpening.toISOString(),
+              workflowDefinitionId: bindWorkflow,
+              reason: bindReason.trim(),
+              evidenceReference: bindEvidence.trim(),
+            }
+          : undefined,
+      });
+      setBindRecorded(true);
+      toast.success(
+        bindSchedule
+          ? 'Document bound; schedule change awaiting approval. Tender dates have not changed.'
+          : 'Exact approved tender-document version bound'
+      );
+      try {
+        await onChanged();
+        setBindOpen(false);
+      } catch {
+        setBindError(
+          'The binding was saved, but the register could not refresh. Refresh the register; do not submit again.'
+        );
+      }
+    } catch (error) {
+      const message = getProcurementProblemMessage(
+        error,
+        'Document binding failed'
+      );
+      setBindError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const selectRecipient = async (partner?: BusinessPartnerDto) => {
@@ -214,25 +304,39 @@ export function TenderDocumentActionDialogs({
     if (!partner || (partner.email?.trim() && partner.phone?.trim())) return;
     setLoadingRecipientContacts(true);
     try {
-      const contacts = await businessPartnerService.getPartnerContacts(partner.id);
+      const contacts = await businessPartnerService.getPartnerContacts(
+        partner.id
+      );
       if (request !== contactRequest.current) return;
       const primary = contacts
         .filter((contact) => contact.isActive !== false && contact.isPrimary)
         .sort((left, right) => left.id.localeCompare(right.id))[0];
       if (!primary) return;
-      setIssue((current) => request !== contactRequest.current || current.businessPartnerId !== partner.id ? current : ({
-        ...current,
-        recipientEmail: !contactEdits.current.email && !current.recipientEmail.trim()
-          ? primary.email?.trim() ?? '' : current.recipientEmail,
-        recipientPhone: !contactEdits.current.phone && !current.recipientPhone.trim()
-          ? primary.phone?.trim() || primary.mobile?.trim() || '' : current.recipientPhone,
-      }));
+      setIssue((current) =>
+        request !== contactRequest.current ||
+        current.businessPartnerId !== partner.id
+          ? current
+          : {
+              ...current,
+              recipientEmail:
+                !contactEdits.current.email && !current.recipientEmail.trim()
+                  ? (primary.email?.trim() ?? '')
+                  : current.recipientEmail,
+              recipientPhone:
+                !contactEdits.current.phone && !current.recipientPhone.trim()
+                  ? primary.phone?.trim() || primary.mobile?.trim() || ''
+                  : current.recipientPhone,
+            }
+      );
     } catch {
       if (request === contactRequest.current) {
-        setRecipientContactNotice('Saved contact details could not be loaded. Enter the recipient contact details below.');
+        setRecipientContactNotice(
+          'Saved contact details could not be loaded. Enter the recipient contact details below.'
+        );
       }
     } finally {
-      if (request === contactRequest.current) setLoadingRecipientContacts(false);
+      if (request === contactRequest.current)
+        setLoadingRecipientContacts(false);
     }
   };
 
@@ -248,10 +352,13 @@ export function TenderDocumentActionDialogs({
   };
 
   const issueDocument = async () => {
-    if (!register || busy || loadingRecipientContacts || issueRefreshWarning) return;
+    if (!register || busy || loadingRecipientContacts || issueRefreshWarning)
+      return;
     setIssueError('');
     if (requiresPublicationForIssue && register.isSourcePublished !== true) {
-      setIssueError('Publish the procurement before issuing documents to suppliers.');
+      setIssueError(
+        'Publish the procurement before issuing documents to suppliers.'
+      );
       return;
     }
     if (recipientMode === 'saved' && !issue.businessPartnerId) {
@@ -262,11 +369,19 @@ export function TenderDocumentActionDialogs({
       setIssueError('This procurement requires a saved supplier recipient.');
       return;
     }
-    if (recipientMode === 'configured' && !register.allowedExternalRecipientEmails?.includes(issue.recipientEmail)) {
-      setIssueError('Select an external recipient already configured on this procurement.');
+    if (
+      recipientMode === 'configured' &&
+      !register.allowedExternalRecipientEmails?.includes(issue.recipientEmail)
+    ) {
+      setIssueError(
+        'Select an external recipient already configured on this procurement.'
+      );
       return;
     }
-    if (recipientMode === 'new' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(issue.recipientEmail.trim())) {
+    if (
+      recipientMode === 'new' &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(issue.recipientEmail.trim())
+    ) {
       setIssueError('Enter a valid email for the new interested supplier.');
       return;
     }
@@ -298,7 +413,10 @@ export function TenderDocumentActionDialogs({
     try {
       await service.issue(request);
     } catch (error) {
-      const message = getProcurementProblemMessage(error, 'Document issue failed.');
+      const message = getProcurementProblemMessage(
+        error,
+        'Document issue failed.'
+      );
       setIssueError(message);
       toast.error(message);
       setBusy(false);
@@ -330,9 +448,16 @@ export function TenderDocumentActionDialogs({
   const createChange = async () => {
     if (!register || busy) return;
     setChangeError('');
-    if (changeType === 'UnpublishedScheduleReschedule' &&
-        (register.isSourcePublished !== false || !hasAnyTenderDocumentAction(register.allowedActions, ['RescheduleUnpublished']))) {
-      setChangeError('This tender no longer allows pre-publication rescheduling. Refresh the register.');
+    if (
+      changeType === 'UnpublishedScheduleReschedule' &&
+      (register.isSourcePublished !== false ||
+        !hasAnyTenderDocumentAction(register.allowedActions, [
+          'RescheduleUnpublished',
+        ]))
+    ) {
+      setChangeError(
+        'This tender no longer allows pre-publication rescheduling. Refresh the register.'
+      );
       return;
     }
     const deadline = new Date(newValueUtc);
@@ -342,13 +467,21 @@ export function TenderDocumentActionDialogs({
       sourceId: register.sourceId,
       changeType,
       newTemplateVersionId:
-        changeType === 'Addendum' ? newTemplateVersionId || undefined : undefined,
+        changeType === 'Addendum'
+          ? newTemplateVersionId || undefined
+          : undefined,
       newValueUtc:
-        changeType === 'Addendum' || !newValueUtc || Number.isNaN(deadline.getTime())
+        changeType === 'Addendum' ||
+        !newValueUtc ||
+        Number.isNaN(deadline.getTime())
           ? undefined
           : deadline.toISOString(),
-      newOpeningScheduledAtUtc: changeType === 'UnpublishedScheduleReschedule' && newOpeningUtc && !Number.isNaN(nextOpening.getTime())
-        ? nextOpening.toISOString() : undefined,
+      newOpeningScheduledAtUtc:
+        changeType === 'UnpublishedScheduleReschedule' &&
+        newOpeningUtc &&
+        !Number.isNaN(nextOpening.getTime())
+          ? nextOpening.toISOString()
+          : undefined,
       requiresAcknowledgement,
       reason,
       workflowDefinitionId,
@@ -384,7 +517,9 @@ export function TenderDocumentActionDialogs({
       'BindVersion',
       'BindRegister',
     ]);
-  const requiresPublicationForIssue = register?.sourceType === 'Tender' && register.method !== 'RequestForQuotation';
+  const requiresPublicationForIssue =
+    register?.sourceType === 'Tender' &&
+    register.method !== 'RequestForQuotation';
   const issueAllowed =
     canManage &&
     Boolean(register) &&
@@ -403,9 +538,19 @@ export function TenderDocumentActionDialogs({
       'ExtendSubmissionDeadline',
       'ExtendBidValidity',
     ]);
-  const rescheduleAllowed = canManage && register?.sourceType === 'Tender' && register.isSourcePublished === false &&
-    hasAnyTenderDocumentAction(register?.allowedActions, ['RescheduleUnpublished']);
+  const rescheduleAllowed =
+    canManage &&
+    register?.sourceType === 'Tender' &&
+    register.isSourcePublished === false &&
+    hasAnyTenderDocumentAction(register?.allowedActions, [
+      'RescheduleUnpublished',
+    ]);
   const rescheduling = changeType === 'UnpublishedScheduleReschedule';
+  const canBindSchedule =
+    canManage &&
+    hasAnyTenderDocumentAction(readiness.allowedActions, [
+      'BindWithScheduleChange',
+    ]);
   const effectiveTemplate = approvedTemplates.find(
     (template) => template.id === register?.effectiveTemplateVersionId
   );
@@ -414,36 +559,61 @@ export function TenderDocumentActionDialogs({
     <>
       <div className="flex flex-wrap gap-2">
         {bindAllowed && (
-          <Button onClick={() => setBindOpen(true)}>
+          <Button
+            onClick={() => {
+              setBindError('');
+              setBindRecorded(false);
+              setBindSchedule(
+                canBindSchedule &&
+                  new Date(
+                    readiness.effectiveSubmissionDeadlineUtc ?? ''
+                  ).getTime() <= Date.now()
+              );
+              setBindOpen(true);
+            }}
+          >
             <FilePlus2 className="mr-2 h-4 w-4" /> Bind approved version
           </Button>
         )}
         {issueAllowed && (
-          <Button disabled={busy || Boolean(issueRefreshWarning)} onClick={() => setIssueOpen(true)}>
+          <Button
+            disabled={busy || Boolean(issueRefreshWarning)}
+            onClick={() => setIssueOpen(true)}
+          >
             <ReceiptText className="mr-2 h-4 w-4" /> Issue document
           </Button>
         )}
         {rescheduleAllowed && (
-          <Button variant="outline" disabled={busy} onClick={() => {
-            if (!rescheduling) {
-              setNewValueUtc(localInput(register?.effectiveSubmissionDeadlineUtc));
-              setNewOpeningUtc(localInput(register?.openingScheduledAtUtc));
-            }
-            setChangeType('UnpublishedScheduleReschedule');
-            setRequiresAcknowledgement(false);
-            setChangeError('');
-            setChangeOpen(true);
-          }}>
-            <CalendarClock className="mr-2 h-4 w-4" /> Reschedule before publication
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => {
+              if (!rescheduling) {
+                setNewValueUtc(
+                  localInput(register?.effectiveSubmissionDeadlineUtc)
+                );
+                setNewOpeningUtc(localInput(register?.openingScheduledAtUtc));
+              }
+              setChangeType('UnpublishedScheduleReschedule');
+              setRequiresAcknowledgement(false);
+              setChangeError('');
+              setChangeOpen(true);
+            }}
+          >
+            <CalendarClock className="mr-2 h-4 w-4" /> Reschedule before
+            publication
           </Button>
         )}
         {changeAllowed && !rescheduleAllowed && (
-          <Button variant="outline" onClick={() => {
-            setChangeType('Addendum');
-            setRequiresAcknowledgement(true);
-            setChangeError('');
-            setChangeOpen(true);
-          }}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setChangeType('Addendum');
+              setRequiresAcknowledgement(true);
+              setChangeError('');
+              setChangeOpen(true);
+            }}
+          >
             <CalendarClock className="mr-2 h-4 w-4" /> Governed change
           </Button>
         )}
@@ -451,7 +621,8 @@ export function TenderDocumentActionDialogs({
 
       {requiresPublicationForIssue && register?.isSourcePublished === false && (
         <p className="mt-3 text-sm text-muted-foreground">
-          Prepare and approve documents here. Publish the tender before issuing documents to suppliers.
+          Prepare and approve documents here. Publish the tender before issuing
+          documents to suppliers.
         </p>
       )}
 
@@ -459,10 +630,18 @@ export function TenderDocumentActionDialogs({
         <Alert className="mt-3">
           <AlertDescription className="space-y-2">
             <p>{issueRefreshWarning}</p>
-            <Button variant="outline" disabled={busy} onClick={async () => {
-              setBusy(true);
-              try { await refreshIssuedRegister(); } finally { setBusy(false); }
-            }}>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await refreshIssuedRegister();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Refresh register
             </Button>
@@ -470,13 +649,20 @@ export function TenderDocumentActionDialogs({
         </Alert>
       )}
 
-      <Dialog open={bindOpen} onOpenChange={setBindOpen}>
-        <DialogContent className="max-w-3xl">
+      <Dialog
+        open={bindOpen}
+        onOpenChange={(open) => {
+          if (!busy && !bindRecorded) setBindOpen(open);
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Bind exact approved document version</DialogTitle>
             <DialogDescription>
               The binding freezes policy, method, content checksum, deadline,
               bid validity, and paid-or-free issue terms for this source.
+              Original dates are retained. Eligible unpublished tenders can
+              request new dates here; they take effect only after approval.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
@@ -500,22 +686,25 @@ export function TenderDocumentActionDialogs({
                 </Select>
               </Field>
             </div>
-            <Field label="Submission deadline">
+            <Field label="Original submission deadline">
               <Input
+                aria-label="Original submission deadline"
                 type="datetime-local"
                 value={submissionDeadline}
-                onChange={(event) => setSubmissionDeadline(event.target.value)}
+                readOnly
               />
             </Field>
-            <Field label="Opening scheduled">
+            <Field label="Original opening scheduled">
               <Input
+                aria-label="Original opening scheduled"
                 type="datetime-local"
                 value={openingAt}
-                onChange={(event) => setOpeningAt(event.target.value)}
+                readOnly
               />
             </Field>
             <Field label="Bid validity until">
               <Input
+                aria-label="Bid validity until"
                 type="datetime-local"
                 value={bidValidity}
                 onChange={(event) => setBidValidity(event.target.value)}
@@ -556,19 +745,140 @@ export function TenderDocumentActionDialogs({
               />
             </Field>
           </div>
+          {canBindSchedule && (
+            <div className="space-y-3 rounded-lg border p-4">
+              <Label className="flex items-center gap-2">
+                <Checkbox
+                  checked={bindSchedule}
+                  disabled={busy || bindRecorded}
+                  onCheckedChange={(value) => setBindSchedule(value === true)}
+                />
+                Request new dates for approval
+              </Label>
+              {bindSchedule && (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    The original dates remain unchanged until the configured
+                    independent approval is completed. The tender is not
+                    published by this action.
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Field label="New submission deadline">
+                      <Input
+                        aria-label="New submission deadline"
+                        type="datetime-local"
+                        value={bindDeadline}
+                        disabled={busy || bindRecorded}
+                        onChange={(event) =>
+                          setBindDeadline(event.target.value)
+                        }
+                      />
+                    </Field>
+                    <Field label="New opening scheduled">
+                      <Input
+                        aria-label="New opening scheduled"
+                        type="datetime-local"
+                        value={bindOpening}
+                        disabled={busy || bindRecorded}
+                        onChange={(event) => setBindOpening(event.target.value)}
+                      />
+                    </Field>
+                    <Field label="Schedule approval workflow">
+                      <Select
+                        value={bindWorkflow}
+                        disabled={busy || bindRecorded}
+                        onValueChange={setBindWorkflow}
+                      >
+                        <SelectTrigger aria-label="Schedule approval workflow">
+                          <SelectValue placeholder="Select Published workflow" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {workflows.map((workflow) => (
+                            <SelectItem key={workflow.id} value={workflow.id}>
+                              {workflow.name} · v{workflow.version}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Schedule evidence reference">
+                      <Input
+                        aria-label="Schedule evidence reference"
+                        value={bindEvidence}
+                        disabled={busy || bindRecorded}
+                        onChange={(event) =>
+                          setBindEvidence(event.target.value)
+                        }
+                      />
+                    </Field>
+                    <div className="md:col-span-2">
+                      <Field label="Reason for new dates">
+                        <Textarea
+                          aria-label="Reason for new dates"
+                          value={bindReason}
+                          disabled={busy || bindRecorded}
+                          onChange={(event) =>
+                            setBindReason(event.target.value)
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {bindError && (
+            <Alert variant="destructive">
+              <AlertDescription>{bindError}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBindOpen(false)}>
+            <Button
+              variant="outline"
+              disabled={busy || bindRecorded}
+              onClick={() => setBindOpen(false)}
+            >
               Cancel
             </Button>
-            <Button disabled={busy} onClick={() => void bind()}>
-              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Bind immutable version
-            </Button>
+            {bindRecorded ? (
+              <Button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onChanged();
+                    setBindRecorded(false);
+                    setBindOpen(false);
+                  } catch {
+                    setBindError(
+                      'The binding was saved. Refresh is still unavailable; do not submit again.'
+                    );
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Refresh register
+              </Button>
+            ) : (
+              <Button disabled={busy} onClick={() => void bind()}>
+                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {bindSchedule
+                  ? 'Bind and request schedule approval'
+                  : 'Bind immutable version'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={issueOpen} onOpenChange={(open) => { if (!busy) setIssueOpen(open); }}>
+      <Dialog
+        open={issueOpen}
+        onOpenChange={(open) => {
+          if (!busy) setIssueOpen(open);
+        }}
+      >
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Record controlled issue or sale</DialogTitle>
@@ -579,22 +889,45 @@ export function TenderDocumentActionDialogs({
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-3 md:col-span-2">
-              {(register?.allowsNewRecipient === true || Boolean(register?.allowedExternalRecipientEmails?.length)) && (
+              {(register?.allowsNewRecipient === true ||
+                Boolean(register?.allowedExternalRecipientEmails?.length)) && (
                 <Field label="Recipient">
-                  <Select value={recipientMode} disabled={busy} onValueChange={(mode) => {
-                    setRecipientMode(mode as 'saved' | 'new' | 'configured');
-                    contactRequest.current += 1;
-                    contactEdits.current = { email: false, phone: false };
-                    setLoadingRecipientContacts(false);
-                    setRecipientContactNotice('');
-                    setIssueError('');
-                    setIssue((current) => ({ ...current, businessPartnerId: '', recipientName: '', recipientEmail: '', recipientPhone: '' }));
-                  }}>
-                    <SelectTrigger aria-label="Recipient type"><SelectValue /></SelectTrigger>
+                  <Select
+                    value={recipientMode}
+                    disabled={busy}
+                    onValueChange={(mode) => {
+                      setRecipientMode(mode as 'saved' | 'new' | 'configured');
+                      contactRequest.current += 1;
+                      contactEdits.current = { email: false, phone: false };
+                      setLoadingRecipientContacts(false);
+                      setRecipientContactNotice('');
+                      setIssueError('');
+                      setIssue((current) => ({
+                        ...current,
+                        businessPartnerId: '',
+                        recipientName: '',
+                        recipientEmail: '',
+                        recipientPhone: '',
+                      }));
+                    }}
+                  >
+                    <SelectTrigger aria-label="Recipient type">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="saved">Saved supplier</SelectItem>
-                      {register?.allowsNewRecipient === true && <SelectItem value="new">New interested supplier</SelectItem>}
-                      {Boolean(register?.allowedExternalRecipientEmails?.length) && <SelectItem value="configured">Configured external recipient</SelectItem>}
+                      {register?.allowsNewRecipient === true && (
+                        <SelectItem value="new">
+                          New interested supplier
+                        </SelectItem>
+                      )}
+                      {Boolean(
+                        register?.allowedExternalRecipientEmails?.length
+                      ) && (
+                        <SelectItem value="configured">
+                          Configured external recipient
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -608,24 +941,52 @@ export function TenderDocumentActionDialogs({
                 />
               ) : recipientMode === 'configured' ? (
                 <Field label="Configured external recipient">
-                  <Select value={issue.recipientEmail} disabled={busy} onValueChange={(email) => {
-                    setIssueError('');
-                    setIssue((current) => ({ ...current, recipientEmail: email }));
-                  }}>
-                    <SelectTrigger aria-label="Configured external recipient"><SelectValue placeholder="Select a configured recipient" /></SelectTrigger>
+                  <Select
+                    value={issue.recipientEmail}
+                    disabled={busy}
+                    onValueChange={(email) => {
+                      setIssueError('');
+                      setIssue((current) => ({
+                        ...current,
+                        recipientEmail: email,
+                      }));
+                    }}
+                  >
+                    <SelectTrigger aria-label="Configured external recipient">
+                      <SelectValue placeholder="Select a configured recipient" />
+                    </SelectTrigger>
                     <SelectContent>
-                      {register?.allowedExternalRecipientEmails?.map((email) => <SelectItem key={email} value={email}>{email}</SelectItem>)}
+                      {register?.allowedExternalRecipientEmails?.map(
+                        (email) => (
+                          <SelectItem key={email} value={email}>
+                            {email}
+                          </SelectItem>
+                        )
+                      )}
                     </SelectContent>
                   </Select>
                 </Field>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  Use a saved record if one exists. This records document receipt only;
-                  it does not create an approved vendor or waive GHANEPS registration or tender eligibility.
+                  Use a saved record if one exists. This records document
+                  receipt only; it does not create an approved vendor or waive
+                  GHANEPS registration or tender eligibility.
                 </p>
               )}
-              {loadingRecipientContacts && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading saved primary contact…</p>}
-              {recipientContactNotice && <p role="alert" className="text-sm text-amber-800">{recipientContactNotice}</p>}
+              {loadingRecipientContacts && (
+                <p
+                  role="status"
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading saved
+                  primary contact…
+                </p>
+              )}
+              {recipientContactNotice && (
+                <p role="alert" className="text-sm text-amber-800">
+                  {recipientContactNotice}
+                </p>
+              )}
             </div>
             <Field label="Recipient name">
               <Input
@@ -707,7 +1068,9 @@ export function TenderDocumentActionDialogs({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ExternalPortal">External portal</SelectItem>
+                  <SelectItem value="ExternalPortal">
+                    External portal
+                  </SelectItem>
                   <SelectItem value="Email">Email</SelectItem>
                   <SelectItem value="PhysicalCollection">
                     Physical collection
@@ -728,12 +1091,23 @@ export function TenderDocumentActionDialogs({
               </Field>
             </div>
           </div>
-          {issueError && <Alert variant="destructive"><AlertDescription>{issueError}</AlertDescription></Alert>}
+          {issueError && (
+            <Alert variant="destructive">
+              <AlertDescription>{issueError}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={() => setIssueOpen(false)}>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => setIssueOpen(false)}
+            >
               Cancel
             </Button>
-            <Button disabled={busy || loadingRecipientContacts} onClick={() => void issueDocument()}>
+            <Button
+              disabled={busy || loadingRecipientContacts}
+              onClick={() => void issueDocument()}
+            >
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Record immutable issue
             </Button>
@@ -741,10 +1115,19 @@ export function TenderDocumentActionDialogs({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={changeOpen} onOpenChange={(open) => { if (!busy) setChangeOpen(open); }}>
+      <Dialog
+        open={changeOpen}
+        onOpenChange={(open) => {
+          if (!busy) setChangeOpen(open);
+        }}
+      >
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{rescheduling ? 'Reschedule unpublished tender' : 'Create governed document change'}</DialogTitle>
+            <DialogTitle>
+              {rescheduling
+                ? 'Reschedule unpublished tender'
+                : 'Create governed document change'}
+            </DialogTitle>
             <DialogDescription>
               {rescheduling
                 ? 'Submit both new dates for independent approval. The original schedule is retained; the tender stays unpublished and the dates change only after approval.'
@@ -752,29 +1135,35 @@ export function TenderDocumentActionDialogs({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
-            {!rescheduling && <Field label="Change type">
-              <Select
-                value={changeType}
-                onValueChange={(value) =>
-                  setChangeType(value as ProcurementTenderDocumentChangeType)
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(
-                    Object.keys(
-                      tenderDocumentChangeTypeLabel
-                    ) as ProcurementTenderDocumentChangeType[]
-                  ).filter((type) => type !== 'UnpublishedScheduleReschedule').map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {tenderDocumentChangeTypeLabel[type]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>}
+            {!rescheduling && (
+              <Field label="Change type">
+                <Select
+                  value={changeType}
+                  onValueChange={(value) =>
+                    setChangeType(value as ProcurementTenderDocumentChangeType)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(
+                      Object.keys(
+                        tenderDocumentChangeTypeLabel
+                      ) as ProcurementTenderDocumentChangeType[]
+                    )
+                      .filter(
+                        (type) => type !== 'UnpublishedScheduleReschedule'
+                      )
+                      .map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {tenderDocumentChangeTypeLabel[type]}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
             <Field label="Exact Published workflow">
               <Select
                 value={workflowDefinitionId}
@@ -831,7 +1220,9 @@ export function TenderDocumentActionDialogs({
                 }
               >
                 <Input
-                  aria-label={rescheduling ? 'New submission deadline' : undefined}
+                  aria-label={
+                    rescheduling ? 'New submission deadline' : undefined
+                  }
                   type="datetime-local"
                   disabled={busy}
                   value={newValueUtc}
@@ -841,18 +1232,26 @@ export function TenderDocumentActionDialogs({
             )}
             {rescheduling && (
               <Field label="New opening time">
-                <Input type="datetime-local" aria-label="New opening time" disabled={busy} value={newOpeningUtc} onChange={(event) => setNewOpeningUtc(event.target.value)} />
+                <Input
+                  type="datetime-local"
+                  aria-label="New opening time"
+                  disabled={busy}
+                  value={newOpeningUtc}
+                  onChange={(event) => setNewOpeningUtc(event.target.value)}
+                />
               </Field>
             )}
-            {!rescheduling && <label className="flex items-center gap-2 rounded border p-3 text-sm">
-              <Checkbox
-                checked={requiresAcknowledgement}
-                onCheckedChange={(checked) =>
-                  setRequiresAcknowledgement(Boolean(checked))
-                }
-              />
-              Mandatory recipient acknowledgement
-            </label>}
+            {!rescheduling && (
+              <label className="flex items-center gap-2 rounded border p-3 text-sm">
+                <Checkbox
+                  checked={requiresAcknowledgement}
+                  onCheckedChange={(checked) =>
+                    setRequiresAcknowledgement(Boolean(checked))
+                  }
+                />
+                Mandatory recipient acknowledgement
+              </label>
+            )}
             <div className="md:col-span-2">
               <Field label="Governed reason">
                 <Textarea
@@ -875,9 +1274,17 @@ export function TenderDocumentActionDialogs({
               </Field>
             </div>
           </div>
-          {changeError && <Alert variant="destructive"><AlertDescription>{changeError}</AlertDescription></Alert>}
+          {changeError && (
+            <Alert variant="destructive">
+              <AlertDescription>{changeError}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={() => setChangeOpen(false)}>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => setChangeOpen(false)}
+            >
               Cancel
             </Button>
             <Button disabled={busy} onClick={() => void createChange()}>
@@ -909,8 +1316,11 @@ export function TenderDocumentDecisionDialog({
   const [comments, setComments] = useState('');
   const [dispatchChannel, setDispatchChannel] = useState('ExternalPortal');
   const [dispatchReference, setDispatchReference] = useState('');
-  const [dispatchEvidenceReference, setDispatchEvidenceReference] = useState('');
-  const dispatchRequired = action === 'Approve' && change?.changeType !== 'UnpublishedScheduleReschedule';
+  const [dispatchEvidenceReference, setDispatchEvidenceReference] =
+    useState('');
+  const dispatchRequired =
+    action === 'Approve' &&
+    change?.changeType !== 'UnpublishedScheduleReschedule';
 
   const decide = async () => {
     if (!change || !approvalReference.trim()) return;
@@ -918,14 +1328,15 @@ export function TenderDocumentDecisionDialog({
       action,
       approvalReference,
       comments: comments || undefined,
-      dispatchChannel:
-        dispatchRequired ? dispatchChannel || undefined : undefined,
-      dispatchReference:
-        dispatchRequired ? dispatchReference || undefined : undefined,
-      dispatchEvidenceReference:
-        dispatchRequired
-          ? dispatchEvidenceReference || undefined
-          : undefined,
+      dispatchChannel: dispatchRequired
+        ? dispatchChannel || undefined
+        : undefined,
+      dispatchReference: dispatchRequired
+        ? dispatchReference || undefined
+        : undefined,
+      dispatchEvidenceReference: dispatchRequired
+        ? dispatchEvidenceReference || undefined
+        : undefined,
       rowVersion: change.rowVersion,
     };
     try {
@@ -950,7 +1361,10 @@ export function TenderDocumentDecisionDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {action} {change ? tenderDocumentChangeTypeLabel[change.changeType] : 'change'}
+            {action}{' '}
+            {change
+              ? tenderDocumentChangeTypeLabel[change.changeType]
+              : 'change'}
           </DialogTitle>
           <DialogDescription>
             The service verifies the exact workflow outcome, capability and SOD
@@ -1001,9 +1415,7 @@ export function TenderDocumentDecisionDialog({
           </Button>
           <Button
             variant={action === 'Reject' ? 'destructive' : 'default'}
-            disabled={
-              busy || !approvalReference.trim()
-            }
+            disabled={busy || !approvalReference.trim()}
             onClick={() => void decide()}
           >
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1068,15 +1480,20 @@ export function TenderDocumentAcknowledgementDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {outcome === 'Acknowledged' ? 'Acknowledge receipt' : 'Decline change'}
+            {outcome === 'Acknowledged'
+              ? 'Acknowledge receipt'
+              : 'Decline change'}
           </DialogTitle>
           <DialogDescription>
-            This response is tied to the authenticated recipient and retained
-            in the immutable register.
+            This response is tied to the authenticated recipient and retained in
+            the immutable register.
           </DialogDescription>
         </DialogHeader>
         <Field label="Acknowledgement channel">
-          <Input value={channel} onChange={(event) => setChannel(event.target.value)} />
+          <Input
+            value={channel}
+            onChange={(event) => setChannel(event.target.value)}
+          />
         </Field>
         <Field label="Acknowledgement reference">
           <Input

@@ -739,6 +739,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             !source.SourcingCase.MethodRule.IsAllowed ||
             source.SourcingCase.MethodRule.Method != source.SourcingCase.SelectedMethod)
             blocked.Add("The locked sourcing-case method rule is no longer valid.");
+        var canBind = blocked.Count == 0;
+        var canRequestSchedule = CanRescheduleUnpublishedSource(source);
+        if (source.SubmissionDeadlineUtc <= now)
+            blocked.Add(canRequestSchedule
+                ? "The deadline has elapsed. Use Bind approved version to request new dates for approval before publication."
+                : "The source deadline has elapsed and this source is not eligible for pre-publication rescheduling.");
         return new ProcurementTenderDocumentRegisterReadinessDto
         {
             SourceStatus = source.Tender?.Status ?? source.Rfq!.Status,
@@ -758,10 +764,13 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 ? null
                 : $"{effectiveTemplate.TemplateCode}/v{effectiveTemplate.Version}",
             EffectiveSubmissionDeadlineUtc = source.SubmissionDeadlineUtc,
+            OpeningScheduledAtUtc = source.OpeningScheduledAtUtc,
             CurrencyCode = source.CurrencyCode,
             Ready = blocked.Count == 0,
             BlockedReasons = blocked,
-            AllowedActions = !_currentUser.IsExternalUser && blocked.Count == 0 ? ["Bind"] : []
+            AllowedActions = !_currentUser.IsExternalUser && canBind
+                ? canRequestSchedule ? ["Bind", "BindWithScheduleChange"] : ["Bind"]
+                : []
         };
     }
 
@@ -806,7 +815,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (deadline != EnsureUtc(source.SubmissionDeadlineUtc.Value))
             throw Validation("TENDER_DOCUMENT_DEADLINE_MISMATCH",
                 "The register submission deadline must exactly match the source deadline.");
-        if (deadline <= DateTime.UtcNow)
+        if (deadline <= DateTime.UtcNow && request.ScheduleChange is null)
             throw Validation("TENDER_DOCUMENT_DEADLINE_ELAPSED",
                 "The register submission deadline must be in the future.");
         if (opening.HasValue && opening.Value < deadline)
@@ -856,6 +865,14 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             CreatedById = _currentUser.UserId,
             RowVersion = Guid.NewGuid().ToByteArray()
         };
+        if (request.ScheduleChange is not null)
+        {
+            await EnsureChangeWindowOpenAsync(register, source,
+                ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule, cancellationToken);
+            ValidateUnpublishedSchedule(register, source, deadline, opening,
+                EnsureUtc(request.ScheduleChange.SubmissionDeadlineUtc),
+                EnsureUtc(request.ScheduleChange.OpeningScheduledAtUtc));
+        }
         Capture(register);
         return await ExecuteAsync(async () =>
         {
@@ -865,6 +882,24 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 ProcurementControlEventResult.Succeeded, null, RegisterSnapshot(register),
                 "Exact published template, sourcing lineage, deadlines, validity, and fee mode were bound.",
                 [], correlation, now, cancellationToken);
+            if (request.ScheduleChange is { } schedule)
+            {
+                // Preserve the source schedule as immutable history. Binding and the pending
+                // shared approval request commit together; neither applies proposed dates.
+                await CreateChangeCoreAsync(new CreateProcurementTenderDocumentChangeRequest
+                {
+                    SourceType = request.SourceType,
+                    SourceId = request.SourceId,
+                    ChangeType = ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule,
+                    NewValueUtc = schedule.SubmissionDeadlineUtc,
+                    NewOpeningScheduledAtUtc = schedule.OpeningScheduledAtUtc,
+                    WorkflowDefinitionId = schedule.WorkflowDefinitionId,
+                    Reason = schedule.Reason,
+                    EvidenceReference = schedule.EvidenceReference,
+                    RequiresAcknowledgement = false,
+                    RegisterRowVersion = Convert.ToBase64String(register.RowVersion)
+                }, correlation, cancellationToken, useTransaction: false);
+            }
             return MapRegister(
                 await LoadRegisterAsync(request.SourceType, request.SourceId, tracked: false, cancellationToken),
                 source, null);
@@ -1048,10 +1083,17 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         }, cancellationToken);
     }
 
-    public async Task<ProcurementTenderDocumentChangeDto> CreateChangeAsync(
+    public Task<ProcurementTenderDocumentChangeDto> CreateChangeAsync(
         CreateProcurementTenderDocumentChangeRequest request,
         string correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        CreateChangeCoreAsync(request, correlationId, cancellationToken);
+
+    private async Task<ProcurementTenderDocumentChangeDto> CreateChangeCoreAsync(
+        CreateProcurementTenderDocumentChangeRequest request,
+        string correlationId,
+        CancellationToken cancellationToken,
+        bool useTransaction = true)
     {
         EnsureAuthenticatedTenant();
         var correlation = NormalizeCorrelation(correlationId);
@@ -1171,7 +1213,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             RowVersion = Guid.NewGuid().ToByteArray()
         };
         Capture(change);
-        return await ExecuteAsync(async () =>
+        async Task<ProcurementTenderDocumentChangeDto> PersistChangeAsync()
         {
             await Changes.AddAsync(change);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1208,7 +1250,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                     change.EvidenceFileUploadRecordId, "Tender document change", "DEC-003"),
                 correlation, now, cancellationToken);
             return MapChange(change);
-        }, cancellationToken);
+        }
+        return useTransaction
+            ? await ExecuteAsync(PersistChangeAsync, cancellationToken)
+            : await PersistChangeAsync();
     }
 
     public async Task<ProcurementTenderDocumentChangeDto> DecideChangeAsync(
@@ -2585,9 +2630,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         source.Tender is not null && source.SourcingCase.SelectedMethod != ProcurementMethodType.RequestForQuotation;
 
     private static bool CanRescheduleUnpublished(ProcurementTenderDocumentRegister register, SourceContext source) =>
+        CanRescheduleUnpublishedSource(source) && !register.Issuances.Any(item => !item.IsDeleted);
+
+    private static bool CanRescheduleUnpublishedSource(SourceContext source) =>
         AllowsOpenDocumentAccess(source) && source.Tender!.Status == "Approved" &&
         !source.Tender.PublishDate.HasValue && !source.Tender.PublishedById.HasValue &&
-        !source.HasBidsOrStatutoryControls && !register.Issuances.Any(item => !item.IsDeleted);
+        !source.HasBidsOrStatutoryControls;
 
     private static List<string> RegisterActions(ProcurementTenderDocumentRegister register, SourceContext source)
     {
@@ -3231,6 +3279,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             EffectiveTemplateVersionId = state.EffectiveTemplateVersionId,
             EffectiveTemplateReference = state.EffectiveTemplateReference,
             EffectiveSubmissionDeadlineUtc = state.EffectiveSubmissionDeadlineUtc,
+            OpeningScheduledAtUtc = EffectiveOpening(register),
             EffectiveBidValidityUntilUtc = state.EffectiveBidValidityUntilUtc,
             FeeMode = register.FeeMode,
             FeeAmount = register.FeeAmount,

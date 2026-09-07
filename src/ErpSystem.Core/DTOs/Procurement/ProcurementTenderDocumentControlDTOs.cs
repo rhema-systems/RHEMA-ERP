@@ -174,6 +174,7 @@ public sealed class ProcurementTenderDocumentRegisterReadinessDto
     public Guid? EffectiveTemplateVersionId { get; set; }
     public string? EffectiveTemplateReference { get; set; }
     public DateTime? EffectiveSubmissionDeadlineUtc { get; set; }
+    public DateTime? OpeningScheduledAtUtc { get; set; }
     public DateTime? EffectiveBidValidityUntilUtc { get; set; }
     public ProcurementTenderDocumentFeeMode? FeeMode { get; set; }
     public decimal? FeeAmount { get; set; }
@@ -338,6 +339,16 @@ public sealed class BindProcurementTenderDocumentRegisterRequest
     public ProcurementTenderDocumentFeeMode FeeMode { get; set; }
     [Range(typeof(decimal), "0", "9999999999999999")] public decimal FeeAmount { get; set; }
     [Required, StringLength(3)] public string CurrencyCode { get; set; } = string.Empty;
+    public BindProcurementTenderDocumentScheduleChangeRequest? ScheduleChange { get; set; }
+}
+
+public sealed class BindProcurementTenderDocumentScheduleChangeRequest
+{
+    public DateTime SubmissionDeadlineUtc { get; set; }
+    public DateTime OpeningScheduledAtUtc { get; set; }
+    public Guid WorkflowDefinitionId { get; set; }
+    [Required, StringLength(2000)] public string Reason { get; set; } = string.Empty;
+    [Required, StringLength(500)] public string EvidenceReference { get; set; } = string.Empty;
 }
 
 public sealed class IssueProcurementTenderDocumentControlRequest
