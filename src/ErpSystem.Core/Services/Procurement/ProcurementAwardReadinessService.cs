@@ -729,13 +729,14 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             return;
         }
         var control = controls[0];
+        var petty = control.Method == ProcurementMethodType.PettyPurchase;
         state.Method = control.Method;
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Source,
             "EXCEPTIONAL_SOURCE_CURRENT",
             control.Status == ProcurementExceptionalSourcingControlStatus.Recommended &&
             tender.Status is not "Awarded" and not "Cancelled",
-            "The exceptional source has reached a negotiated recommendation and is not awarded.",
-            "Complete approval, negotiation, and recommendation before award.",
+            petty ? "The Petty Purchase has an approved quotation recommendation and is not awarded." : "The exceptional source has reached a negotiated recommendation and is not awarded.",
+            petty ? "Complete independent approval and quotation recommendation before award." : "Complete approval, negotiation, and recommendation before award.",
             "ProcurementExceptionalSourcingControl", control.Id, control.IntegrityHash);
         state.Authority = new ProcurementAwardReadinessAuthorityDto
         {
@@ -747,7 +748,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             WorkflowInstanceId = control.WorkflowInstanceId,
             ApprovalReference = control.PpaApprovalReference ??
                                 control.ManagingDirectorApprovalReference ??
-                                control.BoardApprovalReference,
+                                control.BoardApprovalReference ??
+                                (petty && control.WorkflowInstanceId.HasValue ? $"workflow:{control.WorkflowInstanceId.Value:N}" : null),
             ApprovedAtUtc = control.ApprovedAtUtc,
             ApprovedByUserId = control.ApprovedById,
             ApprovalActorUserIds = ParseGuids(control.ApprovalActorsJson)
@@ -770,12 +772,12 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             bid is not null && control.RecommendedAtUtc.HasValue &&
             !string.IsNullOrWhiteSpace(control.RecommendationReason) &&
             !string.IsNullOrWhiteSpace(control.RecommendationEvidenceReference),
-            "The negotiated recommendation identifies one current bid and supplier with evidence.",
-            "Complete the negotiated recommendation and attach its evidence.",
+            petty ? "The approved quotation recommendation identifies one current bid and supplier with evidence." : "The negotiated recommendation identifies one current bid and supplier with evidence.",
+            petty ? "Complete the approved quotation recommendation and attach its evidence." : "Complete the negotiated recommendation and attach its evidence.",
             "ProcurementExceptionalSourcingControl", control.Id, control.IntegrityHash);
         state.Evaluations.Add(new ProcurementAwardReadinessEvaluationDto
         {
-            EvaluationType = "ExceptionalNegotiatedRecommendation",
+            EvaluationType = petty ? "PettyQuotationRecommendation" : "ExceptionalNegotiatedRecommendation",
             EvaluationId = control.Id,
             Phase = ProcurementEvaluationPhase.Combined,
             Status = control.Status.ToString(),
@@ -784,16 +786,19 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             IntegrityHash = control.IntegrityHash
         });
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Evaluation,
-            "EXCEPTIONAL_NEGOTIATION_EVALUATED",
+            petty ? "PETTY_QUOTATION_REVIEWED" : "EXCEPTIONAL_NEGOTIATION_EVALUATED",
+            petty ? bid is not null && bid.TotalBidAmount > 0 && bid.TotalBidAmount <= tender.EstimatedValue &&
+                control.ApprovedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
+                !string.IsNullOrWhiteSpace(control.SupplierSelectionEvidenceReference) :
             control.NegotiatedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
             !string.IsNullOrWhiteSpace(control.NegotiationMinutesEvidenceReference) &&
             !string.IsNullOrWhiteSpace(control.NegotiationOutcomeReference),
-            "Negotiation minutes, outcome, and resulting recommendation are retained.",
-            "Complete the negotiation record and recommendation.");
+            petty ? "The approved supplier quotation and recommendation are retained." : "Negotiation minutes, outcome, and resulting recommendation are retained.",
+            petty ? "Review and recommend the recorded quotation within the approved value." : "Complete the negotiation record and recommendation.");
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.ScoreIntegrity,
             "EXCEPTIONAL_SCORE_NOT_APPLICABLE",
             ProcurementAwardReadinessPrerequisiteStatus.NotApplicable,
-            "The source-applicable evaluation is a negotiated recommendation, not committee score sheets.",
+            petty ? "The source-applicable evaluation is an approved quotation recommendation, not committee score sheets." : "The source-applicable evaluation is a negotiated recommendation, not committee score sheets.",
             null);
         await AddWorkflowAsync(state, cancellationToken);
         await AddSuppliersAsync(state, tender.RequiresPrequalification,
@@ -804,9 +809,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             null, control.JustificationEvidenceReference);
         AddEvidence(state, "EXCEPTIONAL_SUPPLIER_SELECTION", "Supplier selection evidence",
             null, control.SupplierSelectionEvidenceReference);
-        AddEvidence(state, "EXCEPTIONAL_NEGOTIATION", "Negotiation minutes",
-            control.NegotiationId, control.NegotiationMinutesEvidenceReference);
-        AddEvidence(state, "EXCEPTIONAL_RECOMMENDATION", "Negotiated recommendation",
+        if (!petty)
+            AddEvidence(state, "EXCEPTIONAL_NEGOTIATION", "Negotiation minutes",
+                control.NegotiationId, control.NegotiationMinutesEvidenceReference);
+        AddEvidence(state, "EXCEPTIONAL_RECOMMENDATION", petty ? "Approved quotation recommendation" : "Negotiated recommendation",
             control.RecommendedBidId, control.RecommendationEvidenceReference);
         AddEvidence(state, "EXCEPTIONAL_AUTHORITY", "Exceptional authority approval",
             control.WorkflowInstanceId, state.Authority.ApprovalReference);
@@ -1941,7 +1947,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         state.MethodRuleCode = control.MethodRuleCode;
         if (control.RecommendedById is { } evaluatorId)
             state.Items.Add(DirectEvaluatorLineage(
-                "ExceptionalNegotiatedRecommendation",
+                control.Method == ProcurementMethodType.PettyPurchase
+                    ? "PettyQuotationRecommendation" : "ExceptionalNegotiatedRecommendation",
                 control.Id,
                 evaluatorId,
                 ProcurementEvaluationPhase.Combined,
@@ -1952,7 +1959,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             control.WorkflowInstanceId,
             control.ApprovedById,
             ParseGuids(control.ApprovalActorsJson),
-            cancellationToken);
+            cancellationToken,
+            knownSubmitterId: control.SubmittedForApprovalById,
+            expectedEntityId: source.Id,
+            expectedDefinitionId: control.WorkflowDefinitionId);
     }
 
     private async Task AddCommitteeScoreEvaluatorLineageAsync(
@@ -2151,7 +2161,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         Guid? workflowInstanceId,
         Guid? approvedById,
         IReadOnlyCollection<Guid> declaredActorIds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? knownSubmitterId = null,
+        Guid? expectedEntityId = null,
+        Guid? expectedDefinitionId = null)
     {
         var declared = declaredActorIds
             .Where(item => item != Guid.Empty)
@@ -2186,7 +2199,18 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .Select(item => item!.Value)
             .Distinct()
             .ToListAsync(cancellationToken);
-        if (workflow is null || actual.Count == 0 ||
+        // Legacy exceptional controls included the submitter in ApprovalActorsJson.
+        // Exclude only the exact workflow initiator when they did not approve.
+        // Keep all actual approvals and reject every other unmatched actor.
+        if (workflow is not null && knownSubmitterId.HasValue &&
+            workflow.InitiatedById == knownSubmitterId.Value &&
+            !actual.Contains(knownSubmitterId.Value) &&
+            approvedById != knownSubmitterId)
+            declared.Remove(knownSubmitterId.Value);
+        if (workflow is null || workflow.Status != WorkflowInstanceStatus.Completed ||
+            (expectedEntityId.HasValue && workflow.EntityId != expectedEntityId.Value) ||
+            (expectedDefinitionId.HasValue && workflow.WorkflowDefinitionId != expectedDefinitionId.Value) ||
+            actual.Count == 0 ||
             declared.Any(item => !actual.Contains(item)))
             throw AmbiguousEvaluatorLineage(
                 "Authority approval actors do not match the exact completed workflow lineage.");

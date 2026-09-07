@@ -722,8 +722,22 @@ public sealed class ProcurementPurchaseOrderComplianceService :
                 return (ProcurementGhanepsSourceType.RequestForQuotation,
                     purchaseOrder.ProcurementSourceId.Value);
             case ProcurementPurchaseOrderSourceType.ApprovedException:
-                return (ProcurementGhanepsSourceType.ExceptionalSourcing,
-                    purchaseOrder.ProcurementSourceId.Value);
+            {
+                // PO sources identify the awarded exception control; GHANEPS
+                // identifies its underlying tender, not that control record.
+                var tenderId = await _unitOfWork.Repository<ProcurementExceptionalSourcingControl>()
+                    .GetQueryable(item =>
+                        item.TenantId == _currentUser.TenantId &&
+                        item.Id == purchaseOrder.ProcurementSourceId.Value &&
+                        !item.IsDeleted)
+                    .AsNoTracking()
+                    .Select(item => (Guid?)item.TenderId)
+                    .SingleOrDefaultAsync(cancellationToken);
+                if (!tenderId.HasValue || tenderId.Value == Guid.Empty)
+                    throw new InvalidOperationException(
+                        "The approved exception has no current-tenant tender lineage for its GHANEPS check.");
+                return (ProcurementGhanepsSourceType.ExceptionalSourcing, tenderId.Value);
+            }
             case ProcurementPurchaseOrderSourceType.TenderAward:
             {
                 var tenderId = await _unitOfWork.Repository<TenderAward>()

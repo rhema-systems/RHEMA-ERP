@@ -152,6 +152,7 @@ const tenderMethods = new Set<ProcurementMethodType>([
   'SingleSource',
   'QualityBasedSelection',
   'QualityAndCostBasedSelection',
+  'PettyPurchase',
 ]);
 
 const formatMethod = (method?: ProcurementMethodType) =>
@@ -487,7 +488,9 @@ export default function PurchaseRequisitionDetailPage() {
       return;
     }
     try {
-      router.push(`/procurement/tenders/new?fromRequisitionId=${id}`);
+      router.push(resolvedMethod === 'PettyPurchase'
+        ? `/procurement/petty-purchases/new?fromRequisitionId=${id}`
+        : `/procurement/tenders/new?fromRequisitionId=${id}`);
     } catch (error: any) {
       console.error('Error navigating to tender creation:', error);
       toast.error(error.message || 'Failed to start Tender process');
@@ -640,7 +643,10 @@ export default function PurchaseRequisitionDetailPage() {
             canApproveReject={canRenderApprovalActions}
           />
 
-          {approved && (
+          {approved && resolvedMethod === 'PettyPurchase' && existingTenderSource?.sourceEntityId && (
+            <Button asChild><Link href={`/procurement/tenders/${existingTenderSource.sourceEntityId}/exception-controls`}>Open Petty Purchase</Link></Button>
+          )}
+          {approved && !(resolvedMethod === 'PettyPurchase' && existingTenderSource) && (
             <Button
               variant="outline"
               onClick={handleCreateTender}
@@ -654,11 +660,11 @@ export default function PurchaseRequisitionDetailPage() {
                 : undefined}
             >
               <FileText className="h-4 w-4 mr-2" />
-              Create Tender
+              {resolvedMethod === 'PettyPurchase' ? 'Prepare Petty Purchase' : 'Create Tender'}
             </Button>
           )}
 
-          {approved && (
+          {approved && (resolvedMethod !== 'PettyPurchase' || canConvertToPO) && (
             <Button
               onClick={handleConvertToPO}
               disabled={!canConvertToPO}
@@ -669,7 +675,7 @@ export default function PurchaseRequisitionDetailPage() {
             </Button>
           )}
 
-          {approved && (
+          {approved && resolvedMethod !== 'PettyPurchase' && (
             <Button
               variant="outline"
               onClick={handleCreateRfq}

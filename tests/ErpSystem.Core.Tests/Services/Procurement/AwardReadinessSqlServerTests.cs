@@ -17,6 +17,80 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 /// <summary>Runs the actual readiness migration and trigger in a new disposable SQL Server database.</summary>
 public sealed class AwardReadinessSqlServerTests
 {
+    [SqlServerFact]
+    [Trait("Category", "SqlServerIntegration")]
+    public async Task PettyAuthorityMigrationAdmitsExactNullableRouteAndRetainsSourceGuards()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.ApplyAsync(new AlignLegacyAwardReadinessWithLockedCurrentEvaluations());
+        var source = await SourceFixture.SeedAsync(database);
+        var methodRule = Guid.NewGuid();
+        var definition = Guid.NewGuid();
+        var workflow = Guid.NewGuid();
+        await database.ExecuteAsync($"""
+            UPDATE dbo.Tenders SET Status='Approved' WHERE Id='{source.TenderId}';
+            UPDATE dbo.TenderBids SET Status='Submitted' WHERE Id='{source.BidId}';
+            INSERT dbo.WorkflowInstances VALUES('{workflow}','{definition}','{source.TenderId}','{source.TenantId}',0,2);
+            INSERT dbo.ProcurementExceptionalSourcingControls
+            VALUES(NEWID(),'{source.TenderId}','{source.TenantId}',0,4,5,'{source.BidId}','{methodRule}',
+                'METHOD-PETTY',NULL,'','{definition}','{workflow}');
+            """);
+        async Task Append(int method = 5, string prefix = "", Guid? route = null)
+        {
+            var authority = JsonSerializer.Serialize(new
+            {
+                methodRuleId = methodRule, methodRuleCode = "METHOD-PETTY", authorityRouteId = route,
+                authorityRouteReference = "", workflowDefinitionId = definition, workflowInstanceId = workflow,
+                workflowStatus = "Completed", approvalReference = "workflow-test",
+                approvedByUserId = source.ApproverId, approvalActorUserIds = new[] { source.ApproverId }
+            });
+            var snapshot = JsonSerializer.Serialize(new { subjectType = "TenderBid", subjectIds = new[] { source.BidId }, businessPartnerIds = new[] { source.SupplierId } });
+            var prerequisites = JsonSerializer.Serialize(Enumerable.Range(0, 9).Select(group => new { group, status = 0, items = new[] { new { status = 0 } } }));
+            await database.ExecuteAsync(prefix + """
+                INSERT dbo.ProcurementAwardReadinessDecisions
+                (Id,TenantId,SourceType,SourceId,SourceReference,Method,DecisionSequence,Status,RecommendationSubjectType,
+                 RecommendedSubjectIdsJson,RecommendedBusinessPartnerIdsJson,RecommendationSnapshotJson,EvaluationLineageJson,
+                 SupplierLineageJson,PrequalificationLineageJson,VerificationLineageJson,AuthorityLineageJson,EvidenceLineageJson,
+                 PrerequisiteSnapshotJson,TimelineSnapshotJson,BlockedReasonsJson,SourceIntegrityHash,IntegrityHash,IdempotencyKey,
+                 CorrelationId,EvaluatedAtUtc,EvaluatedByUserId,EvaluatedByName,CreatedAt,CreatedById,IsDeleted,
+                 MethodRuleId,MethodRuleCode,AuthorityRouteId,AuthorityRouteReference,WorkflowDefinitionId,WorkflowInstanceId)
+                VALUES(NEWID(),@tenant,2,@source,'TND-SQL-READY',@method,
+                 (SELECT ISNULL(MAX(DecisionSequence),0)+1 FROM dbo.ProcurementAwardReadinessDecisions),1,'TenderBid',
+                 @subjects,@suppliers,@snapshot,'[]','[]','[]','[]',@authority,'[]',@prerequisites,'[]','[]',
+                 REPLICATE('A',64),REPLICATE('B',64),CONVERT(varchar(36),NEWID()),'petty-sql',SYSUTCDATETIME(),
+                 @approver,'Independent test approver',SYSUTCDATETIME(),@approver,0,@rule,'METHOD-PETTY',@route,'',@definition,@workflow);
+                IF @@TRANCOUNT > 0 ROLLBACK;
+                """, new SqlParameter("@tenant", source.TenantId), new SqlParameter("@source", source.TenderId),
+                new SqlParameter("@method", method), new SqlParameter("@subjects", JsonSerializer.Serialize(new[] { source.BidId })),
+                new SqlParameter("@suppliers", JsonSerializer.Serialize(new[] { source.SupplierId })),
+                new SqlParameter("@snapshot", snapshot), new SqlParameter("@authority", authority),
+                new SqlParameter("@prerequisites", prerequisites), new SqlParameter("@approver", source.ApproverId),
+                new SqlParameter("@rule", methodRule), new SqlParameter("@route", System.Data.SqlDbType.UniqueIdentifier) { Value = (object?)route ?? DBNull.Value },
+                new SqlParameter("@definition", definition), new SqlParameter("@workflow", workflow));
+        }
+        (await Assert.ThrowsAsync<SqlException>(() => Append())).Number.Should().Be(51407);
+        await database.ApplyAsync(new AlignPettyPurchaseAwardReadinessAuthority());
+        var guard = await database.ScalarAsync<string>(ReadTriggerSql);
+        await database.ApplyAsync(new AlignPettyPurchaseAwardReadinessAuthority());
+        (await database.ScalarAsync<string>(ReadTriggerSql)).Should().Be(guard);
+        await Append();
+        foreach (var mutation in new[]
+        {
+            "UPDATE dbo.ProcurementExceptionalSourcingControls SET Status=2;",
+            "UPDATE dbo.ProcurementExceptionalSourcingControls SET RecommendedBidId=NEWID();",
+            "UPDATE dbo.ProcurementExceptionalSourcingControls SET TenantId=NEWID();",
+            "UPDATE dbo.ProcurementExceptionalSourcingControls SET MethodRuleId=NEWID();",
+            "UPDATE dbo.TenderBids SET BusinessPartnerId=NEWID();",
+            "UPDATE dbo.WorkflowInstances SET Status=1;",
+            "UPDATE dbo.WorkflowInstances SET EntityId=NEWID();"
+        })
+            await Assert.ThrowsAsync<SqlException>(() => Append(prefix: "BEGIN TRAN; " + mutation));
+        await Assert.ThrowsAsync<SqlException>(() => Append(method: 4, prefix: "BEGIN TRAN; UPDATE dbo.ProcurementExceptionalSourcingControls SET Method=4;"));
+        await Assert.ThrowsAsync<SqlException>(() => Append(route: Guid.NewGuid()));
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM dbo.ProcurementAwardReadinessDecisions;")).Should().Be(1);
+        (await Assert.ThrowsAsync<SqlException>(() => database.ExecuteAsync("UPDATE dbo.ProcurementAwardReadinessDecisions SET Status=0;"))).Number.Should().Be(51400);
+    }
+
     [Fact]
     public void SqlGeneratorLineEndingsAreNormalizedInsideEveryComparedFragment()
     {

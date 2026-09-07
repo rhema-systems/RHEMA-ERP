@@ -118104,7 +118104,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("AuthorityRouteId")
+                    b.Property<Guid?>("AuthorityRouteId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AuthorityRouteReference")
@@ -205706,8 +205706,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementRequisitionAuthorityRoute", "AuthorityRoute")
                         .WithMany()
                         .HasForeignKey("AuthorityRouteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPolicyExceptionRule", "ExceptionRule")
                         .WithMany()

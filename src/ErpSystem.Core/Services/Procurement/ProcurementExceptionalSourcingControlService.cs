@@ -103,10 +103,17 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             .OrderBy(item => item.PartnerName).AsNoTracking().ToListAsync(cancellationToken);
         return new ProcurementExceptionalSourcingReadinessDto
         {
+            SourceRequisitionId = tender.SourcePurchaseRequisitionId,
+            Currency = tender.Currency ?? string.Empty, EstimatedValue = tender.EstimatedValue,
+            QuotationItems = await _unitOfWork.Repository<TenderItem>().GetQueryable(item =>
+                item.TenderId == tender.Id && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                .OrderBy(item => item.LineNumber).Select(item => new PettyPurchaseQuotationItemDto
+                { TenderItemId = item.Id, Description = item.Description, Quantity = item.Quantity,
+                    UnitOfMeasure = item.UnitOfMeasure }).ToListAsync(cancellationToken),
             TenderId = tender.Id, TenderNumber = tender.TenderNumber, TenderTitle = tender.Title,
             TenderStatus = tender.Status, Method = lineage.Case.SelectedMethod,
             MethodRuleCode = lineage.MethodRule.RuleCode, ExceptionRuleCode = lineage.ExceptionRule.RuleCode,
-            AuthorityRouteReference = lineage.Case.AuthorityRouteReference, MinimumSupplierCount = minimum,
+            AuthorityRouteReference = lineage.Case.AuthorityRouteReference ?? string.Empty, MinimumSupplierCount = minimum,
             BoardApprovalRequired = lineage.BoardRequired,
             ManagingDirectorApprovalRequired = lineage.ManagingDirectorRequired,
             PpaApprovalRequired = lineage.PpaRequired,
@@ -134,14 +141,15 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         var correlation = NormalizeCorrelation(correlationId);
         var tender = await LoadTenderAsync(tenderId, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(ManagePermission, tender.TenderNumber, correlation, cancellationToken);
-        if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+        var lineage = await RevalidateAsync(tender, null, correlation, cancellationToken);
+        var petty = lineage.Case.SelectedMethod == ProcurementMethodType.PettyPurchase;
+        if (!(petty && tender.Status == "Draft") && !string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             throw Conflict("EXCEPTIONAL_TENDER_APPROVAL_REQUIRED", "The tender document must be Approved before the controlled noncompetitive case is prepared.");
-        if (!tender.SubmissionDeadline.HasValue || EnsureUtc(tender.SubmissionDeadline.Value) <= DateTime.UtcNow)
+        if (!petty && (!tender.SubmissionDeadline.HasValue || EnsureUtc(tender.SubmissionDeadline.Value) <= DateTime.UtcNow))
             throw Validation("EXCEPTIONAL_TENDER_DEADLINE_INVALID", "The approved tender requires a future supplier-submission deadline.");
         if (await Controls.ExistsAsync(item => item.TenantId == _currentUser.TenantId && item.TenderId == tenderId && !item.IsDeleted))
             throw Conflict("EXCEPTIONAL_CONTROL_EXISTS", "The controlled noncompetitive sourcing record already exists.");
-        var lineage = await RevalidateAsync(tender, null, correlation, cancellationToken);
-        if (!lineage.Case.AuthorityRouteId.HasValue || string.IsNullOrWhiteSpace(lineage.Case.AuthorityRouteReference))
+        if (!petty && (!lineage.Case.AuthorityRouteId.HasValue || string.IsNullOrWhiteSpace(lineage.Case.AuthorityRouteReference)))
             throw Validation("EXCEPTIONAL_ADVANCED_AUTHORITY_ROUTE_REQUIRED",
                 "This exceptional statutory-control stage requires an advanced authority route. The sourcing case remains valid for the standard approved-PR tender workflow.");
         if (lineage.MethodRule.JustificationRequired)
@@ -200,10 +208,10 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         {
             Id = Guid.NewGuid(), TenantId = _currentUser.TenantId, TenderId = tender.Id,
             SourcingCaseId = lineage.Case.Id, MethodRuleId = lineage.MethodRule.Id,
-            ExceptionRuleId = lineage.ExceptionRule.Id, AuthorityRouteId = lineage.Case.AuthorityRouteId.Value,
+            ExceptionRuleId = lineage.ExceptionRule.Id, AuthorityRouteId = lineage.Case.AuthorityRouteId,
             Method = lineage.Case.SelectedMethod, MethodRuleCode = lineage.MethodRule.RuleCode,
             ExceptionRuleCode = lineage.ExceptionRule.RuleCode,
-            AuthorityRouteReference = lineage.Case.AuthorityRouteReference,
+            AuthorityRouteReference = lineage.Case.AuthorityRouteReference ?? string.Empty,
             Status = ProcurementExceptionalSourcingControlStatus.Prepared,
             Justification = NullIfWhiteSpace(request.Justification) ?? "Not required by the locked sourcing rule.",
             JustificationEvidenceReference = NullIfWhiteSpace(request.JustificationEvidenceReference) ?? "not-required-by-policy",
@@ -216,9 +224,19 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             PpaApprovalRequired = lineage.PpaRequired,
             WorkflowDefinitionId = lineage.WorkflowDefinitionId,
             CreatedAt = now, CreatedBy = ActorName(), CreatedById = _currentUser.UserId,
-            Tender = tender, SourcingCase = lineage.Case, MethodRule = lineage.MethodRule,
-            ExceptionRule = lineage.ExceptionRule, AuthorityRoute = lineage.Case.AuthorityRoute
+            // Policy/source reads are detached snapshots. Adding their navigation graph
+            // would try to INSERT existing immutable rules. Persist their FK IDs only.
+            // Tender is explicitly tracked and is needed for the quotation snapshot.
+            Tender = tender
         };
+        if (petty)
+        {
+            await CapturePettyQuotationAsync(tender, supplierIds.Single(), request.Quotation, cancellationToken);
+            // Preparation freezes the source; the configured TenderException workflow,
+            // not a fabricated tender approval/publication, authorizes this purchase.
+            tender.Status = "Prepared";
+            await Tenders.UpdateAsync(tender);
+        }
         Capture(control);
         await Controls.AddAsync(control);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -253,7 +271,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
                 control.Status = ProcurementExceptionalSourcingControlStatus.PendingApproval;
                 control.SubmittedForApprovalAtUtc = now;
                 control.SubmittedForApprovalById = _currentUser.UserId;
-                control.ApprovalActorsJson = JsonSerializer.Serialize(new[] { _currentUser.UserId }, JsonOptions);
+                // Submission is retained separately; it is not an approval.
+                control.ApprovalActorsJson = "[]";
                 control.WorkflowInstanceId = workflow.WorkflowInstanceId;
                 Touch(control, now);
                 await Controls.UpdateAsync(control);
@@ -313,13 +332,13 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         {
             var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
             {
-                ControlCode = "SOD-EXCEPTION-INITIATOR-APPROVER", SourceType = ApprovalSourceType,
+                ControlCode = "SOD-INITIATOR-APPROVER", SourceType = ApprovalSourceType,
                 SourceReference = control.Tender.TenderNumber, ProhibitedActorUserIds = prohibited.ToList()
             }, correlation, cancellationToken);
             if (!sod.Allowed) throw new ProcurementExceptionalSourcingAuthorizationException(sod.Message);
         }
 
-        if (action == "approve")
+        if (action == "approve" && control.Method != ProcurementMethodType.PettyPurchase)
         {
             var supplierIds = SuppliersFrom(control).Select(item => item.BusinessPartnerId).ToList();
             await _tenderDocumentControlService.EnsurePublicationReadyAsync(
@@ -345,15 +364,16 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             control.Status = ProcurementExceptionalSourcingControlStatus.Approved;
             control.ApprovedAtUtc = now;
             control.ApprovedById = _currentUser.UserId;
-            control.SuppliersInvitedAtUtc = now;
-            control.Tender.Status = "Published";
-            control.Tender.PublishDate = now;
-            control.Tender.PublishedById = _currentUser.UserId;
+            var petty = control.Method == ProcurementMethodType.PettyPurchase;
+            control.SuppliersInvitedAtUtc = petty ? null : now;
+            control.Tender.Status = petty ? "Approved" : "Published";
+            control.Tender.PublishDate = petty ? null : now;
+            control.Tender.PublishedById = petty ? null : _currentUser.UserId;
             control.Tender.UpdatedAt = now;
             var existing = await Invitations.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                     item.TenderId == control.TenderId && supplierIds.Contains(item.BusinessPartnerId) && !item.IsDeleted)
                 .Select(item => item.BusinessPartnerId).ToListAsync(cancellationToken);
-            foreach (var supplierId in supplierIds.Except(existing))
+            foreach (var supplierId in supplierIds.Except(existing).Where(_ => !petty))
                 await Invitations.AddAsync(new TenderInvitation
                 {
                     Id = Guid.NewGuid(), TenantId = _currentUser.TenantId, TenderId = control.TenderId,
@@ -371,7 +391,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         Touch(control, now);
         await Controls.UpdateAsync(control);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        if (control.Status == ProcurementExceptionalSourcingControlStatus.Approved)
+        if (control.Status == ProcurementExceptionalSourcingControlStatus.Approved && control.Method != ProcurementMethodType.PettyPurchase)
             await _notifications.SendTenderPublishedNotificationAsync(control.TenderId,
                 SuppliersFrom(control).Select(item => item.BusinessPartnerId).ToList(), new List<string>());
         await RecordAsync(control, control.Status == ProcurementExceptionalSourcingControlStatus.Approved
@@ -389,6 +409,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     {
         if (!await IsExceptionalAsync(tenderId, cancellationToken)) return;
         var control = await LoadControlAsync(tenderId, tracked: false, cancellationToken);
+        if (control.Method == ProcurementMethodType.PettyPurchase)
+            throw Conflict("PETTY_PURCHASE_NOT_OPEN_BIDDING", "Petty Purchase uses its approved recorded supplier quotation, not public bid submission.");
         if (control.Status != ProcurementExceptionalSourcingControlStatus.Approved)
             throw Conflict("EXCEPTIONAL_BID_WINDOW_CLOSED", "Supplier bids are accepted only after the exact exceptional-sourcing approval and before negotiation begins.");
         if (!SuppliersFrom(control).Any(item => item.BusinessPartnerId == businessPartnerId))
@@ -399,6 +421,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     {
         if (!await IsExceptionalAsync(tenderId, cancellationToken)) return;
         var control = await LoadControlAsync(tenderId, tracked: false, cancellationToken);
+        if (control.Method == ProcurementMethodType.PettyPurchase)
+            throw Conflict("PETTY_QUOTATION_LOCKED", "This Petty Purchase retains the independently approved quotation. Changes require a separately approved source, not the competitive negotiation lifecycle.");
         await EnsureCapabilityAsync(ManagePermission, control.Tender.TenderNumber,
             Guid.NewGuid().ToString("N"), cancellationToken);
         if (control.Status != ProcurementExceptionalSourcingControlStatus.Approved)
@@ -416,6 +440,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
     {
         var correlation = NormalizeCorrelation(correlationId);
         var control = await LoadControlAsync(tenderId, tracked: true, cancellationToken);
+        if (control.Method == ProcurementMethodType.PettyPurchase)
+            throw Conflict("PETTY_QUOTATION_LOCKED", "Use the approved quotation recommendation for Petty Purchase.");
         await EnsureCapabilityAsync(ManagePermission, control.Tender.TenderNumber, correlation, cancellationToken);
         await RevalidateAsync(control.Tender, control, correlation, cancellationToken);
         EnsureStatus(control, ProcurementExceptionalSourcingControlStatus.Approved, "EXCEPTIONAL_NEGOTIATION_NOT_READY");
@@ -458,15 +484,22 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         var control = await LoadControlAsync(tenderId, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(EvaluatePermission, control.Tender.TenderNumber, correlation, cancellationToken);
         await RevalidateAsync(control.Tender, control, correlation, cancellationToken);
-        EnsureStatus(control, ProcurementExceptionalSourcingControlStatus.Negotiated, "EXCEPTIONAL_RECOMMENDATION_NOT_READY");
+        var petty = control.Method == ProcurementMethodType.PettyPurchase;
+        EnsureStatus(control, petty ? ProcurementExceptionalSourcingControlStatus.Approved : ProcurementExceptionalSourcingControlStatus.Negotiated, "EXCEPTIONAL_RECOMMENDATION_NOT_READY");
         EnsureRowVersion(control.RowVersion, request.RowVersion);
         Require(request.Reason, "EXCEPTIONAL_RECOMMENDATION_REASON_REQUIRED", "The negotiated award recommendation reason is required.");
         Require(request.EvidenceReference, "EXCEPTIONAL_RECOMMENDATION_EVIDENCE_REQUIRED", "Signed recommendation evidence is required.");
+        if (!petty)
+        {
         var negotiation = await Negotiations.GetQueryable(item => item.Id == control.NegotiationId &&
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted).AsNoTracking().SingleAsync(cancellationToken);
         if (negotiation.TenderBidId != request.BidId)
             throw Validation("EXCEPTIONAL_RECOMMENDATION_BID_MISMATCH", "The recommendation must use the bid whose negotiation was completed.");
+        }
         var bid = await LoadBidAsync(tenderId, request.BidId, cancellationToken);
+        if (petty && (!SuppliersFrom(control).Any(item => item.BusinessPartnerId == bid.BusinessPartnerId) ||
+            bid.Status != "Submitted" || bid.TotalBidAmount <= 0 || bid.TotalBidAmount > control.Tender.EstimatedValue))
+            throw Validation("PETTY_QUOTATION_INVALID", "Recommend only the recorded quotation for the approved supplier within the locked value.");
         var supplier = await _supplierValidation.EvaluateEligibilityAsync(new SupplierEligibilityEvaluationRequest
         {
             BusinessPartnerId = bid.BusinessPartnerId,
@@ -509,7 +542,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             .Where(id => id != Guid.Empty).Distinct().ToList();
         var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
         {
-            ControlCode = "SOD-TENDER-EVALUATOR-AWARD-APPROVER", SourceType = SourceType,
+            ControlCode = "SOD-EVALUATOR-AWARD-APPROVER", SourceType = SourceType,
             SourceReference = control.Tender.TenderNumber, ProhibitedActorUserIds = prohibited
         }, correlation, cancellationToken);
         if (!sod.Allowed) throw new ProcurementExceptionalSourcingAuthorizationException(sod.Message);
@@ -625,6 +658,38 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
     }
 
+    private async Task CapturePettyQuotationAsync(Tender tender, Guid supplierId,
+        PettyPurchaseQuotationRequest? quotation, CancellationToken cancellationToken)
+    {
+        if (await Bids.ExistsAsync(item => item.TenantId == _currentUser.TenantId && item.TenderId == tender.Id && !item.IsDeleted))
+            throw Conflict("PETTY_QUOTATION_EXISTS", "A quotation already exists for this purchase; do not create another source or quotation.");
+        var items = await _unitOfWork.Repository<TenderItem>().GetQueryable(item =>
+            item.TenantId == _currentUser.TenantId && item.TenderId == tender.Id && !item.IsDeleted)
+            .OrderBy(item => item.LineNumber).ToListAsync(cancellationToken);
+        var total = PettyPurchaseQuotationRules.Validate(quotation, items, tender.EstimatedValue);
+        var now = DateTime.UtcNow;
+        var bid = new TenderBid
+        {
+            Id = Guid.NewGuid(), TenantId = _currentUser.TenantId, TenderId = tender.Id,
+            BusinessPartnerId = supplierId, BidNumber = $"PQ-{Guid.NewGuid():N}",
+            Status = "Submitted", SubmittedDate = now, TotalBidAmount = total, Currency = tender.Currency,
+            CommercialProposal = JsonSerializer.Serialize(new { kind = "RecordedPettyQuotation", quotation!.Reference, quotation.EvidenceReference }, JsonOptions),
+            CreatedAt = now, CreatedById = _currentUser.UserId, CreatedBy = ActorName(),
+            // This is an officer-recorded quotation, not a declaration made by a bidder.
+            AcceptedDeclaration = false,
+            Items = items.Select(item => new TenderBidItem
+            {
+                Id = Guid.NewGuid(), TenantId = _currentUser.TenantId, TenderItemId = item.Id,
+                OfferedQuantity = item.Quantity,
+                UnitPrice = quotation!.Items.Single(price => price.TenderItemId == item.Id).UnitPrice,
+                TotalPrice = decimal.Round(item.Quantity * quotation!.Items.Single(price => price.TenderItemId == item.Id).UnitPrice, 2, MidpointRounding.AwayFromZero),
+                CreatedAt = now, CreatedById = _currentUser.UserId, CreatedBy = ActorName()
+            }).ToList()
+        };
+        await Bids.AddAsync(bid);
+        if (!tender.Bids.Contains(bid)) tender.Bids.Add(bid);
+    }
+
     private async Task<Tender> LoadTenderAsync(Guid tenderId, bool tracked, CancellationToken cancellationToken)
     {
         EnsureAuthenticatedTenant();
@@ -647,6 +712,7 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
         IQueryable<ProcurementExceptionalSourcingControl> query = Controls.GetQueryable(item => item.TenderId == tenderId &&
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .Include(item => item.Tender).ThenInclude(item => item.Bids).ThenInclude(item => item.BusinessPartner)
+            .Include(item => item.Tender).ThenInclude(item => item.Bids).ThenInclude(item => item.Items)
             .Include(item => item.SourcingCase).ThenInclude(item => item.AuthorityRoute).ThenInclude(item => item.Steps)
             .Include(item => item.MethodRule).Include(item => item.ExceptionRule)
             .Include(item => item.Negotiation);
@@ -751,12 +817,25 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             throw Validation("EXCEPTIONAL_EVIDENCE_POLICY_INCOMPLETE", $"The current {decisionKey} policy has no mandatory evidence checklist.");
         if (control is not null)
         {
+            if (control.Method == ProcurementMethodType.PettyPurchase)
+            {
+                using var snapshot = JsonDocument.Parse(control.LifecycleSnapshotJson);
+                if (!snapshot.RootElement.TryGetProperty("quotation", out var quotation) ||
+                    !PettyPurchaseQuotationRules.MatchesSnapshot(quotation,
+                        JsonSerializer.SerializeToElement(QuotationSnapshot(control), JsonOptions)))
+                    throw Validation("PETTY_QUOTATION_CHANGED", "The recorded quotation changed after preparation. Approval cannot continue against different supplier, evidence or prices.");
+            }
             var captured = EvidenceFrom(control);
             if (evidenceRules.Any(rule => !captured.Any(item => item.EvidenceRuleId == rule.Id &&
-                    !string.IsNullOrWhiteSpace(item.EvidenceReference) && !string.IsNullOrWhiteSpace(item.VerificationReference))))
+                    !string.IsNullOrWhiteSpace(item.EvidenceReference) && (!rule.RequiresVerification || !string.IsNullOrWhiteSpace(item.VerificationReference)))))
                 throw Validation("EXCEPTIONAL_EVIDENCE_STALE", $"The immutable sourcing record does not cover every current mandatory {decisionKey} evidence rule.");
         }
-        var authorityText = string.Join(" ", sourcingCase.AuthorityRoute.Steps.Select(item => $"{item.AuthorityName} {item.AuthorityRole}").Append(exceptionRule.ApproverRole));
+        if ((sourcingCase.AuthorityRouteId.HasValue || !string.IsNullOrWhiteSpace(sourcingCase.AuthorityRouteReference)) &&
+            (sourcingCase.AuthorityRoute is null || !sourcingCase.AuthorityRouteId.HasValue || string.IsNullOrWhiteSpace(sourcingCase.AuthorityRouteReference)))
+            throw Validation("EXCEPTIONAL_AUTHORITY_LINEAGE_INCOMPLETE", "The recorded authority route is incomplete; it cannot be downgraded to a standard workflow.");
+        if (sourcingCase.SelectedMethod != ProcurementMethodType.PettyPurchase && sourcingCase.AuthorityRoute is null)
+            throw Validation("EXCEPTIONAL_ADVANCED_AUTHORITY_ROUTE_REQUIRED", "Restricted or single-source procurement requires its captured authority route.");
+        var authorityText = string.Join(" ", (sourcingCase.AuthorityRoute?.Steps.Select(item => $"{item.AuthorityName} {item.AuthorityRole}") ?? []).Append(exceptionRule.ApproverRole));
         var boardRequired = authorityText.Contains("board", StringComparison.OrdinalIgnoreCase);
         var managingDirectorRequired = authorityText.Contains("managing director", StringComparison.OrdinalIgnoreCase) ||
                                       authorityText.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(item => string.Equals(item, "MD", StringComparison.OrdinalIgnoreCase));
@@ -832,13 +911,15 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             control.RecommendationEvidenceReference, control.RecommendedAtUtc, control.RecommendedById,
             control.AwardBidId, control.AwardReference, control.AwardedAtUtc, control.ContractReference,
             control.ContractedAtUtc, control.BidderAcceptanceReference, control.AcceptedAtUtc,
-            control.PostAwardFilingReference, control.ExceptionReportReference, control.FiledAtUtc, control.FiledById
+            control.PostAwardFilingReference, control.ExceptionReportReference, control.FiledAtUtc, control.FiledById,
+            quotation = QuotationSnapshot(control)
         }, JsonOptions);
         control.IntegrityHash = ComputeHash(control.LifecycleSnapshotJson);
     }
 
     private static ProcurementExceptionalSourcingControlDto Map(ProcurementExceptionalSourcingControl control) => new()
     {
+        SourceRequisitionId = control.Tender.SourcePurchaseRequisitionId,
         TenderId = control.TenderId, TenderNumber = control.Tender.TenderNumber, TenderTitle = control.Tender.Title,
         Method = control.Method, MethodRuleCode = control.MethodRuleCode, ExceptionRuleCode = control.ExceptionRuleCode,
         AuthorityRouteReference = control.AuthorityRouteReference, Status = control.Status,
@@ -874,7 +955,14 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
             SupplierName = item.BusinessPartner?.PartnerName ?? SuppliersFrom(control).FirstOrDefault(supplier => supplier.BusinessPartnerId == item.BusinessPartnerId)?.SupplierName ?? string.Empty,
             BidAmount = item.TotalBidAmount, Currency = item.Currency ?? control.Tender.Currency, Status = item.Status
         }).ToList(),
-        Milestones =
+        Milestones = control.Method == ProcurementMethodType.PettyPurchase ?
+        [
+            Milestone("PETTY-01", "Supplier quotation and evidence", control.PreparedAtUtc, control.SupplierSelectionEvidenceReference),
+            Milestone("PETTY-02", "Independent approval submitted", control.SubmittedForApprovalAtUtc, control.WorkflowInstanceId?.ToString()),
+            Milestone("PETTY-03", "Independent approval completed", control.ApprovedAtUtc, control.WorkflowInstanceId?.ToString()),
+            Milestone("PETTY-04", "Quotation recommendation", control.RecommendedAtUtc, control.RecommendationEvidenceReference),
+            Milestone("PETTY-05", "Award ready for purchase order", control.AwardedAtUtc, control.AwardReference)
+        ] :
         [
             Milestone("DEC-001", "Current exceptional method lineage", control.PreparedAtUtc, control.MethodRuleCode),
             Milestone("DEC-002", "Statutory justification", control.PreparedAtUtc, control.JustificationEvidenceReference),
@@ -897,6 +985,13 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
                 control.ExceptionRule.PostAwardFilingRequired ? control.PostAwardFilingReference : "Not required by locked rule")
         ]
     };
+
+    private static object? QuotationSnapshot(ProcurementExceptionalSourcingControl control) =>
+        control.Method == ProcurementMethodType.PettyPurchase ? control.Tender.Bids
+            .Where(item => !item.IsDeleted).OrderBy(item => item.Id).Select(item => new { item.Id, item.BusinessPartnerId,
+                item.TotalBidAmount, item.Currency, item.CommercialProposal,
+                lines = item.Items.Where(line => !line.IsDeleted).OrderBy(line => line.TenderItemId).Select(line => new {
+                    line.TenderItemId, line.OfferedQuantity, line.UnitPrice, line.TotalPrice }).ToList() }).ToList() : null;
 
     private static List<SupplierSnapshot> SuppliersFrom(ProcurementExceptionalSourcingControl control) =>
         JsonSerializer.Deserialize<List<SupplierSnapshot>>(control.SupplierSnapshotJson, JsonOptions) ?? new();
