@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 clean candidate `8ac41e69`; independent GPT-5.6 Sol High review active |
+| Review status | C7 cycle 1 `CHANGES_REQUIRED`; bounded GPT-5.6 Sol Medium correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -713,6 +713,18 @@ no owner module changed and no database was accessed. Independent GPT-5.6 Sol Hi
 accounting atomicity, maker-checker security, participant trust/transaction boundaries, idempotency, durable
 post-rollback failure evidence, migration/SQL authority and C1-C6 regression preservation. Integration and
 the Inventory reissue remain blocked pending approval.
+
+Stage C7 independent review cycle 1 returned `CHANGES_REQUIRED` at exact clean candidate `8ac41e69`. Four P1
+gates remain: the caller can substitute an unregistered arbitrary participant whose database/transaction and
+external effects are not Finance-bound; C7 regresses direct C6 checker-bound Posted/Failed retry authority;
+the migration trigger admits preseeded or combined decision/execution states and lacks executable C7 SQL
+coverage; and correction/reversal preparation incorrectly re-resolves current C5 books instead of preserving
+the target's frozen set. Two P2 gates remain: governed rejection can be stranded by later C5 readiness drift,
+and rejected intents lack an immutable reconstructible economic snapshot. Reviewer gates otherwise passed a
+zero-error build, 39 focused C6/C7 tests with 11 guarded skips, 358 widened passes with 35 guarded skips, EF
+model parity, exact 455-migration discovery, no-connect script generation, exact ancestry, clean status/diff/
+credential checks and owner-module isolation. The coordinator dispatched all findings for one bounded Sol
+Medium correction. No migration was applied and configured `RHEMAERP` remains untouched.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
