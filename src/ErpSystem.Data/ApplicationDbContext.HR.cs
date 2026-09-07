@@ -469,8 +469,14 @@ public partial class ApplicationDbContext
     public DbSet<SheRiskAssessmentAcknowledgement> SheRiskAssessmentAcknowledgements { get; set; } = null!;
     public DbSet<SheInspectionChecklist> SheInspectionChecklists { get; set; } = null!;
     public DbSet<SheInspectionChecklistItem> SheInspectionChecklistItems { get; set; } = null!;
+    public DbSet<SheInspectionChecklistField> SheInspectionChecklistFields { get; set; } = null!;
+    public DbSet<SheInspectionChecklistSection> SheInspectionChecklistSections { get; set; } = null!;
+    public DbSet<SheInspectionChecklistOutcome> SheInspectionChecklistOutcomes { get; set; } = null!;
+    public DbSet<SheInspectionChecklistSignatory> SheInspectionChecklistSignatories { get; set; } = null!;
     public DbSet<SafetyInspection> SafetyInspections { get; set; } = null!;
     public DbSet<SafetyInspectionItem> SafetyInspectionItems { get; set; } = null!;
+    public DbSet<SafetyInspectionFieldValue> SafetyInspectionFieldValues { get; set; } = null!;
+    public DbSet<SafetyInspectionSignature> SafetyInspectionSignatures { get; set; } = null!;
     public DbSet<SafetyInspectionHazard> SafetyInspectionHazards { get; set; } = null!;
     public DbSet<SafetyInspectionHazardAction> SafetyInspectionHazardActions { get; set; } = null!;
     public DbSet<SafetyInspectionDocument> SafetyInspectionDocuments { get; set; } = null!;
@@ -10101,13 +10107,44 @@ private void ConfigureHREntities(ModelBuilder builder)
         });
 
         // D. Safety inspections & audits ──────────────────────────────
-        builder.Entity<SheInspectionChecklist>(e => e.HasIndex(x => new { x.TenantId, x.ChecklistNumber }).IsUnique());
+        // A template number is shared by its versions (v1 retired, v2 published, v3 draft), so
+        // uniqueness is per version — see docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.3.
+        builder.Entity<SheInspectionChecklist>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ChecklistNumber, x.Version }).IsUnique();
+            e.HasIndex(x => x.Status);
+            // Sections and outcomes are reached through the template; no inverse collection is wanted
+            // on the two outcome navs SafetyInspection carries (Recommended / confirmed), so they are
+            // declared explicitly rather than left to convention.
+            e.HasOne(x => x.PreviousVersion).WithMany().HasForeignKey(x => x.PreviousVersionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<SheInspectionChecklistField>(e => e.HasIndex(x => new { x.ChecklistId, x.DisplayOrder }));
+        builder.Entity<SheInspectionChecklistSection>(e => e.HasIndex(x => new { x.ChecklistId, x.DisplayOrder }));
+        builder.Entity<SheInspectionChecklistItem>(e =>
+        {
+            e.HasIndex(x => new { x.ChecklistId, x.ItemOrder });
+            e.HasOne(x => x.Section).WithMany(s => s.Items).HasForeignKey(x => x.SectionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<SheInspectionChecklistOutcome>(e => e.HasIndex(x => new { x.ChecklistId, x.DisplayOrder }));
+        builder.Entity<SheInspectionChecklistSignatory>(e => e.HasIndex(x => new { x.ChecklistId, x.DisplayOrder }));
         builder.Entity<SafetyInspection>(e =>
         {
             e.HasIndex(x => new { x.TenantId, x.InspectionNumber }).IsUnique();
             e.HasIndex(x => x.Type);
             e.HasIndex(x => x.Status);
             e.HasIndex(x => x.InspectionDate);
+            e.HasOne(x => x.RecommendedOutcome).WithMany().HasForeignKey(x => x.RecommendedOutcomeId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Outcome).WithMany().HasForeignKey(x => x.OutcomeId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<SafetyInspectionFieldValue>(e =>
+        {
+            e.HasIndex(x => new { x.InspectionId, x.ChecklistFieldId }).IsUnique();
+            e.HasOne(x => x.ChecklistField).WithMany().HasForeignKey(x => x.ChecklistFieldId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<SafetyInspectionSignature>(e =>
+        {
+            e.HasIndex(x => new { x.InspectionId, x.ChecklistSignatoryId }).IsUnique();
+            e.HasOne(x => x.ChecklistSignatory).WithMany().HasForeignKey(x => x.ChecklistSignatoryId).OnDelete(DeleteBehavior.Restrict);
         });
 
         // E. Permit-to-work ───────────────────────────────────────────

@@ -270,6 +270,56 @@ public enum SheInspectionResult
     NeedsFollowUp = 4
 }
 
+// ── Inspection checklist builder (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ──
+
+/// <summary>Template lifecycle. Structure is editable only in Draft; Published rows are what inspections pin.</summary>
+public enum SheChecklistStatus
+{
+    Draft = 1,
+    Published = 2,
+    Retired = 3
+}
+
+/// <summary>How a run against the template is summarised.</summary>
+public enum SheChecklistScoringMode
+{
+    /// <summary>No score and no outcome block — items and findings only.</summary>
+    None = 1,
+    /// <summary>Compliant ÷ applicable as a percentage, mapped onto the template's outcome bands.</summary>
+    CompliancePercentage = 2,
+    /// <summary>The inspector picks one of the template's outcomes (e.g. Excellent … Unsatisfactory); no percentage is computed.</summary>
+    QualitativeRating = 3
+}
+
+/// <summary>Standard sections score C / NC / NA. Critical sections are Yes / No, and any Yes disqualifies.</summary>
+public enum SheChecklistSectionKind
+{
+    Standard = 1,
+    Critical = 2
+}
+
+/// <summary>The closed set of header-field types a template may declare ("Department" on paper is OrganizationUnit here).</summary>
+public enum SheChecklistFieldType
+{
+    Text = 1,
+    LongText = 2,
+    Number = 3,
+    Date = 4,
+    Time = 5,
+    YesNo = 6,
+    Choice = 7,
+    Employee = 8,
+    Location = 9,
+    OrganizationUnit = 10
+}
+
+/// <summary>System users sign in-app as the logged-in employee; external parties (vendor, operator) are a typed name and date.</summary>
+public enum SheChecklistSignatoryKind
+{
+    SystemUser = 1,
+    External = 2
+}
+
 // ── Permit-to-Work ────────────────────────────────────────
 public enum ShePermitType
 {

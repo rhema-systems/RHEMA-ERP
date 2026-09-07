@@ -198,4 +198,48 @@ public class SafetyInspectionController : SheApiControllerBase
         await _service.DeleteDocumentAsync(documentId);
         return NoContent();
     }
+
+    // ── Checklist run (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+    /// <summary>Loads a published template's items onto an inspection that has none yet.</summary>
+    [HttpPost("{id:guid}/apply-checklist")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    public async Task<ActionResult<SafetyInspectionDto>> ApplyChecklist(Guid id, [FromBody] ApplySafetyInspectionChecklistDto dto)
+        => Ok(await _service.ApplyChecklistAsync(id, dto, UserId));
+
+    /// <summary>Bulk answer — the walk, saved in one call.</summary>
+    [HttpPut("{id:guid}/responses")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    public async Task<ActionResult<SafetyInspectionDto>> SaveResponses(Guid id, [FromBody] List<SafetyInspectionResponseDto> responses)
+        => Ok(await _service.SaveResponsesAsync(id, responses, UserId));
+
+    /// <summary>Replace-set of the header field values: a field missing from the body is cleared.</summary>
+    [HttpPut("{id:guid}/field-values")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    public async Task<ActionResult<SafetyInspectionDto>> SaveFieldValues(Guid id, [FromBody] List<SafetyInspectionFieldValueWriteDto> values)
+        => Ok(await _service.SaveFieldValuesAsync(id, values, TenantId, UserId));
+
+    [HttpGet("{id:guid}/score")]
+    [Authorize(Policy = HrPermissions.SheReadPolicy)]
+    public async Task<ActionResult<SafetyInspectionScoreDto>> GetScore(Guid id)
+        => Ok(await _service.GetScoreAsync(id));
+
+    /// <summary>Gate + persist the score and outcome; refused (422) while items are unassessed or required fields empty.</summary>
+    [HttpPost("{id:guid}/complete")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    public async Task<ActionResult<SafetyInspectionDto>> Complete(Guid id, [FromBody] CompleteSafetyInspectionDto dto)
+        => Ok(await _service.CompleteAsync(id, dto, UserId));
+
+    /// <summary>System-user signatories sign as the token's employee; external ones need a typed name.</summary>
+    [HttpPost("{id:guid}/signatures")]
+    [Authorize(Policy = HrPermissions.SheWritePolicy)]
+    public async Task<ActionResult<SafetyInspectionSignatureDto>> AddSignature(Guid id, [FromBody] CreateSafetyInspectionSignatureDto dto)
+        => Ok(await _service.AddSignatureAsync(id, dto, TenantId, UserId));
+
+    [HttpDelete("signatures/{signatureId:guid}")]
+    [Authorize(Policy = HrPermissions.SheAdminPolicy)]
+    public async Task<IActionResult> DeleteSignature(Guid signatureId)
+    {
+        await _service.DeleteSignatureAsync(signatureId);
+        return NoContent();
+    }
 }

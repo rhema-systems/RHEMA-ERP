@@ -908,6 +908,13 @@ public class SheRiskAssessmentAcknowledgement : TenantEntity
 //  D. SAFETY INSPECTIONS & AUDITS
 // ──────────────────────────────────────────────────────────
 
+/// <summary>
+/// An inspection checklist template — the form the SHE team designs and inspections are run against.
+/// Design record: docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md. A template is header fields +
+/// lettered sections of numbered items (+ optional critical Yes/No sections) + a scoring mode + outcomes
+/// + signatories. Structure is editable only while <see cref="Status"/> is Draft; publishing freezes it,
+/// and "new version" clones it into Draft v+1 under the same number so past inspections keep their form.
+/// </summary>
 public class SheInspectionChecklist : TenantEntity
 {
     [Required, MaxLength(30)]
@@ -923,7 +930,100 @@ public class SheInspectionChecklist : TenantEntity
 
     public int Version { get; set; } = 1;
 
+    /// <summary>Offered for new inspections only when active AND published.</summary>
     public bool IsActive { get; set; } = true;
+
+    public SheChecklistStatus Status { get; set; } = SheChecklistStatus.Draft;
+
+    public SheChecklistScoringMode ScoringMode { get; set; } = SheChecklistScoringMode.CompliancePercentage;
+
+    /// <summary>Adds "Partially compliant" to the C / NC / NA choice. It counts as NOT compliant in the percentage.</summary>
+    public bool AllowPartialCompliance { get; set; }
+
+    /// <summary>Printed form title, e.g. "FOOD VENDOR SCREENING &amp; INSPECTION CHECKLIST".</summary>
+    [MaxLength(200)]
+    public string? PrintTitle { get; set; }
+
+    /// <summary>Printed under the title, e.g. the site name.</summary>
+    [MaxLength(200)]
+    public string? PrintSubtitle { get; set; }
+
+    /// <summary>Footer text — e.g. the immediate-disqualification conditions and the scope note.</summary>
+    [MaxLength(4000)]
+    public string? Instructions { get; set; }
+
+    /// <summary>Printed above the critical section, e.g. "Tick where applicable."</summary>
+    [MaxLength(500)]
+    public string? CriticalSectionNote { get; set; }
+
+    public DateTime? PublishedAt { get; set; }
+
+    public Guid? PublishedById { get; set; }
+
+    [ForeignKey(nameof(PublishedById))]
+    public virtual Employee? PublishedBy { get; set; }
+
+    public DateTime? RetiredAt { get; set; }
+
+    /// <summary>The row this version was cloned from (same number, Version − 1).</summary>
+    public Guid? PreviousVersionId { get; set; }
+
+    [ForeignKey(nameof(PreviousVersionId))]
+    public virtual SheInspectionChecklist? PreviousVersion { get; set; }
+
+    public virtual ICollection<SheInspectionChecklistField> Fields { get; set; } = new List<SheInspectionChecklistField>();
+    public virtual ICollection<SheInspectionChecklistSection> Sections { get; set; } = new List<SheInspectionChecklistSection>();
+    public virtual ICollection<SheInspectionChecklistItem> Items { get; set; } = new List<SheInspectionChecklistItem>();
+    public virtual ICollection<SheInspectionChecklistOutcome> Outcomes { get; set; } = new List<SheInspectionChecklistOutcome>();
+    public virtual ICollection<SheInspectionChecklistSignatory> Signatories { get; set; } = new List<SheInspectionChecklistSignatory>();
+}
+
+/// <summary>A header field of the form ("Vendor name", "Weather", "Organization unit"). Values are captured per inspection.</summary>
+public class SheInspectionChecklistField : TenantEntity
+{
+    public Guid ChecklistId { get; set; }
+
+    [ForeignKey(nameof(ChecklistId))]
+    public virtual SheInspectionChecklist Checklist { get; set; } = null!;
+
+    public int DisplayOrder { get; set; }
+
+    [Required, MaxLength(150)]
+    public string Label { get; set; } = string.Empty;
+
+    public SheChecklistFieldType FieldType { get; set; } = SheChecklistFieldType.Text;
+
+    public bool IsRequired { get; set; }
+
+    /// <summary>For <see cref="SheChecklistFieldType.Choice"/>: the options, '|'-separated.</summary>
+    [MaxLength(1000)]
+    public string? ChoiceOptions { get; set; }
+
+    [MaxLength(300)]
+    public string? HelpText { get; set; }
+}
+
+/// <summary>A lettered section ("A. Vendor Documentation"). Critical sections hold the Yes/No disqualifiers.</summary>
+public class SheInspectionChecklistSection : TenantEntity
+{
+    public Guid ChecklistId { get; set; }
+
+    [ForeignKey(nameof(ChecklistId))]
+    public virtual SheInspectionChecklist Checklist { get; set; } = null!;
+
+    public int DisplayOrder { get; set; }
+
+    /// <summary>The printed letter or code, e.g. "A".</summary>
+    [MaxLength(10)]
+    public string? Code { get; set; }
+
+    [Required, MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    public SheChecklistSectionKind Kind { get; set; } = SheChecklistSectionKind.Standard;
 
     public virtual ICollection<SheInspectionChecklistItem> Items { get; set; } = new List<SheInspectionChecklistItem>();
 }
@@ -935,10 +1035,18 @@ public class SheInspectionChecklistItem : TenantEntity
     [ForeignKey(nameof(ChecklistId))]
     public virtual SheInspectionChecklist Checklist { get; set; } = null!;
 
+    /// <summary>Null only on rows that pre-date the builder; publishing a template requires every item to sit in a section.</summary>
+    public Guid? SectionId { get; set; }
+
+    [ForeignKey(nameof(SectionId))]
+    public virtual SheInspectionChecklistSection? Section { get; set; }
+
+    /// <summary>Order within the section (or across the template for legacy section-less rows).</summary>
     public int ItemOrder { get; set; }
 
-    [Required, MaxLength(100)]
-    public string Category { get; set; } = string.Empty;
+    /// <summary>Legacy grouping label; defaults to the section title when blank.</summary>
+    [MaxLength(100)]
+    public string? Category { get; set; }
 
     [Required, MaxLength(500)]
     public string ItemDescription { get; set; } = string.Empty;
@@ -949,6 +1057,56 @@ public class SheInspectionChecklistItem : TenantEntity
     public string? RegulatoryReference { get; set; }
 
     public SheRiskLevel? AssociatedRiskLevel { get; set; }
+}
+
+/// <summary>
+/// An outcome the run can end in ("Approved with corrective actions", "Unsatisfactory"). In percentage mode
+/// the bands recommend one; a disqualifying outcome is forced by any critical non-conformity.
+/// </summary>
+public class SheInspectionChecklistOutcome : TenantEntity
+{
+    public Guid ChecklistId { get; set; }
+
+    [ForeignKey(nameof(ChecklistId))]
+    public virtual SheInspectionChecklist Checklist { get; set; } = null!;
+
+    public int DisplayOrder { get; set; }
+
+    [Required, MaxLength(150)]
+    public string Label { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? MinPercent { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? MaxPercent { get; set; }
+
+    /// <summary>"Re-inspection required within N days" — informational on the outcome, printed with it.</summary>
+    public int? ReinspectionWithinDays { get; set; }
+
+    /// <summary>The outcome forced when any critical item is answered Yes. At most one per template.</summary>
+    public bool IsDisqualifying { get; set; }
+}
+
+/// <summary>Who signs the completed form, in print order ("Vendor", "SHE Officer", "Site Representative").</summary>
+public class SheInspectionChecklistSignatory : TenantEntity
+{
+    public Guid ChecklistId { get; set; }
+
+    [ForeignKey(nameof(ChecklistId))]
+    public virtual SheInspectionChecklist Checklist { get; set; } = null!;
+
+    public int DisplayOrder { get; set; }
+
+    [Required, MaxLength(150)]
+    public string RoleLabel { get; set; } = string.Empty;
+
+    public SheChecklistSignatoryKind Kind { get; set; } = SheChecklistSignatoryKind.SystemUser;
+
+    public bool IsRequired { get; set; }
 }
 
 public class SafetyInspection : TenantEntity
@@ -1015,9 +1173,101 @@ public class SafetyInspection : TenantEntity
     [ForeignKey(nameof(ClosedById))]
     public virtual Employee? ClosedBy { get; set; }
 
+    // ── Checklist run summary — computed by CompleteAsync from the items, never client-typed.
+    //    ComplianceScore above stays the rounded percentage the KPI layer reads. ──
+    public int? TotalApplicableItems { get; set; }
+    public int? TotalCompliantItems { get; set; }
+    public int? TotalNonCompliantItems { get; set; }
+    public int? TotalPartiallyCompliantItems { get; set; }
+    public int? CriticalNonConformityCount { get; set; }
+
+    [Column(TypeName = "decimal(5,2)")]
+    public decimal? CompliancePercentage { get; set; }
+
+    /// <summary>The outcome the template's bands (or a critical hit) recommended at completion.</summary>
+    public Guid? RecommendedOutcomeId { get; set; }
+
+    [ForeignKey(nameof(RecommendedOutcomeId))]
+    public virtual SheInspectionChecklistOutcome? RecommendedOutcome { get; set; }
+
+    /// <summary>The outcome the inspector confirmed (or chose, in qualitative mode).</summary>
+    public Guid? OutcomeId { get; set; }
+
+    [ForeignKey(nameof(OutcomeId))]
+    public virtual SheInspectionChecklistOutcome? Outcome { get; set; }
+
+    /// <summary>Required whenever the confirmed outcome differs from the recommended one.</summary>
+    [MaxLength(500)]
+    public string? OutcomeOverrideReason { get; set; }
+
+    /// <summary>The inspected party's comments (vendor / operator). The inspector's are FindingsAndObservations.</summary>
+    [MaxLength(2000)]
+    public string? SubjectComments { get; set; }
+
+    public DateTime? CompletedAt { get; set; }
+
+    public Guid? CompletedById { get; set; }
+
+    [ForeignKey(nameof(CompletedById))]
+    public virtual Employee? CompletedBy { get; set; }
+
     public virtual ICollection<SafetyInspectionItem> Items { get; set; } = new List<SafetyInspectionItem>();
     public virtual ICollection<SafetyInspectionHazard> Hazards { get; set; } = new List<SafetyInspectionHazard>();
     public virtual ICollection<SafetyInspectionDocument> Documents { get; set; } = new List<SafetyInspectionDocument>();
+    public virtual ICollection<SafetyInspectionFieldValue> FieldValues { get; set; } = new List<SafetyInspectionFieldValue>();
+    public virtual ICollection<SafetyInspectionSignature> Signatures { get; set; } = new List<SafetyInspectionSignature>();
+}
+
+/// <summary>The value captured for one template header field on one inspection.</summary>
+public class SafetyInspectionFieldValue : TenantEntity
+{
+    public Guid InspectionId { get; set; }
+
+    [ForeignKey(nameof(InspectionId))]
+    public virtual SafetyInspection Inspection { get; set; } = null!;
+
+    public Guid ChecklistFieldId { get; set; }
+
+    [ForeignKey(nameof(ChecklistFieldId))]
+    public virtual SheInspectionChecklistField ChecklistField { get; set; } = null!;
+
+    /// <summary>Canonical text: ISO date / time, invariant number, "true"/"false", the choice label, or free text.</summary>
+    [MaxLength(2000)]
+    public string? ValueText { get; set; }
+
+    /// <summary>For Employee / Location / OrganizationUnit fields — the referenced row's id. The read resolves the name.</summary>
+    public Guid? ValueReferenceId { get; set; }
+}
+
+/// <summary>One signature line of the completed form. System users sign as the token's employee; external parties are typed.</summary>
+public class SafetyInspectionSignature : TenantEntity
+{
+    public Guid InspectionId { get; set; }
+
+    [ForeignKey(nameof(InspectionId))]
+    public virtual SafetyInspection Inspection { get; set; } = null!;
+
+    public Guid ChecklistSignatoryId { get; set; }
+
+    [ForeignKey(nameof(ChecklistSignatoryId))]
+    public virtual SheInspectionChecklistSignatory ChecklistSignatory { get; set; } = null!;
+
+    /// <summary>Snapshot of the signatory's role label at signing time.</summary>
+    [Required, MaxLength(150)]
+    public string RoleLabel { get; set; } = string.Empty;
+
+    public Guid? SignedByEmployeeId { get; set; }
+
+    [ForeignKey(nameof(SignedByEmployeeId))]
+    public virtual Employee? SignedBy { get; set; }
+
+    [Required, MaxLength(200)]
+    public string SignedName { get; set; } = string.Empty;
+
+    public DateTime SignedAt { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
 }
 
 public class SafetyInspectionItem : TenantEntity
@@ -1031,6 +1281,9 @@ public class SafetyInspectionItem : TenantEntity
 
     [ForeignKey(nameof(ChecklistItemId))]
     public virtual SheInspectionChecklistItem? ChecklistItem { get; set; }
+
+    /// <summary>Position on the form when materialised from a template (section order, then item order). 0 for hand-added findings.</summary>
+    public int DisplayOrder { get; set; }
 
     [Required, MaxLength(500)]
     public string ItemDescription { get; set; } = string.Empty;

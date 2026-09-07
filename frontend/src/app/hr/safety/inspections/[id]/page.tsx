@@ -11,6 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { InspectionChecklistRun } from '@/components/hr/safety/checklist/InspectionChecklistRun';
+import { InspectionPrintButton } from '@/components/hr/safety/checklist/InspectionPrintButton';
+import { ChecklistPrintForm } from '@/components/hr/safety/checklist/ChecklistPrintForm';
 import {
   Dialog,
   DialogContent,
@@ -361,7 +364,8 @@ export default function InspectionDetailPage() {
         description={`${inspection.typeName} · ${inspection.categoryName} · ${fmtDate(inspection.inspectionDate)}`}
         backHref="/hr/safety/inspections"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {inspection.checklist && <InspectionPrintButton />}
             {!isClosed && (
               <Button onClick={() => setCloseOpen(true)}>
                 <Lock className="mr-2 h-4 w-4" />
@@ -430,8 +434,31 @@ export default function InspectionDetailPage() {
             </div>
             <InfoRow
               label="Compliance score"
-              value={inspection.complianceScore != null ? `${inspection.complianceScore}%` : null}
+              value={
+                inspection.compliancePercentage != null
+                  ? `${inspection.compliancePercentage}% (${inspection.totalCompliantItems} of ${inspection.totalApplicableItems} applicable)`
+                  : inspection.complianceScore != null
+                    ? `${inspection.complianceScore}%`
+                    : null
+              }
             />
+            {inspection.checklist && (
+              <>
+                {inspection.criticalNonConformityCount ? (
+                  <InfoRow label="Critical non-conformities" value={inspection.criticalNonConformityCount} />
+                ) : null}
+                <InfoRow
+                  label={inspection.scoringMode === 'QualitativeRating' ? 'Overall rating' : 'Outcome'}
+                  value={
+                    inspection.outcomeLabel
+                      ? `${inspection.outcomeLabel}${inspection.outcomeOverrideReason ? ` (recommended: ${inspection.recommendedOutcomeLabel})` : ''}`
+                      : inspection.completedAt
+                        ? null
+                        : 'Pending completion'
+                  }
+                />
+              </>
+            )}
             <InfoRow label="Compliance deadline" value={fmtDate(inspection.complianceDeadline)} />
             {inspection.findingsAndObservations && (
               <p className="text-muted-foreground mt-3 whitespace-pre-wrap text-sm">
@@ -464,8 +491,13 @@ export default function InspectionDetailPage() {
         </Card>
       </div>
 
-      <Tabs defaultValue="items">
+      <Tabs defaultValue={inspection.checklist ? 'checklist' : 'items'}>
         <TabsList>
+          {inspection.checklist && (
+            <TabsTrigger value="checklist">
+              Checklist · {inspection.checklist.checklistNumber} v{inspection.checklist.version}
+            </TabsTrigger>
+          )}
           <TabsTrigger value="items">Findings ({inspection.items.length})</TabsTrigger>
           <TabsTrigger value="hazards">Hazards ({inspection.hazards.length})</TabsTrigger>
           <TabsTrigger value="actions">
@@ -473,6 +505,16 @@ export default function InspectionDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="documents">Documents ({inspection.documents.length})</TabsTrigger>
         </TabsList>
+
+        {/* ── Checklist walk (materialised from the template) ── */}
+        {inspection.checklist && (
+          <TabsContent value="checklist" className="mt-4">
+            <InspectionChecklistRun
+              inspection={inspection}
+              onChanged={() => queryClient.invalidateQueries({ queryKey: ['hr', 'safety-inspection', id] })}
+            />
+          </TabsContent>
+        )}
 
         {/* ── Findings ── */}
         <TabsContent value="items" className="mt-4">
@@ -975,6 +1017,13 @@ export default function InspectionDetailPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Print root: hidden on screen, the only thing visible while printing (globals.css). */}
+      {inspection.checklist && (
+        <div className="she-inspection-print-root hidden">
+          <ChecklistPrintForm checklist={inspection.checklist} inspection={inspection} />
+        </div>
+      )}
 
       <ConfirmationDialog
         open={deleteOpen}

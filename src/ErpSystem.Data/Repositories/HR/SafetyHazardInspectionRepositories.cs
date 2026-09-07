@@ -160,13 +160,26 @@ public class SheInspectionChecklistRepository : GenericRepository<SheInspectionC
     public async Task<SheInspectionChecklist?> GetByNumberAsync(string checklistNumber) =>
         await _dbSet.FirstOrDefaultAsync(c => c.ChecklistNumber == checklistNumber && !c.IsDeleted);
 
+    // The whole structure rides along: the builder screen, the print view and the materialiser all
+    // need fields, sections, items, outcomes and signatories in one read. Split query keeps the five
+    // child sets from multiplying into one cartesian row set.
     public async Task<SheInspectionChecklist?> GetWithItemsAsync(Guid id) =>
         await _dbSet
-            .Include(c => c.Items.OrderBy(i => i.ItemOrder))
+            .Include(c => c.PublishedBy)
+            .Include(c => c.Fields)
+            .Include(c => c.Sections)
+            .Include(c => c.Items)
+            .Include(c => c.Outcomes)
+            .Include(c => c.Signatories)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
 
+    // "Active" for the inspection-scheduling picker means offered for NEW inspections: active AND
+    // published. Drafts and retired versions stay visible on the admin list, not here.
     public async Task<IEnumerable<SheInspectionChecklist>> GetActiveAsync() =>
-        await _dbSet.Where(c => c.IsActive && !c.IsDeleted).OrderBy(c => c.Name).ToListAsync();
+        await _dbSet.Include(c => c.Items)
+            .Where(c => c.IsActive && c.Status == SheChecklistStatus.Published && !c.IsDeleted)
+            .OrderBy(c => c.Name).ThenByDescending(c => c.Version).ToListAsync();
 
     public async Task<IEnumerable<SheInspectionChecklist>> GetByTypeAsync(SheInspectionType type) =>
         await _dbSet.Where(c => c.Type == type && !c.IsDeleted).OrderBy(c => c.Name).ToListAsync();
@@ -195,9 +208,20 @@ public class SafetyInspectionRepository : GenericRepository<SafetyInspection>, I
         await _dbSet
             .Include(i => i.Location)
             .Include(i => i.OrganizationUnit)
-            .Include(i => i.Checklist)
+            .Include(i => i.Checklist).ThenInclude(c => c!.Fields)
+            .Include(i => i.Checklist).ThenInclude(c => c!.Sections)
+            .Include(i => i.Checklist).ThenInclude(c => c!.Items)
+            .Include(i => i.Checklist).ThenInclude(c => c!.Outcomes)
+            .Include(i => i.Checklist).ThenInclude(c => c!.Signatories)
             .Include(i => i.Inspector)
             .Include(i => i.ClosedBy)
+            .Include(i => i.CompletedBy)
+            .Include(i => i.RecommendedOutcome)
+            .Include(i => i.Outcome)
+            .Include(i => i.FieldValues).ThenInclude(v => v.ChecklistField)
+            .Include(i => i.Signatures).ThenInclude(x => x.ChecklistSignatory)
+            .Include(i => i.Signatures).ThenInclude(x => x.SignedBy)
+            .Include(i => i.Items).ThenInclude(t => t.ChecklistItem).ThenInclude(ci => ci!.Section)
             .Include(i => i.Items).ThenInclude(t => t.ResponsiblePerson)
             .Include(i => i.Items).ThenInclude(t => t.ResolvedBy)
             .Include(i => i.Hazards).ThenInclude(h => h.Owner)

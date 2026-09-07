@@ -300,3 +300,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260904005351_AddGeoAreaToLocationCompanyAndFacility")] partial class AddGeoAreaToLocationCompanyAndFacility { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260904032437_AddSheHazardReporter")] partial class AddSheHazardReporter { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260905011117_MergeFinanceDimensionsAndProcurementTenderLifecycle")] partial class MergeFinanceDimensionsAndProcurementTenderLifecycle { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260907003611_AddSheChecklistBuilder")] partial class AddSheChecklistBuilder { }

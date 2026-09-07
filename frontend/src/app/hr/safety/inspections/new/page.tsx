@@ -124,7 +124,7 @@ export default function NewInspectionPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Schedule Inspection"
-        description="The number is generated automatically and the inspection starts as Scheduled."
+        description="The number is generated automatically. Choosing a checklist loads its items onto the inspection and starts the walk; without one the inspection stays Scheduled and findings are recorded by hand."
         backHref="/hr/safety/inspections"
       />
 
