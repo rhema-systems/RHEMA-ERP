@@ -214,8 +214,6 @@ export function TenderDocumentActionDialogs({
       (savedValidityDays ?? validityDays ?? 0) <= 0
     )
       missing.push('Bid validity period (calendar days)');
-    if (!savedValidityDays && !validityReference.trim())
-      missing.push('Approved validity document/clause reference');
     if (bindSchedule && !bindDeadline) missing.push('New submission deadline');
     if (bindSchedule && !bindOpening) missing.push('New opening scheduled');
     if (bindSchedule && !bindWorkflow)
@@ -282,7 +280,7 @@ export function TenderDocumentActionDialogs({
         bidValidityPeriodDays: savedValidityDays ?? validityDays,
         bidValidityTermsReference: savedValidityDays
           ? undefined
-          : validityReference.trim(),
+          : validityReference.trim() || undefined,
         feeMode,
         feeAmount: feeMode === 'Free' ? 0 : feeAmount,
         currencyCode: currencyCode.toUpperCase(),
@@ -759,13 +757,17 @@ export function TenderDocumentActionDialogs({
               </p>
             </Field>
             {!savedValidityDays && (
-              <Field label="Approved validity document/clause reference">
+              <Field label="Validity page/clause note (optional)">
                 <Input
-                  aria-label="Approved validity document/clause reference"
+                  aria-label="Validity page/clause note (optional)"
                   value={validityReference}
                   maxLength={500}
                   onChange={(event) => setValidityReference(event.target.value)}
                 />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  The selected approved document version is linked
+                  automatically.
+                </p>
               </Field>
             )}
             <Field label="Bid valid until (calculated)">
