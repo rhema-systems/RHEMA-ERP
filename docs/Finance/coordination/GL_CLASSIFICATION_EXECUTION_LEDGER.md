@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage C6 — neutral AccountingEvent and atomic per-book orchestration |
+| Phase | Post-Phase-6 Stage B2 — Inventory neutral AccountingEvent producer cutover |
 | Status | `IN_PROGRESS` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
-| Exact base | `f41e8e8fe81d5caceab635d6c143e7200b84a0ed` |
-| Branch | `codex/finance-accounting-event-c6` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-accounting-event-c6` |
+| Exact base | `69b357fd09cc6713ad9d9c18dbf6855e2afd6b2e` |
+| Branch | `codex/inventory-accounting-event-cutover` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-cutover` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `f41e8e8fe81d5caceab635d6c143e7200b84a0ed` |
+| Primary HEAD at activation | `69b357fd09cc6713ad9d9c18dbf6855e2afd6b2e` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C6 cycle 3 `APPROVED`; integrated and coordinator-verified; stage complete |
+| Model routing | Implementer: GPT-5.6 Terra Medium; substantive Finance corrections: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
+| Review status | Inventory owner packet dispatched; implementation pending |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
