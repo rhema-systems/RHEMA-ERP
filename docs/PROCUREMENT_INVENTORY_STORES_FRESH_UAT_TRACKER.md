@@ -1,5 +1,13 @@
 # Fresh Supplier, Procurement, Inventory and Stores UAT
 
+## 8 September resume: TND-2026-0003 document preparation
+
+- **Paused before preparation:** sign in as `procurementofficer` in `DEFAULT`, open [the empty v2 Draft](http://localhost:3000/procurement/tender-documents/1c024cce-4bcf-4e4d-90fa-c7d41d2b8423), then demonstrate **Start document preparation** and continue walkthrough B8a. Do not bind the retained published v1 if demonstrating the fresh document sequence.
+- At **7 September 22:43 UTC**, the explicitly authorized local reset removed only register `fd8abde3-d804-4cc8-a607-18d9eff349c2` from tender `255010bc-26f1-4dcf-9b4a-378932323cb0`. Preflight confirmed no issues, addenda/changes, bids, awards, contracts or NCT statutory-control records depended on it. A guarded transaction restored the binding-protection trigger and verified unchanged tender, published documents, other registers, control-event history and both completed approval workflows. The original binding audit remains retained. This was a one-time local UAT maintenance exception, not a normal workflow or application change.
+- After-commit SQL and visible UI checks: **TND-2026-0003 remains Approved and unpublished**, with zero live bindings. **TDC-NCT-GOODS-STD-V2 · v1 remains Published** with its file and completed approval. The new **v2 is Draft / Preparation not started**, with no content, workflow, submission or publication. No runtime restart or Finance change was made.
+- **Date check before publication:** submission remains **8 September 2026, 11:00 UTC**, opening **11:10 UTC**. If preparation runs past that deadline, follow the approved rescheduling exception in B8d. No dates or validity period were invented or changed by this reset.
+- The browser is left on the empty Draft. UAT resumes at the document step tomorrow; tender publication and subsequent steps have not been performed for this tender.
+
 ## 7 September correction: optional validity page/clause note
 
 - The clause-reference requirement in the earlier validity-term entry below is superseded: **Validity page/clause note (optional)** can be blank. The selected approved document version and checksum are automatically retained in binding history, with an optional trimmed note (maximum 500 characters).
