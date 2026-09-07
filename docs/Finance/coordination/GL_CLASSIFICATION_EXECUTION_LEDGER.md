@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 cycle 1 `CHANGES_REQUIRED`; bounded GPT-5.6 Sol Medium correction active |
+| Review status | C7 corrected candidate `2a45d130`; independent GPT-5.6 Sol High cycle-2 review active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -725,6 +725,19 @@ zero-error build, 39 focused C6/C7 tests with 11 guarded skips, 358 widened pass
 model parity, exact 455-migration discovery, no-connect script generation, exact ancestry, clean status/diff/
 credential checks and owner-module isolation. The coordinator dispatched all findings for one bounded Sol
 Medium correction. No migration was applied and configured `RHEMAERP` remains untouched.
+
+The implementer completed the C7 cycle-1 correction as clean commit
+`2a45d130ddd2dcac2274a0682ea8a612b0ec83e1` on top of `8ac41e69`. The candidate now resolves only
+Finance-registered participants bound to the scoped `ApplicationDbContext` and ambient transaction; restores
+current-actor authority for direct C6 retries; persists a complete immutable fingerprint-bound intent snapshot;
+uses the target's frozen selection for correction/reversal; permits drift-safe governed rejection; and tightens
+the C7 migration to separate durable preparation, decision and execution transitions. New guarded SQL coverage
+includes preflight, legitimate and fabricated transitions, concurrency, atomic rollback/recovery and Down gates.
+Implementer validation passed a zero-error build, 42 focused C6/C7 tests with 13 guarded skips, 13/13 C7 tests,
+EF model parity, exact 455-migration discovery and the exact no-connect C6-to-C7 script. The worktree is clean,
+the ledger is unchanged, no owner module changed and no database was accessed. Independent GPT-5.6 Sol High
+cycle-2 review is active across all six prior findings and preserved C1-C6 authority. Integration and Inventory
+remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
