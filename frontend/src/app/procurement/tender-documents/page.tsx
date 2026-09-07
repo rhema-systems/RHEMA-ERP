@@ -72,7 +72,9 @@ const statuses: ProcurementTenderDocumentTemplateStatus[] = [
 const methods = Object.keys(procurementMethodLabel) as ProcurementMethodType[];
 
 const localInput = (value: Date) => {
-  const shifted = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
+  const shifted = new Date(
+    value.getTime() - value.getTimezoneOffset() * 60_000
+  );
   return shifted.toISOString().slice(0, 16);
 };
 
@@ -110,9 +112,8 @@ export default function TenderDocumentTemplatesPage() {
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<SaveProcurementTenderDocumentTemplate>(
-    emptyForm()
-  );
+  const [form, setForm] =
+    useState<SaveProcurementTenderDocumentTemplate>(emptyForm());
 
   const summary = useQuery({
     queryKey: ['procurement-tender-document-template-summary'],
@@ -143,8 +144,7 @@ export default function TenderDocumentTemplatesPage() {
       policySetId,
       policySetCode: policy?.code ?? '',
       policySetVersion: policy?.version ?? 0,
-      sourceConfigurationProfileId:
-        policy?.sourceConfigurationProfileId ?? '',
+      sourceConfigurationProfileId: policy?.sourceConfigurationProfileId ?? '',
     }));
   };
 
@@ -455,9 +455,10 @@ export default function TenderDocumentTemplatesPage() {
           <DialogHeader>
             <DialogTitle>Create controlled tender-document Draft</DialogTitle>
             <DialogDescription>
-              Create the controlled metadata first. Submission starts the exact
-              approval workflow where the tender document is uploaded and
-              independently verified before publication.
+              Create the setup first, then select Start document preparation to
+              enable uploading. Upload the file and select Send for approval.
+              This is one workflow: Prepare → Upload → Review → Publish
+              document.
             </DialogDescription>
           </DialogHeader>
 
