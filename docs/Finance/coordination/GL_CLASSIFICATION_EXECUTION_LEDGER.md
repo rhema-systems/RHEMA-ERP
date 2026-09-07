@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `REVIEW_REQUIRED` |
+| Status | `COMPLETE` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | Final C5 candidate `23938652533960fc80529cd87aae2b3abee9c888`; independent GPT-5.6 Sol High approval review active |
+| Review status | Final C5 candidate `23938652533960fc80529cd87aae2b3abee9c888` approved and integrated; C6 orchestration dispatch pending |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -698,6 +698,24 @@ PendingApproval retirement-evidence insertion denial, governed carry-through imp
 pre-evidence Approved mutation matrix, post-use immutability and preservation of every earlier C5 closure.
 A read-only structured handoff was requested because the task turn exposed no final text. Integration and C6
 remain blocked pending approval; no migration was applied and configured `RHEMAERP` remains untouched.
+
+Independent GPT-5.6 Sol High review approved final clean C5 candidate
+`23938652533960fc80529cd87aae2b3abee9c888`. The six-commit ancestry is exact and linear from base
+`bb50aeed`; retirement evidence cannot be preseeded or carried through Draft/PendingApproval, governed
+retirement requires the exact maker-checker and minimum-bound endpoint, the complete Approved mutation matrix
+is exercised before frozen evidence, and all earlier temporal, selection, compatibility, audit and concurrency
+findings remain closed. Reviewer gates passed a zero-error build, 23 focused C5 tests with 8 guarded SQL
+skips, 319 widened C1-C5 tests with 24 guarded SQL skips, frontend 9/9, ESLint, EF no-pending-model, migration
+discovery/idempotent script generation, exact ancestry, clean status and diff checks.
+
+The coordinator integrated the six approved commits locally as `007acac2`, `3daccc06`, `4bc52d3c`,
+`a85937ee`, `4501c949` and `ca51fab1`. Every task-owned tracked blob is byte-identical to the reviewed
+candidate; only this coordinator ledger differs. Primary verification passed a fresh zero-error test-project
+build with 1,182 existing warnings, 23 focused C5 tests with 8 guarded SQL skips, frontend 9/9, targeted
+ESLint, EF no-pending-model, no-connect migration discovery and full-range diff/tree checks. Migration
+`20260906190846_AddAccountingBookApplicabilityFoundation` remains unapplied; configured `RHEMAERP` was not
+accessed or mutated. Stage C5 is complete. AccountingEvent orchestration, per-book journal fan-out and
+automatic parallel posting remain disabled pending separately reviewed C6 authority.
 
 Stage C5 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `68490c9c`. Three P1
 gates remain: open-ended approved versions cannot be atomically superseded without retroactively removing
