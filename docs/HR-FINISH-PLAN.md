@@ -1377,6 +1377,19 @@ employee or grant the `HR` role the `HR.*.Admin` tier. Until then the demo seeds
 sheet, README, Book 2 event names and 15 h timesheet, Book 3 §5 nine award types, §7 four cases /
 five action types. `100-movements.mjs` now promotes into a real M5 vacancy (Book 3 §6).
 
+**Incident 2026-09-07 — the rebuild wrote its transactional layer into the DEVELOPMENT database.**
+A development API left running on port 5000 answered /health, and `Invoke-UatDemoScenarios.ps1`
+adopted it. Every SQL read went to UAT and every API write went to dev: 28 of 34 modules reported
+"ok", UAT stayed at the seeder layer, and 5,579 rows across 126 HR tables landed in `ErpSystemDB`
+(inventory kept with the harness as `out/dev-pollution-2026-09-07.txt`). Fixed the same day:
+`scripts/ErpApiProbe.ps1` reads an employee id from the target database and asks the API for it —
+ids are minted per rebuild, so only the right database answers — and the rebuild now refuses a busy
+port unless that probe passes; `lib/ctx.mjs` runs the same check before its first write; the second
+seeder pass moved into the recovery script; and `scripts/Test-ErpApiDatabase.ps1` replaces the
+row-count check in every book, because the development database also carries TDC staff numbers and
+the 2026-09-05 master merge moved the totals (five more estate fixtures). **A health answer is not a
+database identity.** The development-database cleanup is a decision for the owner, not done here.
+
 **Lesson (generalises):** a list DTO that omits the id you would dedupe on turns every "ensure"
 step into a duplicator; probe the table, never the summary. And a seeder's probe must ask for a row
 that seeder actually writes — the same lesson as `HrSeedOrchestrator`, met five more times.

@@ -162,23 +162,17 @@ if ($SkipScenarios) {
     Write-Host "  -SkipScenarios: the transactional layer was NOT built. This is not a demo database yet;" -ForegroundColor Yellow
     Write-Host "  run ./scripts/Invoke-UatDemoScenarios.ps1 -Database $Database to finish it." -ForegroundColor Yellow
 } else {
+    # One call does the scenarios, the second seeder pass and both checks, in that order. It starts
+    # its own API on $ApiPort and REFUSES to run if that port is already taken -- on 2026-09-07 a
+    # development API left on 5000 was silently adopted and the whole transactional layer went into
+    # the wrong database. Stop any API first, or pass -ApiPort.
     Write-Host ""
-    Write-Host "  -> Building the transactional layer through the API" -ForegroundColor Green
+    Write-Host "  -> Building the transactional layer through the API, then checking it" -ForegroundColor Green
     $scenarioArgs = @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'Invoke-UatDemoScenarios.ps1'),
                       '-Database', $Database, '-Port', $ApiPort, '-Server', $Server, '-UserId', $UserId, '-Password', $Password)
     if ($HarnessDir) { $scenarioArgs += @('-HarnessDir', $HarnessDir) }
-    & powershell @($scenarioArgs + '-SkipVerify')
+    & powershell @scenarioArgs
     $scenarioExit = $LASTEXITCODE
-
-    # Second seeder pass. Three demo tables have no usable door AND hang off rows the scenarios
-    # create (training budgets, staff movements, probation periods), so their seeder steps find
-    # nothing on the first pass and skip. Every other step's guard makes this pass a no-op.
-    Invoke-ApiCommand -Command 'seed-hr-demo' -Label 'Second pass: demo tables that depend on scenario rows'
-
-    Write-Host ""
-    Write-Host "  -> Checking coverage and runbook consistency" -ForegroundColor Green
-    & powershell @($scenarioArgs + '-VerifyOnly')
-    if ($LASTEXITCODE -ne 0) { $scenarioExit = 1 }
 }
 
 # Report the state rather than assume it. A seeder that silently no-ops is the failure mode this

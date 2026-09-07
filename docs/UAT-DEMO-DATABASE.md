@@ -54,8 +54,8 @@ started. It prints one `▶` line per scenario with a `✓` or `✗` under it.
   DEMO DATASET COMPLETE: scenarios ok, every required table holds data, runbooks consistent.
 ```
 
-and finally the row counts (`Employees = 127`, `Demo staff (TDC/...) = 103`, `Demo logins
-(linked) = 9`, …). **If the last banner is red, the database is not fit for a demo.** Read the `✗`
+and finally the row counts (`Demo staff (TDC/...) = 103`, `Demo logins (linked) = 9`, …; the plain
+`Employees` total also includes other modules' fixtures and moves when master is merged). **If the last banner is red, the database is not fit for a demo.** Read the `✗`
 lines, fix the cause, and re-run just the fifth step — it is safe to repeat:
 
 ```powershell
@@ -74,6 +74,17 @@ staged. See `scripts/ErpDbCredential.ps1`.
 ---
 
 ## B. Switch to UAT and run the app
+
+**For a demonstration, use the one command** — it does everything in this section, proves the API
+is on the demo database, and says READY or tells you what is wrong:
+
+```powershell
+powershell -File .\scripts\Start-Demo.ps1          # up
+powershell -File .\scripts\Start-Demo.ps1 -Stop    # down afterwards
+```
+
+The steps below are the same thing by hand, and are what you want for ordinary development.
+
 
 **B1. Stop any API that is already running.** In the window where it is running press `Ctrl+C`.
 If you cannot find the window:
@@ -137,20 +148,20 @@ The frontend does not need restarting. Refresh the browser.
 Do this whenever you are unsure. **This is the check that stops you demoing the wrong data.**
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri 'http://localhost:5000/api/auth/login' `
-  -ContentType 'application/json' `
-  -Body '{"username":"admin","password":"Admin123!"}' |
-  ForEach-Object { Invoke-RestMethod -Method Post `
-    -Uri 'http://localhost:5000/api/hr/Employees/paged?page=1&pageSize=1' `
-    -ContentType 'application/json' -Body '{}' `
-    -Headers @{ Authorization = "Bearer $($_.token)" } } |
-  Select-Object -ExpandProperty totalCount
+powershell -File .\scripts\Test-ErpApiDatabase.ps1
 ```
 
-| Result | You are on |
-| --- | --- |
-| **127** | UAT — the demo database (103 seeded staff + 24 estate fixtures) |
-| **~1750** | Development — full of test fixtures |
+```
+  YES  The API on port 5000 is serving ErpSystemDB_UAT.
+```
+
+or `NO`, with the command to fix it. It works by reading one employee id out of the demo database
+and asking the API for that employee: ids are minted on every rebuild, so only the right database
+answers. **Do not judge by row counts any more.** The development database also carries TDC staff
+numbers, and other teams' fixtures move the totals every time master is merged, so "127 means
+UAT" stopped being true on 2026-09-05. On 2026-09-07 a development API left running on port
+5000 was mistaken for the demo one and an entire rebuild's transactions went into the wrong
+database; this check, and the same probe inside the rebuild script, exist so that cannot recur.
 
 ---
 
