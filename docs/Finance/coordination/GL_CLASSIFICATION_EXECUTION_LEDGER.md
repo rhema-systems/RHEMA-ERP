@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C5 — effective-dated accounting-book applicability authority |
-| Status | `IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `bb50aeed3635b040fe4bb3217a1ab87b7de79cc3` |
 | Branch | `codex/finance-book-applicability-c5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C5 cycle 4 `CHANGES_REQUIRED`; final insert-governance/test correction active on GPT-5.6 Sol Medium |
+| Review status | Final C5 candidate `23938652533960fc80529cd87aae2b3abee9c888`; independent GPT-5.6 Sol High approval review active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -690,6 +690,14 @@ build, 23 C5 tests with 8 guarded SQL skips, 319 widened tests with 24 guarded S
 EF no-pending-model, discovery/script generation, exact ancestry, clean status and diff checks. A final insert-
 governance and unmasked-test correction was dispatched on GPT-5.6 Sol Medium. No database was accessed or
 mutated; integration and C6 remain blocked.
+
+The implementer completed the final C5 insert-governance correction as
+`23938652533960fc80529cd87aae2b3abee9c888`. The resulting six-commit worktree is clean and its full
+range passes `git diff --check`. Independent GPT-5.6 Sol High approval review is active over Draft/
+PendingApproval retirement-evidence insertion denial, governed carry-through impossibility, the complete
+pre-evidence Approved mutation matrix, post-use immutability and preservation of every earlier C5 closure.
+A read-only structured handoff was requested because the task turn exposed no final text. Integration and C6
+remain blocked pending approval; no migration was applied and configured `RHEMAERP` remains untouched.
 
 Stage C5 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `68490c9c`. Three P1
 gates remain: open-ended approved versions cannot be atomically superseded without retroactively removing
