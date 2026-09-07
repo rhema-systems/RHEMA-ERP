@@ -24,6 +24,56 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementTenderDocumentControlServiceTests
 {
     [Fact]
+    public async Task BindingDerivesExpiryFromSavedTenderTermsAndProposedClosing()
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        fixture.Tender.BidValidityPeriodDays = 45;
+        await fixture.Context.SaveChangesAsync();
+        var request = fixture.FirstBindingWithSchedule();
+        request.BidValidityPeriodDays = null;
+        request.BidValidityTermsReference = null;
+        var readiness = await fixture.Service.GetRegisterReadinessAsync(request.SourceType, request.SourceId);
+        readiness.BidValidityPeriodDays.Should().Be(45);
+        var result = await fixture.Service.BindAsync(request, "saved-validity-terms");
+        result.OriginalBidValidityUntilUtc.Should().Be(request.ScheduleChange!.SubmissionDeadlineUtc.AddDays(45));
+        fixture.Tender.SubmissionDeadline.Should().Be(request.SubmissionDeadlineUtc);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("zero")]
+    [InlineData("negative")]
+    [InlineData("overflow")]
+    [InlineData("reference")]
+    [InlineData("override")]
+    [InlineData("unapproved")]
+    public async Task InvalidValidityTermsFailBeforeRegisterCreation(string variant)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var request = fixture.FirstBindingWithSchedule();
+        switch (variant)
+        {
+            case "missing": request.BidValidityPeriodDays = null; break;
+            case "zero": request.BidValidityPeriodDays = 0; break;
+            case "negative": request.BidValidityPeriodDays = -1; break;
+            case "overflow": request.BidValidityPeriodDays = int.MaxValue; break;
+            case "reference": request.BidValidityTermsReference = " "; break;
+            case "override": fixture.Tender.BidValidityPeriodDays = 30; await fixture.Context.SaveChangesAsync(); break;
+            case "unapproved": fixture.Tender.BidValidityPeriodDays = 90; fixture.Tender.Status = "Draft"; await fixture.Context.SaveChangesAsync(); break;
+        }
+        var action = () => fixture.Service.BindAsync(request, "invalid-validity-terms");
+        await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>();
+        (await fixture.Context.ProcurementTenderDocumentRegisters.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public void ValidityCalculationPreservesTimeAcrossLeapDay()
+    {
+        var closing = new DateTime(2028, 2, 28, 16, 50, 27, DateTimeKind.Utc).AddMilliseconds(321);
+        ProcurementBidValidity.Calculate(closing, 2).Should().Be(new DateTime(2028, 3, 1, 16, 50, 27, DateTimeKind.Utc).AddMilliseconds(321));
+    }
+
+    [Fact]
     public async Task PublishedPolicyOptionsAreTenantSafeAndExposeExactProfileLineage()
     {
         await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free);
@@ -1704,6 +1754,8 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 SubmissionDeadlineUtc = Tender.SubmissionDeadline!.Value,
                 OpeningScheduledAtUtc = Tender.OpeningDate,
                 BidValidityUntilUtc = Tender.SubmissionDeadline.Value.AddDays(30),
+                BidValidityPeriodDays = 30,
+                BidValidityTermsReference = "Approved UAT document clause 1",
                 FeeMode = FeeMode,
                 FeeAmount = FeeMode == ProcurementTenderDocumentFeeMode.Paid ? 25m : 0m,
                 CurrencyCode = "GHS"
@@ -1713,7 +1765,8 @@ public sealed class ProcurementTenderDocumentControlServiceTests
         {
             SourceType = ProcurementTenderDocumentSourceType.Tender, SourceId = Tender.Id,
             TemplateVersionId = TemplateId, SubmissionDeadlineUtc = Tender.SubmissionDeadline!.Value,
-            OpeningScheduledAtUtc = Tender.OpeningDate, BidValidityUntilUtc = DateTime.UtcNow.AddDays(90),
+            OpeningScheduledAtUtc = Tender.OpeningDate,
+            BidValidityPeriodDays = 90, BidValidityTermsReference = "Approved UAT document clause 1",
             FeeMode = FeeMode, CurrencyCode = "GHS",
             ScheduleChange = new()
             {
@@ -1742,6 +1795,8 @@ public sealed class ProcurementTenderDocumentControlServiceTests
                 SourceId = rfq.Id, TemplateVersionId = TemplateId,
                 SubmissionDeadlineUtc = rfq.SubmissionDeadline!.Value,
                 BidValidityUntilUtc = rfq.SubmissionDeadline.Value.AddDays(30),
+                BidValidityPeriodDays = 30,
+                BidValidityTermsReference = "Approved UAT RFQ validity clause",
                 FeeMode = FeeMode, FeeAmount = 0m, CurrencyCode = "GHS"
             }, "bind-rfq");
             return (rfq, register);

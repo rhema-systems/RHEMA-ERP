@@ -61,6 +61,7 @@ export interface TenderDetailDto extends TenderDto {
   evaluationCriteriaJson?: string;
   notes?: string;
   termsAndConditions?: string;
+  bidValidityPeriodDays?: number | null;
   requiredDocuments?: string; // JSON array of required document types
   requiresAcceptanceDeclaration?: boolean;
   acceptanceDeclarationDocumentPath?: string;
@@ -114,6 +115,7 @@ export interface CreateTenderDto {
   evaluationCriteriaJson?: string;
   notes?: string;
   termsAndConditions?: string;
+  bidValidityPeriodDays?: number | null;
   requiredDocuments?: string; // JSON string of TenderDocumentRequirement[]
   requiresAcceptanceDeclaration?: boolean;
   evaluationTemplateId?: string;
@@ -142,6 +144,7 @@ export interface UpdateTenderDto {
   evaluationCriteriaJson?: string;
   notes?: string;
   termsAndConditions?: string;
+  bidValidityPeriodDays?: number | null;
   requiredDocuments?: string; // JSON string of TenderDocumentRequirement[]
   requiresAcceptanceDeclaration?: boolean;
   evaluationTemplateId?: string;

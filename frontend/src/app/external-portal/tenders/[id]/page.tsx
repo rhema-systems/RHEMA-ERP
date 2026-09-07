@@ -688,6 +688,7 @@ export default function ExternalTenderDetailPage() {
               <p className="text-gray-700 whitespace-pre-wrap">
                 {tender.termsAndConditions || 'No terms and conditions specified'}
               </p>
+              {tender.bidValidityPeriodDays != null && <p className="mt-2">Bid validity: {tender.bidValidityPeriodDays} calendar days from submission closing.</p>}
             </CardContent>
           </Card>
         </TabsContent>

@@ -209,6 +209,7 @@ export interface ProcurementTenderDocumentReadiness {
   effectiveSubmissionDeadlineUtc?: string;
   openingScheduledAtUtc?: string;
   effectiveBidValidityUntilUtc?: string;
+  bidValidityPeriodDays?: number;
   feeMode?: ProcurementTenderDocumentFeeMode;
   feeAmount?: number;
   currencyCode?: string;
@@ -364,7 +365,9 @@ export interface BindProcurementTenderDocumentRequest {
   templateVersionId: string;
   submissionDeadlineUtc: string;
   openingScheduledAtUtc?: string;
-  bidValidityUntilUtc: string;
+  bidValidityUntilUtc?: string;
+  bidValidityPeriodDays?: number;
+  bidValidityTermsReference?: string;
   feeMode: ProcurementTenderDocumentFeeMode;
   feeAmount: number;
   currencyCode: string;

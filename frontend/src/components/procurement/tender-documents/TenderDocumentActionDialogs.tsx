@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { calculateBidValidity } from '@/lib/procurement-bid-validity';
 import { TenderDocumentRecipientSelector } from './TenderDocumentRecipientSelector';
 import {
   businessPartnerService,
@@ -99,7 +100,13 @@ export function TenderDocumentActionDialogs({
   const [templateVersionId, setTemplateVersionId] = useState('');
   const [submissionDeadline, setSubmissionDeadline] = useState('');
   const [openingAt, setOpeningAt] = useState('');
-  const [bidValidity, setBidValidity] = useState('');
+  const [validityDays, setValidityDays] = useState<number | undefined>();
+  const [validityReference, setValidityReference] = useState('');
+  const savedValidityDays = readiness.bidValidityPeriodDays;
+  const bidValidity = calculateBidValidity(
+    bindSchedule ? bindDeadline : readiness.effectiveSubmissionDeadlineUtc,
+    savedValidityDays ?? validityDays
+  );
   const [feeMode, setFeeMode] = useState<'Free' | 'Paid'>('Free');
   const [feeAmount, setFeeAmount] = useState(0);
   const [currencyCode, setCurrencyCode] = useState('GHS');
@@ -141,12 +148,17 @@ export function TenderDocumentActionDialogs({
 
   useEffect(() => {
     setSubmissionDeadline(localInput(readiness.effectiveSubmissionDeadlineUtc));
-    setBidValidity(localInput(readiness.effectiveBidValidityUntilUtc));
     setOpeningAt(localInput(readiness.openingScheduledAtUtc));
     setFeeMode(readiness.feeMode ?? 'Free');
     setFeeAmount(readiness.feeAmount ?? 0);
     setCurrencyCode(readiness.currencyCode ?? 'GHS');
   }, [readiness]);
+
+  useEffect(() => {
+    // A transcription belongs to this exact source/document, not another tender or version.
+    setValidityDays(undefined);
+    setValidityReference('');
+  }, [readiness.sourceId, templateVersionId]);
 
   useEffect(() => {
     if (!register) return;
@@ -193,14 +205,32 @@ export function TenderDocumentActionDialogs({
   const bind = async () => {
     if (busy || bindRecorded) return;
     setBindError('');
+    const missing: string[] = [];
+    if (!templateVersionId) missing.push('Approved effective version');
+    if (!submissionDeadline) missing.push('Original submission deadline');
+    if (!currencyCode.trim()) missing.push('Currency');
     if (
-      !templateVersionId ||
-      !submissionDeadline ||
-      !bidValidity ||
-      !currencyCode.trim()
-    ) {
-      toast.error(
-        'Select an approved version and complete deadline, validity, and currency.'
+      !Number.isSafeInteger(savedValidityDays ?? validityDays) ||
+      (savedValidityDays ?? validityDays ?? 0) <= 0
+    )
+      missing.push('Bid validity period (calendar days)');
+    if (!savedValidityDays && !validityReference.trim())
+      missing.push('Approved validity document/clause reference');
+    if (bindSchedule && !bindDeadline) missing.push('New submission deadline');
+    if (bindSchedule && !bindOpening) missing.push('New opening scheduled');
+    if (bindSchedule && !bindWorkflow)
+      missing.push('Schedule approval workflow');
+    if (bindSchedule && !bindReason.trim())
+      missing.push('Reason for new dates');
+    if (bindSchedule && !bindEvidence.trim())
+      missing.push('Schedule evidence reference');
+    if (missing.length) {
+      setBindError(`Complete: ${missing.join('; ')}.`);
+      return;
+    }
+    if (!bidValidity) {
+      setBindError(
+        'The submission date and validity period must produce a valid expiry date.'
       );
       return;
     }
@@ -248,7 +278,11 @@ export function TenderDocumentActionDialogs({
         templateVersionId,
         submissionDeadlineUtc: originalDeadline.toISOString(),
         openingScheduledAtUtc: readiness.openingScheduledAtUtc,
-        bidValidityUntilUtc: new Date(bidValidity).toISOString(),
+        bidValidityUntilUtc: bidValidity,
+        bidValidityPeriodDays: savedValidityDays ?? validityDays,
+        bidValidityTermsReference: savedValidityDays
+          ? undefined
+          : validityReference.trim(),
         feeMode,
         feeAmount: feeMode === 'Free' ? 0 : feeAmount,
         currencyCode: currencyCode.toUpperCase(),
@@ -702,13 +736,52 @@ export function TenderDocumentActionDialogs({
                 readOnly
               />
             </Field>
-            <Field label="Bid validity until">
+            <Field label="Bid validity period (calendar days)">
               <Input
-                aria-label="Bid validity until"
-                type="datetime-local"
-                value={bidValidity}
-                onChange={(event) => setBidValidity(event.target.value)}
+                aria-label="Bid validity period (calendar days)"
+                type="number"
+                min={1}
+                step={1}
+                readOnly={
+                  savedValidityDays !== undefined && savedValidityDays !== null
+                }
+                value={savedValidityDays ?? validityDays ?? ''}
+                onChange={(event) =>
+                  setValidityDays(
+                    event.target.value ? Number(event.target.value) : undefined
+                  )
+                }
               />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {savedValidityDays
+                  ? 'From the saved tender terms. Change terms only through tender preparation and approval.'
+                  : 'Not recorded on this source. Copy the period stated in the approved document; do not choose a default.'}
+              </p>
+            </Field>
+            {!savedValidityDays && (
+              <Field label="Approved validity document/clause reference">
+                <Input
+                  aria-label="Approved validity document/clause reference"
+                  value={validityReference}
+                  maxLength={500}
+                  onChange={(event) => setValidityReference(event.target.value)}
+                />
+              </Field>
+            )}
+            <Field label="Bid valid until (calculated)">
+              <Input
+                aria-label="Bid valid until (calculated)"
+                readOnly
+                value={
+                  bidValidity
+                    ? new Date(bidValidity).toLocaleString()
+                    : 'Enter the period and submission date'
+                }
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Calculated from {bindSchedule ? 'the proposed' : 'the original'}{' '}
+                submission deadline. Not the opening or delivery date.
+              </p>
             </Field>
             <Field label="Fee mode">
               <Select

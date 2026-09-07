@@ -149,7 +149,8 @@ describe('first-binding schedule approval', () => {
   const sourceOpening = '2025-09-07T14:05:27.321Z';
   function mountBinding(
     actions = ['Bind', 'BindWithScheduleChange'],
-    expired = true
+    expired = true,
+    savedDays?: number
   ) {
     const currentDeadline = expired
       ? sourceDeadline
@@ -159,6 +160,7 @@ describe('first-binding schedule approval', () => {
         readiness={{
           ...readiness,
           hasRegister: false,
+          bidValidityPeriodDays: savedDays,
           effectiveSubmissionDeadlineUtc: currentDeadline,
           openingScheduledAtUtc: expired
             ? sourceOpening
@@ -189,9 +191,16 @@ describe('first-binding schedule approval', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Bind approved version' })
     );
-    fireEvent.change(screen.getByLabelText('Bid validity until'), {
-      target: { value: '2099-12-01T14:00' },
-    });
+    if (!savedDays) {
+      fireEvent.change(
+        screen.getByLabelText('Bid validity period (calendar days)'),
+        { target: { value: '90' } }
+      );
+      fireEvent.change(
+        screen.getByLabelText('Approved validity document/clause reference'),
+        { target: { value: 'Approved NCT document clause 18' } }
+      );
+    }
     return currentDeadline;
   }
   function fillSchedule() {
@@ -233,6 +242,9 @@ describe('first-binding schedule approval', () => {
       expect.objectContaining({
         submissionDeadlineUtc: sourceDeadline,
         openingScheduledAtUtc: sourceOpening,
+        bidValidityPeriodDays: 90,
+        bidValidityTermsReference: 'Approved NCT document clause 18',
+        bidValidityUntilUtc: '2099-12-06T14:00:00.000Z',
         scheduleChange: expect.objectContaining({
           workflowDefinitionId: 'review-workflow',
           reason: 'Document preparation delayed publication',
@@ -266,7 +278,7 @@ describe('first-binding schedule approval', () => {
       screen.getByRole('button', { name: 'Bind and request schedule approval' })
     );
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'complete the approval workflow'
+      'Schedule approval workflow'
     );
     expect(api.bind).not.toHaveBeenCalled();
   });
@@ -276,6 +288,47 @@ describe('first-binding schedule approval', () => {
       screen.getByRole('button', { name: 'Bind immutable version' })
     );
     expect(screen.getByRole('alert')).toHaveTextContent('deadline has elapsed');
+    expect(api.bind).not.toHaveBeenCalled();
+  });
+  it('uses saved terms as read-only and updates the expiry preview with proposed closing', async () => {
+    mountBinding(['Bind', 'BindWithScheduleChange'], true, 30);
+    expect(
+      screen.getByLabelText('Bid validity period (calendar days)')
+    ).toHaveAttribute('readonly');
+    expect(
+      screen.queryByLabelText('Approved validity document/clause reference')
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Bid valid until (calculated)')
+    ).toHaveAttribute('readonly');
+    fillSchedule();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Bind and request schedule approval' })
+    );
+    await waitFor(() => expect(api.bind).toHaveBeenCalledOnce());
+    expect(api.bind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bidValidityPeriodDays: 30,
+        bidValidityTermsReference: undefined,
+        bidValidityUntilUtc: '2099-10-07T14:00:00.000Z',
+      })
+    );
+  });
+  it('identifies the missing approved-term reference without discarding entered values', () => {
+    mountBinding(['Bind'], false);
+    fireEvent.change(
+      screen.getByLabelText('Approved validity document/clause reference'),
+      { target: { value: '' } }
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Bind immutable version' })
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Approved validity document/clause reference'
+    );
+    expect(
+      screen.getByLabelText('Bid validity period (calendar days)')
+    ).toHaveValue(90);
     expect(api.bind).not.toHaveBeenCalled();
   });
   it('preserves the dates and reason when the server rejects binding', async () => {

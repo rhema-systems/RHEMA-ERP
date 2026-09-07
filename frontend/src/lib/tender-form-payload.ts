@@ -22,6 +22,7 @@ export interface PersistedTenderFormData {
   evaluationCriteriaJson: string;
   notes: string;
   termsAndConditions: string;
+  bidValidityPeriodDays?: number | null;
   documentRequirements: unknown[];
   requiresAcceptanceDeclaration: boolean;
   evaluationTemplateId: string | null;
@@ -52,6 +53,7 @@ export function buildUpdateTenderDto(
     evaluationCriteriaJson: formData.evaluationCriteriaJson || undefined,
     notes: formData.notes || undefined,
     termsAndConditions: formData.termsAndConditions || undefined,
+    bidValidityPeriodDays: formData.bidValidityPeriodDays ?? null,
     requiredDocuments:
       formData.documentRequirements.length > 0
         ? JSON.stringify(formData.documentRequirements)
