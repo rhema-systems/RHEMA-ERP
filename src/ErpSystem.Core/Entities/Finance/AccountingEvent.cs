@@ -48,6 +48,22 @@ public sealed class AccountingEvent : TenantEntity
     public AccountingBookSelectionEvidence? AccountingBookSelectionEvidence { get; set; }
     public ICollection<AccountingEventPosting> Postings { get; set; } = new List<AccountingEventPosting>();
     public ICollection<AccountingEventAttempt> Attempts { get; set; } = new List<AccountingEventAttempt>();
+    public AccountingEventProducerReceipt? ProducerReceipt { get; set; }
+}
+
+/// <summary>Finance-owned immutable proof of the exact owner effect staged in the ambient transaction.</summary>
+public sealed class AccountingEventProducerReceipt : TenantEntity
+{
+    public Guid AccountingEventId { get; set; }
+    [MaxLength(100)] public string ParticipantCode { get; set; } = string.Empty;
+    [MaxLength(100)] public string OwnerEntityType { get; set; } = string.Empty;
+    public Guid OwnerEntityId { get; set; }
+    [MaxLength(60)] public string OwnerAction { get; set; } = string.Empty;
+    [MaxLength(64)] public string EffectFingerprint { get; set; } = string.Empty;
+    [MaxLength(64)] public string RequestFingerprint { get; set; } = string.Empty;
+    public DateTime RecordedAtUtc { get; set; }
+    public Guid RecordedByUserId { get; set; }
+    public AccountingEvent AccountingEvent { get; set; } = null!;
 }
 
 /// <summary>Append-only outcome of one request to release the canonical event group.</summary>

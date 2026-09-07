@@ -126,20 +126,14 @@ public sealed class FinanceProducerIntentC7Tests
     }
 
     [Fact]
-    public void Registry_RejectsUnregisteredWrongContextExternalAndTransactionOwningHandlers()
+    public void ApprovedExecutionSurface_IsInternalAndAcceptsReceiptButNoCallbackOrContext()
     {
-        var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        var other = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        FluentActions.Invoking(() => new FinanceProducerExecutionRegistry([]).Resolve("INV", db))
-            .Should().Throw<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_PARTICIPANT_UNREGISTERED:*");
-        FluentActions.Invoking(() => new FinanceProducerExecutionRegistry([new Participant(other, "INV")]).Resolve("INV", db))
-            .Should().Throw<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_PARTICIPANT_CONTEXT_CONFLICT:*");
-        FluentActions.Invoking(() => new FinanceProducerExecutionRegistry([new Participant(db, "INV", external: true)]).Resolve("INV", db))
-            .Should().Throw<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_PARTICIPANT_EXTERNAL_EFFECTS_UNSUPPORTED:*");
-        FluentActions.Invoking(() => new FinanceProducerExecutionRegistry([new Participant(db, "INV", managesTransactions: true)]).Resolve("INV", db))
-            .Should().Throw<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_PARTICIPANT_TRANSACTION_CONTROL_FORBIDDEN:*");
+        typeof(IFinanceProducerIntentService).GetMethods().Should().NotContain(method => method.Name.Contains("Execute", StringComparison.Ordinal));
+        var method = typeof(IFinanceProducerApprovedExecution).GetMethod("ExecuteInAmbientTransactionAsync")!;
+        method.GetParameters().Should().ContainSingle(parameter => parameter.ParameterType == typeof(ProducerOwnerEffectReceiptDto));
+        method.GetParameters().Should().NotContain(parameter => typeof(Delegate).IsAssignableFrom(parameter.ParameterType)
+            || parameter.ParameterType == typeof(ApplicationDbContext));
+        typeof(AccountingEventService).Assembly.GetTypes().Should().NotContain(type => type.Name.Contains("ExecutionRegistry", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -164,7 +158,7 @@ public sealed class FinanceProducerIntentC7Tests
     }
 
     [Fact]
-    public async Task ExecuteApproved_BindsExactParticipantIdentity()
+    public async Task ExecuteApproved_ForwardsExactReceiptWithoutExecutableCallback()
     {
         var applicability = Applicability();
         var events = new Mock<IAccountingEventService>();
@@ -175,13 +169,13 @@ public sealed class FinanceProducerIntentC7Tests
             ProducerParticipantIdentity = "INVENTORY.DISPOSAL.V1", ProducerIntentSnapshotJson = Prepared(intent).ProducerIntentSnapshotJson
         });
         var harness = Harness(applicability, events);
-        var handler = new Participant(harness.Db, "inventory.disposal.v1");
-        harness.Registry.Setup(x => x.Resolve("INVENTORY.DISPOSAL.V1", harness.Db)).Returns(handler);
         harness.Executor.Result = new AccountingEventDto { Status = "Posted" };
+        var receipt = Receipt(harness.TenantId, intent);
 
-        (await harness.Service.ExecuteApprovedAsync(Guid.NewGuid(), intent)).Status.Should().Be("Posted");
+        (await ((IFinanceProducerApprovedExecution)harness.Service)
+            .ExecuteInAmbientTransactionAsync(Guid.NewGuid(), intent, receipt)).Status.Should().Be("Posted");
 
-        harness.Registry.Verify(x => x.Resolve("INVENTORY.DISPOSAL.V1", harness.Db), Times.Once);
+        harness.Executor.Receipt.Should().BeSameAs(receipt);
     }
 
     [Fact]
@@ -214,6 +208,51 @@ public sealed class FinanceProducerIntentC7Tests
             .Invoke(null, [evidence, Guid.NewGuid()])).Should().Throw<TargetInvocationException>().Which;
         invocation.InnerException.Should().BeOfType<InvalidOperationException>()
             .Which.Message.Should().StartWith("ACCOUNTING_EVENT_MAKER_CONFLICT:");
+    }
+
+    [Fact]
+    public void ReceiptValidation_DeniesEmptyMismatchAndCrossTenant_AndFingerprintBindsExpectation()
+    {
+        var tenant = Guid.NewGuid();
+        var intent = Intent();
+        var request = new CreateAccountingEventDto
+        {
+            SelectionIdempotencyKey = intent.IdempotencyKey, ExpectedCalculationInputHash = Hash('A'),
+            ExpectedSelectionFingerprint = Hash('B'), ProducerParticipantIdentity = "INVENTORY.DISPOSAL.V1",
+            ExpectedOwnerEffect = intent.ExpectedOwnerEffect, PostingRequest = ToFinance(intent.PostingRequest)
+        };
+        var receipt = Receipt(tenant, intent);
+        var validator = typeof(AccountingEventService).GetMethod("RequireReceiptMatch", BindingFlags.NonPublic | BindingFlags.Static)!;
+        validator.Invoke(null, [request, receipt, tenant]);
+
+        var mismatched = Receipt(tenant, intent);
+        mismatched.OwnerEntityId = Guid.NewGuid();
+        var noOp = Receipt(tenant, intent);
+        noOp.EffectFingerprint = new string('0', 64);
+        foreach (var invalid in new[] { new ProducerOwnerEffectReceiptDto(), noOp, Receipt(Guid.NewGuid(), intent), mismatched })
+        {
+            Action action = () => validator.Invoke(null, [request, invalid, tenant]);
+            action.Should().Throw<TargetInvocationException>().Which.InnerException.Should().BeOfType<InvalidOperationException>();
+        }
+
+        var changed = new CreateAccountingEventDto
+        {
+            SelectionIdempotencyKey = request.SelectionIdempotencyKey,
+            ExpectedCalculationInputHash = request.ExpectedCalculationInputHash,
+            ExpectedSelectionFingerprint = request.ExpectedSelectionFingerprint,
+            ProducerParticipantIdentity = request.ProducerParticipantIdentity,
+            ExpectedOwnerEffect = new ProducerOwnerEffectIdentityDto
+            {
+                ParticipantCode = request.ExpectedOwnerEffect!.ParticipantCode,
+                OwnerEntityType = request.ExpectedOwnerEffect.OwnerEntityType,
+                OwnerEntityId = request.ExpectedOwnerEffect.OwnerEntityId,
+                OwnerAction = request.ExpectedOwnerEffect.OwnerAction,
+                EffectFingerprint = Hash('E')
+            },
+            PostingRequest = request.PostingRequest
+        };
+        var root = Guid.NewGuid();
+        Fingerprint(request, root).Should().NotBe(Fingerprint(changed, root));
     }
 
     [Fact]
@@ -257,12 +296,11 @@ public sealed class FinanceProducerIntentC7Tests
         var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var executor = new StubExecutor();
-        var registry = new Mock<IFinanceProducerExecutionRegistry>();
         var user = new Mock<ICurrentUserService>();
         user.SetupGet(x => x.TenantId).Returns(tenantId);
         var service = new FinanceProducerIntentService(applicability.Object, events.Object, executor,
-            registry.Object, db, user.Object, Options.Create(new FinanceProducerIntentOptions { Enabled = enabled }));
-        return new TestHarness(service, db, tenantId, executor, registry);
+            db, user.Object, Options.Create(new FinanceProducerIntentOptions { Enabled = enabled }));
+        return new TestHarness(service, db, tenantId, executor);
     }
 
     private static Mock<IAccountingBookApplicabilityService> Applicability()
@@ -280,6 +318,11 @@ public sealed class FinanceProducerIntentC7Tests
     private static ProducerAccountingIntentDto Intent() => new()
     {
         IdempotencyKey = "inventory-disposal-1", ParticipantIdentity = "inventory.disposal.v1",
+        ExpectedOwnerEffect = new ProducerOwnerEffectIdentityDto
+        {
+            ParticipantCode = "inventory.disposal.v1", OwnerEntityType = "InventoryDisposal",
+            OwnerEntityId = Guid.NewGuid(), OwnerAction = "Dispose", EffectFingerprint = Hash('F')
+        },
         PostingRequest = new ProducerFinancePostingRequestDto
         {
             SourceModule = "INV", OriginModuleCode = "INV", SourceDocumentType = "INVENTORY_DISPOSAL",
@@ -301,6 +344,7 @@ public sealed class FinanceProducerIntentC7Tests
             EventKind = intent.EventKind, SelectionIdempotencyKey = intent.IdempotencyKey,
             ExpectedCalculationInputHash = Hash('A'), ExpectedSelectionFingerprint = Hash('B'),
             ProducerParticipantIdentity = intent.ParticipantIdentity.Trim().ToUpperInvariant(),
+            ExpectedOwnerEffect = intent.ExpectedOwnerEffect,
             PostingRequest = ToFinance(intent.PostingRequest)
         }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
     };
@@ -317,23 +361,24 @@ public sealed class FinanceProducerIntentC7Tests
         AccountingBookCode = string.Empty
     };
 
+    private static ProducerOwnerEffectReceiptDto Receipt(Guid tenantId, ProducerAccountingIntentDto intent) => new()
+    {
+        TenantId = tenantId, ParticipantCode = intent.ExpectedOwnerEffect.ParticipantCode,
+        OwnerEntityType = intent.ExpectedOwnerEffect.OwnerEntityType, OwnerEntityId = intent.ExpectedOwnerEffect.OwnerEntityId,
+        OwnerAction = intent.ExpectedOwnerEffect.OwnerAction, EffectFingerprint = intent.ExpectedOwnerEffect.EffectFingerprint
+    };
+
     private sealed record TestHarness(FinanceProducerIntentService Service, ApplicationDbContext Db, Guid TenantId,
-        StubExecutor Executor, Mock<IFinanceProducerExecutionRegistry> Registry);
+        StubExecutor Executor);
 
     private sealed class StubExecutor : ITrustedAccountingEventExecutor
     {
         public AccountingEventDto Result { get; set; } = new();
-        public Task<AccountingEventDto> ExecuteApprovedAsync(Guid accountingEventId, ReleaseAccountingEventDto request,
-            IFinanceProducerExecutionHandler handler, CancellationToken cancellationToken = default) => Task.FromResult(Result);
-    }
-
-    private sealed class Participant(ApplicationDbContext db, string identity, bool external = false, bool managesTransactions = false)
-        : IFinanceProducerExecutionHandler
-    {
-        public string ParticipantIdentity { get; } = identity;
-        public ApplicationDbContext DbContext => db;
-        public bool UsesExternalSideEffects => external;
-        public bool ManagesTransactions => managesTransactions;
-        public Task ExecuteAsync(FinanceProducerExecutionContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+        public ProducerOwnerEffectReceiptDto? Receipt { get; private set; }
+        public Task<AccountingEventDto> ExecuteApprovedInAmbientTransactionAsync(Guid accountingEventId,
+            ReleaseAccountingEventDto request, ProducerOwnerEffectReceiptDto receipt, CancellationToken cancellationToken = default)
+        { Receipt = receipt; return Task.FromResult(Result); }
+        public Task RecordApprovedFailureAfterRollbackAsync(Guid accountingEventId, ReleaseAccountingEventDto request,
+            ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

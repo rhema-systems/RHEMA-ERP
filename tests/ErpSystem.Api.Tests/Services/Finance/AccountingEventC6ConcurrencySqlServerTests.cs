@@ -25,7 +25,7 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class AccountingEventC6ConcurrencySqlServerTests
 {
     [SqlServerFact]
-    public async Task ApprovedProducerParticipant_RollsBackWithC6_PersistsFailure_AndRecoversExactlyOnce()
+    public async Task ApprovedProducerReceipt_JoinsOwnerTransaction_RollsBackPersistsFailureAndRecoversExactlyOnce()
     {
         await using var database = await DisposableDatabase.CreateAsync();
         Seeded seeded;
@@ -34,9 +34,18 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             seeded = await SeedAsync(setup, database);
             await setup.Database.ExecuteSqlRawAsync("CREATE TABLE [C7OwnerEffects] ([Id] uniqueidentifier NOT NULL PRIMARY KEY);");
         }
-        await RepairSecondBookAsync(database, seeded);
         var request = Request(database, "C7-OWNER-ATOMIC");
         request.ProducerParticipantIdentity = "INVENTORY.DISPOSAL.V1";
+        request.ExpectedOwnerEffect = new ProducerOwnerEffectIdentityDto
+        {
+            ParticipantCode = "INVENTORY.DISPOSAL.V1", OwnerEntityType = "INVENTORY_DISPOSAL",
+            OwnerEntityId = request.PostingRequest.SourceDocumentId, OwnerAction = "DISPOSE", EffectFingerprint = new string('F', 64)
+        };
+        var receipt = new ProducerOwnerEffectReceiptDto
+        {
+            TenantId = database.TenantId, ParticipantCode = "INVENTORY.DISPOSAL.V1", OwnerEntityType = "INVENTORY_DISPOSAL",
+            OwnerEntityId = request.PostingRequest.SourceDocumentId, OwnerAction = "DISPOSE", EffectFingerprint = new string('F', 64)
+        };
         Guid eventId;
         await using (var prepare = database.Context())
             eventId = (await Service(prepare, database.TenantId, database.MakerId).CreateAsync(request)).Id;
@@ -44,12 +53,40 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             await Service(approve, database.TenantId, database.CheckerId).ApproveAsync(eventId,
                 new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request });
 
+        await using (var noAmbient = database.Context())
+            await FluentActions.Awaiting(() => ((ITrustedAccountingEventExecutor)Service(noAmbient, database.TenantId, database.MakerId))
+                .ExecuteApprovedInAmbientTransactionAsync(eventId,
+                    new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt))
+                .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_AMBIENT_TRANSACTION_REQUIRED:*");
+
+        await using (var replaced = database.Context())
+        {
+            var service = Service(replaced, database.TenantId, database.MakerId);
+            await using var original = await replaced.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var originalId = original.TransactionId;
+            await original.RollbackAsync();
+            await original.DisposeAsync();
+            await using var replacement = await replaced.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            Action changed = () => typeof(AccountingEventService).GetMethod("RequireTransactionIdentity",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(service, [originalId]);
+            changed.Should().Throw<System.Reflection.TargetInvocationException>().Which.InnerException.Should()
+                .BeOfType<InvalidOperationException>().Which.Message.Should().StartWith("ACCOUNTING_EVENT_AMBIENT_TRANSACTION_CHANGED:");
+            await replacement.RollbackAsync();
+        }
+
         await using (var fail = database.Context())
         {
-            var participant = new SqlOwnerParticipant(fail, "INVENTORY.DISPOSAL.V1", eventId, failAfterWrite: true);
-            await FluentActions.Awaiting(() => ((ITrustedAccountingEventExecutor)Service(fail, database.TenantId, database.MakerId)).ExecuteApprovedAsync(eventId,
-                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, participant))
-                .Should().ThrowAsync<InvalidOperationException>().WithMessage("C7_OWNER_FAILURE");
+            await using var tx = await fail.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            await fail.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO [C7OwnerEffects] ([Id]) VALUES ({eventId})");
+            var executor = (ITrustedAccountingEventExecutor)Service(fail, database.TenantId, database.MakerId);
+            var failure = await FluentActions.Awaiting(() => executor.ExecuteApprovedInAmbientTransactionAsync(eventId,
+                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt))
+                .Should().ThrowAsync<InvalidOperationException>();
+            await tx.RollbackAsync();
+            await tx.DisposeAsync();
+            fail.ChangeTracker.Clear();
+            await executor.RecordApprovedFailureAfterRollbackAsync(eventId,
+                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt, failure.Which);
         }
         await using (var verifyFailure = database.Context())
         {
@@ -64,18 +101,45 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
 
         await using (var retry = database.Context())
         {
-            var participant = new SqlOwnerParticipant(retry, "inventory.disposal.v1", eventId, failAfterWrite: false);
-            (await ((ITrustedAccountingEventExecutor)Service(retry, database.TenantId, database.MakerId)).ExecuteApprovedAsync(eventId,
-                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, participant))
+            await RepairSecondBookAsync(database, seeded);
+            await using var tx = await retry.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            await retry.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO [C7OwnerEffects] ([Id]) VALUES ({eventId})");
+            (await ((ITrustedAccountingEventExecutor)Service(retry, database.TenantId, database.MakerId)).ExecuteApprovedInAmbientTransactionAsync(eventId,
+                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt))
                 .Status.Should().Be(AccountingEventStatuses.Posted);
+            await tx.CommitAsync();
         }
         await using (var exactRetry = database.Context())
         {
-            var mustNotRun = new SqlOwnerParticipant(exactRetry, "INVENTORY.DISPOSAL.V1", eventId, failAfterWrite: true);
-            (await ((ITrustedAccountingEventExecutor)Service(exactRetry, database.TenantId, database.MakerId)).ExecuteApprovedAsync(eventId,
-                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, mustNotRun))
+            await using var tx = await exactRetry.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            (await ((ITrustedAccountingEventExecutor)Service(exactRetry, database.TenantId, database.MakerId)).ExecuteApprovedInAmbientTransactionAsync(eventId,
+                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = request }, receipt))
                 .Status.Should().Be(AccountingEventStatuses.Posted);
+            await tx.CommitAsync();
             (await exactRetry.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [C7OwnerEffects]").SingleAsync()).Should().Be(1);
+            (await exactRetry.AccountingEventProducerReceipts.CountAsync(item => item.AccountingEventId == eventId)).Should().Be(1);
+            await FluentActions.Awaiting(() => exactRetry.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE [AccountingEventProducerReceipts] SET [OwnerAction]={"TAMPER"} WHERE [AccountingEventId]={eventId}"))
+                .Should().ThrowAsync<SqlException>().WithMessage("*C7_RECEIPT_IMMUTABLE*");
+        }
+
+        var reused = Request(database, "C7-OWNER-REUSED", Guid.NewGuid());
+        reused.ProducerParticipantIdentity = request.ProducerParticipantIdentity;
+        reused.ExpectedOwnerEffect = request.ExpectedOwnerEffect;
+        Guid reusedId;
+        await using (var prepareReuse = database.Context())
+            reusedId = (await Service(prepareReuse, database.TenantId, database.MakerId).CreateAsync(reused)).Id;
+        await using (var approveReuse = database.Context())
+            await Service(approveReuse, database.TenantId, database.CheckerId).ApproveAsync(reusedId,
+                new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = reused });
+        await using (var rejectReuse = database.Context())
+        {
+            await using var tx = await rejectReuse.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            await FluentActions.Awaiting(() => ((ITrustedAccountingEventExecutor)Service(rejectReuse, database.TenantId, database.MakerId))
+                    .ExecuteApprovedInAmbientTransactionAsync(reusedId,
+                        new ReleaseAccountingEventDto { Reason = "independent producer approval", Request = reused }, receipt))
+                .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_OWNER_EFFECT_REUSED:*");
+            await tx.RollbackAsync();
         }
     }
 
@@ -386,21 +450,6 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         AccountId = account, AccountClassificationId = classification, IsEnabled = true };
     private sealed record Seeded(Guid PrimaryBookId, Guid SecondBookId, Guid DebitId, Guid CreditId, Guid SecondAssetClassId,
         Guid SecondLiabilityClassId, AccountingBookSelectionDto Selection);
-
-    private sealed class SqlOwnerParticipant(ApplicationDbContext db, string identity, Guid effectId, bool failAfterWrite)
-        : IFinanceProducerExecutionHandler
-    {
-        public string ParticipantIdentity { get; } = identity;
-        public ApplicationDbContext DbContext => db;
-        public bool UsesExternalSideEffects => false;
-        public bool ManagesTransactions => false;
-
-        public async Task ExecuteAsync(FinanceProducerExecutionContext context, CancellationToken cancellationToken)
-        {
-            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO [C7OwnerEffects] ([Id]) VALUES ({effectId})", cancellationToken);
-            if (failAfterWrite) throw new InvalidOperationException("C7_OWNER_FAILURE");
-        }
-    }
 
     private sealed class SqlServerFactAttribute : FactAttribute
     {

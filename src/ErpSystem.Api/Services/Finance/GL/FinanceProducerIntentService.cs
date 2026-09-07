@@ -14,33 +14,31 @@ namespace ErpSystem.Api.Services.Finance.GL;
 /// Producer-facing Finance adapter. It converts one neutral intent into governed C5 preview evidence and
 /// C6 maker/checker state; book choice and per-book execution remain entirely inside Finance.
 /// </summary>
-public sealed partial class FinanceProducerIntentService : IFinanceProducerIntentService
+public sealed partial class FinanceProducerIntentService : IFinanceProducerIntentService, IFinanceProducerApprovedExecution
 {
     private readonly IAccountingBookApplicabilityService _applicability;
     private readonly IAccountingEventService _events;
     private readonly ITrustedAccountingEventExecutor _executor;
-    private readonly IFinanceProducerExecutionRegistry _registry;
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly FinanceProducerIntentOptions _options;
 
     public FinanceProducerIntentService(IAccountingBookApplicabilityService applicability,
         IAccountingEventService events, AccountingEventService executor,
-        IFinanceProducerExecutionRegistry registry, ApplicationDbContext db, ICurrentUserService currentUser,
+        ApplicationDbContext db, ICurrentUserService currentUser,
         IOptions<FinanceProducerIntentOptions> options)
-        : this(applicability, events, (ITrustedAccountingEventExecutor)executor, registry, db, currentUser, options)
+        : this(applicability, events, (ITrustedAccountingEventExecutor)executor, db, currentUser, options)
     {
     }
 
     internal FinanceProducerIntentService(IAccountingBookApplicabilityService applicability,
         IAccountingEventService events, ITrustedAccountingEventExecutor executor,
-        IFinanceProducerExecutionRegistry registry, ApplicationDbContext db, ICurrentUserService currentUser,
+        ApplicationDbContext db, ICurrentUserService currentUser,
         IOptions<FinanceProducerIntentOptions> options)
     {
         _applicability = applicability;
         _events = events;
         _executor = executor;
-        _registry = registry;
         _db = db;
         _currentUser = currentUser;
         _options = options.Value;
@@ -72,8 +70,8 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             new ReleaseAccountingEventDto { Request = await BuildPreparedRequestAsync(accountingEventId, intent, cancellationToken), Reason = decision.Reason }, cancellationToken);
     }
 
-    public async Task<AccountingEventDto> ExecuteApprovedAsync(Guid accountingEventId, ProducerAccountingIntentDto intent,
-        CancellationToken cancellationToken = default)
+    async Task<AccountingEventDto> IFinanceProducerApprovedExecution.ExecuteInAmbientTransactionAsync(Guid accountingEventId,
+        ProducerAccountingIntentDto intent, ProducerOwnerEffectReceiptDto receipt, CancellationToken cancellationToken)
     {
         RequireEnabled();
         ValidateIntent(intent);
@@ -82,10 +80,21 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             || approved.Status is not ("PendingApproval" or "Failed" or "Posted"))
             throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: execution requires durable independent approval.");
         var request = await BuildPreparedRequestAsync(accountingEventId, intent, cancellationToken);
-        var handler = _registry.Resolve(approved.ProducerParticipantIdentity
-            ?? throw new InvalidOperationException("ACCOUNTING_EVENT_PARTICIPANT_UNREGISTERED: prepared identity is missing."), _db);
-        return await _executor.ExecuteApprovedAsync(accountingEventId,
-            new ReleaseAccountingEventDto { Request = request, Reason = approved.ProducerDecisionReason ?? string.Empty }, handler, cancellationToken);
+        return await _executor.ExecuteApprovedInAmbientTransactionAsync(accountingEventId,
+            new ReleaseAccountingEventDto { Request = request, Reason = approved.ProducerDecisionReason ?? string.Empty }, receipt, cancellationToken);
+    }
+
+    async Task IFinanceProducerApprovedExecution.RecordFailureAfterRollbackAsync(Guid accountingEventId,
+        ProducerAccountingIntentDto intent, ProducerOwnerEffectReceiptDto receipt, Exception failure,
+        CancellationToken cancellationToken)
+    {
+        RequireEnabled();
+        ArgumentNullException.ThrowIfNull(failure);
+        var prepared = await _events.GetAsync(accountingEventId, cancellationToken);
+        var request = await BuildPreparedRequestAsync(accountingEventId, intent, cancellationToken);
+        await _executor.RecordApprovedFailureAfterRollbackAsync(accountingEventId,
+            new ReleaseAccountingEventDto { Request = request, Reason = prepared.ProducerDecisionReason ?? string.Empty },
+            receipt, failure, cancellationToken);
     }
 
     private async Task<CreateAccountingEventDto> BuildRequestAsync(ProducerAccountingIntentDto intent, CancellationToken ct)
@@ -126,7 +135,7 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         return new CreateAccountingEventDto
         {
             AccountingEventId = intent.AccountingEventId,
-            EventKind = intent.EventKind,
+            EventKind = intent.EventKind ?? AccountingEventKinds.Original,
             SupersedesAccountingEventId = intent.SupersedesAccountingEventId,
             CorrectsAccountingEventId = intent.CorrectsAccountingEventId,
             ReversesAccountingEventId = intent.ReversesAccountingEventId,
@@ -134,6 +143,7 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             ExpectedCalculationInputHash = calculationInputHash,
             ExpectedSelectionFingerprint = selectionFingerprint,
             ProducerParticipantIdentity = CanonicalParticipant(intent.ParticipantIdentity),
+            ExpectedOwnerEffect = CanonicalOwnerEffect(intent.ExpectedOwnerEffect, intent.ParticipantIdentity),
             PostingRequest = ToFinancePosting(posting)
         };
     }
@@ -150,13 +160,14 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             ?? throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_INVALID: prepared producer evidence cannot be reconstructed.");
         return new CreateAccountingEventDto
         {
-            AccountingEventId = accountingEventId, EventKind = intent.EventKind,
+            AccountingEventId = accountingEventId, EventKind = intent.EventKind ?? AccountingEventKinds.Original,
             SupersedesAccountingEventId = intent.SupersedesAccountingEventId,
             CorrectsAccountingEventId = intent.CorrectsAccountingEventId, ReversesAccountingEventId = intent.ReversesAccountingEventId,
             SelectionIdempotencyKey = intent.IdempotencyKey,
             ExpectedCalculationInputHash = frozen.ExpectedCalculationInputHash,
             ExpectedSelectionFingerprint = frozen.ExpectedSelectionFingerprint,
             ProducerParticipantIdentity = CanonicalParticipant(intent.ParticipantIdentity),
+            ExpectedOwnerEffect = CanonicalOwnerEffect(intent.ExpectedOwnerEffect, intent.ParticipantIdentity),
             PostingRequest = ToFinancePosting(intent.PostingRequest)
         };
     }
@@ -197,6 +208,7 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         ArgumentNullException.ThrowIfNull(intent);
         ArgumentNullException.ThrowIfNull(intent.PostingRequest);
         _ = CanonicalParticipant(intent.ParticipantIdentity);
+        _ = CanonicalOwnerEffect(intent.ExpectedOwnerEffect, intent.ParticipantIdentity);
         if (intent.PostingRequest.Lines.Count == 0)
             throw new InvalidOperationException("PRODUCER_INTENT_LINES_REQUIRED: at least one economic line is required.");
         var debit = intent.PostingRequest.Lines.Sum(line => line.DebitAmount);
@@ -211,6 +223,25 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         if (normalized.Length is 0 or > 100 || !ParticipantIdentityPattern().IsMatch(normalized))
             throw new InvalidOperationException("Producer participant identity must be 1 to 100 canonical characters.");
         return normalized;
+    }
+
+    private static ProducerOwnerEffectIdentityDto CanonicalOwnerEffect(ProducerOwnerEffectIdentityDto? effect, string participant)
+    {
+        ArgumentNullException.ThrowIfNull(effect);
+        var participantCode = CanonicalParticipant(effect.ParticipantCode);
+        if (!string.Equals(participantCode, CanonicalParticipant(participant), StringComparison.Ordinal))
+            throw new InvalidOperationException("PRODUCER_OWNER_EFFECT_PARTICIPANT_CONFLICT: expected effect must retain the producer participant.");
+        var entityType = effect.OwnerEntityType?.Trim().ToUpperInvariant() ?? string.Empty;
+        var action = effect.OwnerAction?.Trim().ToUpperInvariant() ?? string.Empty;
+        var fingerprint = effect.EffectFingerprint?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (entityType.Length is 0 or > 100 || action.Length is 0 or > 60 || effect.OwnerEntityId == Guid.Empty
+            || fingerprint.Length != 64 || fingerprint.All(ch => ch == '0') || fingerprint.Any(ch => !Uri.IsHexDigit(ch)))
+            throw new InvalidOperationException("PRODUCER_OWNER_EFFECT_INVALID: a stable entity, action and 64-character fingerprint are required.");
+        return new ProducerOwnerEffectIdentityDto
+        {
+            ParticipantCode = participantCode, OwnerEntityType = entityType,
+            OwnerEntityId = effect.OwnerEntityId, OwnerAction = action, EffectFingerprint = fingerprint
+        };
     }
 
     private static void RequireReason(DecideProducerAccountingIntentDto decision)

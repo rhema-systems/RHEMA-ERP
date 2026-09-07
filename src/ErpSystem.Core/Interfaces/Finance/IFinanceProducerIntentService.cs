@@ -13,6 +13,4 @@ public interface IFinanceProducerIntentService
         DecideProducerAccountingIntentDto decision, CancellationToken cancellationToken = default);
     Task<AccountingEventDto> RejectAsync(Guid accountingEventId, ProducerAccountingIntentDto intent,
         DecideProducerAccountingIntentDto decision, CancellationToken cancellationToken = default);
-    Task<AccountingEventDto> ExecuteApprovedAsync(Guid accountingEventId, ProducerAccountingIntentDto intent,
-        CancellationToken cancellationToken = default);
 }

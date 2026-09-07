@@ -26,8 +26,10 @@ public sealed class AccountingEventC6MigrationSqlServerTests
         await empty.CreatePredecessorAsync();
         await empty.ApplyAsync(up: true);
         await empty.ApplyC7Async(up: true);
+        (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name='AccountingEventProducerReceipts'")).Should().Be(1);
         (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('AccountingEvents') AND name LIKE 'Producer%'")).Should().Be(7);
         await empty.ApplyC7Async(up: false);
+        (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name='AccountingEventProducerReceipts'")).Should().Be(0);
         (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('AccountingEvents') AND name LIKE 'Producer%'")).Should().Be(0);
     }
 

@@ -10,8 +10,9 @@ public sealed class CreateAccountingEventDto
     public string SelectionIdempotencyKey { get; set; } = string.Empty;
     public string ExpectedCalculationInputHash { get; set; } = string.Empty;
     public string ExpectedSelectionFingerprint { get; set; } = string.Empty;
-    /// <summary>Stable owner adapter identity; part of immutable C6 request evidence.</summary>
+    /// <summary>Stable owner participant identity; part of immutable C6 request evidence.</summary>
     public string ProducerParticipantIdentity { get; set; } = string.Empty;
+    public ProducerOwnerEffectIdentityDto? ExpectedOwnerEffect { get; set; }
     /// <summary>The economic command. AccountingBookCode is ignored; C5 frozen evidence is authoritative.</summary>
     public FinancePostingRequestV2Dto PostingRequest { get; set; } = new();
 }
@@ -46,6 +47,7 @@ public sealed class AccountingEventDto
     public string? ProducerParticipantIdentity { get; set; }
     public string? ProducerIntentSnapshotJson { get; set; }
     public string? ProducerIntentSnapshotHash { get; set; }
+    public ProducerOwnerEffectReceiptDto? ProducerOwnerEffectReceipt { get; set; }
     public Guid? ProducerDecidedByUserId { get; set; }
     public DateTime? ProducerDecidedAtUtc { get; set; }
     public string? ProducerDecisionReason { get; set; }

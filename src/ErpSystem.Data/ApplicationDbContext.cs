@@ -133,6 +133,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AccountingEvent> AccountingEvents { get; set; }
     public DbSet<AccountingEventPosting> AccountingEventPostings { get; set; }
     public DbSet<AccountingEventAttempt> AccountingEventAttempts { get; set; }
+    public DbSet<AccountingEventProducerReceipt> AccountingEventProducerReceipts { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
     public DbSet<AccountBookCurrencyPolicy> AccountBookCurrencyPolicies { get; set; }
     public DbSet<AccountClassification> AccountClassifications { get; set; }
@@ -2997,6 +2998,24 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(item => item.AccountingEvent).WithMany(item => item.Attempts)
                 .HasForeignKey(item => new { item.TenantId, item.AccountingEventId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEventProducerReceipt>(entity =>
+        {
+            entity.ToTable("AccountingEventProducerReceipts", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEventProducerReceipts_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingEventProducerReceipts_EffectFingerprint", "LEN([EffectFingerprint]) = 64 AND [EffectFingerprint] <> REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingEventProducerReceipts_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.ParticipantCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.ParticipantCode, item.EffectFingerprint }).IsUnique();
+            entity.HasOne(item => item.AccountingEvent).WithOne(item => item.ProducerReceipt)
+                .HasForeignKey<AccountingEventProducerReceipt>(item => new { item.TenantId, item.AccountingEventId })
+                .HasPrincipalKey<AccountingEvent>(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountingBookApplicabilityPolicy>(entity =>
