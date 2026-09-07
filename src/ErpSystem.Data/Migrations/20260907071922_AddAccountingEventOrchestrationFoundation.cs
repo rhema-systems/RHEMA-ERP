@@ -27,6 +27,11 @@ IF OBJECT_ID(N'[Tenants]', N'U') IS NULL
    OR COL_LENGTH(N'AccountingBookSelectionEvidence', N'SelectionFingerprint') IS NULL
    OR COL_LENGTH(N'AccountingBookSelectionEvidenceBooks', N'AuthorityFingerprint') IS NULL
    OR COL_LENGTH(N'FinancePostingEvents', N'AccountingBookId') IS NULL
+   OR COL_LENGTH(N'FinancePostingEvents', N'OriginModuleCode') IS NULL
+   OR COL_LENGTH(N'FinancePostingEvents', N'SourceModule') IS NULL
+   OR COL_LENGTH(N'FinancePostingEvents', N'SourceDocumentType') IS NULL
+   OR COL_LENGTH(N'FinancePostingEvents', N'SourceDocumentId') IS NULL
+   OR COL_LENGTH(N'FinancePostingEvents', N'PostingAction') IS NULL
    OR COL_LENGTH(N'JournalEntries', N'AccountingBookId') IS NULL
     THROW 51000, 'C6_SCHEMA_PREFLIGHT: complete C1-C5 selection and leaf-posting authority is required.', 1;
 
@@ -286,12 +291,16 @@ IF EXISTS (
             migrationBuilder.CreateIndex(
                 name: "IX_AccountingEventPostings_TenantId_FinancePostingEventId",
                 table: "AccountingEventPostings",
-                columns: new[] { "TenantId", "FinancePostingEventId" });
+                columns: new[] { "TenantId", "FinancePostingEventId" },
+                unique: true,
+                filter: "[FinancePostingEventId] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_AccountingEventPostings_TenantId_JournalEntryId",
                 table: "AccountingEventPostings",
-                columns: new[] { "TenantId", "JournalEntryId" });
+                columns: new[] { "TenantId", "JournalEntryId" },
+                unique: true,
+                filter: "[JournalEntryId] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
                 name: "IX_AccountingEvents_TenantId_AccountingBookSelectionEvidenceId",
@@ -348,7 +357,11 @@ BEGIN
        OR i.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2
        OR i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[SourceDocumentType]))) COLLATE Latin1_General_100_BIN2
        OR i.[PostingAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[PostingAction]))) COLLATE Latin1_General_100_BIN2
-       OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))) COLLATE Latin1_General_100_BIN2)
+       OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))) COLLATE Latin1_General_100_BIN2
+       OR DATALENGTH(i.[OriginatingModuleCode])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[OriginatingModuleCode]))))
+       OR DATALENGTH(i.[SourceDocumentType])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[SourceDocumentType]))))
+       OR DATALENGTH(i.[PostingAction])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[PostingAction]))))
+       OR DATALENGTH(i.[IdempotencyKey])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[IdempotencyKey])))))
         THROW 51000, 'C6_EVENT_IDENTITY: canonical nonblank tenant, source, action, actor and idempotency identity is required.', 1;
 
     IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
@@ -368,18 +381,31 @@ BEGIN
 
     IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
        WHERE (d.[Status]=N'Posted' AND i.[Status]<>N'Posted')
-          OR (d.[Status]=N'PendingApproval' AND i.[Status] NOT IN (N'PendingApproval',N'Pending',N'Posted',N'Failed'))
+          OR (d.[Status]=N'PendingApproval' AND i.[Status] NOT IN (N'PendingApproval',N'Pending',N'Failed'))
           OR (d.[Status]=N'Pending' AND i.[Status] NOT IN (N'Pending',N'Posted',N'Failed'))
-          OR (d.[Status]=N'Failed' AND i.[Status] NOT IN (N'Failed',N'Pending',N'Posted')))
+          OR (d.[Status]=N'Failed' AND i.[Status] NOT IN (N'Failed',N'Pending')))
         THROW 51000, 'C6_EVENT_STATUS: only governed preparation, release, failure and retry transitions are permitted.', 1;
+
+    IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+       WHERE d.[Status]=i.[Status] AND d.[Status] IN (N'Posted',N'Failed') AND
+         (ISNULL(d.[CompletedAtUtc],CONVERT(datetime2,'1900-01-01'))<>ISNULL(i.[CompletedAtUtc],CONVERT(datetime2,'1900-01-01'))
+          OR ISNULL(d.[FailureMessage],N'')<>ISNULL(i.[FailureMessage],N'')))
+        THROW 51000, 'C6_EVENT_OUTCOME_IMMUTABLE: persisted Posted and Failed outcome evidence cannot be rewritten.', 1;
 
     IF EXISTS (SELECT 1 FROM inserted i JOIN [AccountingEvents] p WITH (UPDLOCK,HOLDLOCK)
        ON p.[TenantId]=i.[TenantId] AND p.[Id]=i.[SupersedesAccountingEventId]
        WHERE i.[EventKind] IN (N'Correction',N'Reversal') AND (p.[Status]<>N'Posted'
           OR i.[RootAccountingEventId]<>p.[RootAccountingEventId] OR i.[Version]<>p.[Version]+1
+          OR i.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2<>p.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(i.[OriginatingModuleCode])<>DATALENGTH(p.[OriginatingModuleCode])
+          OR i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2<>p.[SourceDocumentType] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(i.[SourceDocumentType])<>DATALENGTH(p.[SourceDocumentType])
+          OR i.[SourceDocumentId]<>p.[SourceDocumentId]
+          OR i.[PostingAction] COLLATE Latin1_General_100_BIN2<>p.[PostingAction] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(i.[PostingAction])<>DATALENGTH(p.[PostingAction])
           OR i.[AccountingBookSelectionEvidenceId]<>p.[AccountingBookSelectionEvidenceId]
           OR i.[SelectionFingerprint]<>p.[SelectionFingerprint]))
-        THROW 51000, 'C6_EVENT_LINEAGE: successor must bind the posted predecessor root, next version and frozen selection.', 1;
+        THROW 51000, 'C6_EVENT_LINEAGE: successor must bind the posted predecessor canonical source, root, next version and frozen selection.', 1;
 
     IF EXISTS (SELECT 1 FROM [AccountingEvents] a WITH (UPDLOCK,HOLDLOCK)
        JOIN [AccountingEvents] b WITH (UPDLOCK,HOLDLOCK) ON b.[TenantId]=a.[TenantId]
@@ -390,8 +416,13 @@ BEGIN
     IF EXISTS (SELECT 1 FROM inserted i LEFT JOIN [AccountingBookSelectionEvidence] e WITH (UPDLOCK,HOLDLOCK)
        ON e.[TenantId]=i.[TenantId] AND e.[Id]=i.[AccountingBookSelectionEvidenceId]
        WHERE (i.[Status] IN (N'Pending',N'Posted') OR i.[AccountingBookSelectionEvidenceId] IS NOT NULL) AND (e.[Id] IS NULL
-          OR e.[SelectionFingerprint]<>i.[SelectionFingerprint] OR e.[OriginatingModuleCode]<>i.[OriginatingModuleCode]
-          OR e.[SourceDocumentType]<>i.[SourceDocumentType] OR e.[PostingAction]<>i.[PostingAction]
+          OR e.[SelectionFingerprint]<>i.[SelectionFingerprint]
+          OR e.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2<>i.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(e.[OriginatingModuleCode])<>DATALENGTH(i.[OriginatingModuleCode])
+          OR e.[SourceDocumentType] COLLATE Latin1_General_100_BIN2<>i.[SourceDocumentType] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(e.[SourceDocumentType])<>DATALENGTH(i.[SourceDocumentType])
+          OR e.[PostingAction] COLLATE Latin1_General_100_BIN2<>i.[PostingAction] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(e.[PostingAction])<>DATALENGTH(i.[PostingAction])
           OR (i.[EventKind]=N'Original' AND CONVERT(date,e.[EffectiveDate])<>i.[EventDate])))
         THROW 51000, 'C6_EVENT_SELECTION: released event identity must match its immutable C5 selection.', 1;
 
@@ -427,15 +458,39 @@ BEGIN
        LEFT JOIN [AccountingBookSelectionEvidenceBooks] eb WITH (UPDLOCK,HOLDLOCK)
        ON eb.[TenantId]=p.[TenantId] AND eb.[AccountingBookSelectionEvidenceId]=e.[AccountingBookSelectionEvidenceId]
         AND eb.[AccountingBookId]=p.[AccountingBookId] AND eb.[SelectionOrder]=p.[SelectionOrder]
-       WHERE e.[AccountingBookSelectionEvidenceId] IS NULL OR eb.[Id] IS NULL
+       WHERE e.[Version]<>p.[EventVersion] OR e.[AccountingBookSelectionEvidenceId] IS NULL OR eb.[Id] IS NULL
         OR eb.[AccountingBookCodeSnapshot]<>p.[AccountingBookCodeSnapshot] OR eb.[AuthorityFingerprint]<>p.[AuthorityFingerprint])
         THROW 51000, 'C6_POSTING_SELECTION: per-book evidence must exactly match the frozen C5 coordinate.', 1;
     IF EXISTS (SELECT 1 FROM inserted p
+       JOIN [AccountingEvents] e ON e.[TenantId]=p.[TenantId] AND e.[Id]=p.[AccountingEventId] AND e.[Version]=p.[EventVersion]
+       LEFT JOIN [AccountingEventPostings] predecessor ON predecessor.[TenantId]=p.[TenantId]
+        AND predecessor.[AccountingEventId]=e.[ReversesAccountingEventId] AND predecessor.[AccountingBookId]=p.[AccountingBookId]
+        AND predecessor.[EventVersion]=e.[Version]-1 AND predecessor.[Status]=N'Posted'
        LEFT JOIN [FinancePostingEvents] f ON f.[TenantId]=p.[TenantId] AND f.[Id]=p.[FinancePostingEventId]
        LEFT JOIN [JournalEntries] j ON j.[TenantId]=p.[TenantId] AND j.[Id]=p.[JournalEntryId]
        WHERE p.[Status]=N'Posted' AND (f.[Id] IS NULL OR j.[Id] IS NULL OR f.[AccountingBookId]<>p.[AccountingBookId]
         OR j.[AccountingBookId]<>p.[AccountingBookId] OR f.[JournalEntryId] IS NULL OR f.[JournalEntryId]<>p.[JournalEntryId]
-        OR f.[PostingStatus]<>N'Posted' OR j.[PostingStatus]<>N'Posted'))
+        OR f.[PostingStatus]<>N'Posted' OR j.[PostingStatus]<>N'Posted'
+        OR (e.[EventKind]=N'Original' AND (
+             ISNULL(f.[OriginModuleCode],f.[SourceModule]) COLLATE Latin1_General_100_BIN2<>e.[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(ISNULL(f.[OriginModuleCode],f.[SourceModule]))<>DATALENGTH(e.[OriginatingModuleCode])
+          OR f.[SourceDocumentType] COLLATE Latin1_General_100_BIN2<>e.[SourceDocumentType] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(f.[SourceDocumentType])<>DATALENGTH(e.[SourceDocumentType]) OR f.[SourceDocumentId]<>e.[SourceDocumentId]
+          OR f.[PostingAction] COLLATE Latin1_General_100_BIN2<>e.[PostingAction] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(f.[PostingAction])<>DATALENGTH(e.[PostingAction])))
+        OR (e.[EventKind]=N'Correction' AND (
+             f.[SourceModule] COLLATE Latin1_General_100_BIN2<>N'GL' OR DATALENGTH(f.[SourceModule])<>DATALENGTH(N'GL')
+          OR f.[OriginModuleCode] COLLATE Latin1_General_100_BIN2<>N'FIN' OR DATALENGTH(f.[OriginModuleCode])<>DATALENGTH(N'FIN')
+          OR f.[SourceDocumentType] COLLATE Latin1_General_100_BIN2<>N'AccountingEventCorrection' OR DATALENGTH(f.[SourceDocumentType])<>DATALENGTH(N'AccountingEventCorrection')
+          OR f.[SourceDocumentId]<>e.[Id]
+          OR f.[PostingAction] COLLATE Latin1_General_100_BIN2<>e.[PostingAction] COLLATE Latin1_General_100_BIN2
+          OR DATALENGTH(f.[PostingAction])<>DATALENGTH(e.[PostingAction])))
+        OR (e.[EventKind]=N'Reversal' AND (
+             predecessor.[Id] IS NULL OR predecessor.[FinancePostingEventId] IS NULL OR f.[SourceDocumentId]<>predecessor.[FinancePostingEventId]
+          OR f.[SourceModule] COLLATE Latin1_General_100_BIN2<>N'GL' OR DATALENGTH(f.[SourceModule])<>DATALENGTH(N'GL')
+          OR f.[OriginModuleCode] COLLATE Latin1_General_100_BIN2<>N'FIN' OR DATALENGTH(f.[OriginModuleCode])<>DATALENGTH(N'FIN')
+          OR f.[SourceDocumentType] COLLATE Latin1_General_100_BIN2<>N'FinancePostingEventReversal' OR DATALENGTH(f.[SourceDocumentType])<>DATALENGTH(N'FinancePostingEventReversal')
+          OR f.[PostingAction] COLLATE Latin1_General_100_BIN2<>N'Reverse' OR DATALENGTH(f.[PostingAction])<>DATALENGTH(N'Reverse')))))
         THROW 51000, 'C6_POSTING_RESULT: leaf journal and posting event must be Posted in the exact selected book.', 1;
 END;
 
@@ -447,6 +502,8 @@ BEGIN
     SET NOCOUNT ON;
     IF EXISTS (SELECT 1 FROM deleted)
         THROW 51000, 'C6_ATTEMPT_IMMUTABLE: final attempt outcomes are append-only.', 1;
+    IF EXISTS (SELECT 1 FROM inserted WHERE [Status]=N'Pending')
+        THROW 51000, 'C6_ATTEMPT_FINAL_REQUIRED: attempt evidence must be inserted once with its final outcome.', 1;
     IF EXISTS (SELECT 1 FROM inserted a JOIN [AccountingEvents] e
        ON e.[TenantId]=a.[TenantId] AND e.[Id]=a.[AccountingEventId]
        WHERE a.[RequestFingerprint]<>e.[RequestFingerprint])

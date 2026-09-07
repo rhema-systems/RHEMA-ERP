@@ -24,4 +24,6 @@ internal interface IAccountingEventPostingLeaf
 
 internal readonly record struct AccountingEventPostingAuthority(
     Guid AccountingEventId,
-    Guid AccountingBookSelectionEvidenceId);
+    Guid AccountingBookSelectionEvidenceId,
+    Guid AccountingBookId,
+    string AuthorityFingerprint);

@@ -10390,9 +10390,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "AccountingBookId");
 
-                    b.HasIndex("TenantId", "FinancePostingEventId");
+                    b.HasIndex("TenantId", "FinancePostingEventId")
+                        .IsUnique()
+                        .HasFilter("[FinancePostingEventId] IS NOT NULL");
 
-                    b.HasIndex("TenantId", "JournalEntryId");
+                    b.HasIndex("TenantId", "JournalEntryId")
+                        .IsUnique()
+                        .HasFilter("[JournalEntryId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "AccountingEventId", "EventVersion", "AccountingBookId")
                         .IsUnique();

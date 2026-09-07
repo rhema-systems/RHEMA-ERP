@@ -42,11 +42,32 @@ public sealed class AccountingEventC6MigrationSqlServerTests
         await using var db = await DisposableDatabase.CreateAsync();
         await db.CreatePredecessorAsync();
         await db.ApplyAsync(up: true);
-        var tenant = Guid.NewGuid(); var eventId = Guid.NewGuid(); var actor = Guid.NewGuid();
+        var tenant = Guid.NewGuid(); var eventId = Guid.NewGuid(); var actor = Guid.NewGuid(); var attemptId = Guid.NewGuid();
         await db.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');" + EventInsert(tenant, eventId, actor, "FAILURE-KEY", "FAILED", status: "Failed") +
-            $"INSERT AccountingEventAttempts(Id,AccountingEventId,AttemptNumber,RequestFingerprint,Status,StartedAtUtc,CompletedAtUtc,FailureMessage,CreatedAt,IsDeleted,TenantId) VALUES('{Guid.NewGuid()}','{eventId}',1,REPLICATE('A',64),'Failed',SYSUTCDATETIME(),SYSUTCDATETIME(),N'leaf failed',SYSUTCDATETIME(),0,'{tenant}');");
+            $"INSERT AccountingEventAttempts(Id,AccountingEventId,AttemptNumber,RequestFingerprint,Status,StartedAtUtc,CompletedAtUtc,FailureMessage,CreatedAt,IsDeleted,TenantId) VALUES('{attemptId}','{eventId}',1,REPLICATE('A',64),'Failed',SYSUTCDATETIME(),SYSUTCDATETIME(),N'leaf failed',SYSUTCDATETIME(),0,'{tenant}');");
         (await db.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingEvents WHERE Status='Failed'")).Should().Be(1);
         (await db.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingEventAttempts WHERE Status='Failed'")).Should().Be(1);
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEvents SET CompletedAtUtc=DATEADD(second,1,CompletedAtUtc),FailureMessage=N'rewritten' WHERE Id='{eventId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_OUTCOME_IMMUTABLE*");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEvents SET RequestFingerprint=REPLICATE('B',64) WHERE Id='{eventId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_IMMUTABLE*");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEventAttempts SET FailureMessage=N'rewritten' WHERE Id='{attemptId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_ATTEMPT_IMMUTABLE*");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"DELETE AccountingEventAttempts WHERE Id='{attemptId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_ATTEMPT_IMMUTABLE*");
+        var book = Guid.NewGuid(); var evidence = Guid.NewGuid();
+        await db.ExecuteAsync($@"INSERT AccountingBooks(Id,TenantId,Code) VALUES('{book}','{tenant}',N'PRIMARY');
+INSERT AccountingBookSelectionEvidence(Id,TenantId,OriginatingModuleCode,SourceDocumentType,PostingAction,EffectiveDate,IdempotencyKey,SelectionFingerprint,IsDeleted)
+ VALUES('{evidence}','{tenant}',N'FIN',N'JOURNAL',N'FAILED',CONVERT(date,'2026-09-07'),N'FAILURE-SELECTION',REPLICATE('B',64),0);
+INSERT AccountingBookSelectionEvidenceBooks(Id,TenantId,AccountingBookSelectionEvidenceId,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,IsDeleted)
+ VALUES('{Guid.NewGuid()}','{tenant}','{evidence}','{book}',0,N'PRIMARY',REPLICATE('C',64),0);");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"UPDATE AccountingEvents SET Status=N'Posted',AccountingBookSelectionEvidenceId='{evidence}',
+ SelectionFingerprint=REPLICATE('B',64),FailureMessage=NULL WHERE Id='{eventId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_STATUS*");
+        await db.ExecuteAsync($@"UPDATE AccountingEvents SET Status=N'Pending',AccountingBookSelectionEvidenceId='{evidence}',SelectionFingerprint=REPLICATE('B',64),
+ CompletedAtUtc=NULL,FailureMessage=NULL WHERE Id='{eventId}'");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE Id='{eventId}' AND Status='Pending' AND CompletedAtUtc IS NULL AND FailureMessage IS NULL"))
+            .Should().Be(1);
         await FluentActions.Awaiting(() => db.ApplyAsync(up: false)).Should().ThrowAsync<SqlException>().WithMessage("*C6_DOWN_BLOCKED*");
         (await db.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name='AccountingEvents'")).Should().Be(1);
     }
@@ -60,6 +81,8 @@ public sealed class AccountingEventC6MigrationSqlServerTests
         var tenant = Guid.NewGuid(); var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
         var book = Guid.NewGuid(); var evidence = Guid.NewGuid(); var source = Guid.NewGuid();
         var original = Guid.NewGuid(); var successor = Guid.NewGuid(); var journal = Guid.NewGuid(); var leaf = Guid.NewGuid();
+        var originalPosting = Guid.NewGuid();
+        var successorPosting = Guid.NewGuid(); var badJournal = Guid.NewGuid(); var badLeaf = Guid.NewGuid();
         await db.ExecuteAsync($@"
 INSERT Tenants(Id) VALUES('{tenant}');
 INSERT AccountingBooks(Id,TenantId,Code) VALUES('{book}','{tenant}',N'PRIMARY');
@@ -74,10 +97,11 @@ INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocume
 UPDATE AccountingEvents SET AccountingBookSelectionEvidenceId='{evidence}',Status=N'Pending',ReleasedByUserId='{checker}',ReleasedAtUtc=SYSUTCDATETIME(),ReleaseReason=N'release'
  WHERE Id='{original}';
 INSERT JournalEntries(Id,TenantId,AccountingBookId,PostingStatus) VALUES('{journal}','{tenant}','{book}',N'Posted');
-INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus) VALUES('{leaf}','{tenant}','{book}','{journal}',N'Posted');
+INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus,SourceModule,OriginModuleCode,SourceDocumentType,SourceDocumentId,PostingAction)
+ VALUES('{leaf}','{tenant}','{book}','{journal}',N'Posted',N'FIN',N'FIN',N'JOURNAL','{source}',N'POST');
 INSERT AccountingEventPostings(Id,AccountingEventId,EventVersion,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,Status,
  FinancePostingEventId,JournalEntryId,PostedAtUtc,CreatedAt,IsDeleted,TenantId)
- VALUES('{Guid.NewGuid()}','{original}',1,'{book}',0,N'PRIMARY',REPLICATE('C',64),N'Posted','{leaf}','{journal}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');
+ VALUES('{originalPosting}','{original}',1,'{book}',0,N'PRIMARY',REPLICATE('C',64),N'Posted','{leaf}','{journal}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');
 UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHERE Id='{original}';
 INSERT AccountingEvents(Id,OriginatingModuleCode,SourceDocumentType,SourceDocumentId,PostingAction,IdempotencyKey,EventKind,Version,RootAccountingEventId,
  SupersedesAccountingEventId,ReversesAccountingEventId,SelectionFingerprint,RequestFingerprint,Status,EventDate,RequestedAtUtc,RequestedByUserId,
@@ -88,6 +112,50 @@ UPDATE AccountingEvents SET AccountingBookSelectionEvidenceId='{evidence}',Statu
  WHERE Id='{successor}';");
         (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE Id='{successor}' AND Status='Pending' AND EventDate=CONVERT(date,'2026-09-08') AND AccountingBookSelectionEvidenceId='{evidence}'"))
             .Should().Be(1);
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEvents SET CompletedAtUtc=DATEADD(second,1,CompletedAtUtc) WHERE Id='{original}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_OUTCOME_IMMUTABLE*");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"INSERT AccountingEventAttempts(Id,AccountingEventId,AttemptNumber,RequestFingerprint,Status,StartedAtUtc,CreatedAt,IsDeleted,TenantId)
+ VALUES('{Guid.NewGuid()}','{successor}',1,REPLICATE('D',64),N'Pending',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}')"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_ATTEMPT_FINAL_REQUIRED*");
+        await db.ExecuteAsync($@"
+INSERT JournalEntries(Id,TenantId,AccountingBookId,PostingStatus) VALUES('{badJournal}','{tenant}','{book}',N'Posted');
+INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus,SourceModule,OriginModuleCode,SourceDocumentType,SourceDocumentId,PostingAction)
+ VALUES('{badLeaf}','{tenant}','{book}','{badJournal}',N'Posted',N'GL',N'FIN',N'FinancePostingEventReversal','{Guid.NewGuid()}',N'Reverse');
+INSERT AccountingEventPostings(Id,AccountingEventId,EventVersion,AccountingBookId,SelectionOrder,AccountingBookCodeSnapshot,AuthorityFingerprint,Status,CreatedAt,IsDeleted,TenantId)
+ VALUES('{successorPosting}','{successor}',2,'{book}',0,N'PRIMARY',REPLICATE('C',64),N'Pending',SYSUTCDATETIME(),0,'{tenant}');");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{badLeaf}',JournalEntryId='{badJournal}',PostedAtUtc=SYSUTCDATETIME()
+ WHERE Id='{successorPosting}'" )).Should().ThrowAsync<SqlException>().WithMessage("*C6_POSTING_RESULT*");
+        var unrelated = new[]
+        {
+            (SourceModule: "XX", Origin: "FIN", Document: "FinancePostingEventReversal", SourceId: leaf, Action: "Reverse"),
+            (SourceModule: "GL", Origin: "XXX", Document: "FinancePostingEventReversal", SourceId: leaf, Action: "Reverse"),
+            (SourceModule: "GL", Origin: "FIN", Document: "UnrelatedReversal", SourceId: leaf, Action: "Reverse"),
+            (SourceModule: "GL", Origin: "FIN", Document: "FinancePostingEventReversal", SourceId: leaf, Action: "Unrelated")
+        };
+        foreach (var evidenceMismatch in unrelated)
+        {
+            var mismatchJournal = Guid.NewGuid(); var mismatchLeaf = Guid.NewGuid();
+            await db.ExecuteAsync($@"INSERT JournalEntries(Id,TenantId,AccountingBookId,PostingStatus) VALUES('{mismatchJournal}','{tenant}','{book}',N'Posted');
+INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus,SourceModule,OriginModuleCode,SourceDocumentType,SourceDocumentId,PostingAction)
+ VALUES('{mismatchLeaf}','{tenant}','{book}','{mismatchJournal}',N'Posted',N'{evidenceMismatch.SourceModule}',N'{evidenceMismatch.Origin}',N'{evidenceMismatch.Document}','{evidenceMismatch.SourceId}',N'{evidenceMismatch.Action}');");
+            await FluentActions.Awaiting(() => db.ExecuteAsync($@"UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{mismatchLeaf}',JournalEntryId='{mismatchJournal}',PostedAtUtc=SYSUTCDATETIME()
+ WHERE Id='{successorPosting}'")).Should().ThrowAsync<SqlException>().WithMessage("*C6_POSTING_RESULT*");
+        }
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{leaf}',JournalEntryId='{journal}',PostedAtUtc=SYSUTCDATETIME()
+ WHERE Id='{successorPosting}'" )).Should().ThrowAsync<SqlException>();
+        var validJournal = Guid.NewGuid(); var validLeaf = Guid.NewGuid();
+        await db.ExecuteAsync($@"INSERT JournalEntries(Id,TenantId,AccountingBookId,PostingStatus) VALUES('{validJournal}','{tenant}','{book}',N'Posted');
+INSERT FinancePostingEvents(Id,TenantId,AccountingBookId,JournalEntryId,PostingStatus,SourceModule,OriginModuleCode,SourceDocumentType,SourceDocumentId,PostingAction)
+ VALUES('{validLeaf}','{tenant}','{book}','{validJournal}',N'Posted',N'GL',N'FIN',N'FinancePostingEventReversal','{leaf}',N'Reverse');
+UPDATE AccountingEventPostings SET Status=N'Posted',FinancePostingEventId='{validLeaf}',JournalEntryId='{validJournal}',PostedAtUtc=SYSUTCDATETIME()
+ WHERE Id='{successorPosting}';
+UPDATE AccountingEvents SET Status=N'Posted',CompletedAtUtc=SYSUTCDATETIME() WHERE Id='{successor}';");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEventPostings WHERE Id='{successorPosting}' AND Status='Posted' AND FinancePostingEventId='{validLeaf}'"))
+            .Should().Be(1);
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEventPostings SET AuthorityFingerprint=REPLICATE('E',64) WHERE Id='{originalPosting}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_POSTING_IMMUTABLE*");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE AccountingEvents SET SelectionFingerprint=REPLICATE('E',64) WHERE Id='{original}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_IMMUTABLE*");
     }
 
     [SqlServerFact]
@@ -117,6 +185,21 @@ UPDATE AccountingEvents SET AccountingBookSelectionEvidenceId='{evidence}',Statu
         outcomes.Count(item => item is null).Should().Be(1);
         outcomes.Count(item => item is SqlException).Should().Be(1);
         (await db.ScalarAsync<int>("SELECT COUNT(*) FROM AccountingEvents WHERE TenantId='" + tenant + "' AND IdempotencyKey='RACE-KEY'")).Should().Be(1);
+    }
+
+    [SqlServerFact]
+    public async Task CanonicalEventSourceRejectsLowerCaseAndTrailingSpaceBeforePersistence()
+    {
+        await using var db = await DisposableDatabase.CreateAsync();
+        await db.CreatePredecessorAsync();
+        await db.ApplyAsync(up: true);
+        var tenant = Guid.NewGuid(); var actor = Guid.NewGuid();
+        await db.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');");
+        await FluentActions.Awaiting(() => db.ExecuteAsync(EventInsert(tenant, Guid.NewGuid(), actor, "CASE-KEY", "post", "PendingApproval")))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_IDENTITY*");
+        await FluentActions.Awaiting(() => db.ExecuteAsync(EventInsert(tenant, Guid.NewGuid(), actor, "SPACE-KEY", "POST ", "PendingApproval")))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C6_EVENT_IDENTITY*");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM AccountingEvents WHERE TenantId='{tenant}'")).Should().Be(0);
     }
 
     private static string EventInsert(Guid tenant, Guid id, Guid actor, string key, string action, string status) => $@"
@@ -165,7 +248,8 @@ CREATE TABLE AccountingBookSelectionEvidenceBooks(Id uniqueidentifier NOT NULL C
  AccountingBookCodeSnapshot nvarchar(20) NOT NULL,AuthorityFingerprint nvarchar(64) NOT NULL,IsDeleted bit NOT NULL);
 CREATE TABLE JournalEntries(Id uniqueidentifier NOT NULL CONSTRAINT PK_JournalEntries PRIMARY KEY,TenantId uniqueidentifier NOT NULL,AccountingBookId uniqueidentifier NOT NULL,PostingStatus nvarchar(20) NOT NULL);
 CREATE TABLE FinancePostingEvents(Id uniqueidentifier NOT NULL CONSTRAINT PK_FinancePostingEvents PRIMARY KEY,TenantId uniqueidentifier NOT NULL,AccountingBookId uniqueidentifier NOT NULL,
- JournalEntryId uniqueidentifier NULL,PostingStatus nvarchar(20) NOT NULL);");
+ JournalEntryId uniqueidentifier NULL,PostingStatus nvarchar(20) NOT NULL,SourceModule nvarchar(50) NOT NULL,OriginModuleCode nvarchar(10) NULL,
+ SourceDocumentType nvarchar(100) NOT NULL,SourceDocumentId uniqueidentifier NOT NULL,PostingAction nvarchar(50) NOT NULL);");
 
         public async Task ApplyAsync(bool up)
         {

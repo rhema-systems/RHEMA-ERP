@@ -1,5 +1,7 @@
+using System.Data.Common;
 using System.Text.RegularExpressions;
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Api.Services.Finance.Settings;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
@@ -11,6 +13,7 @@ using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -27,24 +30,27 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         await using var database = await DisposableDatabase.CreateAsync();
         await using (var setup = database.Context())
         {
-            await setup.Database.EnsureCreatedAsync();
             setup.Tenants.Add(Tenant(database.TenantId));
             await setup.SaveChangesAsync();
         }
         var request = Request(database);
-        async Task<(AccountingEventDto? Result, Exception? Error)> Prepare(CreateAccountingEventDto candidate)
+        async Task<(AccountingEventDto? Result, Exception? Error)> Prepare(CreateAccountingEventDto candidate, DbCommandInterceptor interceptor)
         {
-            await using var db = database.Context();
-            try { return (await Service(db, database.TenantId, database.MakerId, Mock.Of<IAccountingBookApplicabilityService>()).CreateAsync(candidate), null); }
+            await using var db = database.Context(interceptor);
+            try { return (await Service(db, database.TenantId, database.MakerId).CreateAsync(candidate), null); }
             catch (Exception error) { return (null, error); }
         }
-        var identical = await Task.WhenAll(Task.Run(() => Prepare(request)), Task.Run(() => Prepare(Request(database))));
+        var identicalRace = new EventLockCompetition();
+        var identical = await Task.WhenAll(Prepare(request, identicalRace.Owner), Prepare(Request(database), identicalRace.Contender));
+        identicalRace.AssertCompeted();
         identical.Should().OnlyContain(item => item.Error == null);
         identical.Select(item => item.Result!.Id).Distinct().Should().ContainSingle();
         var raceSource = Guid.NewGuid();
         var conflictA = Request(database, "EVENT-CONFLICT-RACE", raceSource); conflictA.PostingRequest.Description = "winner A";
         var conflictB = Request(database, "EVENT-CONFLICT-RACE", raceSource); conflictB.PostingRequest.Description = "winner B";
-        var conflicting = await Task.WhenAll(Task.Run(() => Prepare(conflictA)), Task.Run(() => Prepare(conflictB)));
+        var conflictRace = new EventLockCompetition();
+        var conflicting = await Task.WhenAll(Prepare(conflictA, conflictRace.Owner), Prepare(conflictB, conflictRace.Contender));
+        conflictRace.AssertCompeted();
         conflicting.Count(item => item.Result is not null && item.Error is null).Should().Be(1);
         conflicting.Count(item => item.Result is null && item.Error is InvalidOperationException error
             && error.Message.StartsWith("ACCOUNTING_EVENT_IDEMPOTENCY_CONFLICT:", StringComparison.Ordinal)).Should().Be(1);
@@ -54,20 +60,84 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
     }
 
     [SqlServerFact]
+    public async Task ReleaseRacesSerializeSameAuthorityAndRejectDifferentCheckerOrReason()
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        Seeded seeded;
+        await using (var setup = database.Context()) seeded = await SeedAsync(setup, database);
+        await RepairSecondBookAsync(database, seeded);
+
+        async Task<Guid> Prepare(CreateAccountingEventDto request)
+        {
+            await using var context = database.Context();
+            return (await Service(context, database.TenantId, database.MakerId).CreateAsync(request)).Id;
+        }
+        async Task<(AccountingEventDto? Result, Exception? Error)> Release(Guid id, CreateAccountingEventDto request,
+            Guid checker, string reason, DbCommandInterceptor interceptor)
+        {
+            await using var context = database.Context(interceptor);
+            try { return (await Service(context, database.TenantId, checker).ReleaseAsync(id,
+                new ReleaseAccountingEventDto { Reason = reason, Request = request }), null); }
+            catch (Exception error) { return (null, error); }
+        }
+
+        var sameRequest = Request(database, "RELEASE-SAME", Guid.NewGuid()); var sameId = await Prepare(sameRequest);
+        var sameRace = new EventLockCompetition();
+        var same = await Task.WhenAll(
+            Release(sameId, sameRequest, database.CheckerId, "same governed release", sameRace.Owner),
+            Release(sameId, Request(database, "RELEASE-SAME", sameRequest.PostingRequest.SourceDocumentId), database.CheckerId, "same governed release", sameRace.Contender));
+        sameRace.AssertCompeted();
+        same.Count(item => item.Error == null && item.Result != null && item.Result.Status == AccountingEventStatuses.Posted).Should().Be(2);
+        var correction = Request(database, "RELEASE-SAME-CORRECTION", sameRequest.PostingRequest.SourceDocumentId);
+        correction.EventKind = AccountingEventKinds.Correction; correction.CorrectsAccountingEventId = sameId;
+        correction.SupersedesAccountingEventId = sameId; correction.PostingRequest.PostingDate = database.EventDate.AddDays(1);
+        var correctionId = await Prepare(correction);
+        await using (var correctionContext = database.Context())
+            (await Service(correctionContext, database.TenantId, database.CheckerId).ReleaseAsync(correctionId,
+                new ReleaseAccountingEventDto { Reason = "exact correction", Request = correction })).Status.Should().Be(AccountingEventStatuses.Posted);
+        await using (var correctionVerify = database.Context())
+        {
+            var leaves = await correctionVerify.AccountingEventPostings.Where(x => x.AccountingEventId == correctionId)
+                .Select(x => x.FinancePostingEvent!).ToListAsync();
+            leaves.Should().HaveCount(2).And.OnlyContain(x => x.SourceModule == "GL" && x.OriginModuleCode == "FIN"
+                && x.SourceDocumentType == "AccountingEventCorrection" && x.SourceDocumentId == correctionId && x.PostingAction == "POST");
+        }
+
+        var checkerRequest = Request(database, "RELEASE-CHECKER", Guid.NewGuid()); var checkerId = await Prepare(checkerRequest);
+        var checkerRace = new EventLockCompetition();
+        var checkerOutcomes = await Task.WhenAll(
+            Release(checkerId, checkerRequest, database.CheckerId, "fixed release", checkerRace.Owner),
+            Release(checkerId, Request(database, "RELEASE-CHECKER", checkerRequest.PostingRequest.SourceDocumentId), database.OtherCheckerId, "fixed release", checkerRace.Contender));
+        checkerRace.AssertCompeted();
+        checkerOutcomes.Count(item => item.Result != null && item.Result.Status == AccountingEventStatuses.Posted && item.Error == null).Should().Be(1);
+        checkerOutcomes.Count(item => item.Error is InvalidOperationException error
+            && error.Message.StartsWith("ACCOUNTING_EVENT_RELEASE_CHECKER_CONFLICT:", StringComparison.Ordinal)).Should().Be(1);
+
+        var reasonRequest = Request(database, "RELEASE-REASON", Guid.NewGuid()); var reasonId = await Prepare(reasonRequest);
+        var reasonRace = new EventLockCompetition();
+        var reasonOutcomes = await Task.WhenAll(
+            Release(reasonId, reasonRequest, database.CheckerId, "fixed release", reasonRace.Owner),
+            Release(reasonId, Request(database, "RELEASE-REASON", reasonRequest.PostingRequest.SourceDocumentId), database.CheckerId, "changed release", reasonRace.Contender));
+        reasonRace.AssertCompeted();
+        reasonOutcomes.Count(item => item.Result != null && item.Result.Status == AccountingEventStatuses.Posted && item.Error == null).Should().Be(1);
+        reasonOutcomes.Count(item => item.Error is InvalidOperationException error
+            && error.Message.StartsWith("ACCOUNTING_EVENT_RELEASE_REASON_CONFLICT:", StringComparison.Ordinal)).Should().Be(1);
+    }
+
+    [SqlServerFact]
     public async Task SecondBookFailureRollsBackEveryEconomicWrite_PersistsFailure_Retries_AndReversesExactGroup()
     {
         await using var database = await DisposableDatabase.CreateAsync();
         Seeded seeded;
         await using (var setup = database.Context()) seeded = await SeedAsync(setup, database);
-        var applicability = Applicability(seeded);
         var request = Request(database);
         Guid eventId;
         await using (var prepare = database.Context())
-            eventId = (await Service(prepare, database.TenantId, database.MakerId, applicability).CreateAsync(request)).Id;
+            eventId = (await Service(prepare, database.TenantId, database.MakerId).CreateAsync(request)).Id;
 
         await using (var release = database.Context())
         {
-            await FluentActions.Awaiting(() => Service(release, database.TenantId, database.CheckerId, applicability)
+            await FluentActions.Awaiting(() => Service(release, database.TenantId, database.CheckerId)
                 .ReleaseAsync(eventId, new ReleaseAccountingEventDto { Reason = "independent release", Request = Request(database) }))
                 .Should().ThrowAsync<InvalidOperationException>();
         }
@@ -79,6 +149,7 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             (await failed.JournalEntries.CountAsync()).Should().Be(0);
             (await failed.FinancePostingEvents.CountAsync()).Should().Be(0);
             (await failed.AccountBalances.CountAsync()).Should().Be(0);
+            (await failed.AccountingBookSelectionEvidence.CountAsync()).Should().Be(0);
             (await failed.Accounts.Where(x => x.Id == seeded.DebitId || x.Id == seeded.CreditId).SumAsync(x => x.Balance)).Should().Be(0m);
         }
 
@@ -93,22 +164,23 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         }
         await using (var retry = database.Context())
         {
-            var posted = await Service(retry, database.TenantId, database.CheckerId, applicability)
+            var posted = await Service(retry, database.TenantId, database.CheckerId)
                 .ReleaseAsync(eventId, new ReleaseAccountingEventDto { Reason = "independent release", Request = Request(database) });
             posted.Status.Should().Be(AccountingEventStatuses.Posted);
             posted.Postings.Should().HaveCount(2).And.OnlyContain(x => x.Status == AccountingEventStatuses.Posted && x.EventVersion == 1);
             posted.Attempts.Should().HaveCount(2);
+            (await retry.AccountingBookSelectionEvidence.CountAsync()).Should().Be(1);
         }
 
-        var reversalRequest = Request(database); reversalRequest.EventKind = AccountingEventKinds.Reversal;
+        var reversalRequest = Request(database, "EVENT-REVERSAL"); reversalRequest.EventKind = AccountingEventKinds.Reversal;
         reversalRequest.PostingRequest.PostingDate = database.EventDate.AddDays(1);
         reversalRequest.ReversesAccountingEventId = eventId; reversalRequest.SupersedesAccountingEventId = eventId;
         Guid reversalId;
         await using (var reversePrepare = database.Context())
-            reversalId = (await Service(reversePrepare, database.TenantId, database.MakerId, applicability).CreateAsync(reversalRequest)).Id;
+            reversalId = (await Service(reversePrepare, database.TenantId, database.MakerId).CreateAsync(reversalRequest)).Id;
         await using (var reverseRelease = database.Context())
         {
-            var reversed = await Service(reverseRelease, database.TenantId, database.CheckerId, applicability)
+            var reversed = await Service(reverseRelease, database.TenantId, database.CheckerId)
                 .ReleaseAsync(reversalId, new ReleaseAccountingEventDto { Reason = "exact group reversal", Request = reversalRequest });
             reversed.Version.Should().Be(2); reversed.RootAccountingEventId.Should().Be(eventId);
             reversed.EventDate.Should().Be(database.EventDate.AddDays(1));
@@ -119,6 +191,13 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         (await final.JournalEntries.CountAsync()).Should().Be(4);
         (await final.FinancePostingEvents.CountAsync()).Should().Be(4);
         (await final.AccountingEventPostings.CountAsync()).Should().Be(4);
+        var originalLeaves = await final.AccountingEventPostings.Where(x => x.AccountingEventId == eventId)
+            .ToDictionaryAsync(x => x.AccountingBookId, x => x.FinancePostingEventId!.Value);
+        var reversalLeaves = await final.AccountingEventPostings.Include(x => x.FinancePostingEvent)
+            .Where(x => x.AccountingEventId == reversalId).ToListAsync();
+        reversalLeaves.Should().OnlyContain(x => x.FinancePostingEvent != null && x.FinancePostingEvent.SourceModule == "GL"
+            && x.FinancePostingEvent.OriginModuleCode == "FIN" && x.FinancePostingEvent.SourceDocumentType == "FinancePostingEventReversal"
+            && x.FinancePostingEvent.PostingAction == "Reverse" && x.FinancePostingEvent.SourceDocumentId == originalLeaves[x.AccountingBookId]);
         (await final.Accounts.Where(x => x.Id == seeded.DebitId || x.Id == seeded.CreditId)
             .Select(x => x.Balance).ToListAsync()).Should().HaveCount(2).And.OnlyContain(value => value == 0m);
         var balances = await final.AccountBalances.Where(x => x.AccountId == seeded.DebitId || x.AccountId == seeded.CreditId).ToListAsync();
@@ -131,13 +210,40 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         (await final.AccountCurrencyExposures.CountAsync(x => x.AccountId == seeded.DebitId || x.AccountId == seeded.CreditId)).Should().Be(0);
     }
 
-    private static AccountingEventService Service(ApplicationDbContext db, Guid tenant, Guid actor, IAccountingBookApplicabilityService applicability)
+    private static AccountingEventService Service(ApplicationDbContext db, Guid tenant, Guid actor)
     {
         var user = User(tenant, actor); var audit = new Mock<IFinanceAuditService>();
         audit.Setup(x => x.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
         var leaf = new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit.Object);
+        var applicability = Applicability(db, tenant, actor, audit: audit.Object);
         return new AccountingEventService(db, user.Object, applicability, leaf, audit.Object,
             Options.Create(new AccountingEventOptions { Enabled = true }));
+    }
+
+    private static AccountingBookApplicabilityService Applicability(ApplicationDbContext db, Guid tenant, Guid actor,
+        bool governedWorkflow = false, IFinanceAuditService? audit = null)
+    {
+        var user = User(tenant, actor); var workflow = new Mock<IWorkflowService>();
+        if (governedWorkflow)
+        {
+            workflow.Setup(x => x.HasActiveApprovalWorkflowAsync(It.IsAny<string>())).ReturnsAsync(true);
+            workflow.Setup(x => x.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>()))
+                .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = Guid.NewGuid() });
+            workflow.Setup(x => x.CanUserApproveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(true);
+            workflow.Setup(x => x.ProcessApprovalStepAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()))
+                .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
+        }
+        if (audit is null)
+        {
+            var auditMock = new Mock<IFinanceAuditService>();
+            auditMock.Setup(x => x.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
+            audit = auditMock.Object;
+        }
+        var initialization = new Mock<IAccountingBookInitializationService>();
+        initialization.Setup(x => x.ValidateCurrentApprovedEvidenceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccountingBookInitializationEvidenceValidationDto { IsValid = true, InitializationId = Guid.NewGuid(), Version = 1,
+                EvidenceFingerprint = new string('A', 64), ReconciliationFingerprint = new string('B', 64) });
+        return new AccountingBookApplicabilityService(db, user.Object, workflow.Object, audit, initialization.Object);
     }
 
     private static Mock<ICurrentUserService> User(Guid tenant, Guid actor)
@@ -147,16 +253,9 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         user.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>()); return user;
     }
 
-    private static IAccountingBookApplicabilityService Applicability(Seeded seeded)
-    {
-        var mock = new Mock<IAccountingBookApplicabilityService>();
-        mock.Setup(x => x.FreezeAsync(It.IsAny<FreezeAccountingBookSelectionDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(seeded.Selection);
-        return mock.Object;
-    }
-
     private static async Task<Seeded> SeedAsync(ApplicationDbContext db, DisposableDatabase database)
     {
-        await db.Database.EnsureCreatedAsync(); var tenant = database.TenantId;
+        var tenant = database.TenantId;
         var primary = Book(tenant, "IFRS", true, AccountingBookType.PrimaryFull); var second = Book(tenant, "LOCAL", false, AccountingBookType.ParallelFull);
         var year = new FiscalYear { TenantId = tenant, FiscalYearName = "FY26", FiscalYearCode = "2026", Year = 2026, FiscalYearType = "Calendar",
             StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31), TotalDays = 365, NumberOfPeriods = 12, Status = "Open", IsActive = true };
@@ -166,26 +265,40 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         database.DebitId = debit.Id; database.CreditId = credit.Id;
         var pa = Classification(tenant, primary.Id, "ASSET", AccountType.Asset); var pl = Classification(tenant, primary.Id, "LIABILITY", AccountType.Liability);
         var sa = Classification(tenant, second.Id, "ASSET", AccountType.Asset); var sl = Classification(tenant, second.Id, "LIABILITY", AccountType.Liability);
-        var evidence = new AccountingBookSelectionEvidence { TenantId = tenant, EffectiveDate = database.EventDate, OriginatingModuleCode = "INV",
-            SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST", IdempotencyKey = "EVENT-1", CalculationInputHash = new string('A', 64),
-            SelectionFingerprint = new string('B', 64), FrozenByUserId = database.MakerId, FrozenAtUtc = DateTime.UtcNow };
-        evidence.Books = [EvidenceBook(tenant, evidence.Id, primary, 0, 'C'), EvidenceBook(tenant, evidence.Id, second, 1, 'D')];
         db.AddRange(Tenant(tenant), new FinanceSettings { TenantId = tenant, BaseCurrency = "GHS", CoaType = "Segmented", AccountSeparator = "-" }, primary, second,
             year, period, new ModuleDefinition { TenantId = tenant, ModuleCode = "INV", ModuleName = "Inventory", IsActive = true },
             new AccountingBookPeriod { TenantId = tenant, AccountingBookId = primary.Id, FiscalPeriodId = period.Id, PeriodStatus = AccountingBookPeriodStatus.Open },
             new AccountingBookPeriod { TenantId = tenant, AccountingBookId = second.Id, FiscalPeriodId = period.Id, PeriodStatus = AccountingBookPeriodStatus.Open },
             debit, credit, pa, pl, sa, sl,
-            Mapping(tenant, primary.Id, debit.Id, pa.Id), Mapping(tenant, primary.Id, credit.Id, pl.Id), Mapping(tenant, second.Id, debit.Id, sa.Id), evidence);
+            Mapping(tenant, primary.Id, debit.Id, pa.Id), Mapping(tenant, primary.Id, credit.Id, pl.Id), Mapping(tenant, second.Id, debit.Id, sa.Id));
         await db.SaveChangesAsync();
-        return new Seeded(primary.Id, second.Id, debit.Id, credit.Id, sa.Id, sl.Id, new AccountingBookSelectionDto { SelectionEvidenceId = evidence.Id,
-            EffectiveDate = database.EventDate, OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST",
-            CalculationInputHash = new string('A', 64), SelectionFingerprint = new string('B', 64), Books = evidence.Books.OrderBy(x => x.SelectionOrder)
-                .Select(x => new AccountingBookSelectionBookDto { AccountingBookId = x.AccountingBookId, AccountingBookCode = x.AccountingBookCodeSnapshot,
-                    SelectionOrder = x.SelectionOrder, AuthorityFingerprint = x.AuthorityFingerprint }).ToList() });
+        var maker = Applicability(db, tenant, database.MakerId, governedWorkflow: true);
+        var draft = await maker.CreateDraftAsync(new SaveAccountingBookApplicabilityPolicyDto { PolicyCode = "C6_SQL", Name = "C6 SQL policy",
+            EffectiveFrom = new DateTime(2026, 1, 1), Reason = "C6 migrated SQL authority", Rules = [new SaveAccountingBookApplicabilityRuleDto {
+                RuleCode = "INV_POST", Priority = 100, OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST",
+                AccountingBookIds = [primary.Id, second.Id] }] });
+        var submitted = await maker.SubmitAsync(draft.Id, new DecideAccountingBookApplicabilityPolicyDto { Reason = "submit", RowVersion = draft.RowVersion });
+        var checker = Applicability(db, tenant, database.CheckerId, governedWorkflow: true);
+        await checker.ApproveAsync(draft.Id, new DecideAccountingBookApplicabilityPolicyDto { Reason = "approve", RowVersion = submitted.RowVersion });
+        var selection = await maker.ResolveAsync(new ResolveAccountingBookApplicabilityDto { EffectiveDate = database.EventDate,
+            OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST" });
+        database.CalculationInputHash = selection.CalculationInputHash; database.SelectionFingerprint = selection.SelectionFingerprint;
+        return new Seeded(primary.Id, second.Id, debit.Id, credit.Id, sa.Id, sl.Id, selection);
+    }
+
+    private static async Task RepairSecondBookAsync(DisposableDatabase database, Seeded seeded)
+    {
+        await using var repair = database.Context();
+        foreach (var account in new[] { seeded.DebitId, seeded.CreditId })
+            if (!await repair.AccountAccountingBooks.AnyAsync(x => x.AccountId == account && x.AccountingBookId == seeded.SecondBookId))
+                repair.AccountAccountingBooks.Add(new AccountAccountingBook { TenantId = database.TenantId, AccountId = account,
+                    AccountingBookId = seeded.SecondBookId, AccountClassificationId = account == seeded.DebitId
+                        ? seeded.SecondAssetClassId : seeded.SecondLiabilityClassId, IsEnabled = true });
+        await repair.SaveChangesAsync();
     }
 
     private static CreateAccountingEventDto Request(DisposableDatabase database, string idempotencyKey = "EVENT-1", Guid? sourceDocumentId = null) => new() { SelectionIdempotencyKey = idempotencyKey,
-        ExpectedCalculationInputHash = new string('A', 64), ExpectedSelectionFingerprint = new string('B', 64), PostingRequest = new FinancePostingRequestV2Dto {
+        ExpectedCalculationInputHash = database.CalculationInputHash, ExpectedSelectionFingerprint = database.SelectionFingerprint, PostingRequest = new FinancePostingRequestV2Dto {
             SourceModule = "INV", OriginModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", SourceDocumentId = sourceDocumentId ?? database.SourceId,
             SourceDocumentTenantId = database.TenantId, PostingAction = "POST", PostingDate = database.EventDate, FunctionalCurrencyCode = "GHS",
             Description = "C6 SQL event", Lines = [new FinancePostingLineDto { AccountId = database.DebitId, DebitAmount = 100m, LineNumber = 1 },
@@ -201,10 +314,6 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         Code = code, Name = code, CoreAccountType = type, Status = AccountClassificationStatus.Active, IsPostingClassification = true };
     private static AccountAccountingBook Mapping(Guid tenant, Guid book, Guid account, Guid classification) => new() { TenantId = tenant, AccountingBookId = book,
         AccountId = account, AccountClassificationId = classification, IsEnabled = true };
-    private static AccountingBookSelectionEvidenceBook EvidenceBook(Guid tenant, Guid evidence, AccountingBook book, int order, char fingerprint) => new() {
-        TenantId = tenant, AccountingBookSelectionEvidenceId = evidence, AccountingBookId = book.Id, SelectionOrder = order,
-        AccountingBookCodeSnapshot = book.Code, AuthorityFingerprint = new string(fingerprint, 64) };
-
     private sealed record Seeded(Guid PrimaryBookId, Guid SecondBookId, Guid DebitId, Guid CreditId, Guid SecondAssetClassId,
         Guid SecondLiabilityClassId, AccountingBookSelectionDto Selection);
 
@@ -213,20 +322,74 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         public SqlServerFactAttribute() { if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER"))) Skip = "Set RHEMA_TEST_SQLSERVER to run exact-prefix disposable C6 service gates."; }
     }
 
+    private sealed class EventLockCompetition
+    {
+        private readonly TaskCompletionSource _ownerAcquired = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _contenderAtLock = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _ownerObservations; private int _contenderObservations;
+        public DbCommandInterceptor Owner => new EventLockInterceptor(this, owner: true);
+        public DbCommandInterceptor Contender => new EventLockInterceptor(this, owner: false);
+        public void AssertCompeted()
+        {
+            Volatile.Read(ref _ownerObservations).Should().Be(1, "the owner must pass the event application-lock command inside its transaction");
+            Volatile.Read(ref _contenderObservations).Should().Be(1, "the contender must reach the same lock while the owner transaction is still held");
+        }
+
+        private sealed class EventLockInterceptor(EventLockCompetition race, bool owner) : DbCommandInterceptor
+        {
+            public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command, CommandEventData eventData,
+                InterceptionResult<int> result, CancellationToken cancellationToken = default)
+            {
+                if (!owner && IsEventLock(command))
+                {
+                    await race._ownerAcquired.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+                    Interlocked.Increment(ref race._contenderObservations);
+                    race._contenderAtLock.TrySetResult();
+                }
+                return result;
+            }
+
+            public override async ValueTask<int> NonQueryExecutedAsync(DbCommand command, CommandExecutedEventData eventData, int result,
+                CancellationToken cancellationToken = default)
+            {
+                if (owner && IsEventLock(command))
+                {
+                    Interlocked.Increment(ref race._ownerObservations);
+                    race._ownerAcquired.TrySetResult();
+                    await race._contenderAtLock.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+                }
+                return result;
+            }
+
+            private static bool IsEventLock(DbCommand command) => command.CommandText.Contains("sp_getapplock", StringComparison.OrdinalIgnoreCase)
+                && command.Parameters.Cast<DbParameter>().Any(parameter => parameter.Value?.ToString()?.StartsWith("FIN:C6:EVENT:", StringComparison.Ordinal) == true);
+        }
+    }
+
     private sealed class DisposableDatabase : IAsyncDisposable
     {
         private static readonly Regex SafeName = new("^RHEMAERP_GL_REHEARSAL_C6_[A-Z0-9_]{1,64}$", RegexOptions.CultureInvariant);
         private readonly string _name; private readonly string _master; private readonly string _connection;
         public Guid TenantId { get; } = Guid.NewGuid(); public Guid MakerId { get; } = Guid.NewGuid(); public Guid CheckerId { get; } = Guid.NewGuid();
+        public Guid OtherCheckerId { get; } = Guid.NewGuid();
         public Guid SourceId { get; } = Guid.NewGuid(); public Guid DebitId { get; set; } public Guid CreditId { get; set; }
+        public string CalculationInputHash { get; set; } = new('A', 64); public string SelectionFingerprint { get; set; } = new('B', 64);
         public DateTime EventDate { get; } = new(2026, 9, 7);
         private DisposableDatabase(string name, string master, string connection) => (_name, _master, _connection) = (name, master, connection);
         public static async Task<DisposableDatabase> CreateAsync() { var configured = Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER")!;
             var name = $"RHEMAERP_GL_REHEARSAL_C6_{Guid.NewGuid():N}".ToUpperInvariant(); if (!SafeName.IsMatch(name)) throw new InvalidOperationException("C6 prefix refusal.");
             var master = new SqlConnectionStringBuilder(configured) { InitialCatalog = "master", TrustServerCertificate = true };
             var target = new SqlConnectionStringBuilder(configured) { InitialCatalog = name, TrustServerCertificate = true };
-            var db = new DisposableDatabase(name, master.ConnectionString, target.ConnectionString); await db.MasterAsync($"CREATE DATABASE [{name}]"); return db; }
-        public ApplicationDbContext Context() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection).Options);
+            var db = new DisposableDatabase(name, master.ConnectionString, target.ConnectionString); await db.MasterAsync($"CREATE DATABASE [{name}]");
+            await using var migrated = db.Context(); migrated.Database.SetCommandTimeout(TimeSpan.FromMinutes(3)); await migrated.Database.MigrateAsync();
+            return db; }
+        public ApplicationDbContext Context(DbCommandInterceptor? interceptor = null)
+        {
+            var builder = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection,
+                options => options.EnableRetryOnFailure().CommandTimeout(180));
+            if (interceptor is not null) builder.AddInterceptors(interceptor);
+            return new ApplicationDbContext(builder.Options);
+        }
         private async Task MasterAsync(string sql) { await using var c = new SqlConnection(_master); await c.OpenAsync(); await using var cmd = new SqlCommand(sql, c) { CommandTimeout = 120 }; await cmd.ExecuteNonQueryAsync(); }
         public async ValueTask DisposeAsync() { if (SafeName.IsMatch(_name)) await MasterAsync($"IF DB_ID(N'{_name}') IS NOT NULL BEGIN ALTER DATABASE [{_name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{_name}]; END"); }
     }

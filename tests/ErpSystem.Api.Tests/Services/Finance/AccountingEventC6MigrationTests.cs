@@ -27,7 +27,18 @@ public sealed class AccountingEventC6MigrationTests
             .And.Contain("TR_AccountingEventAttempts_C6AppendOnly").And.Contain("C6_EVENT_LINEAGE")
             .And.Contain("C6_EVENT_SELECTION").And.Contain("C6_EVENT_RELEASE").And.Contain("C6_POSTING_RESULT");
         sql.Should().Contain("i.[AccountingBookSelectionEvidenceId]<>p.[AccountingBookSelectionEvidenceId]")
-            .And.Contain("i.[EventKind]=N'Original' AND CONVERT(date,e.[EffectiveDate])<>i.[EventDate]");
+            .And.Contain("i.[EventKind]=N'Original' AND CONVERT(date,e.[EffectiveDate])<>i.[EventDate]")
+            .And.Contain("i.[SourceDocumentId]<>p.[SourceDocumentId]")
+            .And.Contain("C6_EVENT_OUTCOME_IMMUTABLE")
+            .And.Contain("C6_ATTEMPT_FINAL_REQUIRED")
+            .And.Contain("f.[SourceDocumentId]<>e.[SourceDocumentId]")
+            .And.Contain("DATALENGTH(i.[PostingAction])<>DATALENGTH(p.[PostingAction])")
+            .And.Contain("DATALENGTH(f.[PostingAction])<>DATALENGTH(e.[PostingAction])")
+            .And.Contain("e.[EventKind]=N'Correction'")
+            .And.Contain("N'AccountingEventCorrection'")
+            .And.Contain("e.[EventKind]=N'Reversal'")
+            .And.Contain("predecessor.[FinancePostingEventId]")
+            .And.Contain("N'FinancePostingEventReversal'");
         var events = operations.OfType<CreateTableOperation>().Single(item => item.Name == "AccountingEvents");
         events.UniqueConstraints.Should().Contain(item => item.Columns.SequenceEqual(new[] { "TenantId", "Id", "Version" }));
         var postings = operations.OfType<CreateTableOperation>().Single(item => item.Name == "AccountingEventPostings");
@@ -41,6 +52,12 @@ public sealed class AccountingEventC6MigrationTests
             && item.Columns.SequenceEqual(new[] { "TenantId", "OriginatingModuleCode", "SourceDocumentType", "SourceDocumentId", "PostingAction", "Version" }));
         operations.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
             && item.Table == "AccountingEventPostings" && item.Columns.SequenceEqual(new[] { "TenantId", "AccountingEventId", "EventVersion", "AccountingBookId" }));
+        operations.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
+            && item.Filter == "[FinancePostingEventId] IS NOT NULL" && item.Table == "AccountingEventPostings"
+            && item.Columns.SequenceEqual(new[] { "TenantId", "FinancePostingEventId" }));
+        operations.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
+            && item.Filter == "[JournalEntryId] IS NOT NULL" && item.Table == "AccountingEventPostings"
+            && item.Columns.SequenceEqual(new[] { "TenantId", "JournalEntryId" }));
         operations.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
             && item.Table == "AccountingEventAttempts" && item.Columns.SequenceEqual(new[] { "TenantId", "AccountingEventId", "AttemptNumber" }));
     }

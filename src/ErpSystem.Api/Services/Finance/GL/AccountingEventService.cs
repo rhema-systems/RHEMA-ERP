@@ -49,9 +49,12 @@ public sealed class AccountingEventService : IAccountingEventService
         var tenantId = _currentUser.GetRequiredFinanceTenantId();
         var actor = RequireActor();
         var key = CanonicalKey(request.SelectionIdempotencyKey);
-        var fingerprint = Fingerprint(request, key);
         var existing = await FindByKeyAsync(tenantId, key, cancellationToken);
-        if (existing is not null) { RequireRetryMatch(existing, fingerprint); return Map(existing); }
+        if (existing is not null)
+        {
+            RequireRetryMatch(existing, Fingerprint(request, key, existing.Version, existing.RootAccountingEventId));
+            return Map(existing);
+        }
         var eventId = request.AccountingEventId.GetValueOrDefault(Guid.NewGuid());
         if (eventId == Guid.Empty) eventId = Guid.NewGuid();
         var strategy = _db.Database.CreateExecutionStrategy();
@@ -63,8 +66,14 @@ public sealed class AccountingEventService : IAccountingEventService
             {
                 await AcquireEventLockAsync(tenantId, key, cancellationToken);
                 var raced = await FindByKeyAsync(tenantId, key, cancellationToken);
-                if (raced is not null) { RequireRetryMatch(raced, fingerprint); prepared = raced; await tx.CommitAsync(cancellationToken); return; }
+                if (raced is not null)
+                {
+                    RequireRetryMatch(raced, Fingerprint(request, key, raced.Version, raced.RootAccountingEventId));
+                    prepared = raced; await tx.CommitAsync(cancellationToken); return;
+                }
                 var lineage = await ResolveLineageAsync(tenantId, request, cancellationToken);
+                var rootId = lineage.RootId == Guid.Empty ? eventId : lineage.RootId;
+                var fingerprint = Fingerprint(request, key, lineage.Version, rootId);
                 if (lineage.Target is not null
                     && !string.Equals(request.ExpectedSelectionFingerprint, lineage.Target.SelectionFingerprint, StringComparison.Ordinal))
                     throw new InvalidOperationException("ACCOUNTING_EVENT_LINEAGE_SELECTION_CONFLICT: corrections and reversals must bind the target's frozen selection fingerprint.");
@@ -72,7 +81,7 @@ public sealed class AccountingEventService : IAccountingEventService
                 var now = DateTime.UtcNow;
                 prepared = new AccountingEvent
                 {
-                    Id = eventId, TenantId = tenantId, RootAccountingEventId = lineage.RootId == Guid.Empty ? eventId : lineage.RootId,
+                    Id = eventId, TenantId = tenantId, RootAccountingEventId = rootId,
                     EventKind = lineage.Kind, Version = lineage.Version, SupersedesAccountingEventId = lineage.SupersedesId,
                     CorrectsAccountingEventId = lineage.CorrectsId, ReversesAccountingEventId = lineage.ReversesId,
                     OriginatingModuleCode = (posting.OriginModuleCode ?? posting.SourceModule).Trim().ToUpperInvariant(),
@@ -101,14 +110,11 @@ public sealed class AccountingEventService : IAccountingEventService
         var prepared = await Query().SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("AccountingEvent was not found.");
         var checker = RequireActor();
-        if (prepared.PreparedByUserId == checker) throw new InvalidOperationException("The AccountingEvent checker must differ from its preparer.");
         var normalizedReason = release.Reason.Trim();
-        if (prepared.ReleasedByUserId.HasValue && prepared.ReleasedByUserId != checker)
-            throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_CHECKER_CONFLICT: a retry must retain the original checker.");
-        if (prepared.ReleaseReason is not null && !string.Equals(prepared.ReleaseReason, normalizedReason, StringComparison.Ordinal))
-            throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_REASON_CONFLICT: a retry must retain the original normalized reason.");
+        RequireReleaseMatch(prepared, checker, normalizedReason);
         release.Request.AccountingEventId = accountingEventId;
-        RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey)));
+        RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey),
+            prepared.Version, prepared.RootAccountingEventId));
         return await OrchestrateAsync(release.Request, normalizedReason, cancellationToken);
     }
 
@@ -128,16 +134,12 @@ public sealed class AccountingEventService : IAccountingEventService
         var eventId = request.AccountingEventId.GetValueOrDefault(Guid.NewGuid());
         if (eventId == Guid.Empty) eventId = Guid.NewGuid();
         var key = CanonicalKey(request.SelectionIdempotencyKey);
-        var requestFingerprint = Fingerprint(request, key);
+        string? requestFingerprint = null;
 
         var existing = await FindByKeyAsync(tenantId, key, cancellationToken);
-        if (existing is not null && existing.Status == AccountingEventStatuses.Posted)
-        {
-            RequireRetryMatch(existing, requestFingerprint);
-            return Map(existing);
-        }
         if (existing is not null)
         {
+            requestFingerprint = Fingerprint(request, key, existing.Version, existing.RootAccountingEventId);
             RequireRetryMatch(existing, requestFingerprint);
             eventId = existing.Id;
         }
@@ -157,43 +159,26 @@ public sealed class AccountingEventService : IAccountingEventService
                         .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IdempotencyKey == key && !item.IsDeleted, cancellationToken);
                     if (raced is not null && raced.Status == AccountingEventStatuses.Posted)
                     {
+                        requestFingerprint = Fingerprint(request, key, raced.Version, raced.RootAccountingEventId);
                         RequireRetryMatch(raced, requestFingerprint);
+                        RequireReleaseMatch(raced, actorId, releaseReason);
                         attempted = raced;
                         await transaction.CommitAsync(cancellationToken);
                         return;
                     }
 
-                    if (raced is not null) RequireRetryMatch(raced, requestFingerprint);
-                    var lineage = raced is null
-                        ? await ResolveLineageAsync(tenantId, request, cancellationToken)
-                        : new Lineage(raced.EventKind, raced.Version, raced.RootAccountingEventId,
-                            raced.SupersedesAccountingEventId, raced.CorrectsAccountingEventId,
-                            raced.ReversesAccountingEventId, null);
+                    if (raced is null || raced.Id != eventId)
+                        throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_IDENTITY_CONFLICT: the prepared event no longer matches its canonical release identity.");
+                    requestFingerprint = Fingerprint(request, key, raced.Version, raced.RootAccountingEventId);
+                    RequireRetryMatch(raced, requestFingerprint);
+                    RequireReleaseMatch(raced, actorId, releaseReason);
+                    var lineage = new Lineage(raced.EventKind, raced.Version, raced.RootAccountingEventId,
+                        raced.SupersedesAccountingEventId, raced.CorrectsAccountingEventId,
+                        raced.ReversesAccountingEventId, null);
                     var posting = request.PostingRequest ?? throw new InvalidOperationException("A Finance posting request is required.");
                     var now = DateTime.UtcNow;
                     releaseAttemptStartedAt = now;
-                    attempted = raced ?? new AccountingEvent
-                    {
-                        Id = eventId, TenantId = tenantId,
-                        OriginatingModuleCode = (posting.OriginModuleCode ?? posting.SourceModule).Trim().ToUpperInvariant(),
-                        SourceDocumentType = posting.SourceDocumentType.Trim().ToUpperInvariant(),
-                        SourceDocumentId = posting.SourceDocumentId, PostingAction = posting.PostingAction.Trim().ToUpperInvariant(),
-                        IdempotencyKey = key, EventKind = lineage.Kind, Version = lineage.Version,
-                        RootAccountingEventId = lineage.RootId == Guid.Empty ? eventId : lineage.RootId,
-                        SupersedesAccountingEventId = lineage.SupersedesId, CorrectsAccountingEventId = lineage.CorrectsId,
-                        ReversesAccountingEventId = lineage.ReversesId, SelectionFingerprint = request.ExpectedSelectionFingerprint,
-                        RequestFingerprint = requestFingerprint, EventDate = posting.PostingDate.Date,
-                        RequestedAtUtc = now, RequestedByUserId = actorId, CreatedAt = now, CreatedBy = ActorName()
-                    };
-                    if (raced is null) _db.AccountingEvents.Add(attempted);
-                    else
-                    {
-                        attempted.Status = AccountingEventStatuses.Pending; attempted.CompletedAtUtc = null;
-                        attempted.FailureMessage = null; attempted.UpdatedAt = now; attempted.UpdatedBy = ActorName();
-                    }
-                    attempted.ReleasedByUserId ??= actorId;
-                    attempted.ReleasedAtUtc ??= now;
-                    attempted.ReleaseReason ??= releaseReason;
+                    attempted = raced;
                     var attempt = new AccountingEventAttempt
                     {
                         TenantId = tenantId, AccountingEventId = eventId,
@@ -230,6 +215,14 @@ public sealed class AccountingEventService : IAccountingEventService
                     if (selection.Books.Count == 0)
                         throw new InvalidOperationException("ACCOUNTING_EVENT_EMPTY_SELECTION: frozen evidence selected no accounting book.");
 
+                    // C5 persists frozen evidence and its audit with SaveChanges. Keep the tracked event in
+                    // its valid PendingApproval/Failed database shape until FreezeAsync has completed.
+                    attempted.Status = AccountingEventStatuses.Pending;
+                    attempted.CompletedAtUtc = null;
+                    attempted.FailureMessage = null;
+                    attempted.ReleasedByUserId ??= actorId;
+                    attempted.ReleasedAtUtc ??= now;
+                    attempted.ReleaseReason ??= releaseReason;
                     attempted.AccountingBookSelectionEvidenceId = evidenceId;
                     attempted.SelectionFingerprint = selection.SelectionFingerprint;
                     attempted.Postings = selection.Books.OrderBy(item => item.SelectionOrder).Select(item => new AccountingEventPosting
@@ -244,6 +237,9 @@ public sealed class AccountingEventService : IAccountingEventService
                             CreatedAt = now,
                             CreatedBy = ActorName()
                         }).ToList();
+                    // The internal leaf verifies database-backed event/evidence/book authority. Persist this
+                    // valid Pending aggregate shape before invoking the first representation.
+                    await _db.SaveChangesAsync(cancellationToken);
 
                     var selectedBookIds = attempted.Postings.Select(item => item.AccountingBookId).ToList();
                     var reservationConsumerBookId = await _db.AccountingBooks.AsNoTracking()
@@ -259,11 +255,13 @@ public sealed class AccountingEventService : IAccountingEventService
                                 lineageTarget!.Postings.Single(item => item.AccountingBookId == representation.AccountingBookId).FinancePostingEventId
                                     ?? throw new InvalidOperationException("Original exact-book posting evidence is incomplete."),
                                 posting.PostingDate, posting.ReversalReason ?? "Exact AccountingEvent reversal", representationKey,
-                                new AccountingEventPostingAuthority(eventId, evidenceId), cancellationToken)
+                                new AccountingEventPostingAuthority(eventId, evidenceId, representation.AccountingBookId,
+                                    representation.AuthorityFingerprint), cancellationToken)
                             : await _leaf.PostAsync(CopyForBook(posting, representation.AccountingBookCodeSnapshot, representationKey,
                                     includeBudgetReservations: representation.AccountingBookId == reservationConsumerBookId,
-                                    isCorrection: lineage.Kind == AccountingEventKinds.Correction, eventId),
-                                new AccountingEventPostingAuthority(eventId, evidenceId), cancellationToken);
+                                    isCorrection: lineage.Kind == AccountingEventKinds.Correction, attempted),
+                                new AccountingEventPostingAuthority(eventId, evidenceId, representation.AccountingBookId,
+                                    representation.AuthorityFingerprint), cancellationToken);
                         representation.FinancePostingEventId = result.PostingEventId;
                         representation.JournalEntryId = result.JournalEntryId;
                         representation.PostedAtUtc = DateTime.UtcNow;
@@ -293,8 +291,9 @@ public sealed class AccountingEventService : IAccountingEventService
         catch (Exception ex)
         {
             _db.ChangeTracker.Clear();
-            await PersistFailureAsync(tenantId, actorId, eventId, key, requestFingerprint, request, attempted,
-                releaseAttemptStartedAt ?? DateTime.UtcNow, ex, cancellationToken);
+            await PersistFailureAsync(tenantId, actorId, eventId, key,
+                requestFingerprint ?? throw new InvalidOperationException("AccountingEvent release fingerprint was not resolved."), attempted,
+                releaseReason, releaseAttemptStartedAt ?? DateTime.UtcNow, ex, cancellationToken);
             throw;
         }
 
@@ -385,7 +384,8 @@ public sealed class AccountingEventService : IAccountingEventService
     }
 
     private async Task PersistFailureAsync(Guid tenantId, Guid actorId, Guid eventId, string key,
-        string fingerprint, CreateAccountingEventDto request, AccountingEvent? attempted, DateTime attemptStartedAt,
+        string fingerprint, AccountingEvent? attempted, string releaseReason,
+        DateTime attemptStartedAt,
         Exception exception, CancellationToken ct)
     {
         // Failure evidence is written only after the economic transaction rolled back. Reusing the
@@ -402,6 +402,8 @@ public sealed class AccountingEventService : IAccountingEventService
                     item.TenantId == tenantId && item.IdempotencyKey == key && !item.IsDeleted, ct);
                 if (failure is not null && failure.Status == AccountingEventStatuses.Posted)
                 {
+                    RequireRetryMatch(failure, fingerprint);
+                    RequireReleaseMatch(failure, actorId, releaseReason);
                     await tx.CommitAsync(ct);
                     return;
                 }
@@ -415,18 +417,22 @@ public sealed class AccountingEventService : IAccountingEventService
                 }
                 RequireRetryMatch(failure, fingerprint);
                 var now = DateTime.UtcNow;
-                failure.ReleasedByUserId ??= attempted.ReleasedByUserId;
-                failure.ReleasedAtUtc ??= attempted.ReleasedAtUtc;
-                failure.ReleaseReason ??= attempted.ReleaseReason;
-                failure.Status = AccountingEventStatuses.Failed; failure.CompletedAtUtc = now;
-                failure.FailureMessage = Truncate(exception.Message, 1000);
+                RequireReleaseMatch(failure, actorId, releaseReason);
+                failure.ReleasedByUserId ??= actorId;
+                failure.ReleasedAtUtc ??= attemptStartedAt;
+                failure.ReleaseReason ??= releaseReason;
+                // The first failure fixes the event-level terminal summary. Later retries append attempts
+                // without rewriting the prior outcome evidence after their economic transaction rolls back.
+                failure.Status = AccountingEventStatuses.Failed;
+                failure.CompletedAtUtc ??= now;
+                failure.FailureMessage ??= Truncate(exception.Message, 1000);
                 failure.Attempts.Add(new AccountingEventAttempt
                 {
                     TenantId = tenantId, AccountingEventId = failure.Id,
                     AttemptNumber = failure.Attempts.Count == 0 ? 1 : failure.Attempts.Max(item => item.AttemptNumber) + 1,
                     RequestFingerprint = fingerprint, Status = AccountingEventStatuses.Failed,
                     StartedAtUtc = attemptStartedAt, CompletedAtUtc = now,
-                    FailureMessage = failure.FailureMessage, CreatedAt = now, CreatedBy = ActorName()
+                    FailureMessage = Truncate(exception.Message, 1000), CreatedAt = now, CreatedBy = ActorName()
                 });
                 await _db.SaveChangesAsync(ct);
                 await AuditAsync(FinanceAuditEvents.AccountingEventFailed, failure, ct);
@@ -456,15 +462,15 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         }, ct);
 
     private static FinancePostingRequestV2Dto CopyForBook(FinancePostingRequestV2Dto source, string bookCode, string key,
-        bool includeBudgetReservations, bool isCorrection, Guid eventId) => new()
+        bool includeBudgetReservations, bool isCorrection, AccountingEvent accountingEvent) => new()
     {
-        SourceModule = isCorrection ? "GL" : source.SourceModule,
-        OriginModuleCode = isCorrection ? FinanceModuleLockCatalog.Finance : source.OriginModuleCode,
-        SourceDocumentType = isCorrection ? "AccountingEventCorrection" : source.SourceDocumentType,
-        SourceDocumentId = isCorrection ? eventId : source.SourceDocumentId,
+        SourceModule = isCorrection ? "GL" : source.SourceModule.Trim().ToUpperInvariant(),
+        OriginModuleCode = isCorrection ? FinanceModuleLockCatalog.Finance : accountingEvent.OriginatingModuleCode,
+        SourceDocumentType = isCorrection ? "AccountingEventCorrection" : accountingEvent.SourceDocumentType,
+        SourceDocumentId = isCorrection ? accountingEvent.Id : accountingEvent.SourceDocumentId,
         SourceDocumentTenantId = source.SourceDocumentTenantId, ExistingJournalEntryId = source.ExistingJournalEntryId,
         ReversalOfJournalEntryId = source.ReversalOfJournalEntryId, ReversalReason = source.ReversalReason,
-        ReversalType = source.ReversalType, PostingAction = source.PostingAction,
+        ReversalType = source.ReversalType, PostingAction = accountingEvent.PostingAction,
         SourceDocumentReference = source.SourceDocumentReference, Description = source.Description,
         PostingDate = source.PostingDate, FiscalPeriodId = source.FiscalPeriodId, JournalType = source.JournalType,
         FunctionalCurrencyCode = source.FunctionalCurrencyCode, IdempotencyKey = key, ReturnExistingOnDuplicate = source.ReturnExistingOnDuplicate,
@@ -490,43 +496,127 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
             throw new InvalidOperationException("ACCOUNTING_EVENT_LINEAGE_IDENTITY_CONFLICT: successors must retain the target's canonical economic source identity.");
     }
 
-    private static string Fingerprint(CreateAccountingEventDto request, string key)
+    private static string Fingerprint(CreateAccountingEventDto request, string key, int eventVersion, Guid rootAccountingEventId)
     {
         var posting = request.PostingRequest ?? throw new InvalidOperationException("A Finance posting request is required.");
-        var text = new StringBuilder("RHEMA-FINANCE-ACCOUNTING-EVENT-V1");
-        static string S(string? value) => value?.Trim() ?? "~";
-        static string D(decimal? value) => value?.ToString("G29", CultureInfo.InvariantCulture) ?? "~";
-        static string T(DateTime? value) => value?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? "~";
-        void Add(object? value) => text.Append('|').Append(value ?? "~");
-        Add(key); Add(S(request.EventKind).ToUpperInvariant()); Add(request.SupersedesAccountingEventId);
-        Add(request.CorrectsAccountingEventId); Add(request.ReversesAccountingEventId);
-        Add(S(request.ExpectedCalculationInputHash).ToUpperInvariant()); Add(S(request.ExpectedSelectionFingerprint).ToUpperInvariant());
-        Add(S(posting.SourceModule).ToUpperInvariant()); Add(S(posting.OriginModuleCode).ToUpperInvariant());
-        Add(S(posting.SourceDocumentType).ToUpperInvariant()); Add(posting.SourceDocumentId); Add(posting.SourceDocumentTenantId);
-        Add(posting.ExistingJournalEntryId); Add(posting.ReversalOfJournalEntryId); Add(S(posting.ReversalReason));
-        Add(S(posting.ReversalType).ToUpperInvariant()); Add(S(posting.PostingAction).ToUpperInvariant());
-        Add(S(posting.SourceDocumentReference)); Add(S(posting.Description)); Add(T(posting.PostingDate));
-        Add(posting.FiscalPeriodId); Add(S(posting.JournalType).ToUpperInvariant()); Add(S(posting.FunctionalCurrencyCode).ToUpperInvariant());
-        Add(posting.ReturnExistingOnDuplicate); Add(S(posting.ExchangeRateTypeOverride).ToUpperInvariant());
-        Add(S(posting.ExchangeRateQuoteSideOverride).ToUpperInvariant()); Add(S(posting.ExchangeRateOverrideReason));
-        Add(posting.ExchangeRateOverrideApprovedByUserId); Add(T(posting.ExchangeRateOverrideApprovedAt));
-        Add(posting.PreserveHistoricalExchangeRateSnapshot); Add(posting.AllowPostingToClosedPeriod);
-        Add(S(posting.BudgetReservationSourceDocumentType).ToUpperInvariant());
-        foreach (var reservation in posting.BudgetReservationIds.OrderBy(item => item)) Add($"B:{reservation:D}");
+        static string? S(string? value) => value?.Trim();
+        static string? U(string? value) => value?.Trim().ToUpperInvariant();
+        static string? D(decimal? value) => value?.ToString("G29", CultureInfo.InvariantCulture);
+        static string? T(DateTime? value) => value?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        static string? G(Guid? value) => value?.ToString("D");
+        var canonical = new CanonicalFingerprintWriter("RHEMA-FINANCE-ACCOUNTING-EVENT-V2");
+        void Add(string name, object? value) => canonical.Add(name, value switch
+        {
+            null => null,
+            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+            _ => value.ToString()
+        });
+        Add("event.key", key); Add("event.kind", U(request.EventKind));
+        Add("event.version", eventVersion); Add("event.rootId", rootAccountingEventId.ToString("D"));
+        Add("event.supersedesId", G(request.SupersedesAccountingEventId));
+        Add("event.correctsId", G(request.CorrectsAccountingEventId));
+        Add("event.reversesId", G(request.ReversesAccountingEventId));
+        Add("selection.calculationInputHash", U(request.ExpectedCalculationInputHash));
+        Add("selection.fingerprint", U(request.ExpectedSelectionFingerprint));
+        Add("posting.sourceModule", U(posting.SourceModule));
+        Add("posting.originModule", U(posting.OriginModuleCode));
+        Add("posting.documentType", U(posting.SourceDocumentType));
+        Add("posting.documentId", posting.SourceDocumentId.ToString("D"));
+        Add("posting.documentTenantId", G(posting.SourceDocumentTenantId));
+        Add("posting.existingJournalId", G(posting.ExistingJournalEntryId));
+        Add("posting.reversalJournalId", G(posting.ReversalOfJournalEntryId));
+        Add("posting.reversalReason", S(posting.ReversalReason));
+        Add("posting.reversalType", U(posting.ReversalType));
+        Add("posting.action", U(posting.PostingAction));
+        Add("posting.reference", S(posting.SourceDocumentReference));
+        Add("posting.description", S(posting.Description)); Add("posting.date", T(posting.PostingDate));
+        Add("posting.fiscalPeriodId", G(posting.FiscalPeriodId));
+        Add("posting.journalType", U(posting.JournalType));
+        Add("posting.functionalCurrency", U(posting.FunctionalCurrencyCode));
+        Add("posting.returnExisting", posting.ReturnExistingOnDuplicate);
+        Add("posting.rateTypeOverride", U(posting.ExchangeRateTypeOverride));
+        Add("posting.rateQuoteSideOverride", U(posting.ExchangeRateQuoteSideOverride));
+        Add("posting.rateOverrideReason", S(posting.ExchangeRateOverrideReason));
+        Add("posting.rateOverrideApprover", G(posting.ExchangeRateOverrideApprovedByUserId));
+        Add("posting.rateOverrideApprovedAt", T(posting.ExchangeRateOverrideApprovedAt));
+        Add("posting.preserveHistoricalRate", posting.PreserveHistoricalExchangeRateSnapshot);
+        Add("posting.allowClosedPeriod", posting.AllowPostingToClosedPeriod);
+        Add("budget.sourceDocumentType", U(posting.BudgetReservationSourceDocumentType));
+        var reservations = posting.BudgetReservationIds.OrderBy(item => item).ToList();
+        Add("budget.count", reservations.Count);
+        for (var index = 0; index < reservations.Count; index++)
+            Add($"budget[{index}].id", reservations[index].ToString("D"));
         // Collection position is evidence: equal-valued lines in a different order are not silently conflated.
+        Add("lines.count", posting.Lines.Count);
         foreach (var pair in posting.Lines.Select((line, index) => (line, index)))
         {
             var line = pair.line;
-            Add($"L:{pair.index}:{line.LineNumber}:{line.AccountId:D}:{line.SourceDocumentLineId}:{S(line.Description)}:{D(line.DebitAmount)}:{D(line.CreditAmount)}:{S(line.TransactionCurrency).ToUpperInvariant()}:{D(line.TransactionDebitAmount)}:{D(line.TransactionCreditAmount)}:{D(line.ForeignCurrencyAmount)}:{line.ExchangeRateId}:{D(line.ExchangeRate)}:{S(line.ExchangeRateSource)}:{T(line.ExchangeRateDate)}:{S(line.SourceReferenceNumber)}:{line.FinanceDimensionSetId}:{S(line.SegmentString)}:{S(line.Notes)}:{S(line.TransactionTag)}");
-            foreach (var dimension in line.Dimensions.OrderBy(item => item.DimensionCode, StringComparer.Ordinal)
-                         .ThenBy(item => item.ValueCode, StringComparer.Ordinal).ThenBy(item => item.SourceEntityType, StringComparer.Ordinal)
-                         .ThenBy(item => item.SourceEntityId))
-                Add($"DIM:{S(dimension.DimensionCode).ToUpperInvariant()}:{S(dimension.ValueCode).ToUpperInvariant()}:{S(dimension.SourceEntityType).ToUpperInvariant()}:{dimension.SourceEntityId}");
+            var prefix = $"lines[{pair.index}]";
+            Add($"{prefix}.lineNumber", line.LineNumber); Add($"{prefix}.accountId", line.AccountId.ToString("D"));
+            Add($"{prefix}.sourceLineId", G(line.SourceDocumentLineId)); Add($"{prefix}.description", S(line.Description));
+            Add($"{prefix}.debit", D(line.DebitAmount)); Add($"{prefix}.credit", D(line.CreditAmount));
+            Add($"{prefix}.transactionCurrency", U(line.TransactionCurrency));
+            Add($"{prefix}.transactionDebit", D(line.TransactionDebitAmount)); Add($"{prefix}.transactionCredit", D(line.TransactionCreditAmount));
+            Add($"{prefix}.foreignAmount", D(line.ForeignCurrencyAmount)); Add($"{prefix}.rateId", G(line.ExchangeRateId));
+            Add($"{prefix}.rate", D(line.ExchangeRate)); Add($"{prefix}.rateSource", S(line.ExchangeRateSource));
+            Add($"{prefix}.rateDate", T(line.ExchangeRateDate)); Add($"{prefix}.sourceReference", S(line.SourceReferenceNumber));
+            Add($"{prefix}.dimensionSetId", G(line.FinanceDimensionSetId)); Add($"{prefix}.segment", S(line.SegmentString));
+            Add($"{prefix}.notes", S(line.Notes)); Add($"{prefix}.tag", S(line.TransactionTag));
+            var dimensions = line.Dimensions.OrderBy(item => U(item.DimensionCode), StringComparer.Ordinal)
+                         .ThenBy(item => U(item.ValueCode), StringComparer.Ordinal).ThenBy(item => U(item.SourceEntityType), StringComparer.Ordinal)
+                         .ThenBy(item => item.SourceEntityId).ToList();
+            Add($"{prefix}.dimensions.count", dimensions.Count);
+            for (var dimensionIndex = 0; dimensionIndex < dimensions.Count; dimensionIndex++)
+            {
+                var dimension = dimensions[dimensionIndex]; var dimensionPrefix = $"{prefix}.dimensions[{dimensionIndex}]";
+                Add($"{dimensionPrefix}.code", U(dimension.DimensionCode));
+                Add($"{dimensionPrefix}.value", U(dimension.ValueCode));
+                Add($"{dimensionPrefix}.sourceType", U(dimension.SourceEntityType));
+                Add($"{dimensionPrefix}.sourceId", G(dimension.SourceEntityId));
+            }
         }
-        foreach (var tax in posting.TaxCalculationSnapshots.OrderBy(item => item.CalculationOrder)
-                     .ThenBy(item => item.DocumentType, StringComparer.Ordinal).ThenBy(item => item.DocumentId).ThenBy(item => item.DocumentLineId).ThenBy(item => item.TaxId))
-            Add($"TAX:{S(tax.DocumentType).ToUpperInvariant()}:{tax.DocumentId:D}:{tax.DocumentLineId}:{tax.TaxId:D}:{tax.TaxGroupId}:{tax.PostingAccountId}:{D(tax.BaseAmount)}:{D(tax.TaxableAmount)}:{D(tax.TaxRate)}:{D(tax.TaxAmount)}:{tax.CompoundBasis}:{tax.CalculationOrder}:{T(tax.CalculationDate)}:{tax.IsManualOverride}:{S(tax.OverrideReason)}");
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
+        // Tax DTO list order is transport-incidental; its governed CalculationOrder and stable identities
+        // define canonical order. Lines remain request-ordered because journal line position is economic evidence.
+        var taxes = posting.TaxCalculationSnapshots.OrderBy(item => item.CalculationOrder)
+            .ThenBy(item => U(item.DocumentType), StringComparer.Ordinal).ThenBy(item => item.DocumentId)
+            .ThenBy(item => item.DocumentLineId).ThenBy(item => item.TaxId).ThenBy(item => item.TaxGroupId)
+            .ThenBy(item => item.PostingAccountId).ThenBy(item => item.BaseAmount).ThenBy(item => item.TaxableAmount)
+            .ThenBy(item => item.TaxRate).ThenBy(item => item.TaxAmount).ThenBy(item => item.CompoundBasis)
+            .ThenBy(item => item.CalculationDate.ToUniversalTime()).ThenBy(item => item.IsManualOverride)
+            .ThenBy(item => S(item.OverrideReason), StringComparer.Ordinal).ToList();
+        Add("taxes.count", taxes.Count);
+        for (var index = 0; index < taxes.Count; index++)
+        {
+            var tax = taxes[index]; var prefix = $"taxes[{index}]";
+            Add($"{prefix}.documentType", U(tax.DocumentType)); Add($"{prefix}.documentId", tax.DocumentId.ToString("D"));
+            Add($"{prefix}.documentLineId", G(tax.DocumentLineId)); Add($"{prefix}.taxId", tax.TaxId.ToString("D"));
+            Add($"{prefix}.taxGroupId", G(tax.TaxGroupId)); Add($"{prefix}.postingAccountId", G(tax.PostingAccountId));
+            Add($"{prefix}.baseAmount", D(tax.BaseAmount)); Add($"{prefix}.taxableAmount", D(tax.TaxableAmount));
+            Add($"{prefix}.rate", D(tax.TaxRate)); Add($"{prefix}.amount", D(tax.TaxAmount));
+            Add($"{prefix}.compoundBasis", Convert.ToInt32(tax.CompoundBasis, CultureInfo.InvariantCulture));
+            Add($"{prefix}.calculationOrder", tax.CalculationOrder); Add($"{prefix}.calculationDate", T(tax.CalculationDate));
+            Add($"{prefix}.manualOverride", tax.IsManualOverride); Add($"{prefix}.overrideReason", S(tax.OverrideReason));
+        }
+        return canonical.Hash();
+    }
+
+    private sealed class CanonicalFingerprintWriter(string version)
+    {
+        private readonly StringBuilder _text = new();
+
+        public void Add(string name, string? value)
+        {
+            // Names and UTF-8 byte lengths make adjacent values and embedded delimiters unambiguous.
+            _text.Append(Encoding.UTF8.GetByteCount(name)).Append(':').Append(name).Append('=');
+            if (value is null) _text.Append("-1:;");
+            else _text.Append(Encoding.UTF8.GetByteCount(value)).Append(':').Append(value).Append(';');
+        }
+
+        public string Hash()
+        {
+            var payload = $"{Encoding.UTF8.GetByteCount(version)}:{version};{_text}";
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+        }
     }
 
     private static string CanonicalKey(string value)
@@ -540,6 +630,16 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
     {
         if (!string.Equals(item.RequestFingerprint, fingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("ACCOUNTING_EVENT_IDEMPOTENCY_CONFLICT: the key already identifies different immutable evidence.");
+    }
+
+    private static void RequireReleaseMatch(AccountingEvent item, Guid checker, string normalizedReason)
+    {
+        if (item.PreparedByUserId == checker)
+            throw new InvalidOperationException("The AccountingEvent checker must differ from its preparer.");
+        if (item.ReleasedByUserId.HasValue && item.ReleasedByUserId != checker)
+            throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_CHECKER_CONFLICT: a retry must retain the original checker.");
+        if (item.ReleaseReason is not null && !string.Equals(item.ReleaseReason, normalizedReason, StringComparison.Ordinal))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_REASON_CONFLICT: a retry must retain the original normalized reason.");
     }
 
     private Guid RequireActor() => Guid.TryParse(_currentUser.UserId, out var actor) && actor != Guid.Empty

@@ -2964,6 +2964,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             });
             entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.EventVersion, item.AccountingBookId }).IsUnique();
             entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.EventVersion, item.SelectionOrder }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.FinancePostingEventId }).IsUnique()
+                .HasFilter("[FinancePostingEventId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.JournalEntryId }).IsUnique()
+                .HasFilter("[JournalEntryId] IS NOT NULL");
             entity.HasOne(item => item.AccountingEvent).WithMany(item => item.Postings)
                 .HasForeignKey(item => new { item.TenantId, item.AccountingEventId, item.EventVersion })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Version }).OnDelete(DeleteBehavior.Restrict);

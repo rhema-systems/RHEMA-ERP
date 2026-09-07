@@ -226,8 +226,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         AccountingEventPostingAuthority authority,
         CancellationToken cancellationToken)
     {
-        if (authority.AccountingEventId == Guid.Empty || authority.AccountingBookSelectionEvidenceId == Guid.Empty)
-            throw new InvalidOperationException("Canonical AccountingEvent and frozen selection authority are required.");
+        RequireCompleteAccountingEventAuthority(authority);
         if (_context.Database.IsRelational() && _context.Database.CurrentTransaction is null)
             throw new InvalidOperationException("AccountingEvent representations require one caller-owned database transaction.");
 
@@ -240,11 +239,14 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         if (eventTracked is null)
             throw new InvalidOperationException("AccountingEvent posting authority is not tracked in the active Finance unit of work.");
 
+        if (string.IsNullOrWhiteSpace(request.AccountingBookCode))
+            throw new InvalidOperationException("AccountingEvent representation requires its exact frozen accounting-book code.");
+        await RequireAccountingEventBookAuthorityAsync(tenantId, eventTracked, authority.AccountingBookId,
+            request.AccountingBookCode.Trim().ToUpperInvariant(), authority, cancellationToken);
         var validation = await ValidatePostingRequestAsync(tenantId, request, request.AccountingBookCode,
             producerContext: null, allowHistoricalMappingException: false, cancellationToken);
-        if (!eventTracked.Postings.Any(item => item.AccountingBookId == validation.AccountingBookId
-                && string.Equals(item.AccountingBookCodeSnapshot, validation.AccountingBookCode, StringComparison.Ordinal)))
-            throw new InvalidOperationException("The requested book is not part of the AccountingEvent frozen selection.");
+        await RequireAccountingEventBookAuthorityAsync(tenantId, eventTracked, validation.AccountingBookId,
+            validation.AccountingBookCode, authority, cancellationToken);
         return await ExecutePostingAsync(tenantId, validation, request,
             allowAccountingEventSibling: true, cancellationToken);
     }
@@ -257,7 +259,16 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         AccountingEventPostingAuthority authority,
         CancellationToken cancellationToken)
     {
+        RequireCompleteAccountingEventAuthority(authority);
         var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+        if (_context.Database.IsRelational() && _context.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("AccountingEvent representations require one caller-owned database transaction.");
+        var eventTracked = _context.AccountingEvents.Local.SingleOrDefault(item => item.Id == authority.AccountingEventId
+                && item.TenantId == tenantId && item.AccountingBookSelectionEvidenceId == authority.AccountingBookSelectionEvidenceId);
+        if (eventTracked is null)
+            throw new InvalidOperationException("AccountingEvent posting authority is not tracked in the active Finance unit of work.");
+        await RequireAccountingEventBookAuthorityAsync(tenantId, eventTracked, authority.AccountingBookId,
+            exactBookCode: null, authority: authority, cancellationToken: cancellationToken);
         var original = await _context.FinancePostingEvents.AsNoTracking().Include(item => item.JournalEntry)
             .ThenInclude(item => item!.Transactions).SingleAsync(item => item.TenantId == tenantId
                 && item.Id == financePostingEventId && !item.IsDeleted, cancellationToken);
@@ -287,19 +298,61 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 SegmentString = item.SegmentString, Notes = reason.Trim(), TransactionTag = "Reversal"
             }).ToList()
         };
-        if (_context.Database.IsRelational() && _context.Database.CurrentTransaction is null)
-            throw new InvalidOperationException("AccountingEvent representations require one caller-owned database transaction.");
-        var eventTracked = _context.AccountingEvents.Local.SingleOrDefault(item => item.Id == authority.AccountingEventId
-                && item.TenantId == tenantId && item.AccountingBookSelectionEvidenceId == authority.AccountingBookSelectionEvidenceId);
-        if (eventTracked is null)
-            throw new InvalidOperationException("AccountingEvent posting authority is not tracked in the active Finance unit of work.");
         var validation = await ValidatePostingRequestAsync(tenantId, request, request.AccountingBookCode,
             producerContext: null, allowHistoricalMappingException: true, cancellationToken);
-        if (!eventTracked.Postings.Any(item => item.AccountingBookId == validation.AccountingBookId
-                && string.Equals(item.AccountingBookCodeSnapshot, validation.AccountingBookCode, StringComparison.Ordinal)))
-            throw new InvalidOperationException("The requested book is not part of the AccountingEvent frozen selection.");
+        await RequireAccountingEventBookAuthorityAsync(tenantId, eventTracked, validation.AccountingBookId,
+            validation.AccountingBookCode, authority, cancellationToken);
         return await ExecutePostingAsync(tenantId, validation, request,
             allowAccountingEventSibling: true, cancellationToken);
+    }
+
+    private static void RequireCompleteAccountingEventAuthority(AccountingEventPostingAuthority authority)
+    {
+        if (authority.AccountingEventId == Guid.Empty || authority.AccountingBookSelectionEvidenceId == Guid.Empty
+            || authority.AccountingBookId == Guid.Empty || string.IsNullOrWhiteSpace(authority.AuthorityFingerprint))
+            throw new InvalidOperationException("Canonical AccountingEvent, frozen selection, and exact-book authority are required.");
+    }
+
+    private async Task RequireAccountingEventBookAuthorityAsync(
+        Guid tenantId,
+        AccountingEvent eventTracked,
+        Guid validatedBookId,
+        string? exactBookCode,
+        AccountingEventPostingAuthority authority,
+        CancellationToken cancellationToken)
+    {
+        if (validatedBookId != authority.AccountingBookId
+            || !eventTracked.Postings.Any(item => item.AccountingBookId == authority.AccountingBookId
+                && (exactBookCode is null || string.Equals(item.AccountingBookCodeSnapshot, exactBookCode, StringComparison.Ordinal))
+                && string.Equals(item.AuthorityFingerprint, authority.AuthorityFingerprint, StringComparison.Ordinal)))
+            throw new InvalidOperationException("The requested exact book is not part of the AccountingEvent frozen authority.");
+
+        if (!_context.Database.IsRelational()) return;
+        var bound = await _context.AccountingEventPostings.AsNoTracking().AnyAsync(posting =>
+            posting.TenantId == tenantId
+            && posting.AccountingEventId == authority.AccountingEventId
+            && posting.EventVersion == eventTracked.Version
+            && posting.AccountingBookId == authority.AccountingBookId
+            && (exactBookCode == null || posting.AccountingBookCodeSnapshot == exactBookCode)
+            && posting.AuthorityFingerprint == authority.AuthorityFingerprint
+            && posting.Status == AccountingEventStatuses.Pending
+            && !posting.IsDeleted
+            && _context.AccountingEvents.Any(accountingEvent =>
+                accountingEvent.TenantId == tenantId
+                && accountingEvent.Id == authority.AccountingEventId
+                && accountingEvent.Version == posting.EventVersion
+                && accountingEvent.AccountingBookSelectionEvidenceId == authority.AccountingBookSelectionEvidenceId
+                && accountingEvent.Status == AccountingEventStatuses.Pending
+                && !accountingEvent.IsDeleted)
+            && _context.AccountingBookSelectionEvidenceBooks.Any(selectionBook =>
+                selectionBook.TenantId == tenantId
+                && selectionBook.AccountingBookSelectionEvidenceId == authority.AccountingBookSelectionEvidenceId
+                && selectionBook.AccountingBookId == authority.AccountingBookId
+                && (exactBookCode == null || selectionBook.AccountingBookCodeSnapshot == exactBookCode)
+                && selectionBook.AuthorityFingerprint == authority.AuthorityFingerprint
+                && !selectionBook.IsDeleted), cancellationToken);
+        if (!bound)
+            throw new InvalidOperationException("AccountingEvent exact-book authority is not durably bound to its frozen selection.");
     }
 
     public async Task<FinanceReversalPlanDto> GetReversalPlanAsync(
