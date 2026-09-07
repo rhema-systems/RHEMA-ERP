@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -19,6 +20,72 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementAwardReadinessEvaluatorSodTests
 {
+    [Theory]
+    [InlineData("legacy-submitter", true)]
+    [InlineData("approvers-only", true)]
+    [InlineData("unknown-actor", false)]
+    [InlineData("wrong-initiator", false)]
+    [InlineData("wrong-source", false)]
+    [InlineData("wrong-definition", false)]
+    [InlineData("pending-workflow", false)]
+    [InlineData("unverified-final-approver", false)]
+    public async Task ExceptionalAuthorityUsesExactCompletedWorkflowNotSubmissionHistory(
+        string scenario, bool allowed)
+    {
+        await using var fixture = new Fixture();
+        var evaluatorId = Guid.NewGuid();
+        var source = await fixture.AddExceptionalTenderAsync(evaluatorId);
+        var control = await fixture.Context.Set<ProcurementExceptionalSourcingControl>().SingleAsync();
+        var submitterId = Guid.NewGuid();
+        control.SubmittedForApprovalById = submitterId;
+        control.ApprovedById = scenario == "unverified-final-approver" ? submitterId : fixture.ActorId;
+        control.ApprovalActorsJson = JsonSerializer.Serialize(scenario switch
+        {
+            "approvers-only" => new[] { fixture.ActorId },
+            "unknown-actor" => new[] { submitterId, fixture.ActorId, Guid.NewGuid() },
+            _ => new[] { submitterId, fixture.ActorId }
+        });
+        var workflow = new WorkflowInstance
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            WorkflowDefinitionId = scenario == "wrong-definition" ? Guid.NewGuid() : control.WorkflowDefinitionId,
+            EntityId = scenario == "wrong-source" ? Guid.NewGuid() : source.Id,
+            EntityTypeId = Guid.NewGuid(),
+            InitiatedById = scenario == "wrong-initiator" ? Guid.NewGuid() : submitterId,
+            Status = scenario == "pending-workflow" ? WorkflowInstanceStatus.InProgress : WorkflowInstanceStatus.Completed,
+            CompletedDate = DateTime.UtcNow
+        };
+        control.WorkflowInstanceId = workflow.Id;
+        var step = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            WorkflowInstanceId = workflow.Id, WorkflowInstance = workflow,
+            WorkflowStepId = Guid.NewGuid(), Status = WorkflowStepInstanceStatus.Completed
+        };
+        fixture.Context.AddRange(workflow, step, new WorkflowApproval
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            StepInstanceId = step.Id, StepInstance = step,
+            Status = WorkflowApprovalStatus.Approved,
+            ProcessedById = fixture.ActorId, ProcessedDate = DateTime.UtcNow
+        });
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+
+        if (!allowed)
+        {
+            await fixture.Service.Invoking(service => service.GetEvaluatorAwardApproverSodStatusAsync(
+                    source.Type, source.Id, scenario))
+                .Should().ThrowAsync<ProcurementAwardReadinessValidationException>();
+            return;
+        }
+        var status = await fixture.Service.GetEvaluatorAwardApproverSodStatusAsync(source.Type, source.Id, scenario);
+        status.Allowed.Should().BeTrue();
+        status.EvaluatorUserIds.Should().Equal(evaluatorId);
+        status.IndependentApprovalActorUserIds.Should().Equal(fixture.ActorId);
+        status.IndependentApprovalActorUserIds.Should().NotContain(submitterId);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

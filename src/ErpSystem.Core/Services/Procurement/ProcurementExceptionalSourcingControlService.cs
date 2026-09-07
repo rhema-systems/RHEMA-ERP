@@ -271,7 +271,8 @@ public sealed class ProcurementExceptionalSourcingControlService : IProcurementE
                 control.Status = ProcurementExceptionalSourcingControlStatus.PendingApproval;
                 control.SubmittedForApprovalAtUtc = now;
                 control.SubmittedForApprovalById = _currentUser.UserId;
-                control.ApprovalActorsJson = JsonSerializer.Serialize(new[] { _currentUser.UserId }, JsonOptions);
+                // Submission is retained separately; it is not an approval.
+                control.ApprovalActorsJson = "[]";
                 control.WorkflowInstanceId = workflow.WorkflowInstanceId;
                 Touch(control, now);
                 await Controls.UpdateAsync(control);

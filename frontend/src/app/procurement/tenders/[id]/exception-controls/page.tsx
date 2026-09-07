@@ -780,7 +780,12 @@ export default function ExceptionalSourcingControlsPage() {
             </ActionCard>
           )}
 
-          {actions.canRecommend && (
+          {actions.canRecommend && !hasPermission('procurement.tender.evaluate') && (
+            <p className="text-sm text-muted-foreground">
+              Awaiting a recommendation from an authorized evaluator.
+            </p>
+          )}
+          {actions.canRecommend && hasPermission('procurement.tender.evaluate') && (
             <ActionCard title={control.method === 5 ? 'Recommend approved quotation' : 'Record negotiated recommendation'}>
               <BidSelect
                 control={control}
@@ -827,9 +832,9 @@ export default function ExceptionalSourcingControlsPage() {
           {actions.canAward && !awardGateAllows && (
             <ActionCard title="Award-readiness gate">
               <p className="text-sm text-muted-foreground">
-                A current server-derived Ready decision for the exact negotiated
-                recommendation is required before the controlled award action is
-                available.
+                A current server-derived Ready decision for the exact{' '}
+                {control.method === 5 ? 'approved quotation' : 'negotiated recommendation'}{' '}
+                is required before the controlled award action is available.
               </p>
               <Button asChild variant="outline">
                 <Link
@@ -840,7 +845,7 @@ export default function ExceptionalSourcingControlsPage() {
               </Button>
             </ActionCard>
           )}
-          {actions.canAward && awardGateAllows && (
+          {actions.canAward && awardGateAllows && hasPermission('procurement.tender.approve') && (
             <ActionCard title="Record controlled award">
               <Field label="Award reference">
                 <Input
