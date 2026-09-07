@@ -55,12 +55,14 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { TenderDocumentTemplateEditor } from './TenderDocumentTemplateEditor';
 import { toast } from 'sonner';
 
-const base = {
+const base: ProcurementTenderDocumentTemplate = {
   id: 'template',
+  templateKey: 'template-family',
   templateCode: 'UAT-NCT',
   name: 'NCT document',
   version: 1,
   status: 'PendingApproval',
+  isEffective: false,
   documentTypeCode: 'TENDER-DOCUMENT',
   effectiveFromUtc: '2026-09-07T00:00:00Z',
   policySetId: 'policy',
@@ -76,7 +78,8 @@ const base = {
   blockedReasons: [],
   contentReference: '',
   contentChecksumSha256: '',
-} as ProcurementTenderDocumentTemplate;
+  integrityHash: 'test-integrity',
+};
 const baseWorkflow: WorkflowEvidenceReviewInstanceDto = {
   id: 'flow',
   entityId: 'template',
