@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C6 — neutral AccountingEvent and atomic per-book orchestration |
-| Status | `IN_PROGRESS` |
+| Status | `REVIEW_REQUIRED` |
 | Implementing task | `Assess GL configuration changes` (`01a0648a-99d2-7320-aced-b2b22d160334`) |
 | Exact base | `f41e8e8fe81d5caceab635d6c143e7200b84a0ed` |
 | Branch | `codex/finance-accounting-event-c6` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent schema/posting review: GPT-5.6 Sol High |
-| Review status | C6 cycle 1 `CHANGES_REQUIRED`; substantive GPT-5.6 Sol Medium atomicity/identity correction active |
+| Review status | Corrected C6 candidate `d22305acf1d2976567c05fb8148d9b4019e2b68d`; independent GPT-5.6 Sol High re-review active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -609,6 +609,15 @@ model, 454-migration discovery, idempotent script generation, exact ancestry, cl
 The coordinator dispatched all seven findings for one substantive GPT-5.6 Sol Medium correction with explicit
 owner-facing invariant comments. Integration and later stages remain blocked; no database was accessed or
 mutated.
+
+The implementer completed the substantive C6 correction as
+`d22305acf1d2976567c05fb8148d9b4019e2b68d` on top of the original two-commit candidate. The resulting
+three-commit worktree is clean and its full range passes `git diff --check`. Independent GPT-5.6 Sol High
+re-review is active over all seven cycle-1 atomicity, canonical fingerprint, event-bound leaf ownership,
+in-lock release authority, successor-source lineage, immutable outcome/attempt and migrated synchronized SQL
+findings. A read-only structured handoff was requested because the task turn exposed no final text. Integration
+and later stages remain blocked pending approval; no migration was applied and configured `RHEMAERP` remains
+untouched.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
