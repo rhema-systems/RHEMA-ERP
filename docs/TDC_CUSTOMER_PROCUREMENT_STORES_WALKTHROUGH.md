@@ -315,7 +315,20 @@ Open the **same template**, inspect its uploaded document in the document-review
 
 **Expected:** **Document published**. This publishes the reusable controlled document, **not the tender advertisement**.
 
-**`procurementofficer`:** return to the original tender's process sidebar → **Open document register** → **Refresh** → **Bind approved version**. Check the exact approved version, issue/fee terms, submission/opening/bid-validity dates and required publication/advertisement evidence. If dates expired during preparation, use the supported unpublished rescheduling/approval process before publishing; do not edit SQL, backdate or bypass the deadline control.
+**`procurementofficer`:** return to the original tender's process sidebar → **Open document register** → **Refresh** → **Bind approved version**. Check the exact approved version, issue/fee terms and bid validity. **Original submission deadline** and **Original opening scheduled** are read-only: they record the tender's existing schedule, not a place to overwrite it.
+
+**If the dates are still suitable:** leave **Request new dates for approval** unchecked and select **Bind immutable version**.
+
+**If dates expired before the first binding, or need moving before publication:** for an eligible approved, never-published open NCT, use the same **Bind approved version** dialog:
+
+1. Select **Request new dates for approval** (already selected when the existing deadline has elapsed).
+2. Enter **New submission deadline** in the future and later than the original; set **New opening scheduled** later than both submission and the original opening. Set **Bid validity until** after the proposed submission deadline. Use the agreed demonstration dates; do not backdate.
+3. Select the Published **Schedule approval workflow** (`TDC Sourcing Approval · v1` for this local setup), enter **Reason for new dates** and **Schedule evidence reference**. A reference such as `LOCAL-UAT-NCT-SCHEDULE-001` is simulated UAT evidence, not proof of real approval.
+4. Click **Bind and request schedule approval** once. This records the exact approved document and original schedule together with a **Pending approval** schedule change. **It does not change the tender dates or publish the tender.** If saving succeeds but the page cannot refresh, use **Refresh register**, not another submission.
+5. Check the pending change's embedded workflow. If it starts with a **Submitted** preparation task assigned to `procurementofficer`, complete its required checklist/attachments and **Complete Task** first. Then sign in as the independent reviewer shown there (`procurementapprover` / `TDC_HEAD_OF_PROCUREMENT` in this setup). Open the same document register, review the proposed dates and evidence, complete any required checklist or signature review, then approve the workflow and its schedule decision as prompted. The requester must not approve their own request.
+6. Return as `procurementofficer` and **Refresh**. Confirm the change is **Approved**, both effective dates match the tender, and the original dates remain visible in history. If rejected or still pending, do not publish. An already-bound register uses **Reschedule before publication** instead of binding again.
+
+This recovery is not offered for published/previously published tenders, restricted or QCBS routes, or sources with bids, issued documents or statutory advertisement controls. Use the applicable governed process; do not edit SQL, backdate or bypass the server controls. Check any required publication/advertisement evidence separately before publishing.
 
 Return to the tender and **Publish Tender** only after its readiness conditions pass. Do not issue documents to bidders before tender publication. After publication, record document issue/sale to the actual recipient using saved records; retain any fee/receipt evidence required by the terms.
 
