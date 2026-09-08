@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Pending bounded Inventory implementation, then independent GPT-5.6 Sol High accounting/security/concurrency review |
+| Review status | Inventory sequencing reconciliation complete; bounded preassigned-ID ambient-create correction active, then independent Sol High review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -999,6 +999,17 @@ all other callers. Inventory owns the transaction and deterministic group receip
 success, and rolls back before the separate durable-failure boundary. Inventory may not select/enumerate books,
 derive C5 evidence, call posting leaves, auto-approve or enable disabled C6-C8 defaults. Terra Medium implementation
 is active; Finance schema/migration changes remain out of scope and configured `RHEMAERP` remains untouched.
+
+Inventory reconciliation found that the distinct Stock Adjustment member identity is currently generated only by
+`IStockAdjustmentService.CreateAsync`, which persists before C8 preparation. Preparing afterward would leave an
+owner mutation when C8 is disabled or preparation fails, while preparing beforehand lacks the exact member ID.
+The bounded owner refactor is therefore extended only as required to accept a stable preassigned Stock Adjustment
+ID on the disposal-scoped ambient-create path. That path must add the same entity as a tracked, uncommitted owner
+mutation in the caller's shared Serializable context; it must not save independently, own the transaction or call
+the legacy Finance adapter. The ID must be deterministic for the exact tenant/disposal retry authority and collision
+fail closed. Public Stock Adjustment creation/posting behavior for every other caller remains unchanged. This is
+the minimum in-scope sequencing correction needed to satisfy disabled-default and zero-partial-mutation gates;
+implementation remains active on the original exact base with no database access.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
