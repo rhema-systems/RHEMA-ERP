@@ -187,12 +187,12 @@ function NewPurchaseOrderPageContent() {
 
   const ensureWarehouseItemsLoaded = async (warehouseId: string) => {
     const normalized = normalizeSelectedWarehouseId(warehouseId);
-    if (!normalized || warehouseItemsByWarehouseId[normalized]) {
-      return;
-    }
+    if (!normalized) return [];
+    if (warehouseItemsByWarehouseId[normalized]) return warehouseItemsByWarehouseId[normalized];
 
     const items = await inventoryManagementService.getWarehouseItems(normalized);
     setWarehouseItemsByWarehouseId(prev => ({ ...prev, [normalized]: items || [] }));
+    return items || [];
   };
 
   const ensureWarehouseItemsByInventoryItemLoaded = async (inventoryItemId: string) => {
@@ -488,8 +488,7 @@ function NewPurchaseOrderPageContent() {
 
       const effectiveWarehouseId = getEffectiveWarehouseIdForLine(editingItem.warehouseId);
       if (effectiveWarehouseId) {
-        await ensureWarehouseItemsLoaded(effectiveWarehouseId);
-        const allowedItems = warehouseItemsByWarehouseId[effectiveWarehouseId] || [];
+        const allowedItems = await ensureWarehouseItemsLoaded(effectiveWarehouseId);
         if (!allowedItems.some(wi => wi.inventoryItemId === itemId)) {
           toast.error('This item is not assigned to the selected warehouse');
           return;
@@ -623,14 +622,13 @@ function NewPurchaseOrderPageContent() {
     if (!normalized) return;
 
     try {
-      await ensureWarehouseItemsLoaded(normalized);
+      const allowedItems = await ensureWarehouseItemsLoaded(normalized);
       const warehouse = warehouses.find(w => w.id === normalized);
 
       if (editingItem.inventoryItemId) {
-        const allowedItems = warehouseItemsByWarehouseId[normalized] || [];
         if (!allowedItems.some(wi => wi.inventoryItemId === editingItem.inventoryItemId)) {
           toast.error('Selected item is not assigned to this warehouse');
-          setEditingItem(prev => prev ? {
+          setEditingItem(prev => prev ? retainApprovedPurchaseOrderTerms({
             ...prev,
             warehouseId: normalized,
             warehouseName: warehouse?.name,
@@ -641,7 +639,7 @@ function NewPurchaseOrderPageContent() {
             itemUnitOfMeasureId: undefined,
             unitOfMeasure: 'EA',
             unitPrice: 0
-          } : null);
+          }, findApprovedPurchaseOrderLine(selectedSource?.approvedLines || [], prev)) : null);
           setAvailableUOMs([]);
           return;
         }
