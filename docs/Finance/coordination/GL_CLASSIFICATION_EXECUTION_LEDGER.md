@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 cycle 4 independent GPT-5.6 Sol High review active at clean corrected HEAD `a634b6fc4cb9e6317ddc04f0eee97db07c19f424` |
+| Review status | C7 cycle 4 `APPROVED` at `a634b6fc4cb9e6317ddc04f0eee97db07c19f424`; ordered local integration active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -795,6 +795,18 @@ C6-to-C7 no-connect script. A widened run reported 269 passes, 37 guarded skips 
 baseline failures. The worktree is clean, the ledger is unchanged and no database was accessed. Independent
 GPT-5.6 Sol High cycle-4 review is active over the rollback boundary and all prior closures; integration and
 Inventory reissue remain gated.
+
+Stage C7 independent review cycle 4 returned `APPROVED` at exact clean HEAD
+`a634b6fc4cb9e6317ddc04f0eee97db07c19f424` with no remaining P1/P2 findings. The reviewer independently
+confirmed that Finance rejects a live ambient transaction and clears rolled-back tracked state before fresh
+failure queries or writes; the guarded migrated-SQL case retains a tracked Inventory owner mutation and proves
+only failure evidence persists before successful recovery and exact retry. The internal boundary remains data-
+only with no callback, registry, raw-context exposure or execution HTTP endpoint. Exact four-commit ancestry,
+Finance-only scope, C1 byte parity, clean status/diff/credential checks, EF model parity, 455 migrations and the
+exact C6-to-C7 no-connect script all passed. Fresh validation produced a zero-error build, 43 focused passes
+with 13 guarded SQL skips and 362 widened passes with 37 guarded SQL skips and no failures. SQL guards were not
+executed because `RHEMA_TEST_SQLSERVER` is unset; no database was accessed. Ordered local integration of the
+four approved commits is active, after which primary verification and a fresh Inventory reissue remain required.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
