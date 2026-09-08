@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 implementation active; independent review not started |
+| Review status | C8 independent GPT-5.6 Sol High review active at clean candidate `72b234137623da6891f433ca63354a8b4c42b320` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -882,6 +882,20 @@ C5 freeze and C6 event linkage, ambient zero-or-all execution, exact group/membe
 correction/reversal authority, rollback-before-durable-group-failure evidence, governed API/UI only where needed,
 and an unapplied fail-closed migration if durable group state requires it. Owner modules, producer enumeration,
 automatic enablement, Delta/reporting-currency selection and persistent database mutation remain prohibited.
+
+The C8 implementer completed one clean Finance-only commit,
+`72b234137623da6891f433ca63354a8b4c42b320`, from the exact base. The candidate adds durable group authority,
+immutable ordered normal-C6 members, per-member original C5/C6 evidence, whole-group maker/checker decisions,
+full-group deterministic owner receipt, an internal shared-Serializable-transaction execution boundary, and a
+tracker-clean post-rollback durable group-failure boundary. Direct C7 execution rejects grouped members; C6/C7/C8
+defaults remain disabled and no execution HTTP endpoint or owner-module change was added. The unapplied fail-
+closed C8 migration adds preflight, constraints, indexes, triggers, C7 trigger amendments and evidence-refusing
+Down behavior. Implementer validation passed a zero-error build, 9 C8 tests including relational SQLite atomic
+rollback/recovery, 45 focused C6-C8 tests with 10 guarded SQL skips, earlier widened runs of 72 C5-C8 and 282
+C1-C8 passes, EF model parity, exact 456-migration discovery and the C7-to-C8 no-connect idempotent script. The
+worktree, ancestry, scope, credential and diff gates are clean. Guarded SQL Server cases were not executed because
+`RHEMA_TEST_SQLSERVER` is absent; no database was accessed. Independent GPT-5.6 Sol High accounting/schema/
+security/concurrency review is active; integration and Inventory reissue remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
