@@ -966,7 +966,11 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
     private static string CanonicalKey(string value)
     {
         var key = value?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (key.Length is 0 or > 100) throw new InvalidOperationException("AccountingEvent idempotency key must contain 1 to 100 characters.");
+        if (key.Length is 0 or > 100 || key[0] is not (>= 'A' and <= 'Z') and not (>= '0' and <= '9')
+            || key.Any(character => character is not (>= 'A' and <= 'Z') and not (>= '0' and <= '9')
+                and not '_' and not '.' and not ':' and not '-')
+            || key is "ALL" or "ALL_ACTIVE_BOOKS" or "ALL_CLASSIFIED_BOOKS" or "ALLCLASSIFIEDBOOKS")
+            throw new InvalidOperationException("AccountingEvent idempotency key must contain 1 to 100 canonical ASCII characters.");
         return key;
     }
 
@@ -1047,7 +1051,8 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
     private static bool IsStableProducerIdentity(string value, int max) => value.Length is > 0
         && value.Length <= max && value[0] is >= 'A' and <= 'Z'
         && value.All(character => character is >= 'A' and <= 'Z' or >= '0' and <= '9'
-            or '_' or '.' or '-');
+            or '_' or '.' or '-')
+        && value is not ("ALL" or "ALL_ACTIVE_BOOKS" or "ALL_CLASSIFIED_BOOKS" or "ALLCLASSIFIEDBOOKS");
 
     private static void RequirePersistedReceiptMatch(AccountingEventProducerReceipt? stored,
         ProducerOwnerEffectReceiptDto receipt, string requestFingerprint)

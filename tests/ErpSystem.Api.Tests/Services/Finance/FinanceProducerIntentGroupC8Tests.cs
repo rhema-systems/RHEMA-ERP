@@ -289,7 +289,9 @@ public sealed class FinanceProducerIntentGroupC8Tests
             item => item.ExpectedOwnerEffect.OwnerEntityType = "1InventoryDisposal",
             item => item.ExpectedOwnerEffect.OwnerAction = "Dispose:Now",
             item => item.IdempotencyKey = ":invalid-leading-colon",
-            item => item.Members[0].IdempotencyKey = "mémbér"
+            item => item.Members[0].IdempotencyKey = "mémbér",
+            item => item.ParticipantIdentity = item.ExpectedOwnerEffect.ParticipantCode = "ALL_ACTIVE_BOOKS",
+            item => item.ExpectedOwnerEffect.OwnerAction = "ALL"
         })
         {
             var invalidHarness = Harness(); var invalid = Group(); mutate(invalid);
@@ -400,7 +402,9 @@ public sealed class FinanceProducerIntentGroupC8Tests
             .And.Contain("C8_RECEIPT_REUSED").And.Contain("C7_RECEIPT_REUSED")
             .And.Contain("TR_AccountingEvents_C7ProducerDecision").And.Contain("TR_AccountingEventProducerReceipts_C7Immutable")
             .And.Contain("C8_GROUP_OUTCOME_IMMUTABLE").And.Contain("C8_GROUP_RECOVERY")
+            .And.Contain("C8_GROUP_ATTEMPT_REQUIRED").And.Contain("INSTEAD OF INSERT")
             .And.Contain("FIN:C7C8:").And.Contain("sp_getapplock")
+            .And.Contain("DATALENGTH([ParticipantCode])").And.Contain("LEN([ParticipantCode])*2")
             .And.Contain("C8_MEMBER_LINEAGE").And.Contain("C8_GROUP_LINEAGE")
             .And.Contain("[MemberCount] BETWEEN 2 AND 20");
         down.Should().Contain("C8_DOWN_REFUSED").And.Contain("ALTER TRIGGER [TR_AccountingEvents_C7ProducerDecision]")

@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Api.Services.Finance.Settings;
@@ -414,8 +415,18 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         }
 
         ProducerIntentGroupDto prepared;
-        await using (var prepare = database.Context()) prepared = await GroupService(prepare, database.TenantId, database.MakerId).PrepareAsync(request);
-        await using (var approve = database.Context()) await GroupService(approve, database.TenantId, database.CheckerId).ApproveAsync(prepared.Id,
+        await using (var prepare = database.Context()) prepared = await GroupService(prepare, database.TenantId, database.MakerId, persistAudit: true).PrepareAsync(request);
+        await using (var direct = database.Context())
+        {
+            var grouped = await direct.AccountingEvents.SingleAsync(item => item.Id == prepared.Members[0].AccountingEvent.Id);
+            var frozen = JsonSerializer.Deserialize<CreateAccountingEventDto>(grouped.ProducerIntentSnapshotJson,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            await FluentActions.Awaiting(() => Service(direct, database.TenantId, database.CheckerId).ApproveAsync(grouped.Id,
+                    new ReleaseAccountingEventDto { Request = frozen, Reason = "forbidden individual grouped decision" }))
+                .Should().ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_DECISION_REQUIRED*");
+            grouped.ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Pending);
+        }
+        await using (var approve = database.Context()) await GroupService(approve, database.TenantId, database.CheckerId, persistAudit: true).ApproveAsync(prepared.Id,
             new DecideProducerIntentGroupRequestDto { Group = request, Reason = "independent complete-group approval" });
         var receipt = new ProducerOwnerEffectReceiptDto
         {
@@ -427,7 +438,7 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         Exception failure;
         await using (var execute = database.Context())
         {
-            var service = GroupService(execute, database.TenantId, database.MakerId);
+            var service = GroupService(execute, database.TenantId, database.MakerId, persistAudit: true);
             await using var tx = await execute.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             var owner = await execute.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
             owner.Status = InventoryDisposalStatus.AuditVerified; owner.AuditVerifiedById = database.MakerId;
@@ -455,12 +466,16 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             (await failed.JournalEntries.CountAsync()).Should().Be(0);
             (await failed.AccountBalances.CountAsync()).Should().Be(0);
             (await failed.AccountCurrencyExposures.CountAsync()).Should().Be(0);
+            (await failed.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ProducerIntentGroupFailed
+                && item.ResourceId == prepared.Id.ToString())).Should().Be(1);
+            (await failed.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ProducerIntentGroupPosted
+                && item.ResourceId == prepared.Id.ToString())).Should().Be(0);
         }
 
         await RepairSecondBookAsync(database, seeded);
         await using (var recover = database.Context())
         {
-            var service = GroupService(recover, database.TenantId, database.MakerId);
+            var service = GroupService(recover, database.TenantId, database.MakerId, persistAudit: true);
             await using var tx = await recover.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             var owner = await recover.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
             owner.Status = InventoryDisposalStatus.AuditVerified; owner.AuditVerifiedById = database.MakerId;
@@ -474,7 +489,7 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             var before = (Events: await retry.FinancePostingEvents.CountAsync(), Journals: await retry.JournalEntries.CountAsync(),
                 Postings: await retry.AccountingEventPostings.CountAsync(), Attempts: await retry.ProducerIntentGroupAttempts.CountAsync());
             await using var tx = await retry.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-            (await ((IFinanceProducerIntentGroupApprovedExecution)GroupService(retry, database.TenantId, database.MakerId))
+            (await ((IFinanceProducerIntentGroupApprovedExecution)GroupService(retry, database.TenantId, database.MakerId, persistAudit: true))
                 .ExecuteInAmbientTransactionAsync(prepared.Id, request, receipt)).Status.Should().Be(ProducerIntentGroupStatuses.Posted);
             await tx.CommitAsync();
             (await retry.FinancePostingEvents.CountAsync()).Should().Be(before.Events);
@@ -484,10 +499,112 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             (await retry.AccountingBookSelectionEvidence.CountAsync()).Should().Be(2);
             (await retry.AccountingEventPostings.CountAsync()).Should().Be(3);
             (await retry.ProducerIntentGroupReceipts.CountAsync()).Should().Be(1);
+            (await retry.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ProducerIntentGroupFailed
+                && item.ResourceId == prepared.Id.ToString())).Should().Be(1);
+            (await retry.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ProducerIntentGroupPosted
+                && item.ResourceId == prepared.Id.ToString())).Should().Be(1);
+        }
+
+        static ProducerIntentGroupRequestDto Clone(ProducerIntentGroupRequestDto source) =>
+            JsonSerializer.Deserialize<ProducerIntentGroupRequestDto>(JsonSerializer.Serialize(source))!;
+        static void BindEffect(ProducerIntentGroupRequestDto candidate, char fingerprint)
+        {
+            candidate.ExpectedOwnerEffect.EffectFingerprint = new string(fingerprint, 64);
+            foreach (var member in candidate.Members)
+                member.ExpectedOwnerEffect.EffectFingerprint = candidate.ExpectedOwnerEffect.EffectFingerprint;
+        }
+        static ProducerOwnerEffectReceiptDto ReceiptFor(Guid tenant, ProducerIntentGroupRequestDto candidate) => new()
+        {
+            TenantId = tenant, ParticipantCode = candidate.ExpectedOwnerEffect.ParticipantCode,
+            OwnerEntityType = candidate.ExpectedOwnerEffect.OwnerEntityType, OwnerEntityId = candidate.ExpectedOwnerEffect.OwnerEntityId,
+            OwnerAction = candidate.ExpectedOwnerEffect.OwnerAction, EffectFingerprint = candidate.ExpectedOwnerEffect.EffectFingerprint
+        };
+        async Task<ProducerIntentGroupDto> PrepareApproveExecuteAsync(ProducerIntentGroupRequestDto candidate,
+            IAccountingBookApplicabilityService? applicability, string ownerEvidence)
+        {
+            ProducerIntentGroupDto aggregate;
+            await using (var prepareContext = database.Context())
+                aggregate = await GroupService(prepareContext, database.TenantId, database.MakerId,
+                    persistAudit: true, applicabilityOverride: applicability).PrepareAsync(candidate);
+            await using (var approveContext = database.Context())
+                await GroupService(approveContext, database.TenantId, database.CheckerId,
+                    persistAudit: true, applicabilityOverride: applicability).ApproveAsync(aggregate.Id,
+                    new DecideProducerIntentGroupRequestDto { Group = candidate, Reason = "complete successor review" });
+            await using (var executeContext = database.Context())
+            {
+                await using var tx = await executeContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+                (await executeContext.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId)).AuditFindings = ownerEvidence;
+                aggregate = await ((IFinanceProducerIntentGroupApprovedExecution)GroupService(executeContext,
+                    database.TenantId, database.MakerId, persistAudit: true, applicabilityOverride: applicability))
+                    .ExecuteInAmbientTransactionAsync(aggregate.Id, candidate, ReceiptFor(database.TenantId, candidate));
+                await tx.CommitAsync();
+            }
+            return aggregate;
+        }
+
+        var policyDrift = new Mock<IAccountingBookApplicabilityService>(MockBehavior.Strict);
+        policyDrift.Setup(item => item.ResolveAsync(It.IsAny<ResolveAccountingBookApplicabilityDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("current C5 policy/readiness is blocked"));
+        var correction = Clone(request); correction.ProducerIntentGroupId = null;
+        correction.GroupKind = AccountingEventKinds.Correction; correction.IdempotencyKey = "C8:REAL:CORRECTION:1";
+        correction.SupersedesProducerIntentGroupId = prepared.Id; correction.CorrectsProducerIntentGroupId = prepared.Id;
+        BindEffect(correction, 'C');
+        for (var index = 0; index < correction.Members.Count; index++)
+        {
+            correction.Members[index].AccountingEventId = null; correction.Members[index].EventKind = AccountingEventKinds.Correction;
+            correction.Members[index].IdempotencyKey = $"C8:REAL:CORRECTION:{index + 1}";
+            correction.Members[index].SupersedesAccountingEventId = prepared.Members[index].AccountingEvent.Id;
+            correction.Members[index].CorrectsAccountingEventId = prepared.Members[index].AccountingEvent.Id;
+            correction.Members[index].PostingRequest.PostingDate = database.EventDate.AddDays(1);
+        }
+        var corrected = await PrepareApproveExecuteAsync(correction, policyDrift.Object, "C8 correction owner evidence");
+
+        var secondOriginal = Clone(request); secondOriginal.ProducerIntentGroupId = null;
+        secondOriginal.IdempotencyKey = "C8:REAL:REVERSAL:ORIGINAL"; BindEffect(secondOriginal, 'D');
+        for (var index = 0; index < secondOriginal.Members.Count; index++)
+        {
+            secondOriginal.Members[index].AccountingEventId = null;
+            secondOriginal.Members[index].IdempotencyKey = $"C8:REAL:REVERSAL:ORIGINAL:{index + 1}";
+            secondOriginal.Members[index].PostingRequest.SourceDocumentId = Guid.NewGuid();
+        }
+        var secondPosted = await PrepareApproveExecuteAsync(secondOriginal, null, "C8 second original owner evidence");
+        var reversal = Clone(secondOriginal); reversal.ProducerIntentGroupId = null;
+        reversal.GroupKind = AccountingEventKinds.Reversal; reversal.IdempotencyKey = "C8:REAL:REVERSAL:1";
+        reversal.SupersedesProducerIntentGroupId = secondPosted.Id; reversal.ReversesProducerIntentGroupId = secondPosted.Id;
+        BindEffect(reversal, 'E');
+        for (var index = 0; index < reversal.Members.Count; index++)
+        {
+            reversal.Members[index].AccountingEventId = null; reversal.Members[index].EventKind = AccountingEventKinds.Reversal;
+            reversal.Members[index].IdempotencyKey = $"C8:REAL:REVERSAL:{index + 1}";
+            reversal.Members[index].SupersedesAccountingEventId = secondPosted.Members[index].AccountingEvent.Id;
+            reversal.Members[index].ReversesAccountingEventId = secondPosted.Members[index].AccountingEvent.Id;
+            reversal.Members[index].PostingRequest.PostingDate = database.EventDate.AddDays(2);
+        }
+        var reversed = await PrepareApproveExecuteAsync(reversal, policyDrift.Object, "C8 reversal owner evidence");
+        policyDrift.VerifyNoOtherCalls();
+
+        await using (var lineage = database.Context())
+        {
+            async Task AssertFrozenAsync(ProducerIntentGroupDto predecessor, ProducerIntentGroupDto successor)
+            {
+                for (var index = 0; index < predecessor.Members.Count; index++)
+                {
+                    var before = await lineage.AccountingEvents.AsNoTracking().Include(item => item.AccountingBookSelectionEvidence)!
+                        .ThenInclude(item => item.Books).SingleAsync(item => item.Id == predecessor.Members[index].AccountingEvent.Id);
+                    var after = await lineage.AccountingEvents.AsNoTracking().Include(item => item.AccountingBookSelectionEvidence)!
+                        .ThenInclude(item => item.Books).SingleAsync(item => item.Id == successor.Members[index].AccountingEvent.Id);
+                    after.RootAccountingEventId.Should().Be(before.RootAccountingEventId);
+                    after.AccountingBookSelectionEvidence!.Books.OrderBy(item => item.SelectionOrder).Select(item => item.AccountingBookId)
+                        .Should().Equal(before.AccountingBookSelectionEvidence!.Books.OrderBy(item => item.SelectionOrder).Select(item => item.AccountingBookId));
+                }
+            }
+            await AssertFrozenAsync(prepared, corrected);
+            await AssertFrozenAsync(secondPosted, reversed);
         }
     }
 
-    private static AccountingEventService Service(ApplicationDbContext db, Guid tenant, Guid actor, bool persistAudit = false)
+    private static AccountingEventService Service(ApplicationDbContext db, Guid tenant, Guid actor, bool persistAudit = false,
+        IAccountingBookApplicabilityService? applicabilityOverride = null)
     {
         var user = User(tenant, actor);
         IFinanceAuditService audit;
@@ -500,19 +617,28 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             audit = auditMock.Object;
         }
         var leaf = new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit);
-        var applicability = Applicability(db, tenant, actor, audit: audit);
+        var applicability = applicabilityOverride ?? Applicability(db, tenant, actor, audit: audit);
         return new AccountingEventService(db, user.Object, applicability, leaf, audit,
             Options.Create(new AccountingEventOptions { Enabled = true }));
     }
 
-    private static FinanceProducerIntentGroupService GroupService(ApplicationDbContext db, Guid tenant, Guid actor)
+    private static FinanceProducerIntentGroupService GroupService(ApplicationDbContext db, Guid tenant, Guid actor,
+        bool persistAudit = false, IAccountingBookApplicabilityService? applicabilityOverride = null)
     {
-        var user = User(tenant, actor); var audit = new Mock<IFinanceAuditService>();
-        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
-        var events = Service(db, tenant, actor);
-        var producer = new FinanceProducerIntentService(Applicability(db, tenant, actor), events, events, db, user.Object,
+        var user = User(tenant, actor);
+        IFinanceAuditService audit;
+        if (persistAudit) audit = new FinanceAuditService(db, user.Object, new HttpContextAccessor());
+        else
+        {
+            var auditMock = new Mock<IFinanceAuditService>();
+            auditMock.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
+            audit = auditMock.Object;
+        }
+        var applicability = applicabilityOverride ?? Applicability(db, tenant, actor);
+        var events = Service(db, tenant, actor, applicabilityOverride: applicability);
+        var producer = new FinanceProducerIntentService(applicability, events, events, db, user.Object,
             Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
-        return new FinanceProducerIntentGroupService(db, producer, events, user.Object, audit.Object,
+        return new FinanceProducerIntentGroupService(db, producer, events, user.Object, audit,
             Options.Create(new FinanceProducerIntentGroupOptions { Enabled = true }),
             Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
     }

@@ -49,6 +49,10 @@ CREATE TABLE [ProducerIntentGroups] (
  CONSTRAINT [CK_ProducerIntentGroups_Lineage] CHECK (([GroupKind]='Original' AND [Version]=1 AND [RootProducerIntentGroupId]=[Id] AND [SupersedesProducerIntentGroupId] IS NULL AND [CorrectsProducerIntentGroupId] IS NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind]='Correction' AND [Version]>1 AND [SupersedesProducerIntentGroupId]=[CorrectsProducerIntentGroupId] AND [CorrectsProducerIntentGroupId] IS NOT NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind]='Reversal' AND [Version]>1 AND [SupersedesProducerIntentGroupId]=[ReversesProducerIntentGroupId] AND [ReversesProducerIntentGroupId] IS NOT NULL AND [CorrectsProducerIntentGroupId] IS NULL)),
  CONSTRAINT [CK_ProducerIntentGroups_Decision] CHECK (([Status]='PendingApproval' AND [DecidedByUserId] IS NULL AND [DecidedAtUtc] IS NULL AND [DecisionReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] IN ('Approved','Rejected') AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status]='Posted' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status]='Failed' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)),
  CONSTRAINT [CK_ProducerIntentGroups_MakerChecker] CHECK ([DecidedByUserId] IS NULL OR [DecidedByUserId]<>[PreparedByUserId]),
+ CONSTRAINT [CK_ProducerIntentGroups_IdempotencyAscii] CHECK (DATALENGTH([IdempotencyKey])=LEN([IdempotencyKey])*2 AND LEFT([IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z0-9]' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.:-]%' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')),
+ CONSTRAINT [CK_ProducerIntentGroups_ParticipantAscii] CHECK (DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')),
+ CONSTRAINT [CK_ProducerIntentGroups_OwnerEntityAscii] CHECK (DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')),
+ CONSTRAINT [CK_ProducerIntentGroups_OwnerActionAscii] CHECK (DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')),
  CONSTRAINT [CK_ProducerIntentGroups_GroupFingerprint] CHECK (LEN([GroupFingerprint])=64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'),
  CONSTRAINT [CK_ProducerIntentGroups_SnapshotHash] CHECK (LEN([RequestSnapshotHash])=64 AND [RequestSnapshotHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'),
  CONSTRAINT [CK_ProducerIntentGroups_EffectFingerprint] CHECK (LEN([ExpectedOwnerEffectFingerprint])=64 AND [ExpectedOwnerEffectFingerprint]<>REPLICATE('0',64) AND [ExpectedOwnerEffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'),
@@ -92,6 +96,9 @@ CREATE TABLE [ProducerIntentGroupReceipts] (
  [DeletedAt] datetime2 NULL, [DeletedBy] nvarchar(max) NULL, [TenantId] uniqueidentifier NOT NULL,
  CONSTRAINT [PK_ProducerIntentGroupReceipts] PRIMARY KEY ([Id]),
  CONSTRAINT [CK_ProducerIntentGroupReceipts_NoDelete] CHECK ([IsDeleted]=0),
+ CONSTRAINT [CK_ProducerIntentGroupReceipts_ParticipantAscii] CHECK (DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')),
+ CONSTRAINT [CK_ProducerIntentGroupReceipts_OwnerEntityAscii] CHECK (DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')),
+ CONSTRAINT [CK_ProducerIntentGroupReceipts_OwnerActionAscii] CHECK (DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')),
  CONSTRAINT [CK_ProducerIntentGroupReceipts_EffectFingerprint] CHECK (LEN([EffectFingerprint])=64 AND [EffectFingerprint]<>REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'),
  CONSTRAINT [CK_ProducerIntentGroupReceipts_GroupFingerprint] CHECK (LEN([GroupFingerprint])=64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'),
  CONSTRAINT [FK_ProducerIntentGroupReceipts_Groups] FOREIGN KEY ([TenantId],[ProducerIntentGroupId]) REFERENCES [ProducerIntentGroups]([TenantId],[Id]),
@@ -130,8 +137,10 @@ BEGIN
       OR e.[EventKind]<>g.[GroupKind] OR e.[Version]<>g.[Version]
       OR e.[IdempotencyKey] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(e.[IdempotencyKey]))) COLLATE Latin1_General_100_BIN2
       OR DATALENGTH(e.[IdempotencyKey])<>DATALENGTH(UPPER(LTRIM(RTRIM(e.[IdempotencyKey]))))
+      OR DATALENGTH(e.[IdempotencyKey])<>LEN(e.[IdempotencyKey])*2
       OR LEFT(e.[IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z0-9]'
       OR e.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.:-]%'
+      OR e.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
       OR e.[RequestFingerprint]<>m.[MemberFingerprint] OR e.[ProducerParticipantIdentity]<>g.[ParticipantCode])
   THROW 51000, 'C8_MEMBER_AUTHORITY: ordered members must bind pending C7 events and the group participant.', 1;
  IF EXISTS(SELECT 1 FROM inserted m JOIN [ProducerIntentGroups] g ON g.[TenantId]=m.[TenantId] AND g.[Id]=m.[ProducerIntentGroupId]
@@ -155,14 +164,20 @@ BEGIN
   IF EXISTS(SELECT 1 FROM inserted r WHERE
    r.[ParticipantCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[ParticipantCode]))) COLLATE Latin1_General_100_BIN2
    OR DATALENGTH(r.[ParticipantCode])<>DATALENGTH(UPPER(LTRIM(RTRIM(r.[ParticipantCode]))))
+   OR DATALENGTH(r.[ParticipantCode])<>LEN(r.[ParticipantCode])*2
    OR LEFT(r.[ParticipantCode],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
    OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
    OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerEntityType]))) COLLATE Latin1_General_100_BIN2
+   OR DATALENGTH(r.[OwnerEntityType])<>DATALENGTH(UPPER(LTRIM(RTRIM(r.[OwnerEntityType])))) OR DATALENGTH(r.[OwnerEntityType])<>LEN(r.[OwnerEntityType])*2
    OR LEFT(r.[OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
    OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
    OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerAction]))) COLLATE Latin1_General_100_BIN2
+   OR DATALENGTH(r.[OwnerAction])<>DATALENGTH(UPPER(LTRIM(RTRIM(r.[OwnerAction])))) OR DATALENGTH(r.[OwnerAction])<>LEN(r.[OwnerAction])*2
    OR LEFT(r.[OwnerAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
-   OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%')
+   OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS'))
    THROW 51000, 'C8_RECEIPT_IDENTITY: receipt identities must use the reviewed canonical grammar.', 1;
   DECLARE @ownerTenant uniqueidentifier, @ownerParticipant nvarchar(100), @ownerEffect char(64), @ownerResource nvarchar(255), @ownerResult int;
   DECLARE owner_effects CURSOR LOCAL FAST_FORWARD FOR
@@ -185,14 +200,43 @@ BEGIN
   THROW 51000, 'C8_RECEIPT_REUSED: owner-effect evidence already belongs to a single event.', 1;
 END;
 
-CREATE TRIGGER [TR_ProducerIntentGroupAttempts_C8Immutable] ON [ProducerIntentGroupAttempts] AFTER INSERT,UPDATE,DELETE AS
+CREATE TRIGGER [TR_ProducerIntentGroupAttempts_C8Immutable] ON [ProducerIntentGroupAttempts] INSTEAD OF INSERT AS
 BEGIN
  SET NOCOUNT ON;
- IF EXISTS(SELECT 1 FROM deleted) THROW 51000, 'C8_ATTEMPT_IMMUTABLE: durable group attempts are append-only.', 1;
- IF EXISTS(SELECT 1 FROM inserted a JOIN [ProducerIntentGroups] g ON g.[TenantId]=a.[TenantId] AND g.[Id]=a.[ProducerIntentGroupId]
-  WHERE g.[GroupFingerprint]<>a.[GroupFingerprint] OR (a.[Status]=N'Pending' AND g.[Status] NOT IN (N'Approved',N'Failed'))
-   OR (a.[Status]=N'Posted' AND g.[Status]<>N'Posted') OR (a.[Status]=N'Failed' AND g.[Status]<>N'Failed'))
-  THROW 51000, 'C8_ATTEMPT_AUTHORITY: attempt outcome must match the immutable group lifecycle.', 1;
+ IF EXISTS(SELECT 1 FROM inserted GROUP BY [TenantId],[ProducerIntentGroupId] HAVING COUNT(*)<>1)
+  THROW 51000, 'C8_ATTEMPT_CARDINALITY: one terminal transition requires exactly one attempt.', 1;
+ IF EXISTS(SELECT 1 FROM inserted a LEFT JOIN [ProducerIntentGroups] g WITH (UPDLOCK,HOLDLOCK)
+   ON g.[TenantId]=a.[TenantId] AND g.[Id]=a.[ProducerIntentGroupId]
+  WHERE g.[Id] IS NULL OR a.[Status] NOT IN (N'Posted',N'Failed') OR g.[GroupFingerprint]<>a.[GroupFingerprint]
+   OR a.[AttemptNumber]<>(SELECT ISNULL(MAX(prior.[AttemptNumber]),0)+1 FROM [ProducerIntentGroupAttempts] prior
+      WHERE prior.[TenantId]=a.[TenantId] AND prior.[ProducerIntentGroupId]=a.[ProducerIntentGroupId])
+   OR (a.[Status]=N'Failed' AND (g.[Status]<>N'Approved' OR a.[FailureMessage] IS NULL
+      OR a.[FailedMemberOrder] IS NULL OR a.[FailedAccountingEventId] IS NULL
+      OR NOT EXISTS(SELECT 1 FROM [ProducerIntentGroupMembers] failed
+         WHERE failed.[TenantId]=g.[TenantId] AND failed.[ProducerIntentGroupId]=g.[Id]
+          AND failed.[MemberOrder]=a.[FailedMemberOrder] AND failed.[AccountingEventId]=a.[FailedAccountingEventId])))
+   OR (a.[Status]=N'Posted' AND (g.[Status] NOT IN (N'Approved',N'Failed') OR a.[FailureMessage] IS NOT NULL
+      OR a.[FailedMemberOrder] IS NOT NULL OR a.[FailedAccountingEventId] IS NOT NULL
+      OR NOT EXISTS(SELECT 1 FROM [ProducerIntentGroupReceipts] r WHERE r.[TenantId]=g.[TenantId] AND r.[ProducerIntentGroupId]=g.[Id])
+      OR EXISTS(SELECT 1 FROM [ProducerIntentGroupMembers] m JOIN [AccountingEvents] e
+         ON e.[TenantId]=m.[TenantId] AND e.[Id]=m.[AccountingEventId]
+         WHERE m.[TenantId]=g.[TenantId] AND m.[ProducerIntentGroupId]=g.[Id] AND e.[Status]<>N'Posted'))))
+  THROW 51000, 'C8_ATTEMPT_AUTHORITY: one exact terminal attempt must atomically drive an authorized group transition.', 1;
+ INSERT [ProducerIntentGroupAttempts]([Id],[ProducerIntentGroupId],[AttemptNumber],[GroupFingerprint],[Status],[StartedAtUtc],
+  [CompletedAtUtc],[FailedMemberOrder],[FailedAccountingEventId],[FailureMessage],[CreatedAt],[UpdatedAt],[CreatedBy],[UpdatedBy],
+  [CreatedById],[LastModifiedById],[IsDeleted],[DeletedAt],[DeletedBy],[TenantId])
+ SELECT [Id],[ProducerIntentGroupId],[AttemptNumber],[GroupFingerprint],[Status],[StartedAtUtc],
+  [CompletedAtUtc],[FailedMemberOrder],[FailedAccountingEventId],[FailureMessage],[CreatedAt],[UpdatedAt],[CreatedBy],[UpdatedBy],
+  [CreatedById],[LastModifiedById],[IsDeleted],[DeletedAt],[DeletedBy],[TenantId] FROM inserted;
+ UPDATE g SET [Status]=a.[Status],[CompletedAtUtc]=a.[CompletedAtUtc],
+  [FailureMessage]=CASE WHEN a.[Status]=N'Failed' THEN a.[FailureMessage] ELSE NULL END
+ FROM [ProducerIntentGroups] g JOIN inserted a ON a.[TenantId]=g.[TenantId] AND a.[ProducerIntentGroupId]=g.[Id];
+END;
+
+CREATE TRIGGER [TR_ProducerIntentGroupAttempts_C8NoMutation] ON [ProducerIntentGroupAttempts] AFTER UPDATE,DELETE AS
+BEGIN
+ SET NOCOUNT ON;
+ THROW 51000, 'C8_ATTEMPT_IMMUTABLE: durable group attempts are append-only.', 1;
 END;
 
 CREATE TRIGGER [TR_ProducerIntentGroups_C8Authority] ON [ProducerIntentGroups] AFTER INSERT,UPDATE,DELETE AS
@@ -204,18 +248,26 @@ BEGIN
   THROW 51000, 'C8_GROUP_INSERT_STATE: decision or execution cannot be preseeded.', 1;
  IF EXISTS(SELECT 1 FROM inserted i WHERE i.[ParticipantCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[ParticipantCode]))) COLLATE Latin1_General_100_BIN2
    OR DATALENGTH(i.[ParticipantCode])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[ParticipantCode]))))
+   OR DATALENGTH(i.[ParticipantCode])<>LEN(i.[ParticipantCode])*2
    OR LEFT(i.[ParticipantCode],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
    OR i.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR i.[ParticipantCode] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
    OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))) COLLATE Latin1_General_100_BIN2
    OR DATALENGTH(i.[IdempotencyKey])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))))
+   OR DATALENGTH(i.[IdempotencyKey])<>LEN(i.[IdempotencyKey])*2
    OR LEFT(i.[IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z0-9]'
    OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.:-]%'
+   OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
    OR i.[OwnerEntityType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[OwnerEntityType]))) COLLATE Latin1_General_100_BIN2
+   OR DATALENGTH(i.[OwnerEntityType])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[OwnerEntityType])))) OR DATALENGTH(i.[OwnerEntityType])<>LEN(i.[OwnerEntityType])*2
    OR LEFT(i.[OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
    OR i.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR i.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
    OR i.[OwnerAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[OwnerAction]))) COLLATE Latin1_General_100_BIN2
+   OR DATALENGTH(i.[OwnerAction])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[OwnerAction])))) OR DATALENGTH(i.[OwnerAction])<>LEN(i.[OwnerAction])*2
    OR LEFT(i.[OwnerAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
    OR i.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR i.[OwnerAction] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
    OR i.[OwnerEntityId]='00000000-0000-0000-0000-000000000000')
   THROW 51000, 'C8_GROUP_IDENTITY: canonical participant and owner identity are required.', 1;
  IF EXISTS(SELECT 1 FROM inserted i WHERE i.[Status] IN (N'Approved',N'Rejected',N'Posted',N'Failed')
@@ -238,8 +290,18 @@ BEGIN
    WHERE (d.[Status]=N'PendingApproval' AND i.[Status] NOT IN (N'PendingApproval',N'Approved',N'Rejected'))
       OR (d.[Status]=N'Approved' AND i.[Status] NOT IN (N'Approved',N'Posted',N'Failed'))
       OR (d.[Status]=N'Failed' AND i.[Status] NOT IN (N'Failed',N'Posted'))
-      OR (d.[Status] IN (N'Rejected',N'Posted') AND d.[Status]<>i.[Status]))
-  THROW 51000, 'C8_GROUP_WORKFLOW: combined decision/execution and invalid transitions are forbidden.', 1;
+       OR (d.[Status] IN (N'Rejected',N'Posted') AND d.[Status]<>i.[Status]))
+   THROW 51000, 'C8_GROUP_WORKFLOW: combined decision/execution and invalid transitions are forbidden.', 1;
+ IF EXISTS(SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+   WHERE i.[Status] IN (N'Posted',N'Failed') AND d.[Status]<>i.[Status]
+    AND NOT EXISTS(SELECT 1 FROM [ProducerIntentGroupAttempts] a
+      WHERE a.[TenantId]=i.[TenantId] AND a.[ProducerIntentGroupId]=i.[Id]
+       AND a.[AttemptNumber]=(SELECT MAX(latest.[AttemptNumber]) FROM [ProducerIntentGroupAttempts] latest
+          WHERE latest.[TenantId]=i.[TenantId] AND latest.[ProducerIntentGroupId]=i.[Id])
+       AND a.[GroupFingerprint]=i.[GroupFingerprint] AND a.[Status]=i.[Status]
+       AND a.[CompletedAtUtc]=i.[CompletedAtUtc]
+       AND ISNULL(a.[FailureMessage],N'')=ISNULL(i.[FailureMessage],N'')))
+  THROW 51000, 'C8_GROUP_ATTEMPT_REQUIRED: terminal transition requires its exact immutable attempt in the same operation.', 1;
  IF EXISTS(SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
    WHERE d.[Status] IN (N'Rejected',N'Posted',N'Failed') AND i.[Status]=d.[Status]
     AND (ISNULL(i.[CompletedAtUtc],'0001-01-01')<>ISNULL(d.[CompletedAtUtc],'0001-01-01')
@@ -275,16 +337,22 @@ BEGIN
   IF EXISTS(SELECT 1 FROM inserted r LEFT JOIN [AccountingEvents] e ON e.[TenantId]=r.[TenantId] AND e.[Id]=r.[AccountingEventId]
    WHERE e.[Id] IS NULL OR e.[ProducerDecisionStatus]<>N'Approved' OR e.[Status] NOT IN (N'Pending',N'Posted')
     OR e.[ProducerParticipantIdentity]<>r.[ParticipantCode] OR e.[RequestFingerprint]<>r.[RequestFingerprint]
-    OR r.[OwnerEntityId]='00000000-0000-0000-0000-000000000000'
-    OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[ParticipantCode]))) COLLATE Latin1_General_100_BIN2
-    OR LEFT(r.[ParticipantCode],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
-    OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
-    OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerEntityType]))) COLLATE Latin1_General_100_BIN2
-    OR LEFT(r.[OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
-    OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
-    OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerAction]))) COLLATE Latin1_General_100_BIN2
-    OR LEFT(r.[OwnerAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
-     OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%')
+     OR r.[OwnerEntityId]='00000000-0000-0000-0000-000000000000'
+     OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[ParticipantCode]))) COLLATE Latin1_General_100_BIN2
+     OR DATALENGTH(r.[ParticipantCode])<>DATALENGTH(UPPER(LTRIM(RTRIM(r.[ParticipantCode])))) OR DATALENGTH(r.[ParticipantCode])<>LEN(r.[ParticipantCode])*2
+     OR LEFT(r.[ParticipantCode],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+     OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+     OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
+     OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerEntityType]))) COLLATE Latin1_General_100_BIN2
+     OR DATALENGTH(r.[OwnerEntityType])<>DATALENGTH(UPPER(LTRIM(RTRIM(r.[OwnerEntityType])))) OR DATALENGTH(r.[OwnerEntityType])<>LEN(r.[OwnerEntityType])*2
+     OR LEFT(r.[OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+     OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+     OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')
+     OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerAction]))) COLLATE Latin1_General_100_BIN2
+     OR DATALENGTH(r.[OwnerAction])<>DATALENGTH(UPPER(LTRIM(RTRIM(r.[OwnerAction])))) OR DATALENGTH(r.[OwnerAction])<>LEN(r.[OwnerAction])*2
+     OR LEFT(r.[OwnerAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+     OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+     OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS'))
    THROW 51000, 'C7_RECEIPT_AUTHORITY: receipt must match one approved producer event in execution.', 1;
   DECLARE @ownerTenant uniqueidentifier, @ownerParticipant nvarchar(100), @ownerEffect char(64), @ownerResource nvarchar(255), @ownerResult int;
   DECLARE owner_effects CURSOR LOCAL FAST_FORWARD FOR
@@ -306,7 +374,7 @@ BEGIN
  SET NOCOUNT ON;
  IF EXISTS(SELECT 1 FROM inserted i LEFT JOIN deleted d ON d.[Id]=i.[Id] WHERE d.[Id] IS NULL AND i.[ProducerDecisionStatus] NOT IN (N'NotRequired',N'Pending'))
   THROW 51000, 'C7_INSERT_STATE: producer decisions cannot be fabricated during prepare.', 1;
- IF EXISTS(SELECT 1 FROM inserted i WHERE i.[ProducerDecisionStatus]<>N'NotRequired' AND (i.[ProducerParticipantIdentity] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[ProducerParticipantIdentity]))) COLLATE Latin1_General_100_BIN2 OR DATALENGTH(i.[ProducerParticipantIdentity])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[ProducerParticipantIdentity])))) OR LEFT(i.[ProducerParticipantIdentity],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]' OR i.[ProducerParticipantIdentity] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'))
+ IF EXISTS(SELECT 1 FROM inserted i WHERE i.[ProducerDecisionStatus]<>N'NotRequired' AND (i.[ProducerParticipantIdentity] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[ProducerParticipantIdentity]))) COLLATE Latin1_General_100_BIN2 OR DATALENGTH(i.[ProducerParticipantIdentity])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[ProducerParticipantIdentity])))) OR DATALENGTH(i.[ProducerParticipantIdentity])<>LEN(i.[ProducerParticipantIdentity])*2 OR LEFT(i.[ProducerParticipantIdentity],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]' OR i.[ProducerParticipantIdentity] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%' OR i.[ProducerParticipantIdentity] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS') OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))) COLLATE Latin1_General_100_BIN2 OR DATALENGTH(i.[IdempotencyKey])<>LEN(i.[IdempotencyKey])*2 OR LEFT(i.[IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z0-9]' OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.:-]%' OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')))
   THROW 51000, 'C7_PARTICIPANT_IDENTITY: canonical stable participant identity is required.', 1;
  IF EXISTS(SELECT 1 FROM inserted i WHERE i.[ProducerDecisionStatus] IN (N'Approved',N'Rejected') AND (i.[ProducerDecidedByUserId]=i.[PreparedByUserId] OR LEN(LTRIM(RTRIM(i.[ProducerDecisionReason])))=0))
   THROW 51000, 'C7_MAKER_CHECKER: a distinct checker and governed reason are required.', 1;

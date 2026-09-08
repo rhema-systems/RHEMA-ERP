@@ -271,10 +271,18 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
                     member.Member.AccountingEventId, error);
             }
         }
-        group.Status = ProducerIntentGroupStatuses.Posted; group.CompletedAtUtc = DateTime.UtcNow;
-        group.FailureMessage = null; attempt.CompletedAtUtc = group.CompletedAtUtc;
+        attempt.CompletedAtUtc = DateTime.UtcNow;
         _db.ProducerIntentGroupAttempts.Add(attempt);
+        if (!_db.Database.IsSqlServer())
+        {
+            // SQL Server's C8 attempt trigger owns the paired terminal transition. Lightweight
+            // relational test providers emulate that authority here without weakening production.
+            group.Status = ProducerIntentGroupStatuses.Posted;
+            group.CompletedAtUtc = attempt.CompletedAtUtc;
+            group.FailureMessage = null;
+        }
         await _db.SaveChangesAsync(cancellationToken);
+        if (_db.Database.IsSqlServer()) await _db.Entry(group).ReloadAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.ProducerIntentGroupPosted, group, cancellationToken);
         RequireTransactionIdentity(transaction.TransactionId);
         return Map(group);
@@ -335,9 +343,6 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
                 if (durable.Status != ProducerIntentGroupStatuses.Approved)
                     throw new InvalidOperationException("PRODUCER_INTENT_GROUP_APPROVAL_REQUIRED: durable failure requires approved group authority.");
                 var now = DateTime.UtcNow;
-                durable.Status = ProducerIntentGroupStatuses.Failed;
-                durable.CompletedAtUtc ??= now;
-                durable.FailureMessage ??= Truncate(failure.Message, 1000);
                 var attempt = new ProducerIntentGroupAttempt
                 {
                     TenantId = tenantId, ProducerIntentGroupId = durable.Id,
@@ -348,7 +353,14 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
                     CreatedAt = now, CreatedBy = ActorName()
                 };
                 _db.ProducerIntentGroupAttempts.Add(attempt);
+                if (!_db.Database.IsSqlServer())
+                {
+                    durable.Status = ProducerIntentGroupStatuses.Failed;
+                    durable.CompletedAtUtc = now;
+                    durable.FailureMessage = attempt.FailureMessage;
+                }
                 await _db.SaveChangesAsync(cancellationToken);
+                if (_db.Database.IsSqlServer()) await _db.Entry(durable).ReloadAsync(cancellationToken);
                 await AuditAsync(FinanceAuditEvents.ProducerIntentGroupFailed, durable, cancellationToken);
                 await tx.CommitAsync(cancellationToken);
             }
@@ -757,7 +769,8 @@ IF @result < 0 THROW 51000, 'PRODUCER_INTENT_GROUP_LOCK_FAILED: group identity c
     private static string CanonicalIdentity(string? value, int max, string label)
     {
         var normalized = value?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (normalized.Length is 0 || normalized.Length > max || !CanonicalIdentityPattern().IsMatch(normalized))
+        if (normalized.Length is 0 || normalized.Length > max || !CanonicalIdentityPattern().IsMatch(normalized)
+            || IsPseudoIdentity(normalized))
             throw new InvalidOperationException($"A canonical {label} is required.");
         return normalized;
     }
@@ -765,13 +778,16 @@ IF @result < 0 THROW 51000, 'PRODUCER_INTENT_GROUP_LOCK_FAILED: group identity c
     private static string CanonicalKey(string? value, string label)
     {
         var normalized = value?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (normalized.Length is 0 or > 100 || !CanonicalKeyPattern().IsMatch(normalized))
+        if (normalized.Length is 0 or > 100 || !CanonicalKeyPattern().IsMatch(normalized)
+            || IsPseudoIdentity(normalized))
             throw new InvalidOperationException($"A canonical {label} is required.");
         return normalized;
     }
 
     private static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
+    private static bool IsPseudoIdentity(string value) => value is "ALL" or "ALL_ACTIVE_BOOKS"
+        or "ALL_CLASSIFIED_BOOKS" or "ALLCLASSIFIEDBOOKS";
 
     [GeneratedRegex("^[A-Z][A-Z0-9_.-]*$", RegexOptions.CultureInvariant)]
     private static partial Regex CanonicalIdentityPattern();

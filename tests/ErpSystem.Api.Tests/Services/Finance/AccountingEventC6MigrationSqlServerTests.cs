@@ -95,6 +95,32 @@ VALUES(NEWID(),'{seeded.Individual}',N'INVENTORY.DISPOSAL.V1',N'INVENTORYDISPOSA
         var tenant = Guid.NewGuid(); var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
         await db.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');");
 
+        string GroupInsert(string suffix, string key, string participant, string entity, string action)
+        {
+            var id = Guid.NewGuid();
+            return $@"
+INSERT ProducerIntentGroups(Id,IdempotencyKey,GroupKind,Version,RootProducerIntentGroupId,Status,MemberCount,
+ ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,ExpectedOwnerEffectFingerprint,RequestSnapshotJson,
+ RequestSnapshotHash,GroupFingerprint,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
+VALUES('{id}',N'{key}',N'Original',1,'{id}',N'PendingApproval',2,N'{participant}',N'{entity}',
+ '{Guid.NewGuid()}',N'{action}',REPLICATE('9',64),N'{{""case"":""{suffix}""}}',REPLICATE('D',64),REPLICATE('E',64),
+ '{maker}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');";
+        }
+        foreach (var invalidSql in new[]
+        {
+            GroupInsert("TRAILING", "BAD-TRAILING ", "INVENTORY.DISPOSAL.V1", "INVENTORYDISPOSAL", "DISPOSE"),
+            GroupInsert("PUNCTUATION", "BAD!KEY", "INVENTORY.DISPOSAL.V1", "INVENTORYDISPOSAL", "DISPOSE"),
+            GroupInsert("LEADING", ":BAD", "INVENTORY.DISPOSAL.V1", "INVENTORYDISPOSAL", "DISPOSE"),
+            GroupInsert("NONASCII", "BÁD", "INVENTORY.DISPOSAL.V1", "INVENTORYDISPOSAL", "DISPOSE"),
+            GroupInsert("PSEUDO", "BAD-PSEUDO", "ALL_ACTIVE_BOOKS", "INVENTORYDISPOSAL", "DISPOSE"),
+            GroupInsert("PARTICIPANT-TRAILING", "BAD-PARTICIPANT-TRAILING", "INVENTORY.DISPOSAL.V1 ", "INVENTORYDISPOSAL", "DISPOSE"),
+            GroupInsert("PARTICIPANT-NONASCII", "BAD-PARTICIPANT-NONASCII", "INVENTÓRY", "INVENTORYDISPOSAL", "DISPOSE"),
+            GroupInsert("ENTITY-LEADING", "BAD-ENTITY", "INVENTORY.DISPOSAL.V1", "1INVENTORY", "DISPOSE"),
+            GroupInsert("OWNER-PUNCT", "BAD-OWNER", "INVENTORY.DISPOSAL.V1", "INVENTORYDISPOSAL", "DISPOSE:NOW"),
+            GroupInsert("OWNER-PSEUDO", "BAD-OWNER-PSEUDO", "INVENTORY.DISPOSAL.V1", "INVENTORYDISPOSAL", "ALL")
+        })
+            await FluentActions.Awaiting(() => db.ExecuteAsync(invalidSql)).Should().ThrowAsync<SqlException>();
+
         async Task<(Guid GroupId, Guid IndividualEventId)> SeedAsync(string suffix, char effect)
         {
             var group = Guid.NewGuid(); var first = Guid.NewGuid(); var second = Guid.NewGuid(); var individual = Guid.NewGuid();
@@ -116,7 +142,17 @@ UPDATE AccountingEvents SET ProducerDecisionStatus=N'Approved',ProducerDecidedBy
         }
 
         var failure = await SeedAsync("FAILURE", 'F');
-        await db.ExecuteAsync($"UPDATE ProducerIntentGroups SET Status=N'Failed',CompletedAtUtc=SYSUTCDATETIME(),FailureMessage=N'member two failed' WHERE Id='{failure.GroupId}';");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE ProducerIntentGroups SET Status=N'Failed',CompletedAtUtc=SYSUTCDATETIME(),FailureMessage=N'member two failed' WHERE Id='{failure.GroupId}';"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C8_GROUP_ATTEMPT_REQUIRED*");
+        await db.ExecuteAsync($@"INSERT ProducerIntentGroupAttempts(Id,ProducerIntentGroupId,AttemptNumber,GroupFingerprint,Status,StartedAtUtc,CompletedAtUtc,
+ FailedMemberOrder,FailedAccountingEventId,FailureMessage,CreatedAt,IsDeleted,TenantId)
+SELECT NEWID(),g.Id,1,g.GroupFingerprint,N'Failed',SYSUTCDATETIME(),SYSUTCDATETIME(),2,m.AccountingEventId,N'member two failed',SYSUTCDATETIME(),0,g.TenantId
+FROM ProducerIntentGroups g JOIN ProducerIntentGroupMembers m ON m.TenantId=g.TenantId AND m.ProducerIntentGroupId=g.Id AND m.MemberOrder=2
+WHERE g.Id='{failure.GroupId}';");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM ProducerIntentGroups g JOIN ProducerIntentGroupAttempts a ON a.TenantId=g.TenantId AND a.ProducerIntentGroupId=g.Id WHERE g.Id='{failure.GroupId}' AND g.Status=N'Failed' AND a.Status=N'Failed' AND a.FailureMessage=g.FailureMessage"))
+            .Should().Be(1);
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE ProducerIntentGroups SET Status=N'Posted',CompletedAtUtc=DATEADD(second,1,CompletedAtUtc),FailureMessage=NULL WHERE Id='{failure.GroupId}';"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C8_GROUP_ATTEMPT_REQUIRED*");
         await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE ProducerIntentGroups SET FailureMessage=N'rewritten' WHERE Id='{failure.GroupId}'"))
             .Should().ThrowAsync<SqlException>().WithMessage("*C8_GROUP_OUTCOME_IMMUTABLE*");
         await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE ProducerIntentGroups SET Status=N'Approved',CompletedAtUtc=NULL,FailureMessage=NULL WHERE Id='{failure.GroupId}'"))

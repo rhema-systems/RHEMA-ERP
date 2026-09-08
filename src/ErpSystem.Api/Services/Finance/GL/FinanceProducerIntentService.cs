@@ -220,7 +220,8 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
     private static string CanonicalParticipant(string? value)
     {
         var normalized = value?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (normalized.Length is 0 or > 100 || !ParticipantIdentityPattern().IsMatch(normalized))
+        if (normalized.Length is 0 or > 100 || !ParticipantIdentityPattern().IsMatch(normalized)
+            || IsPseudoIdentity(normalized))
             throw new InvalidOperationException("Producer participant identity must be 1 to 100 canonical characters.");
         return normalized;
     }
@@ -236,6 +237,7 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         var fingerprint = effect.EffectFingerprint?.Trim().ToUpperInvariant() ?? string.Empty;
         if (entityType.Length is 0 or > 100 || action.Length is 0 or > 60
             || !ParticipantIdentityPattern().IsMatch(entityType) || !ParticipantIdentityPattern().IsMatch(action)
+            || IsPseudoIdentity(entityType) || IsPseudoIdentity(action)
             || effect.OwnerEntityId == Guid.Empty
             || fingerprint.Length != 64 || fingerprint.All(ch => ch == '0') || fingerprint.Any(ch => !Uri.IsHexDigit(ch)))
             throw new InvalidOperationException("PRODUCER_OWNER_EFFECT_INVALID: a stable entity, action and 64-character fingerprint are required.");
@@ -245,6 +247,9 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             OwnerEntityId = effect.OwnerEntityId, OwnerAction = action, EffectFingerprint = fingerprint
         };
     }
+
+    private static bool IsPseudoIdentity(string value) => value is "ALL" or "ALL_ACTIVE_BOOKS"
+        or "ALL_CLASSIFIED_BOOKS" or "ALLCLASSIFIEDBOOKS";
 
     private static void RequireReason(DecideProducerAccountingIntentDto decision)
     {
