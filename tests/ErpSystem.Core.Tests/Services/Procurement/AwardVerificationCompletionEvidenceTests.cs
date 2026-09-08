@@ -13,16 +13,20 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class AwardVerificationCompletionEvidenceTests
 {
     [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    public async Task BothCompletionBoundariesApplyTheSameEvidenceRule(bool requiresDocument, bool allowed)
+    [InlineData(false, null, true)]
+    [InlineData(false, "", true)]
+    [InlineData(false, "   ", true)]
+    [InlineData(false, "Reviewed existing records", true)]
+    [InlineData(true, null, false)]
+    [InlineData(true, "Reviewed existing records", false)]
+    public async Task BothCompletionBoundariesApplyTheSameEvidenceRule(bool requiresDocument, string? comments, bool allowed)
     {
         var tenant = Guid.NewGuid();
         var bidder = new TenderAwardVerificationBidder { Id = Guid.NewGuid(), TenantId = tenant, Status = "Passed" };
         bidder.ItemResults.Add(new() {
             Id = Guid.NewGuid(), TenantId = tenant, BidderId = bidder.Id, IsVerified = true, Status = "Passed",
             VerifiedById = Guid.NewGuid(), VerifiedDate = DateTime.UtcNow,
-            Comments = "Checked existing approved supplier and bid records.",
+            Comments = comments,
             ChecklistItem = new() { IsActive = true, IsRequired = true, RequiresDocument = requiresDocument, ItemText = "Review" }
         });
         var verification = new TenderAwardVerification { Id = Guid.NewGuid(), Status = "InProgress", TenantId = tenant, Bidders = [bidder] };
