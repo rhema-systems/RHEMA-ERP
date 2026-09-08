@@ -24,6 +24,9 @@ public sealed class ProducerIntentGroupDto
 {
     public Guid Id { get; set; }
     public Guid RootProducerIntentGroupId { get; set; }
+    public Guid? SupersedesProducerIntentGroupId { get; set; }
+    public Guid? CorrectsProducerIntentGroupId { get; set; }
+    public Guid? ReversesProducerIntentGroupId { get; set; }
     public int Version { get; set; }
     public string GroupKind { get; set; } = string.Empty;
     public string IdempotencyKey { get; set; } = string.Empty;
@@ -31,6 +34,8 @@ public sealed class ProducerIntentGroupDto
     public string ParticipantIdentity { get; set; } = string.Empty;
     public ProducerOwnerEffectIdentityDto ExpectedOwnerEffect { get; set; } = new();
     public string GroupFingerprint { get; set; } = string.Empty;
+    public string RequestSnapshotJson { get; set; } = string.Empty;
+    public string RequestSnapshotHash { get; set; } = string.Empty;
     public Guid PreparedByUserId { get; set; }
     public DateTime PreparedAtUtc { get; set; }
     public Guid? DecidedByUserId { get; set; }

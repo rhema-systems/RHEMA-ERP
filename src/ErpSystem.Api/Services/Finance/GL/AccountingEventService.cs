@@ -403,6 +403,9 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
             {
                 RequireTransactionIdentity(transaction.TransactionId);
                 await AcquireEventLockAsync(tenantId, key, cancellationToken);
+                if (producerExecution && !groupExecution)
+                    await FinanceProducerOwnerEffectAuthority.AcquireAsync(_db, tenantId,
+                        producerReceipt!.ParticipantCode, producerReceipt.EffectFingerprint, cancellationToken);
                 var raced = await _db.AccountingEvents.Include(item => item.Postings).Include(item => item.Attempts)
                     .Include(item => item.ProducerReceipt)
                     .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IdempotencyKey == key && !item.IsDeleted, cancellationToken);
@@ -420,6 +423,9 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
                         if (!groupExecution)
                         {
                             RequireReceiptMatch(request, producerReceipt!, tenantId);
+                            if (await FinanceProducerOwnerEffectAuthority.IsUsedByAnotherAsync(_db, tenantId,
+                                    producerReceipt!.ParticipantCode, producerReceipt.EffectFingerprint, raced.Id, null, cancellationToken))
+                                throw new InvalidOperationException("ACCOUNTING_EVENT_OWNER_EFFECT_REUSED: receipt effect already belongs to another Finance execution.");
                             RequirePersistedReceiptMatch(raced.ProducerReceipt, producerReceipt!, raced.RequestFingerprint);
                         }
                     }
@@ -445,13 +451,11 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
                     if (!groupExecution)
                     {
                         RequireReceiptMatch(request, producerReceipt!, tenantId);
+                        if (await FinanceProducerOwnerEffectAuthority.IsUsedByAnotherAsync(_db, tenantId,
+                                producerReceipt!.ParticipantCode, producerReceipt.EffectFingerprint, raced.Id, null, cancellationToken))
+                            throw new InvalidOperationException("ACCOUNTING_EVENT_OWNER_EFFECT_REUSED: receipt effect already belongs to another Finance execution.");
                         if (raced.ProducerReceipt is not null)
                             RequirePersistedReceiptMatch(raced.ProducerReceipt, producerReceipt!, raced.RequestFingerprint);
-                        else if (await _db.AccountingEventProducerReceipts.AsNoTracking().AnyAsync(item =>
-                            item.TenantId == tenantId && item.AccountingEventId != raced.Id
-                            && item.ParticipantCode == producerReceipt!.ParticipantCode.Trim().ToUpperInvariant()
-                            && item.EffectFingerprint == producerReceipt.EffectFingerprint.Trim().ToUpperInvariant(), cancellationToken))
-                            throw new InvalidOperationException("ACCOUNTING_EVENT_OWNER_EFFECT_REUSED: receipt effect already belongs to another AccountingEvent.");
                     }
                 }
                 var lineage = new Lineage(raced.EventKind, raced.Version, raced.RootAccountingEventId,
@@ -996,6 +1000,9 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         static string C(string? value) => value?.Trim().ToUpperInvariant() ?? string.Empty;
         if (receipt.TenantId == Guid.Empty || receipt.OwnerEntityId == Guid.Empty || C(receipt.ParticipantCode).Length == 0
             || C(receipt.OwnerEntityType).Length == 0 || C(receipt.OwnerAction).Length == 0 || C(receipt.EffectFingerprint).Length != 64
+            || !IsStableProducerIdentity(C(receipt.ParticipantCode), 100)
+            || !IsStableProducerIdentity(C(receipt.OwnerEntityType), 100)
+            || !IsStableProducerIdentity(C(receipt.OwnerAction), 60)
             || C(receipt.EffectFingerprint).All(ch => ch == '0'))
             throw new InvalidOperationException("ACCOUNTING_EVENT_OWNER_EFFECT_EMPTY: a deterministic owner-effect receipt is required.");
         if (receipt.TenantId != tenantId)
@@ -1020,6 +1027,9 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         if (!producer || !string.Equals(C(request.ProducerParticipantIdentity), C(expected.ParticipantCode), StringComparison.Ordinal)
             || C(expected.OwnerEntityType).Length is 0 or > 100 || expected.OwnerEntityId == Guid.Empty
             || C(expected.OwnerAction).Length is 0 or > 60 || fingerprint.Length != 64
+            || !IsStableProducerIdentity(C(request.ProducerParticipantIdentity), 100)
+            || !IsStableProducerIdentity(C(expected.OwnerEntityType), 100)
+            || !IsStableProducerIdentity(C(expected.OwnerAction), 60)
             || fingerprint.All(ch => ch == '0') || fingerprint.Any(ch => !Uri.IsHexDigit(ch)))
             throw new InvalidOperationException("ACCOUNTING_EVENT_OWNER_EFFECT_INVALID: producer prepare requires exact deterministic owner-effect authority.");
     }
@@ -1033,6 +1043,11 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         RequestFingerprint = requestFingerprint, RecordedAtUtc = DateTime.UtcNow, RecordedByUserId = actorId,
         CreatedAt = DateTime.UtcNow, CreatedBy = "FinanceProducerIntentService"
     };
+
+    private static bool IsStableProducerIdentity(string value, int max) => value.Length is > 0
+        && value.Length <= max && value[0] is >= 'A' and <= 'Z'
+        && value.All(character => character is >= 'A' and <= 'Z' or >= '0' and <= '9'
+            or '_' or '.' or '-');
 
     private static void RequirePersistedReceiptMatch(AccountingEventProducerReceipt? stored,
         ProducerOwnerEffectReceiptDto receipt, string requestFingerprint)

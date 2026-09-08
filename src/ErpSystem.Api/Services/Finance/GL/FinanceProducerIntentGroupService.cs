@@ -65,7 +65,7 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             await using var tx = await BeginTransactionAsync(cancellationToken);
             try
             {
-                var key = Canonical(request.IdempotencyKey, 100, "group idempotency key");
+                var key = CanonicalKey(request.IdempotencyKey, "group idempotency key");
                 await AcquireGroupLockAsync(tenantId, key, cancellationToken);
                 var existing = await Query(tracking: true).SingleOrDefaultAsync(item => item.TenantId == tenantId
                     && item.IdempotencyKey == key && !item.IsDeleted, cancellationToken);
@@ -75,6 +75,7 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
                         throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MAKER_CONFLICT: exact retries require the original maker.");
                     BindDurableIds(request, existing);
                     var validatedEvents = await ValidateMembersAsync(request, existing.Members.OrderBy(item => item.MemberOrder).ToList(), cancellationToken);
+                    await RequireDurableMemberLineageAsync(existing, cancellationToken);
                     RequireGroupMatch(existing, request, validatedEvents);
                     prepared = existing;
                     if (tx is not null) await tx.CommitAsync(cancellationToken);
@@ -100,7 +101,7 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
                 var now = DateTime.UtcNow;
                 prepared = new ProducerIntentGroup
                 {
-                    Id = groupId, TenantId = tenantId, IdempotencyKey = Canonical(request.IdempotencyKey, 100, "group idempotency key"),
+                    Id = groupId, TenantId = tenantId, IdempotencyKey = CanonicalKey(request.IdempotencyKey, "group idempotency key"),
                     GroupKind = lineage.Kind, Version = lineage.Version,
                     RootProducerIntentGroupId = lineage.RootId == Guid.Empty ? groupId : lineage.RootId,
                     SupersedesProducerIntentGroupId = lineage.SupersedesId,
@@ -119,6 +120,7 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
                         MemberFingerprint = item.RequestFingerprint, CreatedAt = now, CreatedBy = ActorName()
                     }).ToList()
                 };
+                RequireMemberLineage(prepared, memberEvents, lineage.Target);
                 _db.ProducerIntentGroups.Add(prepared);
                 await _db.SaveChangesAsync(cancellationToken);
                 await AuditAsync(FinanceAuditEvents.ProducerIntentGroupPrepared, prepared, cancellationToken);
@@ -157,13 +159,14 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             await using var tx = await BeginTransactionAsync(cancellationToken);
             try
             {
-                var key = Canonical(decision.Group.IdempotencyKey, 100, "group idempotency key");
+                var key = CanonicalKey(decision.Group.IdempotencyKey, "group idempotency key");
                 await AcquireGroupLockAsync(tenantId, key, cancellationToken);
                 group = await Query(tracking: true).SingleOrDefaultAsync(item => item.TenantId == tenantId
                     && item.Id == groupId && !item.IsDeleted, cancellationToken)
                     ?? throw new KeyNotFoundException("Producer intent group was not found.");
                 BindDurableIds(decision.Group, group);
                 var members = await ValidateMembersAsync(decision.Group, group.Members.OrderBy(item => item.MemberOrder).ToList(), cancellationToken);
+                await RequireDurableMemberLineageAsync(group, cancellationToken);
                 RequireGroupMatch(group, decision.Group, members);
                 var targetStatus = approve ? ProducerIntentGroupStatuses.Approved : ProducerIntentGroupStatuses.Rejected;
                 if (group.Status == targetStatus)
@@ -202,6 +205,7 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
         RequireSnapshotIntegrity(group);
         if (group.MemberCount != group.Members.Count)
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MEMBER_COUNT_CONFLICT: durable member cardinality changed.");
+        await RequireDurableMemberLineageAsync(group, cancellationToken);
         return Map(group);
     }
 
@@ -213,14 +217,20 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
         var tenantId = _currentUser.GetRequiredFinanceTenantId();
         ValidateRequest(request, tenantId);
         var transaction = RequireAmbientTransaction();
-        await AcquireGroupLockAsync(tenantId, Canonical(request.IdempotencyKey, 100, "group idempotency key"), cancellationToken);
+        await AcquireGroupLockAsync(tenantId, CanonicalKey(request.IdempotencyKey, "group idempotency key"), cancellationToken);
         var group = await Query(tracking: true).SingleOrDefaultAsync(item => item.TenantId == tenantId
             && item.Id == groupId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("Producer intent group was not found.");
         BindDurableIds(request, group);
         var preparedRequests = await BuildAndValidateMembersAsync(request, group, cancellationToken);
+        await RequireDurableMemberLineageAsync(group, cancellationToken);
         RequireGroupMatch(group, request, preparedRequests.Select(item => item.Event).ToList());
         RequireReceiptMatch(group, receipt, tenantId);
+        await FinanceProducerOwnerEffectAuthority.AcquireAsync(_db, tenantId,
+            receipt.ParticipantCode, receipt.EffectFingerprint, cancellationToken);
+        if (await FinanceProducerOwnerEffectAuthority.IsUsedByAnotherAsync(_db, tenantId,
+                receipt.ParticipantCode, receipt.EffectFingerprint, null, group.Id, cancellationToken))
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_OWNER_EFFECT_REUSED: receipt effect already belongs to another Finance execution.");
         if (group.Status == ProducerIntentGroupStatuses.Posted)
         {
             RequirePersistedReceiptMatch(group.Receipt, receipt, group.GroupFingerprint);
@@ -232,8 +242,6 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_APPROVAL_REQUIRED: execution requires complete independent approval.");
         if (group.Receipt is null)
         {
-            if (await ReceiptWasUsedAsync(tenantId, group.Id, receipt, cancellationToken))
-                throw new InvalidOperationException("PRODUCER_INTENT_GROUP_OWNER_EFFECT_REUSED: receipt effect already belongs to another Finance execution.");
             group.Receipt = NewReceipt(group, receipt, RequireActor());
             _db.ProducerIntentGroupReceipts.Add(group.Receipt);
             await _db.SaveChangesAsync(cancellationToken);
@@ -289,10 +297,16 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             ?? throw new KeyNotFoundException("Producer intent group was not found.");
         BindDurableIds(request, group);
         var members = await ValidateMembersAsync(request, group.Members.OrderBy(item => item.MemberOrder).ToList(), cancellationToken);
+        await RequireDurableMemberLineageAsync(group, cancellationToken);
         RequireGroupMatch(group, request, members);
         RequireReceiptMatch(group, receipt, tenantId);
         if (group.Status == ProducerIntentGroupStatuses.Posted) return;
-        if (group.Status is not (ProducerIntentGroupStatuses.Approved or ProducerIntentGroupStatuses.Failed))
+        if (group.Status == ProducerIntentGroupStatuses.Failed)
+        {
+            RequireExactFailureRetry(group, failure);
+            return;
+        }
+        if (group.Status != ProducerIntentGroupStatuses.Approved)
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_APPROVAL_REQUIRED: only approved group execution can record failure.");
         var failedMember = failure as ProducerIntentGroupMemberExecutionException;
         await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
@@ -305,7 +319,21 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
                 // freshly loaded failure aggregate can participate in this separate transaction.
                 _db.ChangeTracker.Clear();
                 var durable = await Query(tracking: true).SingleAsync(item => item.TenantId == tenantId && item.Id == groupId, cancellationToken);
+                await RequireDurableMemberLineageAsync(durable, cancellationToken);
                 RequireGroupMatch(durable, request, members);
+                if (durable.Status == ProducerIntentGroupStatuses.Posted)
+                {
+                    await tx.CommitAsync(cancellationToken);
+                    return;
+                }
+                if (durable.Status == ProducerIntentGroupStatuses.Failed)
+                {
+                    RequireExactFailureRetry(durable, failure);
+                    await tx.CommitAsync(cancellationToken);
+                    return;
+                }
+                if (durable.Status != ProducerIntentGroupStatuses.Approved)
+                    throw new InvalidOperationException("PRODUCER_INTENT_GROUP_APPROVAL_REQUIRED: durable failure requires approved group authority.");
                 var now = DateTime.UtcNow;
                 durable.Status = ProducerIntentGroupStatuses.Failed;
                 durable.CompletedAtUtc ??= now;
@@ -365,8 +393,8 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
         supersedes = request.SupersedesProducerIntentGroupId,
         corrects = request.CorrectsProducerIntentGroupId,
         reverses = request.ReversesProducerIntentGroupId,
-        key = Canonical(request.IdempotencyKey, 100, "group idempotency key"),
-        participant = Canonical(request.ParticipantIdentity, 100, "participant identity"),
+        key = CanonicalKey(request.IdempotencyKey, "group idempotency key"),
+        participant = CanonicalIdentity(request.ParticipantIdentity, 100, "participant identity"),
         owner = CanonicalOwnerEffect(request.ExpectedOwnerEffect, request.ParticipantIdentity),
         members = members.Select((item, index) => new { order = index + 1, eventId = item.Id, fingerprint = item.RequestFingerprint }).ToArray()
     };
@@ -388,7 +416,9 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
     private static void RequireSnapshotIntegrity(ProducerIntentGroup group)
     {
         if (string.IsNullOrWhiteSpace(group.RequestSnapshotJson)
-            || !string.Equals(Sha256(group.RequestSnapshotJson), group.RequestSnapshotHash, StringComparison.Ordinal))
+            || !string.Equals(Sha256(group.RequestSnapshotJson), group.RequestSnapshotHash, StringComparison.Ordinal)
+            || !string.Equals(Sha256($"RHEMA.FIN.C8.GROUP.V1\n{group.RequestSnapshotJson}"),
+                group.GroupFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_SNAPSHOT_INVALID: immutable group evidence was altered.");
     }
 
@@ -460,6 +490,62 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
         }
     }
 
+    private async Task RequireDurableMemberLineageAsync(ProducerIntentGroup group, CancellationToken ct)
+    {
+        ProducerIntentGroup? target = null;
+        if (group.GroupKind != AccountingEventKinds.Original)
+        {
+            var targetId = group.SupersedesProducerIntentGroupId
+                ?? throw new InvalidOperationException("PRODUCER_INTENT_GROUP_LINEAGE_CONFLICT: successor predecessor is missing.");
+            target = await Query().SingleOrDefaultAsync(item => item.TenantId == group.TenantId
+                && item.Id == targetId && !item.IsDeleted, ct)
+                ?? throw new InvalidOperationException("PRODUCER_INTENT_GROUP_LINEAGE_CONFLICT: successor predecessor was not found.");
+        }
+        RequireMemberLineage(group, group.Members.OrderBy(item => item.MemberOrder)
+            .Select(item => AccountingEventService.Map(item.AccountingEvent)).ToList(), target);
+    }
+
+    private static void RequireMemberLineage(ProducerIntentGroup group, IReadOnlyList<AccountingEventDto> events,
+        ProducerIntentGroup? target)
+    {
+        var kind = CanonicalKind(group.GroupKind);
+        if (events.Count != group.MemberCount || events.Any(item => item.EventKind != kind || item.Version != group.Version))
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MEMBER_KIND_VERSION: every member must match the group kind and version.");
+        if (kind == AccountingEventKinds.Original)
+        {
+            if (target is not null || group.Version != 1 || group.RootProducerIntentGroupId != group.Id
+                || events.Any(item => item.RootAccountingEventId != item.Id || item.SupersedesAccountingEventId.HasValue
+                    || item.CorrectsAccountingEventId.HasValue || item.ReversesAccountingEventId.HasValue))
+                throw new InvalidOperationException("PRODUCER_INTENT_GROUP_LINEAGE_CONFLICT: original group/member lineage is invalid.");
+            return;
+        }
+        if (target is null || target.Status != ProducerIntentGroupStatuses.Posted
+            || group.Version != target.Version + 1 || group.RootProducerIntentGroupId != target.RootProducerIntentGroupId
+            || group.SupersedesProducerIntentGroupId != target.Id
+            || (kind == AccountingEventKinds.Correction && group.CorrectsProducerIntentGroupId != target.Id)
+            || (kind == AccountingEventKinds.Reversal && group.ReversesProducerIntentGroupId != target.Id))
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_LINEAGE_CONFLICT: successor must bind the exact posted predecessor version and root.");
+        var prior = target.Members.OrderBy(item => item.MemberOrder).ToList();
+        if (prior.Count != events.Count)
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_LINEAGE_MEMBER_COUNT: successors preserve every predecessor member.");
+        for (var index = 0; index < events.Count; index++)
+        {
+            var before = prior[index].AccountingEvent;
+            var after = events[index];
+            if (prior[index].MemberOrder != index + 1 || before.Status != AccountingEventStatuses.Posted
+                || after.RootAccountingEventId != before.RootAccountingEventId || after.Version != before.Version + 1
+                || after.SupersedesAccountingEventId != before.Id
+                || after.OriginatingModuleCode != before.OriginatingModuleCode
+                || after.SourceDocumentType != before.SourceDocumentType
+                || after.SourceDocumentId != before.SourceDocumentId || after.PostingAction != before.PostingAction
+                || (kind == AccountingEventKinds.Correction
+                    && (after.CorrectsAccountingEventId != before.Id || after.ReversesAccountingEventId.HasValue))
+                || (kind == AccountingEventKinds.Reversal
+                    && (after.ReversesAccountingEventId != before.Id || after.CorrectsAccountingEventId.HasValue)))
+                throw new InvalidOperationException("PRODUCER_INTENT_GROUP_LINEAGE_MEMBER_ORDER: successor members must preserve exact ordered posted roots.");
+        }
+    }
+
     private static void ValidateRequest(ProducerIntentGroupRequestDto request, Guid tenantId)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -467,13 +553,15 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_CARDINALITY: a complete group requires 2 to 20 members.");
         if (request.Members.Any(member => member is null || member.PostingRequest is null))
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MEMBER_INVALID: every ordered member requires a neutral posting request.");
-        _ = Canonical(request.IdempotencyKey, 100, "group idempotency key");
-        _ = CanonicalKind(request.GroupKind);
+        _ = CanonicalKey(request.IdempotencyKey, "group idempotency key");
+        var groupKind = CanonicalKind(request.GroupKind);
         var groupOwner = CanonicalOwnerEffect(request.ExpectedOwnerEffect, request.ParticipantIdentity);
         foreach (var member in request.Members)
         {
-            if (!string.Equals(Canonical(member.ParticipantIdentity, 100, "member participant identity"),
-                    Canonical(request.ParticipantIdentity, 100, "participant identity"), StringComparison.Ordinal))
+            if (CanonicalKind(member.EventKind) != groupKind)
+                throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MEMBER_KIND_VERSION: every member kind must match the group kind.");
+            if (!string.Equals(CanonicalIdentity(member.ParticipantIdentity, 100, "member participant identity"),
+                    CanonicalIdentity(request.ParticipantIdentity, 100, "participant identity"), StringComparison.Ordinal))
                 throw new InvalidOperationException("PRODUCER_INTENT_GROUP_PARTICIPANT_CONFLICT: every member must bind the group participant.");
             var memberOwner = CanonicalOwnerEffect(member.ExpectedOwnerEffect, member.ParticipantIdentity);
             if (memberOwner.ParticipantCode != groupOwner.ParticipantCode
@@ -486,7 +574,7 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
         if (request.Members.Any(member => member.PostingRequest.SourceDocumentTenantId.HasValue
             && member.PostingRequest.SourceDocumentTenantId != tenantId))
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_TENANT_CONFLICT: every member source must belong to the current tenant.");
-        if (request.Members.Select(member => Canonical(member.IdempotencyKey, 100, "member idempotency key"))
+        if (request.Members.Select(member => CanonicalKey(member.IdempotencyKey, "member idempotency key"))
             .Distinct(StringComparer.Ordinal).Count() != request.Members.Count)
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_DUPLICATE_MEMBER: member idempotency keys must be unique.");
         if (request.Members.Select(member => $"{member.PostingRequest.SourceModule}|{member.PostingRequest.SourceDocumentType}|{member.PostingRequest.SourceDocumentId:D}|{member.PostingRequest.PostingAction}")
@@ -500,11 +588,11 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
     private static ProducerOwnerEffectIdentityDto CanonicalOwnerEffect(ProducerOwnerEffectIdentityDto effect, string participant)
     {
         ArgumentNullException.ThrowIfNull(effect);
-        var participantCode = Canonical(effect.ParticipantCode, 100, "owner participant");
-        if (!string.Equals(participantCode, Canonical(participant, 100, "participant identity"), StringComparison.Ordinal))
+        var participantCode = CanonicalIdentity(effect.ParticipantCode, 100, "owner participant");
+        if (!string.Equals(participantCode, CanonicalIdentity(participant, 100, "participant identity"), StringComparison.Ordinal))
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_OWNER_PARTICIPANT_CONFLICT: receipt authority must bind the group participant.");
-        var entity = Canonical(effect.OwnerEntityType, 100, "owner entity type");
-        var action = Canonical(effect.OwnerAction, 60, "owner action");
+        var entity = CanonicalIdentity(effect.OwnerEntityType, 100, "owner entity type");
+        var action = CanonicalIdentity(effect.OwnerAction, 60, "owner action");
         var fingerprint = effect.EffectFingerprint?.Trim().ToUpperInvariant() ?? string.Empty;
         if (effect.OwnerEntityId == Guid.Empty || fingerprint.Length != 64 || fingerprint.All(character => character == '0')
             || fingerprint.Any(character => !Uri.IsHexDigit(character)))
@@ -525,14 +613,6 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             || actual.OwnerAction != expected.OwnerAction || actual.EffectFingerprint != expected.EffectFingerprint)
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_OWNER_EFFECT_CONFLICT: receipt does not match immutable group authority.");
     }
-
-    private async Task<bool> ReceiptWasUsedAsync(Guid tenantId, Guid groupId, ProducerOwnerEffectReceiptDto receipt, CancellationToken ct) =>
-        await _db.ProducerIntentGroupReceipts.AsNoTracking().AnyAsync(item => item.TenantId == tenantId
-            && item.ProducerIntentGroupId != groupId && item.ParticipantCode == receipt.ParticipantCode.Trim().ToUpperInvariant()
-            && item.EffectFingerprint == receipt.EffectFingerprint.Trim().ToUpperInvariant(), ct)
-        || await _db.AccountingEventProducerReceipts.AsNoTracking().AnyAsync(item => item.TenantId == tenantId
-            && item.ParticipantCode == receipt.ParticipantCode.Trim().ToUpperInvariant()
-            && item.EffectFingerprint == receipt.EffectFingerprint.Trim().ToUpperInvariant(), ct);
 
     private static ProducerIntentGroupReceipt NewReceipt(ProducerIntentGroup group, ProducerOwnerEffectReceiptDto receipt, Guid actor) => new()
     {
@@ -561,6 +641,19 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             throw new InvalidOperationException("PRODUCER_INTENT_GROUP_DECISION_CONFLICT: checker or reason changed.");
     }
 
+    private static void RequireExactFailureRetry(ProducerIntentGroup group, Exception failure)
+    {
+        var expected = Truncate(failure.Message, 1000);
+        var failedMember = failure as ProducerIntentGroupMemberExecutionException;
+        var durable = group.Attempts.OrderByDescending(item => item.AttemptNumber)
+            .FirstOrDefault(item => item.Status == AccountingEventStatuses.Failed);
+        if (durable is null || !string.Equals(group.FailureMessage, expected, StringComparison.Ordinal)
+            || !string.Equals(durable.FailureMessage, expected, StringComparison.Ordinal)
+            || durable.FailedMemberOrder != failedMember?.MemberOrder
+            || durable.FailedAccountingEventId != failedMember?.AccountingEventId)
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_FAILURE_CONFLICT: failed retry evidence changed.");
+    }
+
     private IQueryable<ProducerIntentGroup> Query(bool tracking = false)
     {
         var query = _db.ProducerIntentGroups.Include(item => item.Members).ThenInclude(item => item.AccountingEvent)
@@ -572,8 +665,12 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
     private static ProducerIntentGroupDto Map(ProducerIntentGroup group) => new()
     {
         Id = group.Id, RootProducerIntentGroupId = group.RootProducerIntentGroupId, Version = group.Version,
+        SupersedesProducerIntentGroupId = group.SupersedesProducerIntentGroupId,
+        CorrectsProducerIntentGroupId = group.CorrectsProducerIntentGroupId,
+        ReversesProducerIntentGroupId = group.ReversesProducerIntentGroupId,
         GroupKind = group.GroupKind, IdempotencyKey = group.IdempotencyKey, Status = group.Status,
         ParticipantIdentity = group.ParticipantCode, GroupFingerprint = group.GroupFingerprint,
+        RequestSnapshotJson = group.RequestSnapshotJson, RequestSnapshotHash = group.RequestSnapshotHash,
         ExpectedOwnerEffect = new() { ParticipantCode = group.ParticipantCode, OwnerEntityType = group.OwnerEntityType,
             OwnerEntityId = group.OwnerEntityId, OwnerAction = group.OwnerAction, EffectFingerprint = group.ExpectedOwnerEffectFingerprint },
         PreparedByUserId = group.PreparedByUserId, PreparedAtUtc = group.PreparedAtUtc,
@@ -657,10 +754,18 @@ IF @result < 0 THROW 51000, 'PRODUCER_INTENT_GROUP_LOCK_FAILED: group identity c
         _ => throw new InvalidOperationException("Producer intent group kind must be Original, Correction, or Reversal.")
     };
 
-    private static string Canonical(string? value, int max, string label)
+    private static string CanonicalIdentity(string? value, int max, string label)
     {
         var normalized = value?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (normalized.Length is 0 || normalized.Length > max || !CanonicalPattern().IsMatch(normalized))
+        if (normalized.Length is 0 || normalized.Length > max || !CanonicalIdentityPattern().IsMatch(normalized))
+            throw new InvalidOperationException($"A canonical {label} is required.");
+        return normalized;
+    }
+
+    private static string CanonicalKey(string? value, string label)
+    {
+        var normalized = value?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (normalized.Length is 0 or > 100 || !CanonicalKeyPattern().IsMatch(normalized))
             throw new InvalidOperationException($"A canonical {label} is required.");
         return normalized;
     }
@@ -668,8 +773,11 @@ IF @result < 0 THROW 51000, 'PRODUCER_INTENT_GROUP_LOCK_FAILED: group identity c
     private static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
-    [GeneratedRegex("^[A-Z][A-Z0-9_.:-]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex CanonicalPattern();
+    [GeneratedRegex("^[A-Z][A-Z0-9_.-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex CanonicalIdentityPattern();
+
+    [GeneratedRegex("^[A-Z0-9][A-Z0-9_.:-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex CanonicalKeyPattern();
 
     private sealed record GroupLineage(string Kind, int Version, Guid RootId, Guid? SupersedesId,
         Guid? CorrectsId, Guid? ReversesId, ProducerIntentGroup? Target);

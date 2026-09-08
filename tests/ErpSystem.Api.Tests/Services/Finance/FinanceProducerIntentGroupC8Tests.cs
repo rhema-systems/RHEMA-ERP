@@ -66,6 +66,9 @@ public sealed class FinanceProducerIntentGroupC8Tests
 
         prepared.Id.Should().Be(exact.Id);
         prepared.Status.Should().Be(ProducerIntentGroupStatuses.PendingApproval);
+        prepared.RequestSnapshotJson.Should().NotBeNullOrWhiteSpace();
+        prepared.RequestSnapshotHash.Should().HaveLength(64);
+        prepared.SupersedesProducerIntentGroupId.Should().BeNull();
         prepared.Members.Select(member => member.MemberOrder).Should().Equal(1, 2);
         prepared.Members.Select(member => member.AccountingEvent.Id).Should().Equal(request.Members.Select(member => member.AccountingEventId!.Value));
         harness.Executor.Prepared.Should().HaveCount(2, "one neutral C6 event is prepared for each genuine source identity");
@@ -132,6 +135,30 @@ public sealed class FinanceProducerIntentGroupC8Tests
         harness.Db.ProducerIntentGroupReceipts.Should().BeEmpty();
         harness.Db.ProducerIntentGroupAttempts.Should().BeEmpty();
         harness.Executor.Executed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DirectC7DecisionAndExecution_DenyAGroupedMemberBeforeMutation()
+    {
+        var harness = Harness(); var request = Group();
+        var group = await harness.Service.PrepareAsync(request);
+        var memberId = group.Members[0].AccountingEvent.Id;
+        harness.Actor = Guid.NewGuid();
+        var prepared = await harness.Producer.BuildPreparedRequestAsync(memberId, request.Members[0], CancellationToken.None);
+        var direct = new AccountingEventService(harness.Db, harness.User.Object, harness.Applicability.Object,
+            new FinancePostingEngine(harness.Db, harness.User.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<FinancePostingEngine>.Instance),
+            harness.Audit.Object, Options.Create(new AccountingEventOptions { Enabled = true }));
+
+        await FluentActions.Awaiting(() => direct.ApproveAsync(memberId,
+            new ReleaseAccountingEventDto { Request = prepared, Reason = "individual decision" })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_DECISION_REQUIRED*");
+        await FluentActions.Awaiting(() => ((ITrustedAccountingEventExecutor)direct)
+            .ExecuteApprovedInAmbientTransactionAsync(memberId,
+                new ReleaseAccountingEventDto { Request = prepared, Reason = "individual decision" },
+                Receipt(harness.TenantId, request))).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_EXECUTION_REQUIRED*");
+        (await harness.Db.AccountingEvents.SingleAsync(item => item.Id == memberId)).ProducerDecisionStatus
+            .Should().Be(ProducerIntentDecisionStatuses.Pending);
     }
 
     [Fact]
@@ -222,6 +249,16 @@ public sealed class FinanceProducerIntentGroupC8Tests
         await ((IFinanceProducerIntentGroupApprovedExecution)harness.Service).RecordFailureAfterRollbackAsync(
             prepared.Id, request, Receipt(harness.TenantId, request), new InvalidOperationException("second member failed"));
 
+        var attemptCount = await harness.Db.ProducerIntentGroupAttempts.CountAsync();
+        await ((IFinanceProducerIntentGroupApprovedExecution)harness.Service).RecordFailureAfterRollbackAsync(
+            prepared.Id, request, Receipt(harness.TenantId, request), new InvalidOperationException("second member failed"));
+        (await harness.Db.ProducerIntentGroupAttempts.CountAsync()).Should().Be(attemptCount,
+            "an exact durable failure retry cannot append another attempt");
+        await FluentActions.Awaiting(() => ((IFinanceProducerIntentGroupApprovedExecution)harness.Service)
+            .RecordFailureAfterRollbackAsync(prepared.Id, request, Receipt(harness.TenantId, request),
+                new InvalidOperationException("different failure"))).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_FAILURE_CONFLICT*");
+
         harness.Db.Tenants.Should().BeEmpty("rolled-back tracked owner state must never be replayed by failure persistence");
         harness.Db.ProducerIntentGroupReceipts.Should().BeEmpty();
         harness.Db.AccountingEventPostings.Should().BeEmpty();
@@ -229,6 +266,37 @@ public sealed class FinanceProducerIntentGroupC8Tests
         durable.Status.Should().Be(ProducerIntentGroupStatuses.Failed);
         durable.Attempts.Should().ContainSingle(attempt => attempt.Status == AccountingEventStatuses.Failed);
         (await harness.Db.AccountingEvents.ToListAsync()).Should().OnlyContain(item => item.Status == AccountingEventStatuses.PendingApproval);
+    }
+
+    [Fact]
+    public async Task SnapshotAndCanonicalIdentityEvidence_FailsClosedOnTamperAndGrammarDrift()
+    {
+        var harness = Harness();
+        var request = Group(); request.IdempotencyKey = "inventory:disposal.group-1";
+        var prepared = await harness.Service.PrepareAsync(request);
+        prepared.RequestSnapshotHash.Should().Be(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(prepared.RequestSnapshotJson))));
+
+        var durable = await harness.Db.ProducerIntentGroups.SingleAsync(item => item.Id == prepared.Id);
+        durable.RequestSnapshotJson += " ";
+        durable.RequestSnapshotHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(durable.RequestSnapshotJson)));
+        await harness.Db.SaveChangesAsync();
+        await FluentActions.Awaiting(() => harness.Service.GetAsync(prepared.Id)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_SNAPSHOT_INVALID*");
+
+        foreach (var mutate in new Action<ProducerIntentGroupRequestDto>[]
+        {
+            item => item.ParticipantIdentity = "inventory:disposal",
+            item => item.ExpectedOwnerEffect.OwnerEntityType = "1InventoryDisposal",
+            item => item.ExpectedOwnerEffect.OwnerAction = "Dispose:Now",
+            item => item.IdempotencyKey = ":invalid-leading-colon",
+            item => item.Members[0].IdempotencyKey = "mémbér"
+        })
+        {
+            var invalidHarness = Harness(); var invalid = Group(); mutate(invalid);
+            await FluentActions.Awaiting(() => invalidHarness.Service.PrepareAsync(invalid)).Should()
+                .ThrowAsync<InvalidOperationException>().WithMessage("*canonical*");
+            invalidHarness.Executor.Prepared.Should().BeEmpty();
+        }
     }
 
     [Fact]
@@ -246,7 +314,77 @@ public sealed class FinanceProducerIntentGroupC8Tests
         var crossTenant = Group(); crossTenant.Members[0].PostingRequest.SourceDocumentTenantId = Guid.NewGuid();
         await FluentActions.Awaiting(() => harness.Service.PrepareAsync(crossTenant)).Should()
             .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_TENANT_CONFLICT*");
+        var mixedKind = Group(); mixedKind.Members[1].EventKind = AccountingEventKinds.Correction;
+        await FluentActions.Awaiting(() => harness.Service.PrepareAsync(mixedKind)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_MEMBER_KIND_VERSION*");
         harness.Executor.Prepared.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Correction_PreservesExactOrderedMemberRootsAndFrozenC5EvidenceDespitePolicyDrift()
+    {
+        var harness = Harness();
+        var originalRequest = Group();
+        var original = await harness.Service.PrepareAsync(originalRequest);
+        harness.Db.ChangeTracker.Clear();
+        var durableGroup = await harness.Db.ProducerIntentGroups.Include(item => item.Members)
+            .ThenInclude(item => item.AccountingEvent).SingleAsync(item => item.Id == original.Id);
+        durableGroup.Status = ProducerIntentGroupStatuses.Posted;
+        foreach (var member in durableGroup.Members)
+        {
+            var evidence = new AccountingBookSelectionEvidence
+            {
+                Id = Guid.NewGuid(), TenantId = harness.TenantId, EffectiveDate = new DateTime(2026, 9, 8),
+                OriginatingModuleCode = "INV", SourceDocumentType = member.AccountingEvent.SourceDocumentType,
+                PostingAction = member.AccountingEvent.PostingAction, IdempotencyKey = $"FROZEN-{member.MemberOrder}",
+                CalculationInputHash = Hash('A'), SelectionFingerprint = Hash('B'),
+                FrozenByUserId = harness.Actor, FrozenAtUtc = DateTime.UtcNow
+            };
+            harness.Db.AccountingBookSelectionEvidence.Add(evidence);
+            member.AccountingEvent.Status = AccountingEventStatuses.Posted;
+            member.AccountingEvent.AccountingBookSelectionEvidenceId = evidence.Id;
+            member.AccountingEvent.AccountingBookSelectionEvidence = evidence;
+        }
+        await harness.Db.SaveChangesAsync();
+        harness.Applicability.Reset();
+        harness.Applicability.Setup(service => service.ResolveAsync(It.IsAny<ResolveAccountingBookApplicabilityDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("current policy is blocked"));
+
+        var correctionRequest = Clone(originalRequest);
+        correctionRequest.ProducerIntentGroupId = null; correctionRequest.GroupKind = AccountingEventKinds.Correction;
+        correctionRequest.IdempotencyKey = "inventory-disposal-group-correction:1";
+        correctionRequest.SupersedesProducerIntentGroupId = original.Id;
+        correctionRequest.CorrectsProducerIntentGroupId = original.Id;
+        correctionRequest.ReversesProducerIntentGroupId = null;
+        for (var index = 0; index < correctionRequest.Members.Count; index++)
+        {
+            var target = original.Members[index].AccountingEvent;
+            var member = correctionRequest.Members[index];
+            member.AccountingEventId = null; member.EventKind = AccountingEventKinds.Correction;
+            member.IdempotencyKey += "-CORRECTION"; member.SupersedesAccountingEventId = target.Id;
+            member.CorrectsAccountingEventId = target.Id; member.ReversesAccountingEventId = null;
+        }
+
+        var swapped = Clone(correctionRequest); swapped.IdempotencyKey += "-SWAP";
+        swapped.Members = swapped.Members.Reverse().ToList();
+        await FluentActions.Awaiting(() => harness.Service.PrepareAsync(swapped)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_LINEAGE_MEMBER_ORDER*");
+
+        var correction = await harness.Service.PrepareAsync(correctionRequest);
+
+        correction.Version.Should().Be(2); correction.RootProducerIntentGroupId.Should().Be(original.Id);
+        correction.CorrectsProducerIntentGroupId.Should().Be(original.Id);
+        correction.Members.Select(item => item.AccountingEvent.EventKind).Should().OnlyContain(kind => kind == AccountingEventKinds.Correction);
+        for (var index = 0; index < correction.Members.Count; index++)
+        {
+            correction.Members[index].AccountingEvent.RootAccountingEventId.Should()
+                .Be(original.Members[index].AccountingEvent.RootAccountingEventId);
+            correction.Members[index].AccountingEvent.CorrectsAccountingEventId.Should()
+                .Be(original.Members[index].AccountingEvent.Id);
+            correction.Members[index].AccountingEvent.SelectionFingerprint.Should().Be(Hash('B'));
+        }
+        harness.Applicability.VerifyNoOtherCalls();
+
     }
 
     [Fact]
@@ -259,9 +397,14 @@ public sealed class FinanceProducerIntentGroupC8Tests
         var down = string.Join("\n", migration.DownOperations().OfType<SqlOperation>().Select(operation => operation.Sql));
 
         up.Should().Contain("C8_PREFLIGHT").And.Contain("C8_GROUP_COMPLETE").And.Contain("C8_GROUP_OUTCOME")
-            .And.Contain("C8_RECEIPT_REUSED").And.Contain("TR_AccountingEvents_C7ProducerDecision")
+            .And.Contain("C8_RECEIPT_REUSED").And.Contain("C7_RECEIPT_REUSED")
+            .And.Contain("TR_AccountingEvents_C7ProducerDecision").And.Contain("TR_AccountingEventProducerReceipts_C7Immutable")
+            .And.Contain("C8_GROUP_OUTCOME_IMMUTABLE").And.Contain("C8_GROUP_RECOVERY")
+            .And.Contain("FIN:C7C8:").And.Contain("sp_getapplock")
+            .And.Contain("C8_MEMBER_LINEAGE").And.Contain("C8_GROUP_LINEAGE")
             .And.Contain("[MemberCount] BETWEEN 2 AND 20");
-        down.Should().Contain("C8_DOWN_REFUSED").And.Contain("ALTER TRIGGER [TR_AccountingEvents_C7ProducerDecision]");
+        down.Should().Contain("C8_DOWN_REFUSED").And.Contain("ALTER TRIGGER [TR_AccountingEvents_C7ProducerDecision]")
+            .And.Contain("ALTER TRIGGER [TR_AccountingEventProducerReceipts_C7Immutable]");
         down.IndexOf("C8_DOWN_REFUSED", StringComparison.Ordinal).Should()
             .BeLessThan(down.IndexOf("DROP TABLE [ProducerIntentGroupAttempts]", StringComparison.Ordinal));
     }
@@ -339,6 +482,7 @@ public sealed class FinanceProducerIntentGroupC8Tests
                 await state.Db.AccountingEvents.AsNoTracking().SingleAsync(item => item.Id == id, ct)));
         var producer = new FinanceProducerIntentService(state.Applicability.Object, eventApi.Object, state.Executor,
             state.Db, state.User.Object, Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+        state.Producer = producer;
         state.Service = new FinanceProducerIntentGroupService(state.Db, producer, state.Executor, state.User.Object,
             state.Audit.Object, Options.Create(new FinanceProducerIntentGroupOptions { Enabled = groupEnabled }),
             Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
@@ -395,6 +539,7 @@ public sealed class FinanceProducerIntentGroupC8Tests
         public Mock<ICurrentUserService> User { get; } = new();
         public Mock<IFinanceAuditService> Audit { get; } = new();
         public StubExecutor Executor { get; set; } = null!;
+        public FinanceProducerIntentService Producer { get; set; } = null!;
         public FinanceProducerIntentGroupService Service { get; set; } = null!;
     }
 
@@ -405,15 +550,22 @@ public sealed class FinanceProducerIntentGroupC8Tests
         public int? FailOnExecutionNumber { get; set; }
         public bool PersistPostedStatus { get; set; }
 
-        public Task<AccountingEventDto> PrepareGroupMemberInAmbientTransactionAsync(CreateAccountingEventDto request,
+        public async Task<AccountingEventDto> PrepareGroupMemberInAmbientTransactionAsync(CreateAccountingEventDto request,
             CancellationToken cancellationToken = default)
         {
             Prepared.Add(request);
             var id = request.AccountingEventId!.Value;
+            var targetId = request.CorrectsAccountingEventId ?? request.ReversesAccountingEventId;
+            var target = targetId.HasValue
+                ? await db.AccountingEvents.AsNoTracking().SingleAsync(item => item.Id == targetId.Value, cancellationToken)
+                : null;
             var fingerprint = (string)typeof(AccountingEventService).GetMethod("Fingerprint", BindingFlags.NonPublic | BindingFlags.Static)!
-                .Invoke(null, [request, request.SelectionIdempotencyKey.Trim().ToUpperInvariant(), 1, id])!;
+                .Invoke(null, [request, request.SelectionIdempotencyKey.Trim().ToUpperInvariant(), target?.Version + 1 ?? 1,
+                    target?.RootAccountingEventId ?? id])!;
             var snapshot = JsonSerializer.Serialize(request, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            var item = new AccountingEvent { Id = id, TenantId = tenantId, RootAccountingEventId = id, Version = 1,
+            var item = new AccountingEvent { Id = id, TenantId = tenantId, RootAccountingEventId = target?.RootAccountingEventId ?? id,
+                Version = target?.Version + 1 ?? 1, SupersedesAccountingEventId = targetId,
+                CorrectsAccountingEventId = request.CorrectsAccountingEventId, ReversesAccountingEventId = request.ReversesAccountingEventId,
                 EventKind = request.EventKind, IdempotencyKey = request.SelectionIdempotencyKey.Trim().ToUpperInvariant(),
                 OriginatingModuleCode = request.PostingRequest.OriginModuleCode ?? request.PostingRequest.SourceModule,
                 SourceDocumentType = request.PostingRequest.SourceDocumentType,
@@ -424,7 +576,7 @@ public sealed class FinanceProducerIntentGroupC8Tests
                 RequestFingerprint = fingerprint, PreparedByUserId = actor(), PreparedAtUtc = DateTime.UtcNow,
                 RequestedAtUtc = DateTime.UtcNow, EventDate = request.PostingRequest.PostingDate, CreatedAt = DateTime.UtcNow };
             db.AccountingEvents.Add(item);
-            return Task.FromResult(AccountingEventService.Map(item));
+            return AccountingEventService.Map(item);
         }
 
         public async Task<AccountingEventDto> ValidatePreparedGroupMemberAsync(Guid accountingEventId,

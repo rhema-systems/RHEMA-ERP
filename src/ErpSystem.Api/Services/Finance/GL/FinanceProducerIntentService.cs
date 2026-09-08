@@ -234,7 +234,9 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         var entityType = effect.OwnerEntityType?.Trim().ToUpperInvariant() ?? string.Empty;
         var action = effect.OwnerAction?.Trim().ToUpperInvariant() ?? string.Empty;
         var fingerprint = effect.EffectFingerprint?.Trim().ToUpperInvariant() ?? string.Empty;
-        if (entityType.Length is 0 or > 100 || action.Length is 0 or > 60 || effect.OwnerEntityId == Guid.Empty
+        if (entityType.Length is 0 or > 100 || action.Length is 0 or > 60
+            || !ParticipantIdentityPattern().IsMatch(entityType) || !ParticipantIdentityPattern().IsMatch(action)
+            || effect.OwnerEntityId == Guid.Empty
             || fingerprint.Length != 64 || fingerprint.All(ch => ch == '0') || fingerprint.Any(ch => !Uri.IsHexDigit(ch)))
             throw new InvalidOperationException("PRODUCER_OWNER_EFFECT_INVALID: a stable entity, action and 64-character fingerprint are required.");
         return new ProducerOwnerEffectIdentityDto

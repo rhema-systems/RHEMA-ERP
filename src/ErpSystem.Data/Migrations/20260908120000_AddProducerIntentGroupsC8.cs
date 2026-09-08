@@ -15,6 +15,7 @@ public partial class AddProducerIntentGroupsC8 : Migration
 IF OBJECT_ID(N'[AccountingEvents]', N'U') IS NULL
  OR OBJECT_ID(N'[AccountingEventProducerReceipts]', N'U') IS NULL
  OR OBJECT_ID(N'[TR_AccountingEvents_C7ProducerDecision]', N'TR') IS NULL
+ OR OBJECT_ID(N'[TR_AccountingEventProducerReceipts_C7Immutable]', N'TR') IS NULL
     THROW 51000, 'C8_PREFLIGHT: reviewed C7 producer authority is required.', 1;
 IF OBJECT_ID(N'[ProducerIntentGroups]', N'U') IS NOT NULL
  OR OBJECT_ID(N'[ProducerIntentGroupMembers]', N'U') IS NOT NULL
@@ -126,15 +127,54 @@ BEGIN
    LEFT JOIN [AccountingEvents] e ON e.[TenantId]=m.[TenantId] AND e.[Id]=m.[AccountingEventId]
    WHERE g.[Status]<>N'PendingApproval' OR m.[MemberOrder]>g.[MemberCount] OR e.[Id] IS NULL
       OR e.[Status]<>N'PendingApproval' OR e.[ProducerDecisionStatus]<>N'Pending'
+      OR e.[EventKind]<>g.[GroupKind] OR e.[Version]<>g.[Version]
+      OR e.[IdempotencyKey] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(e.[IdempotencyKey]))) COLLATE Latin1_General_100_BIN2
+      OR DATALENGTH(e.[IdempotencyKey])<>DATALENGTH(UPPER(LTRIM(RTRIM(e.[IdempotencyKey]))))
+      OR LEFT(e.[IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z0-9]'
+      OR e.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.:-]%'
       OR e.[RequestFingerprint]<>m.[MemberFingerprint] OR e.[ProducerParticipantIdentity]<>g.[ParticipantCode])
   THROW 51000, 'C8_MEMBER_AUTHORITY: ordered members must bind pending C7 events and the group participant.', 1;
+ IF EXISTS(SELECT 1 FROM inserted m JOIN [ProducerIntentGroups] g ON g.[TenantId]=m.[TenantId] AND g.[Id]=m.[ProducerIntentGroupId]
+   LEFT JOIN [ProducerIntentGroupMembers] pm ON pm.[TenantId]=g.[TenantId] AND pm.[ProducerIntentGroupId]=g.[SupersedesProducerIntentGroupId] AND pm.[MemberOrder]=m.[MemberOrder]
+   LEFT JOIN [AccountingEvents] e ON e.[TenantId]=m.[TenantId] AND e.[Id]=m.[AccountingEventId]
+   LEFT JOIN [AccountingEvents] pe ON pe.[TenantId]=pm.[TenantId] AND pe.[Id]=pm.[AccountingEventId]
+   WHERE g.[GroupKind]<>N'Original' AND (pm.[Id] IS NULL OR pe.[Status]<>N'Posted'
+     OR e.[SupersedesAccountingEventId]<>pe.[Id] OR e.[RootAccountingEventId]<>pe.[RootAccountingEventId]
+     OR e.[Version]<>pe.[Version]+1
+     OR e.[OriginatingModuleCode]<>pe.[OriginatingModuleCode] OR e.[SourceDocumentType]<>pe.[SourceDocumentType]
+     OR e.[SourceDocumentId]<>pe.[SourceDocumentId] OR e.[PostingAction]<>pe.[PostingAction]
+     OR (g.[GroupKind]=N'Correction' AND (e.[CorrectsAccountingEventId]<>pe.[Id] OR e.[ReversesAccountingEventId] IS NOT NULL))
+     OR (g.[GroupKind]=N'Reversal' AND (e.[ReversesAccountingEventId]<>pe.[Id] OR e.[CorrectsAccountingEventId] IS NOT NULL))))
+  THROW 51000, 'C8_MEMBER_LINEAGE: successor members must bind exact same-order posted predecessor roots.', 1;
 END;
 
 CREATE TRIGGER [TR_ProducerIntentGroupReceipts_C8Immutable] ON [ProducerIntentGroupReceipts] AFTER INSERT,UPDATE,DELETE AS
 BEGIN
  SET NOCOUNT ON;
  IF EXISTS(SELECT 1 FROM deleted) THROW 51000, 'C8_RECEIPT_IMMUTABLE: group receipt evidence is append-only.', 1;
- IF EXISTS(SELECT 1 FROM inserted r JOIN [ProducerIntentGroups] g ON g.[TenantId]=r.[TenantId] AND g.[Id]=r.[ProducerIntentGroupId]
+  IF EXISTS(SELECT 1 FROM inserted r WHERE
+   r.[ParticipantCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[ParticipantCode]))) COLLATE Latin1_General_100_BIN2
+   OR DATALENGTH(r.[ParticipantCode])<>DATALENGTH(UPPER(LTRIM(RTRIM(r.[ParticipantCode]))))
+   OR LEFT(r.[ParticipantCode],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+   OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerEntityType]))) COLLATE Latin1_General_100_BIN2
+   OR LEFT(r.[OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+   OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerAction]))) COLLATE Latin1_General_100_BIN2
+   OR LEFT(r.[OwnerAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+   OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%')
+   THROW 51000, 'C8_RECEIPT_IDENTITY: receipt identities must use the reviewed canonical grammar.', 1;
+  DECLARE @ownerTenant uniqueidentifier, @ownerParticipant nvarchar(100), @ownerEffect char(64), @ownerResource nvarchar(255), @ownerResult int;
+  DECLARE owner_effects CURSOR LOCAL FAST_FORWARD FOR
+   SELECT DISTINCT [TenantId],[ParticipantCode],[EffectFingerprint] FROM inserted ORDER BY [TenantId],[ParticipantCode],[EffectFingerprint];
+  OPEN owner_effects; FETCH NEXT FROM owner_effects INTO @ownerTenant,@ownerParticipant,@ownerEffect;
+  WHILE @@FETCH_STATUS=0 BEGIN
+   SET @ownerResource=CONCAT(N'FIN:C7C8:',CONVERT(nvarchar(36),@ownerTenant),N'|',@ownerParticipant,N'|',@ownerEffect);
+   EXEC @ownerResult=sp_getapplock @Resource=@ownerResource,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=30000;
+   IF @ownerResult<0 BEGIN CLOSE owner_effects; DEALLOCATE owner_effects; THROW 51000, 'C8_RECEIPT_LOCK_FAILED: owner-effect identity could not be serialized.', 1; END;
+   FETCH NEXT FROM owner_effects INTO @ownerTenant,@ownerParticipant,@ownerEffect;
+  END; CLOSE owner_effects; DEALLOCATE owner_effects;
+  IF EXISTS(SELECT 1 FROM inserted r JOIN [ProducerIntentGroups] g ON g.[TenantId]=r.[TenantId] AND g.[Id]=r.[ProducerIntentGroupId]
    WHERE g.[Status] NOT IN (N'Approved',N'Failed') OR g.[GroupFingerprint]<>r.[GroupFingerprint]
     OR g.[ParticipantCode]<>r.[ParticipantCode] OR g.[OwnerEntityType]<>r.[OwnerEntityType]
     OR g.[OwnerEntityId]<>r.[OwnerEntityId] OR g.[OwnerAction]<>r.[OwnerAction]
@@ -163,7 +203,20 @@ BEGIN
  IF EXISTS(SELECT 1 FROM inserted i LEFT JOIN deleted d ON d.[Id]=i.[Id] WHERE d.[Id] IS NULL AND i.[Status]<>N'PendingApproval')
   THROW 51000, 'C8_GROUP_INSERT_STATE: decision or execution cannot be preseeded.', 1;
  IF EXISTS(SELECT 1 FROM inserted i WHERE i.[ParticipantCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[ParticipantCode]))) COLLATE Latin1_General_100_BIN2
-   OR i.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%' OR i.[OwnerEntityId]='00000000-0000-0000-0000-000000000000')
+   OR DATALENGTH(i.[ParticipantCode])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[ParticipantCode]))))
+   OR LEFT(i.[ParticipantCode],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+   OR i.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))) COLLATE Latin1_General_100_BIN2
+   OR DATALENGTH(i.[IdempotencyKey])<>DATALENGTH(UPPER(LTRIM(RTRIM(i.[IdempotencyKey]))))
+   OR LEFT(i.[IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z0-9]'
+   OR i.[IdempotencyKey] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.:-]%'
+   OR i.[OwnerEntityType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[OwnerEntityType]))) COLLATE Latin1_General_100_BIN2
+   OR LEFT(i.[OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+   OR i.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR i.[OwnerAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(i.[OwnerAction]))) COLLATE Latin1_General_100_BIN2
+   OR LEFT(i.[OwnerAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+   OR i.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+   OR i.[OwnerEntityId]='00000000-0000-0000-0000-000000000000')
   THROW 51000, 'C8_GROUP_IDENTITY: canonical participant and owner identity are required.', 1;
  IF EXISTS(SELECT 1 FROM inserted i WHERE i.[Status] IN (N'Approved',N'Rejected',N'Posted',N'Failed')
    AND (i.[DecidedByUserId]=i.[PreparedByUserId] OR LEN(LTRIM(RTRIM(i.[DecisionReason])))=0))
@@ -183,10 +236,19 @@ BEGIN
   THROW 51000, 'C8_GROUP_EVIDENCE_IMMUTABLE: identity, lineage, membership, snapshot and decision cannot be rewritten.', 1;
  IF EXISTS(SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
    WHERE (d.[Status]=N'PendingApproval' AND i.[Status] NOT IN (N'PendingApproval',N'Approved',N'Rejected'))
-      OR (d.[Status]=N'Approved' AND i.[Status] NOT IN (N'Approved',N'Posted'))
+      OR (d.[Status]=N'Approved' AND i.[Status] NOT IN (N'Approved',N'Posted',N'Failed'))
       OR (d.[Status]=N'Failed' AND i.[Status] NOT IN (N'Failed',N'Posted'))
       OR (d.[Status] IN (N'Rejected',N'Posted') AND d.[Status]<>i.[Status]))
   THROW 51000, 'C8_GROUP_WORKFLOW: combined decision/execution and invalid transitions are forbidden.', 1;
+ IF EXISTS(SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+   WHERE d.[Status] IN (N'Rejected',N'Posted',N'Failed') AND i.[Status]=d.[Status]
+    AND (ISNULL(i.[CompletedAtUtc],'0001-01-01')<>ISNULL(d.[CompletedAtUtc],'0001-01-01')
+      OR ISNULL(i.[FailureMessage],N'')<>ISNULL(d.[FailureMessage],N'')))
+  THROW 51000, 'C8_GROUP_OUTCOME_IMMUTABLE: terminal outcome evidence cannot be rewritten.', 1;
+ IF EXISTS(SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+   WHERE d.[Status]=N'Failed' AND i.[Status]=N'Posted'
+    AND (i.[CompletedAtUtc]<=d.[CompletedAtUtc] OR i.[FailureMessage] IS NOT NULL))
+  THROW 51000, 'C8_GROUP_RECOVERY: recovery must record a later posted completion and retain failed-attempt evidence.', 1;
  IF EXISTS(SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
    WHERE d.[Status]=N'PendingApproval' AND i.[Status] IN (N'Approved',N'Rejected')
     AND ((SELECT COUNT(*) FROM [ProducerIntentGroupMembers] m WHERE m.[TenantId]=i.[TenantId] AND m.[ProducerIntentGroupId]=i.[Id])<>i.[MemberCount]
@@ -198,6 +260,45 @@ BEGIN
     OR EXISTS(SELECT 1 FROM [ProducerIntentGroupMembers] m JOIN [AccountingEvents] e ON e.[TenantId]=m.[TenantId] AND e.[Id]=m.[AccountingEventId]
        WHERE m.[TenantId]=i.[TenantId] AND m.[ProducerIntentGroupId]=i.[Id] AND e.[Status]<>N'Posted')))
   THROW 51000, 'C8_GROUP_OUTCOME: every member and the exact receipt must post before the group.', 1;
+ IF EXISTS(SELECT 1 FROM inserted i LEFT JOIN [ProducerIntentGroups] p ON p.[TenantId]=i.[TenantId] AND p.[Id]=i.[SupersedesProducerIntentGroupId]
+   WHERE i.[GroupKind]<>N'Original' AND (p.[Id] IS NULL OR p.[Status]<>N'Posted'
+     OR i.[Version]<>p.[Version]+1 OR i.[RootProducerIntentGroupId]<>p.[RootProducerIntentGroupId]
+     OR (i.[GroupKind]=N'Correction' AND i.[CorrectsProducerIntentGroupId]<>p.[Id])
+     OR (i.[GroupKind]=N'Reversal' AND i.[ReversesProducerIntentGroupId]<>p.[Id])))
+  THROW 51000, 'C8_GROUP_LINEAGE: successor requires the exact posted predecessor version and root.', 1;
+END;
+
+ALTER TRIGGER [TR_AccountingEventProducerReceipts_C7Immutable] ON [AccountingEventProducerReceipts] AFTER INSERT,UPDATE,DELETE AS
+BEGIN
+ SET NOCOUNT ON;
+ IF EXISTS(SELECT 1 FROM deleted) THROW 51000, 'C7_RECEIPT_IMMUTABLE: producer receipt evidence is append-only.', 1;
+  IF EXISTS(SELECT 1 FROM inserted r LEFT JOIN [AccountingEvents] e ON e.[TenantId]=r.[TenantId] AND e.[Id]=r.[AccountingEventId]
+   WHERE e.[Id] IS NULL OR e.[ProducerDecisionStatus]<>N'Approved' OR e.[Status] NOT IN (N'Pending',N'Posted')
+    OR e.[ProducerParticipantIdentity]<>r.[ParticipantCode] OR e.[RequestFingerprint]<>r.[RequestFingerprint]
+    OR r.[OwnerEntityId]='00000000-0000-0000-0000-000000000000'
+    OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[ParticipantCode]))) COLLATE Latin1_General_100_BIN2
+    OR LEFT(r.[ParticipantCode],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+    OR r.[ParticipantCode] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+    OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerEntityType]))) COLLATE Latin1_General_100_BIN2
+    OR LEFT(r.[OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+    OR r.[OwnerEntityType] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%'
+    OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2<>UPPER(LTRIM(RTRIM(r.[OwnerAction]))) COLLATE Latin1_General_100_BIN2
+    OR LEFT(r.[OwnerAction],1) COLLATE Latin1_General_100_BIN2 NOT LIKE N'[A-Z]'
+     OR r.[OwnerAction] COLLATE Latin1_General_100_BIN2 LIKE N'%[^A-Z0-9_.-]%')
+   THROW 51000, 'C7_RECEIPT_AUTHORITY: receipt must match one approved producer event in execution.', 1;
+  DECLARE @ownerTenant uniqueidentifier, @ownerParticipant nvarchar(100), @ownerEffect char(64), @ownerResource nvarchar(255), @ownerResult int;
+  DECLARE owner_effects CURSOR LOCAL FAST_FORWARD FOR
+   SELECT DISTINCT [TenantId],[ParticipantCode],[EffectFingerprint] FROM inserted ORDER BY [TenantId],[ParticipantCode],[EffectFingerprint];
+  OPEN owner_effects; FETCH NEXT FROM owner_effects INTO @ownerTenant,@ownerParticipant,@ownerEffect;
+  WHILE @@FETCH_STATUS=0 BEGIN
+   SET @ownerResource=CONCAT(N'FIN:C7C8:',CONVERT(nvarchar(36),@ownerTenant),N'|',@ownerParticipant,N'|',@ownerEffect);
+   EXEC @ownerResult=sp_getapplock @Resource=@ownerResource,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=30000;
+   IF @ownerResult<0 BEGIN CLOSE owner_effects; DEALLOCATE owner_effects; THROW 51000, 'C7_RECEIPT_LOCK_FAILED: owner-effect identity could not be serialized.', 1; END;
+   FETCH NEXT FROM owner_effects INTO @ownerTenant,@ownerParticipant,@ownerEffect;
+  END; CLOSE owner_effects; DEALLOCATE owner_effects;
+  IF EXISTS(SELECT 1 FROM inserted i JOIN [ProducerIntentGroupReceipts] r ON r.[TenantId]=i.[TenantId]
+   AND r.[ParticipantCode]=i.[ParticipantCode] AND r.[EffectFingerprint]=i.[EffectFingerprint])
+  THROW 51000, 'C7_RECEIPT_REUSED: owner-effect evidence already belongs to a producer group.', 1;
 END;
 
 ALTER TRIGGER [TR_AccountingEvents_C7ProducerDecision] ON [AccountingEvents] AFTER INSERT,UPDATE,DELETE AS
@@ -231,6 +332,17 @@ DROP TRIGGER IF EXISTS [TR_ProducerIntentGroupMembers_C8Immutable];
 DROP TRIGGER IF EXISTS [TR_ProducerIntentGroupReceipts_C8Immutable];
 DROP TRIGGER IF EXISTS [TR_ProducerIntentGroupAttempts_C8Immutable];
 DROP TABLE [ProducerIntentGroupAttempts]; DROP TABLE [ProducerIntentGroupReceipts]; DROP TABLE [ProducerIntentGroupMembers]; DROP TABLE [ProducerIntentGroups];
+ALTER TRIGGER [TR_AccountingEventProducerReceipts_C7Immutable] ON [AccountingEventProducerReceipts] AFTER INSERT, UPDATE, DELETE AS
+BEGIN
+ SET NOCOUNT ON;
+ IF EXISTS(SELECT 1 FROM deleted) THROW 51000, 'C7_RECEIPT_IMMUTABLE: producer receipt evidence is append-only.', 1;
+ IF EXISTS(SELECT 1 FROM inserted r LEFT JOIN [AccountingEvents] e ON e.[TenantId]=r.[TenantId] AND e.[Id]=r.[AccountingEventId]
+  WHERE e.[Id] IS NULL OR e.[ProducerDecisionStatus]<>N'Approved' OR e.[Status] NOT IN (N'Pending',N'Posted')
+   OR e.[ProducerParticipantIdentity]<>r.[ParticipantCode] OR e.[RequestFingerprint]<>r.[RequestFingerprint]
+   OR r.[OwnerEntityId]='00000000-0000-0000-0000-000000000000'
+   OR LEN(LTRIM(RTRIM(r.[OwnerEntityType])))=0 OR LEN(LTRIM(RTRIM(r.[OwnerAction])))=0)
+  THROW 51000, 'C7_RECEIPT_AUTHORITY: receipt must match one approved producer event in execution.', 1;
+END;
 ALTER TRIGGER [TR_AccountingEvents_C7ProducerDecision] ON [AccountingEvents] AFTER INSERT, UPDATE, DELETE AS
 BEGIN
  SET NOCOUNT ON;

@@ -366,6 +366,127 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         (await final.AccountCurrencyExposures.CountAsync(x => x.AccountId == seeded.DebitId || x.AccountId == seeded.CreditId)).Should().Be(0);
     }
 
+    [SqlServerFact]
+    public async Task ProducerGroup_UsesRealC5AndC6_RollsBackSecondMemberAndRecoversExactlyOnce()
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        Seeded seeded;
+        await using (var setup = database.Context()) seeded = await SeedAsync(setup, database);
+        ProducerIntentGroupRequestDto request;
+        await using (var resolve = database.Context())
+        {
+            var applicability = Applicability(resolve, database.TenantId, database.MakerId);
+            var recovery = await applicability.ResolveAsync(new ResolveAccountingBookApplicabilityDto
+            {
+                EffectiveDate = database.EventDate, OriginatingModuleCode = "INV",
+                SourceDocumentType = "INVENTORY_DISPOSAL", PostingAction = "RECOVER"
+            });
+            var valuation = await applicability.ResolveAsync(new ResolveAccountingBookApplicabilityDto
+            {
+                EffectiveDate = database.EventDate, OriginatingModuleCode = "INV",
+                SourceDocumentType = "STOCK_ADJUSTMENT", PostingAction = "DISPOSE_VALUE"
+            });
+            recovery.Books.Should().ContainSingle();
+            valuation.Books.Should().HaveCount(2);
+            var owner = new ProducerOwnerEffectIdentityDto
+            {
+                ParticipantCode = "INVENTORY.DISPOSAL.V1", OwnerEntityType = "INVENTORY_DISPOSAL",
+                OwnerEntityId = seeded.DisposalCaseId, OwnerAction = "DISPOSE", EffectFingerprint = new string('8', 64)
+            };
+            ProducerAccountingIntentDto Member(string key, string document, string action, Guid source, decimal amount) => new()
+            {
+                IdempotencyKey = key, ParticipantIdentity = owner.ParticipantCode, ExpectedOwnerEffect = owner,
+                PostingRequest = new ProducerFinancePostingRequestDto
+                {
+                    SourceModule = "INV", OriginModuleCode = "INV", SourceDocumentType = document,
+                    SourceDocumentId = source, SourceDocumentTenantId = database.TenantId, PostingAction = action,
+                    PostingDate = database.EventDate, FunctionalCurrencyCode = "GHS", Description = key,
+                    Lines = [new FinancePostingLineDto { AccountId = seeded.DebitId, DebitAmount = amount, LineNumber = 1 },
+                        new FinancePostingLineDto { AccountId = seeded.CreditId, CreditAmount = amount, LineNumber = 2 }]
+                }
+            };
+            request = new ProducerIntentGroupRequestDto
+            {
+                IdempotencyKey = "C8:REAL:GROUP:1", ParticipantIdentity = owner.ParticipantCode, ExpectedOwnerEffect = owner,
+                Members = [Member("C8:REAL:RECOVERY:1", "INVENTORY_DISPOSAL", "RECOVER", Guid.NewGuid(), 25m),
+                    Member("C8:REAL:VALUATION:1", "STOCK_ADJUSTMENT", "DISPOSE_VALUE", Guid.NewGuid(), 100m)]
+            };
+        }
+
+        ProducerIntentGroupDto prepared;
+        await using (var prepare = database.Context()) prepared = await GroupService(prepare, database.TenantId, database.MakerId).PrepareAsync(request);
+        await using (var approve = database.Context()) await GroupService(approve, database.TenantId, database.CheckerId).ApproveAsync(prepared.Id,
+            new DecideProducerIntentGroupRequestDto { Group = request, Reason = "independent complete-group approval" });
+        var receipt = new ProducerOwnerEffectReceiptDto
+        {
+            TenantId = database.TenantId, ParticipantCode = request.ExpectedOwnerEffect.ParticipantCode,
+            OwnerEntityType = request.ExpectedOwnerEffect.OwnerEntityType, OwnerEntityId = request.ExpectedOwnerEffect.OwnerEntityId,
+            OwnerAction = request.ExpectedOwnerEffect.OwnerAction, EffectFingerprint = request.ExpectedOwnerEffect.EffectFingerprint
+        };
+
+        Exception failure;
+        await using (var execute = database.Context())
+        {
+            var service = GroupService(execute, database.TenantId, database.MakerId);
+            await using var tx = await execute.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var owner = await execute.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
+            owner.Status = InventoryDisposalStatus.AuditVerified; owner.AuditVerifiedById = database.MakerId;
+            owner.AuditVerifiedAtUtc = DateTime.UtcNow; owner.AuditFindings = "C8 tracked owner effect";
+            failure = await Assert.ThrowsAsync<ProducerIntentGroupMemberExecutionException>(() =>
+                ((IFinanceProducerIntentGroupApprovedExecution)service).ExecuteInAmbientTransactionAsync(prepared.Id, request, receipt));
+            ((ProducerIntentGroupMemberExecutionException)failure).MemberOrder.Should().Be(2);
+            await tx.RollbackAsync();
+            await tx.DisposeAsync();
+            execute.ChangeTracker.Entries<InventoryDisposalCase>().Should().ContainSingle();
+            await ((IFinanceProducerIntentGroupApprovedExecution)service)
+                .RecordFailureAfterRollbackAsync(prepared.Id, request, receipt, failure);
+        }
+        await using (var failed = database.Context())
+        {
+            (await failed.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId)).Status
+                .Should().Be(InventoryDisposalStatus.Identified);
+            var group = await failed.ProducerIntentGroups.Include(item => item.Attempts).SingleAsync(item => item.Id == prepared.Id);
+            group.Status.Should().Be(ProducerIntentGroupStatuses.Failed);
+            group.Attempts.Should().ContainSingle(item => item.Status == AccountingEventStatuses.Failed && item.FailedMemberOrder == 2);
+            (await failed.ProducerIntentGroupReceipts.CountAsync()).Should().Be(0);
+            (await failed.AccountingBookSelectionEvidence.CountAsync()).Should().Be(0);
+            (await failed.AccountingEventPostings.CountAsync()).Should().Be(0);
+            (await failed.FinancePostingEvents.CountAsync()).Should().Be(0);
+            (await failed.JournalEntries.CountAsync()).Should().Be(0);
+            (await failed.AccountBalances.CountAsync()).Should().Be(0);
+            (await failed.AccountCurrencyExposures.CountAsync()).Should().Be(0);
+        }
+
+        await RepairSecondBookAsync(database, seeded);
+        await using (var recover = database.Context())
+        {
+            var service = GroupService(recover, database.TenantId, database.MakerId);
+            await using var tx = await recover.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var owner = await recover.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
+            owner.Status = InventoryDisposalStatus.AuditVerified; owner.AuditVerifiedById = database.MakerId;
+            owner.AuditVerifiedAtUtc = DateTime.UtcNow; owner.AuditFindings = "C8 committed owner effect";
+            (await ((IFinanceProducerIntentGroupApprovedExecution)service)
+                .ExecuteInAmbientTransactionAsync(prepared.Id, request, receipt)).Status.Should().Be(ProducerIntentGroupStatuses.Posted);
+            await tx.CommitAsync();
+        }
+        await using (var retry = database.Context())
+        {
+            var before = (Events: await retry.FinancePostingEvents.CountAsync(), Journals: await retry.JournalEntries.CountAsync(),
+                Postings: await retry.AccountingEventPostings.CountAsync(), Attempts: await retry.ProducerIntentGroupAttempts.CountAsync());
+            await using var tx = await retry.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            (await ((IFinanceProducerIntentGroupApprovedExecution)GroupService(retry, database.TenantId, database.MakerId))
+                .ExecuteInAmbientTransactionAsync(prepared.Id, request, receipt)).Status.Should().Be(ProducerIntentGroupStatuses.Posted);
+            await tx.CommitAsync();
+            (await retry.FinancePostingEvents.CountAsync()).Should().Be(before.Events);
+            (await retry.JournalEntries.CountAsync()).Should().Be(before.Journals);
+            (await retry.AccountingEventPostings.CountAsync()).Should().Be(before.Postings);
+            (await retry.ProducerIntentGroupAttempts.CountAsync()).Should().Be(before.Attempts);
+            (await retry.AccountingBookSelectionEvidence.CountAsync()).Should().Be(2);
+            (await retry.AccountingEventPostings.CountAsync()).Should().Be(3);
+            (await retry.ProducerIntentGroupReceipts.CountAsync()).Should().Be(1);
+        }
+    }
+
     private static AccountingEventService Service(ApplicationDbContext db, Guid tenant, Guid actor, bool persistAudit = false)
     {
         var user = User(tenant, actor);
@@ -382,6 +503,18 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         var applicability = Applicability(db, tenant, actor, audit: audit);
         return new AccountingEventService(db, user.Object, applicability, leaf, audit,
             Options.Create(new AccountingEventOptions { Enabled = true }));
+    }
+
+    private static FinanceProducerIntentGroupService GroupService(ApplicationDbContext db, Guid tenant, Guid actor)
+    {
+        var user = User(tenant, actor); var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AuditLog());
+        var events = Service(db, tenant, actor);
+        var producer = new FinanceProducerIntentService(Applicability(db, tenant, actor), events, events, db, user.Object,
+            Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+        return new FinanceProducerIntentGroupService(db, producer, events, user.Object, audit.Object,
+            Options.Create(new FinanceProducerIntentGroupOptions { Enabled = true }),
+            Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
     }
 
     private static AccountingBookApplicabilityService Applicability(ApplicationDbContext db, Guid tenant, Guid actor,
@@ -460,6 +593,10 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         var draft = await maker.CreateDraftAsync(new SaveAccountingBookApplicabilityPolicyDto { PolicyCode = "C6_SQL", Name = "C6 SQL policy",
             EffectiveFrom = new DateTime(2026, 1, 1), Reason = "C6 migrated SQL authority", Rules = [new SaveAccountingBookApplicabilityRuleDto {
                 RuleCode = "INV_POST", Priority = 100, OriginatingModuleCode = "INV", SourceDocumentType = "GOODS.RECEIPT", PostingAction = "POST",
+                AccountingBookIds = [primary.Id, second.Id] }, new SaveAccountingBookApplicabilityRuleDto {
+                RuleCode = "INV_DISPOSAL_RECOVERY", Priority = 100, OriginatingModuleCode = "INV", SourceDocumentType = "INVENTORY_DISPOSAL", PostingAction = "RECOVER",
+                AccountingBookIds = [primary.Id] }, new SaveAccountingBookApplicabilityRuleDto {
+                RuleCode = "INV_STOCK_DISPOSE", Priority = 100, OriginatingModuleCode = "INV", SourceDocumentType = "STOCK_ADJUSTMENT", PostingAction = "DISPOSE_VALUE",
                 AccountingBookIds = [primary.Id, second.Id] }] });
         var submitted = await maker.SubmitAsync(draft.Id, new DecideAccountingBookApplicabilityPolicyDto { Reason = "submit", RowVersion = draft.RowVersion });
         var checker = Applicability(db, tenant, database.CheckerId, governedWorkflow: true);

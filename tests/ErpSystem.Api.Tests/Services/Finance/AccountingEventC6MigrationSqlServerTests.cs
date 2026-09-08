@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
+using ErpSystem.Api.Services.Finance.GL;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +14,135 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class AccountingEventC6MigrationSqlServerTests
 {
+    [SqlServerFact]
+    public async Task C7C8OwnerEffectLock_SerializesTwoGenuinelyOpenTransactions()
+    {
+        await using var database = await DisposableDatabase.CreateAsync();
+        await database.CreatePredecessorAsync(); await database.ApplyAsync(up: true);
+        await database.ApplyC7Async(up: true); await database.ApplyC8Async(up: true);
+        var tenant = Guid.NewGuid(); var fingerprint = new string('A', 64);
+        await using var first = database.Context(); await using var second = database.Context();
+        await using var firstTransaction = await first.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        await FinanceProducerOwnerEffectAuthority.AcquireAsync(first, tenant, "INVENTORY.DISPOSAL.V1", fingerprint, CancellationToken.None);
+        await using var secondTransaction = await second.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var waiting = FinanceProducerOwnerEffectAuthority.AcquireAsync(second, tenant, "INVENTORY.DISPOSAL.V1", fingerprint, CancellationToken.None);
+        await Task.Delay(200);
+        waiting.IsCompleted.Should().BeFalse("the shared C7/C8 identity lock must serialize both open owner transactions");
+        await firstTransaction.CommitAsync();
+        await waiting;
+        await secondTransaction.RollbackAsync();
+
+        var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
+        await database.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');");
+        async Task<(Guid Group, Guid Individual)> SeedRaceAsync(string suffix, char effect)
+        {
+            var group = Guid.NewGuid(); var member1 = Guid.NewGuid(); var member2 = Guid.NewGuid(); var individual = Guid.NewGuid();
+            await database.ExecuteAsync(ProducerEventInsert(tenant, member1, maker, $"RACE-{suffix}-1")
+                + ProducerEventInsert(tenant, member2, maker, $"RACE-{suffix}-2")
+                + ProducerEventInsert(tenant, individual, maker, $"RACE-C7-{suffix}") + $@"
+INSERT ProducerIntentGroups(Id,IdempotencyKey,GroupKind,Version,RootProducerIntentGroupId,Status,MemberCount,
+ ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,ExpectedOwnerEffectFingerprint,RequestSnapshotJson,
+ RequestSnapshotHash,GroupFingerprint,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
+VALUES('{group}',N'RACE:GROUP:{suffix}',N'Original',1,'{group}',N'PendingApproval',2,N'INVENTORY.DISPOSAL.V1',
+ N'INVENTORYDISPOSAL','{Guid.NewGuid()}',N'DISPOSE',REPLICATE('{effect}',64),N'{{}}',REPLICATE('D',64),REPLICATE('{effect}',64),
+ '{maker}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');
+INSERT ProducerIntentGroupMembers(Id,ProducerIntentGroupId,AccountingEventId,MemberOrder,MemberFingerprint,CreatedAt,IsDeleted,TenantId)
+VALUES(NEWID(),'{group}','{member1}',1,REPLICATE('A',64),SYSUTCDATETIME(),0,'{tenant}'),
+      (NEWID(),'{group}','{member2}',2,REPLICATE('A',64),SYSUTCDATETIME(),0,'{tenant}');
+UPDATE ProducerIntentGroups SET Status=N'Approved',DecidedByUserId='{checker}',DecidedAtUtc=SYSUTCDATETIME(),DecisionReason=N'complete review' WHERE Id='{group}';
+UPDATE AccountingEvents SET ProducerDecisionStatus=N'Approved',ProducerDecidedByUserId='{checker}',ProducerDecidedAtUtc=SYSUTCDATETIME(),ProducerDecisionReason=N'individual review' WHERE Id='{individual}';");
+            return (group, individual);
+        }
+
+        async Task RunRaceAsync(bool groupWins, string suffix, char effect)
+        {
+            var seeded = await SeedRaceAsync(suffix, effect);
+            await using var groupContext = database.Context(); await using var eventContext = database.Context();
+            await using var groupTx = await groupContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            await using var eventTx = await eventContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var winnerContext = groupWins ? groupContext : eventContext;
+            await FinanceProducerOwnerEffectAuthority.AcquireAsync(winnerContext, tenant, "INVENTORY.DISPOSAL.V1", new string(effect, 64), CancellationToken.None);
+            var groupInsert = $@"INSERT ProducerIntentGroupReceipts(Id,ProducerIntentGroupId,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,
+ EffectFingerprint,GroupFingerprint,RecordedAtUtc,RecordedByUserId,CreatedAt,IsDeleted,TenantId)
+SELECT NEWID(),Id,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,ExpectedOwnerEffectFingerprint,GroupFingerprint,SYSUTCDATETIME(),'{checker}',SYSUTCDATETIME(),0,TenantId
+FROM ProducerIntentGroups WHERE Id='{seeded.Group}';";
+            var eventInsert = $@"INSERT AccountingEventProducerReceipts(Id,AccountingEventId,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,
+ EffectFingerprint,RequestFingerprint,RecordedAtUtc,RecordedByUserId,CreatedAt,IsDeleted,TenantId)
+VALUES(NEWID(),'{seeded.Individual}',N'INVENTORY.DISPOSAL.V1',N'INVENTORYDISPOSAL','{Guid.NewGuid()}',N'DISPOSE',REPLICATE('{effect}',64),REPLICATE('A',64),SYSUTCDATETIME(),'{checker}',SYSUTCDATETIME(),0,'{tenant}');";
+            var winner = groupWins
+                ? groupContext.Database.ExecuteSqlRawAsync(groupInsert)
+                : eventContext.Database.ExecuteSqlRawAsync(eventInsert);
+            await winner;
+            var loser = groupWins
+                ? eventContext.Database.ExecuteSqlRawAsync(eventInsert)
+                : groupContext.Database.ExecuteSqlRawAsync(groupInsert);
+            await Task.Delay(200);
+            loser.IsCompleted.Should().BeFalse("the reciprocal trigger must wait on the winner's open transaction");
+            if (groupWins) await groupTx.CommitAsync(); else await eventTx.CommitAsync();
+            await FluentActions.Awaiting(() => loser).Should().ThrowAsync<SqlException>();
+            if (groupWins) await eventTx.RollbackAsync(); else await groupTx.RollbackAsync();
+        }
+
+        await RunRaceAsync(groupWins: true, "GROUP-WINS", 'B');
+        await RunRaceAsync(groupWins: false, "EVENT-WINS", 'C');
+    }
+
+    [SqlServerFact]
+    public async Task C8FailureWorkflowAndReciprocalC7C8ReceiptAuthority_AreExecutable()
+    {
+        await using var db = await DisposableDatabase.CreateAsync();
+        await db.CreatePredecessorAsync(); await db.ApplyAsync(up: true); await db.ApplyC7Async(up: true); await db.ApplyC8Async(up: true);
+        var tenant = Guid.NewGuid(); var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
+        await db.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');");
+
+        async Task<(Guid GroupId, Guid IndividualEventId)> SeedAsync(string suffix, char effect)
+        {
+            var group = Guid.NewGuid(); var first = Guid.NewGuid(); var second = Guid.NewGuid(); var individual = Guid.NewGuid();
+            await db.ExecuteAsync(ProducerEventInsert(tenant, first, maker, $"C8-{suffix}-1")
+                + ProducerEventInsert(tenant, second, maker, $"C8-{suffix}-2")
+                + ProducerEventInsert(tenant, individual, maker, $"C7-{suffix}") + $@"
+INSERT ProducerIntentGroups(Id,IdempotencyKey,GroupKind,Version,RootProducerIntentGroupId,Status,MemberCount,
+ ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,ExpectedOwnerEffectFingerprint,RequestSnapshotJson,
+ RequestSnapshotHash,GroupFingerprint,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
+VALUES('{group}',N'GROUP:{suffix}',N'Original',1,'{group}',N'PendingApproval',2,N'INVENTORY.DISPOSAL.V1',
+ N'INVENTORYDISPOSAL','{Guid.NewGuid()}',N'DISPOSE',REPLICATE('{effect}',64),N'{{}}',REPLICATE('D',64),REPLICATE('{effect}',64),
+ '{maker}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');
+INSERT ProducerIntentGroupMembers(Id,ProducerIntentGroupId,AccountingEventId,MemberOrder,MemberFingerprint,CreatedAt,IsDeleted,TenantId)
+VALUES(NEWID(),'{group}','{first}',1,REPLICATE('A',64),SYSUTCDATETIME(),0,'{tenant}'),
+      (NEWID(),'{group}','{second}',2,REPLICATE('A',64),SYSUTCDATETIME(),0,'{tenant}');
+UPDATE ProducerIntentGroups SET Status=N'Approved',DecidedByUserId='{checker}',DecidedAtUtc=SYSUTCDATETIME(),DecisionReason=N'complete review' WHERE Id='{group}';
+UPDATE AccountingEvents SET ProducerDecisionStatus=N'Approved',ProducerDecidedByUserId='{checker}',ProducerDecidedAtUtc=SYSUTCDATETIME(),ProducerDecisionReason=N'individual review' WHERE Id='{individual}';");
+            return (group, individual);
+        }
+
+        var failure = await SeedAsync("FAILURE", 'F');
+        await db.ExecuteAsync($"UPDATE ProducerIntentGroups SET Status=N'Failed',CompletedAtUtc=SYSUTCDATETIME(),FailureMessage=N'member two failed' WHERE Id='{failure.GroupId}';");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE ProducerIntentGroups SET FailureMessage=N'rewritten' WHERE Id='{failure.GroupId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C8_GROUP_OUTCOME_IMMUTABLE*");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE ProducerIntentGroups SET Status=N'Approved',CompletedAtUtc=NULL,FailureMessage=NULL WHERE Id='{failure.GroupId}'"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C8_GROUP_WORKFLOW*");
+
+        var individualFirst = await SeedAsync("INDIVIDUAL-FIRST", 'B');
+        await db.ExecuteAsync($@"INSERT AccountingEventProducerReceipts(Id,AccountingEventId,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,
+ EffectFingerprint,RequestFingerprint,RecordedAtUtc,RecordedByUserId,CreatedAt,IsDeleted,TenantId)
+VALUES(NEWID(),'{individualFirst.IndividualEventId}',N'INVENTORY.DISPOSAL.V1',N'INVENTORYDISPOSAL','{Guid.NewGuid()}',N'DISPOSE',REPLICATE('B',64),REPLICATE('A',64),SYSUTCDATETIME(),'{checker}',SYSUTCDATETIME(),0,'{tenant}');");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"INSERT ProducerIntentGroupReceipts(Id,ProducerIntentGroupId,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,
+ EffectFingerprint,GroupFingerprint,RecordedAtUtc,RecordedByUserId,CreatedAt,IsDeleted,TenantId)
+SELECT NEWID(),Id,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,ExpectedOwnerEffectFingerprint,GroupFingerprint,SYSUTCDATETIME(),'{checker}',SYSUTCDATETIME(),0,TenantId
+FROM ProducerIntentGroups WHERE Id='{individualFirst.GroupId}';"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C8_RECEIPT_REUSED*");
+
+        var groupFirst = await SeedAsync("GROUP-FIRST", 'C');
+        await db.ExecuteAsync($@"INSERT ProducerIntentGroupReceipts(Id,ProducerIntentGroupId,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,
+ EffectFingerprint,GroupFingerprint,RecordedAtUtc,RecordedByUserId,CreatedAt,IsDeleted,TenantId)
+SELECT NEWID(),Id,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,ExpectedOwnerEffectFingerprint,GroupFingerprint,SYSUTCDATETIME(),'{checker}',SYSUTCDATETIME(),0,TenantId
+FROM ProducerIntentGroups WHERE Id='{groupFirst.GroupId}';");
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"INSERT AccountingEventProducerReceipts(Id,AccountingEventId,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,
+ EffectFingerprint,RequestFingerprint,RecordedAtUtc,RecordedByUserId,CreatedAt,IsDeleted,TenantId)
+VALUES(NEWID(),'{groupFirst.IndividualEventId}',N'INVENTORY.DISPOSAL.V1',N'INVENTORYDISPOSAL','{Guid.NewGuid()}',N'DISPOSE',REPLICATE('C',64),REPLICATE('A',64),SYSUTCDATETIME(),'{checker}',SYSUTCDATETIME(),0,'{tenant}');"))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C7_RECEIPT_REUSED*");
+    }
+
     [SqlServerFact]
     public async Task C8PreflightEmptyDownAndEvidenceRefusal_AreExecutableAndRestoreC7()
     {
@@ -543,6 +673,7 @@ CREATE TABLE FinancePostingEvents(Id uniqueidentifier NOT NULL CONSTRAINT PK_Fin
             foreach (var command in generator.Generate(up ? migration.UpOperations() : migration.DownOperations())) await ExecuteAsync(command.CommandText);
         }
         public async Task<SqlConnection> OpenAsync() { var connection = new SqlConnection(_connection); await connection.OpenAsync(); return connection; }
+        public ApplicationDbContext Context() => new(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection).Options);
         public async Task ExecuteAsync(string sql) { await using var connection = await OpenAsync(); await using var command = new SqlCommand(sql, connection) { CommandTimeout = 120 }; await command.ExecuteNonQueryAsync(); }
         public async Task<T> ScalarAsync<T>(string sql) { await using var connection = await OpenAsync(); await using var command = new SqlCommand(sql, connection); return (T)Convert.ChangeType(await command.ExecuteScalarAsync(), typeof(T)); }
         private async Task MasterAsync(string sql) { await using var connection = new SqlConnection(_master); await connection.OpenAsync(); await using var command = new SqlCommand(sql, connection) { CommandTimeout = 120 }; await command.ExecuteNonQueryAsync(); }
