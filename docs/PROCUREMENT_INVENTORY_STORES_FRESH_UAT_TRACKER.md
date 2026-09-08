@@ -1,5 +1,13 @@
 # Fresh Supplier, Procurement, Inventory and Stores UAT
 
+## 8 September: optional verification comments correction prepared (not deployed)
+
+- **Verified blocker:** the live Award Verification Checklist required notes or a file despite labeling comments optional. A visible click on **Verify Bidder** reproduced the missing-evidence validation; the unrelated award lookup 404 only meant no award existed yet.
+- **Correction:** review and overall comments are optional. Required checklist decisions, reviewer identity/time, explicitly required same-tenant documents, completed-review locks and award-readiness checks remain enforced. The form now labels **Review comments (optional)** and explains that **Verify Bidder** saves the decisions. No Finance, permission, schema, checklist configuration or existing review data was changed.
+- **Validation:** 35 focused frontend tests and 25 backend policy/completion/readiness tests passed. Coverage includes empty/whitespace comments, required-document rejection, attribution, failed reviews and read-only completed reviews. Backend build succeeded with existing repository warnings.
+- **Live UAT checkpoint:** the user saved Harbourline's bidder verification as **Passed** at 12:16 UTC. At the subsequent read-only check the overall verification was still **InProgress**; **Complete Verification** is the next action, followed by independent award-readiness reassessment. This is not an award or final approval.
+- **Deployment boundary:** both running servers were deliberately left unchanged while the user continued UAT. The corrected blank-comments flow is covered by automated tests, but live-browser acceptance of the new build remains pending deployment during a UAT pause. Do not describe the correction as already active on localhost.
+
 ## 8 September rehearsal passed; resume from empty v3
 
 - **Current restart:** `procurementofficer`, tenant `DEFAULT` → [empty v3 Draft](http://localhost:3000/procurement/tender-documents/fd4b772b-5c76-43fd-8ba8-5e9fc96b9bf2) → **Start document preparation**. The browser is left there. No file, preparation workflow, submission or publication exists on v3. Use this draft for the fresh document demonstration, not the retained Published v2.
