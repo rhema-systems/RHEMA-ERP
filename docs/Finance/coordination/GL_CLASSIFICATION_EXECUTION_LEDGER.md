@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 cycle 2 `CHANGES_REQUIRED`; final bounded Sol Medium correction active |
+| Review status | C8 cycle 3 independent GPT-5.6 Sol High review active at corrected HEAD `df8d88ac0c443936d6e3a5798edcf22e9494e5dc` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -933,6 +933,19 @@ reversal groups preserving each ordered member's original frozen C5 set under dr
 passed a zero-error build, 55 focused passes with 17 guarded skips, 356 widened C1-C8 passes with 36 guarded skips,
 EF parity, exact 456-migration discovery, no-connect script generation and clean ancestry/status/diff/scope gates.
 No database was accessed. One final bounded Sol Medium correction is active; integration remains gated.
+
+The implementer completed the final C8 correction as clean commit
+`df8d88ac0c443936d6e3a5798edcf22e9494e5dc` on top of `e495abcd`. SQL Server now treats insertion of one exact
+immutable Posted/Failed group attempt as the atomic operation that drives the paired group transition; bare
+terminal group updates and attempt update/delete fail closed, while runtime reloads the trigger-owned state before
+writing real audit in the same transaction. Runtime, constraints and amended C7/C8 triggers now enforce exact
+binary ASCII and byte-length canonical identity parity. Expanded guarded migrated-SQL scenarios cover canonical
+denials/success, direct-C7 grouped-member rejection, real success/failure audit atomicity, zero-state rollback,
+recovery/exact retry, and separate correction/reversal groups retaining ordered predecessor frozen C5 evidence
+under strict current-policy drift. Validation passed a zero-error build, 12 C8 tests, 78 C5-C8 passes with 25
+guarded skips, EF parity, exact 456-migration discovery, the C7-to-C8 no-connect script, and clean ancestry/status/
+diff/scope gates. Guarded SQL remains unexecuted because `RHEMA_TEST_SQLSERVER` is absent; no database was accessed.
+Independent GPT-5.6 Sol High cycle-3 review is active; integration and Inventory remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
