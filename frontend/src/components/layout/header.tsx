@@ -191,19 +191,21 @@ export function Header({ className }: HeaderProps) {
           {/* Notifications */}
           <HeaderNotificationBell />
 
-          {/* Full settings catalogue */}
-          {canOpenSettings && (
-            <Button
-              asChild
-              variant="ghost"
-              size="sm"
-              className="h-9 w-9 rounded-xl p-0 hover:bg-slate-100 dark:hover:bg-neutral-800"
-            >
-              <Link href="/settings" aria-label="Open settings" title="Settings">
-                <Settings className="h-4 w-4 text-slate-600 dark:text-slate-300" />
-              </Link>
-            </Button>
-          )}
+          {/* Full settings catalogue — gated on the client-side user, so it renders only after mount */}
+          <ClientOnly>
+            {canOpenSettings && (
+              <Button
+                asChild
+                variant="ghost"
+                size="sm"
+                className="h-9 w-9 rounded-xl p-0 hover:bg-slate-100 dark:hover:bg-neutral-800"
+              >
+                <Link href="/settings" aria-label="Open settings" title="Settings">
+                  <Settings className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                </Link>
+              </Button>
+            )}
+          </ClientOnly>
 
           {/* User Menu */}
           <div className="relative">

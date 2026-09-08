@@ -64,7 +64,7 @@ const HR_ITEMS: NavCardItem[] = [
   {
     title: 'Live adverts',
     description: 'Every posting currently open for applications, across all channels.',
-    href: '/hr/recruitment/adverts',
+    href: '/hr/recruitment/postings',
     icon: Megaphone,
   },
   {

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,6 +27,7 @@ import { PRE_EMPLOYMENT_CHECK_STATUSES, type PreEmploymentCheckStatus } from '@/
  * Pending/Completed/Failed/Waived read as "nothing to chase" or "already resolved".
  */
 export default function PreEmploymentChecksQueuePage() {
+  const router = useRouter();
   const [status, setStatus] = useState<PreEmploymentCheckStatus>('InProgress');
 
   const checks = useQuery({
@@ -86,7 +88,11 @@ export default function PreEmploymentChecksQueuePage() {
               </TableHeader>
               <TableBody>
                 {rows.map((c) => (
-                  <TableRow key={c.id} className="cursor-pointer">
+                  <TableRow
+                    key={c.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/offers/${c.jobOfferId}`)}
+                  >
                     <TableCell className="font-medium">{c.candidateName}</TableCell>
                     <TableCell>
                       <Link

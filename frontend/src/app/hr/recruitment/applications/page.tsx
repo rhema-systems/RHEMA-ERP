@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -34,6 +35,7 @@ const ALL = '__all__';
  * otherwise would mean filtering a single page client-side and reporting the wrong totals.
  */
 export default function ApplicationsPage() {
+  const router = useRouter();
   const [page, setPage] = useState(1);
   const [vacancyId, setVacancyId] = useState<string>(ALL);
   const [status, setStatus] = useState<string>(ALL);
@@ -148,7 +150,11 @@ export default function ApplicationsPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((a) => (
-                  <TableRow key={a.id}>
+<TableRow
+                    key={a.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/applications/${a.id}`)}
+                  >
                     <TableCell className="font-mono text-xs">
                       <Link href={`/hr/recruitment/applications/${a.id}`} className="hover:underline">
                         {a.applicationNumber}

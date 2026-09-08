@@ -140,7 +140,11 @@ export default function StaffRequisitionsPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
-                  <TableRow key={r.id} className="cursor-pointer">
+                  <TableRow
+                    key={r.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/requisitions/${r.id}`)}
+                  >
                     <TableCell className="font-medium">
                       <Link href={`/hr/recruitment/requisitions/${r.id}`} className="hover:underline">
                         {r.requisitionNumber}

@@ -463,6 +463,8 @@ public static class RecruitmentMappingExtensions
         return new JobPostingSummaryDto
         {
             Id = entity.Id,
+            JobVacancyId = entity.JobVacancyId,
+            VacancyNumber = entity.JobVacancy?.VacancyNumber,
             Channel = entity.Channel,
             Title = entity.Title,
             Status = entity.Status,

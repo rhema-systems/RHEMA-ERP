@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Plus, Search, Star, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ function CandidateTable({
   emptyTitle: string;
   emptyDescription: string;
 }) {
+  const router = useRouter();
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -54,7 +56,11 @@ function CandidateTable({
       </TableHeader>
       <TableBody>
         {rows.map((c) => (
-          <TableRow key={c.id}>
+<TableRow
+            key={c.id}
+            className="cursor-pointer hover:bg-muted/50"
+            onClick={() => router.push(`/hr/recruitment/candidates/${c.id}`)}
+          >
             <TableCell className="font-mono text-xs text-muted-foreground">{c.candidateNumber}</TableCell>
             <TableCell className="font-medium">
               <Link href={`/hr/recruitment/candidates/${c.id}`} className="hover:underline">

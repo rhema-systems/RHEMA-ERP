@@ -477,6 +477,9 @@ public class JobPostingDto : BaseDto
 public class JobPostingSummaryDto
 {
     public Guid Id { get; set; }
+    /// <summary>The vacancy this advert belongs to — an advert has no page of its own; its detail is the vacancy's Adverts tab.</summary>
+    public Guid JobVacancyId { get; set; }
+    public string? VacancyNumber { get; set; }
     public JobPostingChannel Channel { get; set; }
     public string ChannelName => Channel.ToString();
     public string Title { get; set; } = string.Empty;

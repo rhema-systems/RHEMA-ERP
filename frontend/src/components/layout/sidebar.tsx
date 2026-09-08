@@ -1475,10 +1475,11 @@ export const navigationItems: NavItem[] = [
             href: '/hr/recruitment',
             icon: UserPlus,
             children: [
+              { title: 'Dashboard', href: '/hr/recruitment/dashboard', icon: LayoutDashboard, permissions: ['HR.Recruitment.Read'] },
               { title: 'Establishment', href: '/hr/recruitment/establishment', icon: Building2, permissions: ['HR.Recruitment.Read'] },
               { title: 'Requisitions', href: '/hr/recruitment/requisitions', icon: ClipboardList, permissions: ['HR.Recruitment.Read'] },
               { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase, permissions: ['HR.Recruitment.Read'] },
-              { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Adverts', href: '/hr/recruitment/postings', icon: Megaphone, permissions: ['HR.Recruitment.Read'] },
               { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users, permissions: ['HR.Recruitment.Read'] },
               { title: 'Talent Pool', href: '/hr/recruitment/talent-pool', icon: Star, permissions: ['HR.Recruitment.Read'] },
               { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText, permissions: ['HR.Recruitment.Read'] },

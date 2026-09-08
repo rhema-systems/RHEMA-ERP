@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -63,6 +64,7 @@ interface SegmentDraft {
  * the pool is worked through. ⚠ Not succession's employee talent pools (/hr/succession/pools).
  */
 export default function TalentPoolPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { hasAnyPermission, hasPermission } = useAuth();
@@ -409,9 +411,13 @@ export default function TalentPoolPage() {
                   </TableHeader>
                   <TableBody>
                     {rows.map((r) => (
-                      <TableRow key={r.id}>
+<TableRow
+                        key={r.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => router.push(`/hr/recruitment/candidates/${r.id}`)}
+                      >
                         {canManage && (
-                          <TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
                             <Checkbox
                               checked={selected.has(r.id)}
                               aria-label={`Select ${r.fullName}`}

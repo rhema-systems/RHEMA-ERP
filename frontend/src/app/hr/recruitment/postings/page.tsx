@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, Loader2, Megaphone, TriangleAlert } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,8 +28,12 @@ type View = 'active' | 'expired-active';
  * The second view is the one that earns its place: **past its expiry date but still marked
  * active** — adverts that should have come down and have not. They are still collecting
  * applications for a role whose deadline has gone.
+ *
+ * The folder is `postings`, not `adverts`, on purpose: ad blockers (EasyList) block any URL with
+ * `/adverts/` in it, which took out this page's own JS chunk and left it a ChunkLoadError.
  */
 export default function LiveAdvertsPage() {
+  const router = useRouter();
   const [view, setView] = useState<View>('active');
 
   const active = useQuery({
@@ -95,6 +100,7 @@ export default function LiveAdvertsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Title</TableHead>
+                  <TableHead>Vacancy</TableHead>
                   <TableHead>Channel</TableHead>
                   <TableHead>Published</TableHead>
                   <TableHead>Expires</TableHead>
@@ -104,13 +110,18 @@ export default function LiveAdvertsPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((p) => (
-                  <TableRow key={p.id}>
+<TableRow
+                    key={p.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/vacancies/${p.jobVacancyId}?tab=adverts`)}
+                  >
                     <TableCell className="font-medium">
                       {p.postingUrl ? (
                         <a
                           href={p.postingUrl}
                           target="_blank"
                           rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
                           className="inline-flex items-center gap-1 text-primary hover:underline"
                         >
                           {p.title} <ExternalLink className="h-3 w-3" />
@@ -119,6 +130,7 @@ export default function LiveAdvertsPage() {
                         p.title
                       )}
                     </TableCell>
+                    <TableCell className="font-mono text-xs">{p.vacancyNumber ?? '—'}</TableCell>
                     <TableCell>{humanizeEnum(p.channel)}</TableCell>
                     <TableCell>{formatDate(p.actualPublishDate ?? p.publishDate)}</TableCell>
                     <TableCell>{formatDate(p.expiryDate)}</TableCell>

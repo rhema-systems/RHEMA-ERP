@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, ListFilter, Loader2, Megaphone, Send, SlidersHorizontal, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -77,6 +77,7 @@ const HIRING_STAGES: JobVacancyStatus[] = [
 export default function VacancyDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = (params?.id as string) ?? '';
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -262,7 +263,7 @@ export default function VacancyDetailPage() {
         ]}
       />
 
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue={searchParams.get('tab') ?? 'overview'}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="adverts">Adverts</TabsTrigger>

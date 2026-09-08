@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ const EXPIRING = '__expiring__';
  * filtering client-side over one large list.
  */
 export default function JobOffersPage() {
+  const router = useRouter();
   const [view, setView] = useState<string>(ALL);
 
   const all = useQuery({
@@ -114,7 +116,11 @@ export default function JobOffersPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((o) => (
-                  <TableRow key={o.id} className="cursor-pointer">
+                  <TableRow
+                    key={o.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/offers/${o.id}`)}
+                  >
                     <TableCell>
                       <Link
                         href={`/hr/recruitment/offers/${o.id}`}

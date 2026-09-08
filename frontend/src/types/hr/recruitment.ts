@@ -631,6 +631,8 @@ export interface JobPosting {
 
 export interface JobPostingSummary {
   id: string;
+  jobVacancyId: string;
+  vacancyNumber?: string | null;
   channel: JobPostingChannel;
   title: string;
   status: JobPostingStatus;
