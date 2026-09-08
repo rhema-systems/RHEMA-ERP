@@ -261,8 +261,7 @@ export function AwardVerificationDialog({
 
     const missingEvidence = bidderVerification.items.filter(item => !hasAwardVerificationEvidence(item));
     if (missingEvidence.length > 0) {
-      toast.error(missingEvidence.map(item => `${item.itemText}: ${item.requiresDocument
-        ? 'attach the required document' : 'add review notes referencing the records checked, or attach evidence'}`).join('; '));
+      toast.error(missingEvidence.map(item => `${item.itemText}: attach the required document`).join('; '));
       return;
     }
 
@@ -477,8 +476,12 @@ export function AwardVerificationDialog({
                               </div>
 
                               {/* Comments */}
+                              <Label htmlFor={`review-comments-${bv.bidId}-${item.checklistItemId}`}>
+                                Review comments (optional)
+                              </Label>
                               <Textarea
-                                placeholder="Comments (optional)"
+                                id={`review-comments-${bv.bidId}-${item.checklistItemId}`}
+                                placeholder="Add context if needed"
                                 value={item.comments}
                                 onChange={(e) =>
                                   handleItemChange(bv.bidId, item.checklistItemId, 'comments', e.target.value)
@@ -489,7 +492,7 @@ export function AwardVerificationDialog({
                               <p className="text-xs text-muted-foreground">
                                 {item.requiresDocument
                                   ? 'Document required: retain the supporting file for this check.'
-                                  : 'Review record: reference the existing records checked in your notes. A separate upload is not required.'}
+                                  : 'Comments and attachments are optional. Click Verify Bidder to save your decisions.'}
                               </p>
 
                               {/* Document Attachments */}
@@ -507,7 +510,7 @@ export function AwardVerificationDialog({
                           ))}
 
                           <div className="border-t pt-4 mt-4">
-                            <Label>Overall Comments</Label>
+                            <Label>Overall comments (optional)</Label>
                             <Textarea
                               placeholder="Overall verification comments for this bidder..."
                               value={bv.overallComments}

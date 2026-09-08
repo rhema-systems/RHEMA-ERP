@@ -50,8 +50,8 @@ describe('saved award verification status', () => {
     expect(screen.queryByRole('button', { name: 'Complete Verification' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pass', exact: true })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Attach evidence' })).toBeDisabled();
-    expect(screen.getByPlaceholderText('Comments (optional)')).toBeDisabled();
-    expect(screen.getByPlaceholderText('Comments (optional)')).toHaveValue('Saved evidence reference');
+    expect(screen.getByRole('textbox', { name: 'Review comments (optional)' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Review comments (optional)' })).toHaveValue('Saved evidence reference');
     expect(screen.getByPlaceholderText('Overall verification comments for this bidder...')).toBeDisabled();
     expect(mocks.verify).not.toHaveBeenCalled();
     expect(mocks.complete).not.toHaveBeenCalled();
@@ -108,6 +108,40 @@ describe('saved award verification status', () => {
     expect(screen.queryByText('All bidders verified!')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Complete Verification' })).not.toBeInTheDocument();
     expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
+  it.each(['', '   '])('saves and completes decisions with optional blank comments %j', async (comments) => {
+    const data = record('InProgress', 'Pending');
+    data.bidders[0].overallComments = comments;
+    data.bidders[0].itemResults[0].comments = comments;
+    mocks.load.mockResolvedValue(data);
+    mocks.verify.mockResolvedValue({ ...data.bidders[0], status: 'Passed' });
+    mocks.complete.mockResolvedValue({ ...data, status: 'Completed' });
+    render(<AwardVerificationDialog {...props} />);
+    await screen.findByText('1 bidder(s) remaining');
+    expect(screen.getByRole('textbox', { name: 'Review comments (optional)' })).toHaveValue(comments);
+    expect(screen.getByText('Comments and attachments are optional. Click Verify Bidder to save your decisions.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Pass', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder' }));
+    await screen.findByText('All bidders verified!');
+    expect(mocks.verify).toHaveBeenCalledWith('verification-1', expect.objectContaining({
+      bidderId: 'bidder-1',
+      itemResults: [expect.objectContaining({ checklistItemId: 'item-1', status: 'Passed', comments: comments || undefined })],
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Complete Verification' }));
+    await screen.findByText('Verification completed · read-only');
+    expect(mocks.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('still requires a decision when comments are optional', async () => {
+    const data = record('InProgress', 'Pending');
+    data.bidders[0].itemResults[0].comments = '';
+    mocks.load.mockResolvedValue(data);
+    render(<AwardVerificationDialog {...props} />);
+    await screen.findByText('1 bidder(s) remaining');
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Bidder' }));
+    expect(mocks.verify).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Complete Verification' })).toBeDisabled();
   });
 
   it('blocks verification when an explicitly required document is missing, even with notes', async () => {

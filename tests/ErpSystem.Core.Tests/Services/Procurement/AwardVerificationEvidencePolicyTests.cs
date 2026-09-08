@@ -19,10 +19,15 @@ public sealed class AwardVerificationEvidencePolicyTests
         return item;
     }
 
-    [Fact]
-    public void AttributableReviewDoesNotRequireDuplicateUpload()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Reviewed existing records")]
+    public void AttributableReviewDoesNotRequireCommentsOrDuplicateUpload(string? comments)
     {
         var item = Review();
+        item.Comments = comments;
         AwardVerificationEvidencePolicy.HasEvidence(item).Should().BeTrue();
         var validate = () => AwardVerificationEvidencePolicy.EnsureComplete([item]);
         validate.Should().NotThrow();
@@ -52,18 +57,20 @@ public sealed class AwardVerificationEvidencePolicyTests
     }
 
     [Theory]
-    [InlineData("notes")]
     [InlineData("reviewer")]
+    [InlineData("empty-reviewer")]
     [InlineData("time")]
     [InlineData("verified")]
-    public void MissingReviewEvidenceOrAttributionDoesNotPass(string missing)
+    public void MissingReviewerAttributionDoesNotPass(string missing)
     {
         var item = Review();
-        if (missing == "notes") item.Comments = " ";
         if (missing == "reviewer") item.VerifiedById = null;
+        if (missing == "empty-reviewer") item.VerifiedById = Guid.Empty;
         if (missing == "time") item.VerifiedDate = null;
         if (missing == "verified") item.IsVerified = false;
         AwardVerificationEvidencePolicy.HasEvidence(item).Should().BeFalse();
+        var validate = () => AwardVerificationEvidencePolicy.EnsureComplete([item]);
+        validate.Should().Throw<InvalidOperationException>();
     }
 
     [Theory]
