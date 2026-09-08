@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage B2 — Inventory atomic accounting-event group cutover |
-| Status | `IN_PROGRESS` |
+| Status | `BLOCKED` |
 | Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` |
 | Branch | `codex/inventory-accounting-event-cutover-c8` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Inventory sequencing reconciliation complete; bounded preassigned-ID ambient-create correction active, then independent Sol High review |
+| Review status | Material Finance authority decision required: pure pre-prepare Stock Adjustment valuation-intent builder, then Inventory resumes |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1010,6 +1010,17 @@ the legacy Finance adapter. The ID must be deterministic for the exact tenant/di
 fail closed. Public Stock Adjustment creation/posting behavior for every other caller remains unchanged. This is
 the minimum in-scope sequencing correction needed to satisfy disabled-default and zero-partial-mutation gates;
 implementation remains active on the original exact base with no database access.
+
+The preassigned-ID correction alone is insufficient because C8 preparation owns a separate Serializable
+transaction and persists member snapshots. A tracked ambient Stock Adjustment cannot be staged before preparation
+without being accidentally flushed by C8, while preparation still needs the exact valuation lines and dimensional
+intent. Those economics are currently constructed only inside the legacy Stock Adjustment Finance adapter, which
+also performs dimension synchronization/freezing writes against a persisted adjustment graph. Safe continuation
+therefore requires explicit authorization for a Finance-owned pure, non-persisting pre-prepare valuation-intent
+builder that derives the existing Stock Adjustment economics and canonical dimensional intent without selecting
+books or mutating state; the existing adapter would consume the same builder to prevent duplicated accounting
+logic. This is a material Finance authority boundary beyond the bounded owner refactor, so Inventory remains clean
+and blocked pending the decision. No migration or database access occurred.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
