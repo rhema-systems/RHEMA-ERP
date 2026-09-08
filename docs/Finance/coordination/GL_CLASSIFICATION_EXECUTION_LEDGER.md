@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage C9 — Finance-owned Stock Adjustment valuation-intent builder |
-| Status | `COMPLETE` |
-| Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
-| Exact base | `3adaf2afba11dfd57f6b1caf9e8d4753e718e36e` |
-| Branch | `codex/finance-stock-adjustment-valuation-intent-c9` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-stock-adjustment-valuation-c9` |
+| Phase | Stage B2 — Inventory atomic accounting-event group cutover |
+| Status | `BLOCKED` |
+| Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
+| Exact base | `39c2537dab9e2a02c0f5f3ee221525c052bc6592` |
+| Branch | `codex/inventory-accounting-event-cutover-c9` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-c9` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `3adaf2afba11dfd57f6b1caf9e8d4753e718e36e` |
+| Primary HEAD at activation | `39c2537dab9e2a02c0f5f3ee221525c052bc6592` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C9 `APPROVED`, integrated as `f5d6315b`, `90d9988b`; exact candidate blobs verified |
+| Review status | C9 complete; fresh Inventory worktree ready, but implementation blocked until the .NET 9 SDK/host is restored |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1082,6 +1082,14 @@ the reviewer executed the correction-built assembly successfully. A fresh primar
 because the machine's shared .NET host and SDK payload were removed externally; only Visual Studio's .NET runtime
 remains. This is an environment failure rather than a candidate defect. C9 is complete and no database was
 accessed, but the next Inventory implementation must remain paused until a usable .NET 9 SDK is restored.
+
+The fresh post-C9 Inventory worktree is prepared at exact base
+`39c2537dab9e2a02c0f5f3ee221525c052bc6592` on branch `codex/inventory-accounting-event-cutover-c9`. Its scope
+remains the previously authorized two-member C8 disposal group plus disposal-scoped ambient Stock Adjustment
+creation using the approved C9 valuation builder. No implementation edits have begun because the local .NET 9
+host/SDK was removed externally: `dotnet.exe`, `host/fxr` and the SDK payload are absent from the shared install,
+and Visual Studio provides only a runtime/test runner. A usable SDK must be restored before safe compile/test-driven
+owner conversion can resume. The worktree is clean and no database was accessed.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
