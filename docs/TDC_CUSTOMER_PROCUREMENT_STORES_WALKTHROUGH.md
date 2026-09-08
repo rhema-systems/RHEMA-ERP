@@ -277,7 +277,7 @@ Save the existing draft, Submit for Approval. **`procurementapprover`** independ
 
 ### B8. Controlled documents and publication
 
-**8 September resume — TND-2026-0003:** as `procurementofficer`, open [the empty v2 Draft](http://localhost:3000/procurement/tender-documents/1c024cce-4bcf-4e4d-90fa-c7d41d2b8423) → **Start document preparation**, then follow B8a from step 2. The tender remains Approved; its binding was reset for this rehearsal. Use v2, not the retained published v1. If preparation runs past **11:00 UTC**, use B8d before tender publication.
+**Document-step restart — TND-2026-0003:** as `procurementofficer`, open [the empty v3 Draft](http://localhost:3000/procurement/tender-documents/fd4b772b-5c76-43fd-8ba8-5e9fc96b9bf2) → **Start document preparation**, then follow B8a from step 2. This route passed through tender publication on 8 September and was reset to Approved/unbound. Demonstrate v3, not the retained Published v2. After **8 September 11:00 UTC**, use B8d before tender publication.
 
 **Start:** the tender is **Approved**, but not Published. Sign in as `procurementofficer` and use the process sidebar → **Open document register**.
 
