@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage C8 — Finance-owned atomic producer-intent groups |
-| Status | `COMPLETE` |
-| Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
-| Exact base | `2367be6ed99634f7c5a25c0e294221bc26730b38` |
-| Branch | `codex/finance-producer-intent-groups-c8` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-producer-groups-c8` |
+| Phase | Stage B2 — Inventory atomic accounting-event group cutover |
+| Status | `IN_PROGRESS` |
+| Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
+| Exact base | `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` |
+| Branch | `codex/inventory-accounting-event-cutover-c8` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-c8` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `2367be6ed99634f7c5a25c0e294221bc26730b38` |
+| Primary HEAD at activation | `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 `APPROVED`, integrated as `66c6e5cc`, `1f5e224e`, `a922f576`, `72fb4845`; primary validation passed |
+| Review status | Pending bounded Inventory implementation, then independent GPT-5.6 Sol High accounting/security/concurrency review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -988,6 +988,17 @@ passes `git diff --check`, and unrelated primary worktree changes remain preserv
 build passed with zero errors and 1,106 inherited warnings after an isolated restore; the focused C6-C8 regression
 passed 56 tests with 17 guarded SQL skips and zero failures. No migration was applied and configured `RHEMAERP`
 was not accessed. C8 is complete; the next exact checkpoint will be the fresh Stage B2 Inventory cutover base.
+
+Stage B2 Inventory is activated from fresh exact base `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` in clean worktree
+`RHEMA-ERP-inventory-accounting-event-c8` on branch `codex/inventory-accounting-event-cutover-c8`. The authorized
+bounded conversion must preserve the disposal-proceeds/recovery and Stock Adjustment valuation postings as two
+distinct neutral C8 group members with their existing source identities and economics. A disposal-scoped internal
+Stock Adjustment path may stage the tracked owner mutation without its legacy Finance adapter inside the caller's
+shared Serializable `ApplicationDbContext` transaction; the existing public `PostAsync` path remains unchanged for
+all other callers. Inventory owns the transaction and deterministic group receipt, commits only after complete C8
+success, and rolls back before the separate durable-failure boundary. Inventory may not select/enumerate books,
+derive C5 evidence, call posting leaves, auto-approve or enable disabled C6-C8 defaults. Terra Medium implementation
+is active; Finance schema/migration changes remain out of scope and configured `RHEMAERP` remains untouched.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
