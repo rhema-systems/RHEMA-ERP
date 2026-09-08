@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 cycle 2 independent GPT-5.6 Sol High review active at corrected HEAD `e495abcdd6cba52d4897932867ded5c4d86b0281` |
+| Review status | C8 cycle 2 `CHANGES_REQUIRED`; final bounded Sol Medium correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -922,6 +922,17 @@ exact retry. Validation passed a zero-error build, 12 C8 tests, 78 C5-C8 passes 
 parity, exact 456-migration discovery, the C7-to-C8 no-connect script, and clean ancestry/status/diff/scope gates.
 The guarded SQL cases remain unexecuted because `RHEMA_TEST_SQLSERVER` is absent; no database was accessed.
 Independent GPT-5.6 Sol High cycle-2 review is active over every finding and preserved C1-C8 authority.
+
+Stage C8 independent review cycle 2 confirmed the shared receipt lock, recovery shape and lineage corrections,
+but returned `CHANGES_REQUIRED` at exact clean HEAD `e495abcd`. Two P1 authority gaps remain: SQL permits bare
+Approved-to-Failed or Failed-to-Posted group transitions without the matching immutable group attempt required by
+runtime, and C7/C8 SQL canonical identity predicates omit byte-length parity so trailing-space bytes can pass
+SQL Server equality while runtime rejects them. P2 relational evidence must add migrated production-service
+direct-C7 denial for grouped members, persisted success/failure audit atomicity, and executable correction and
+reversal groups preserving each ordered member's original frozen C5 set under drift. Reviewer validation otherwise
+passed a zero-error build, 55 focused passes with 17 guarded skips, 356 widened C1-C8 passes with 36 guarded skips,
+EF parity, exact 456-migration discovery, no-connect script generation and clean ancestry/status/diff/scope gates.
+No database was accessed. One final bounded Sol Medium correction is active; integration remains gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
