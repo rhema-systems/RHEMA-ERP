@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage B2 — Inventory neutral AccountingEvent producer cutover through C7 |
-| Status | `IN_PROGRESS` |
+| Status | `BLOCKED` |
 | Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
 | Branch | `codex/inventory-accounting-event-cutover-c7` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Inventory implementer: GPT-5.6 Terra Medium; substantive Finance correction: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
-| Review status | User-authorized bounded Stock Adjustment ambient-participant correction active; independent review not started |
+| Review status | Accounting-design decision required: disposal has two separately identified economic postings; no candidate exists |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -851,6 +851,19 @@ inside the same transaction, and commit only when both owner and all selected-bo
 failure it must roll back before the separate durable-failure call. This bounded Inventory-only expansion is
 active on GPT-5.6 Terra Medium and requires independent GPT-5.6 Sol High accounting/concurrency review before
 integration. Finance schema/migrations, C1-C7 authority and disabled defaults remain out of scope.
+
+The expanded Inventory reconciliation found that disposal completion currently produces two distinct accounting
+events: `InventoryDisposalService` posts the disposal-proceeds/recovery economics, while Stock Adjustment's own
+Finance adapter posts the inventory write-off valuation economics under its separate source identity. Disabling
+the Stock Adjustment adapter while converting only the disposal V1 intent would silently omit the valuation GL;
+leaving it active would retain an independently committed/single-book producer and break the required atomic C7
+group. Folding both legs into one event would change source identity, audit and retry semantics. The recommended
+safe design is a separately authorized Finance-owned atomic producer-intent group boundary: two neutral intents
+retain their exact existing source identities and frozen C5 book evidence, receive governed maker/checker group
+approval, and execute zero-or-all with the owner mutation in one Serializable transaction. That is a substantive
+Finance/C7 extension rather than bounded Inventory wiring and requires explicit user authorization, Sol Medium
+implementation and independent Sol High review. The Inventory worktree remains clean with no edits, commits,
+migrations or database access.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
