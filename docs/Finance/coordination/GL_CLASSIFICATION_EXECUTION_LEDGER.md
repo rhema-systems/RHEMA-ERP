@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 cycle 3 `CHANGES_REQUIRED` at corrected HEAD `df8d88ac0c443936d6e3a5798edcf22e9494e5dc`; final bounded Sol Medium correction active |
+| Review status | Final C8 independent GPT-5.6 Sol High approval review active at corrected HEAD `bebf8941a3b466ca9edab85e43e5fe080e6b1ecb` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -958,6 +958,18 @@ the migrated schema despite the no-pending-model gate passing. Reviewer validati
 build, 55 focused C6-C8 tests with 17 guarded SQL skips, 356 widened C1-C8 tests with 36 guarded skips, EF parity,
 exact 456-migration discovery, no-connect script generation and clean ancestry/status/diff/scope checks. No
 database was accessed. One final bounded Sol Medium correction is active; integration and Inventory remain gated.
+
+The implementer completed the cycle-3 C8 correction as clean commit
+`bebf8941a3b466ca9edab85e43e5fe080e6b1ecb` on top of `df8d88ac`. Failed attempts now accept exactly either a
+null/null coordinate pair for group-level pre-member failures or a non-null pair bound to the exact ordered member;
+half-bound and mismatched coordinates fail closed across runtime, result constraint and attempt trigger. Guarded
+migrated-SQL and production-service coverage now exercises group-level rollback, durable attempt/audit and exact
+retry. All seven ASCII/byte-length constraints are represented in `ApplicationDbContext`, the snapshot and exact
+metadata-parity assertions. Validation passed a zero-error API build, 13 focused C8 tests, 219 widened C1-C8
+tests with 41 guarded SQL skips, EF parity, exact 456-migration discovery, the C7-to-C8 no-connect script, and
+clean ancestry/status/diff/scope/credential gates. Guarded SQL remains unexecuted because
+`RHEMA_TEST_SQLSERVER` is absent; no database was accessed. Final independent Sol High approval review is active;
+integration and Inventory remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
