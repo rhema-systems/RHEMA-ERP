@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | User authorized bounded C9 implementation; independent GPT-5.6 Sol High review required before Inventory resumes |
+| Review status | Independent GPT-5.6 Sol High review active at exact clean C9 HEAD `59e694a9d6e02b869898a47a615b935ccd030e55` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1033,6 +1033,17 @@ execution path, never in preview. C9 may not edit Inventory disposal orchestrati
 C5 selection, call posting leaves per book, enable C6-C8, alter schema/migrations or access configured `RHEMAERP`.
 After clean Sol Medium implementation and independent Sol High approval, C9 will integrate locally and Stage B2
 Inventory will restart from a fresh exact base.
+
+The C9 implementer completed one clean Finance-only commit,
+`59e694a9d6e02b869898a47a615b935ccd030e55`. The pure builder accepts a preassigned Stock Adjustment identity and
+complete item graph, performs fail-closed validation plus one `AsNoTracking` Finance-settings lookup, and returns
+the neutral valuation intent without mutation, transaction, C5, dimension-write or posting capability. The legacy
+Inventory Adjustment Finance adapter now consumes that same builder before retaining its governed dimension and
+V2 posting path. Focused C9/legacy tests passed 10/10; widened tests passed 67 with two reproducible unchanged
+baseline receipt/landed-cost null-reference failures; the full solution build passed with zero errors, EF parity
+and 456-migration discovery remained unchanged, and diff/scope/forbidden-capability/credential checks were clean.
+No database was accessed. Independent Sol High accounting/security/concurrency review is active; integration and
+Inventory remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
