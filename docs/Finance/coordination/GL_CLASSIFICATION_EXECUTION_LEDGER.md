@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 cycle 1 `CHANGES_REQUIRED`; bounded Sol Medium correction active |
+| Review status | C8 cycle 2 independent GPT-5.6 Sol High review active at corrected HEAD `e495abcdd6cba52d4897932867ded5c4d86b0281` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -908,6 +908,20 @@ otherwise passed a zero-error build, 52 focused C6-C8 tests with 14 guarded skip
 38 guarded skips, EF parity, exact 456-migration discovery, the no-connect C7-to-C8 script, and clean ancestry/
 status/diff/scope checks. No database was accessed. One bounded Sol Medium correction is active; C1-C8 defaults,
 owner isolation and all database/remote-operation gates remain unchanged.
+
+The C8 implementer completed the cycle-1 correction as clean commit
+`e495abcdd6cba52d4897932867ded5c4d86b0281` on top of `72b23413`. Runtime and both receipt triggers now use one
+transaction-owned C7/C8 lock namespace and inspect both receipt tables; group-first, event-first and genuinely
+open concurrent winner orders are covered. The group state machine now permits only governed Approved-to-Failed
+and controlled Failed-to-Posted recovery while locking terminal summaries. Runtime and SQL enforce group/member
+kind, root, version and exact same-order predecessor lineage, with drifted-policy correction coverage reusing each
+member's original frozen C5 set. DTO/audit evidence includes the complete snapshot/hash and group lineage, and
+runtime/SQL identity grammar is aligned. New guarded migrated-SQL production coverage drives real C5 and C6 for a
+two-member group, tracked owner rollback, zero economic persistence, tracker-clean durable failure, recovery and
+exact retry. Validation passed a zero-error build, 12 C8 tests, 78 C5-C8 passes with 25 guarded SQL skips, EF
+parity, exact 456-migration discovery, the C7-to-C8 no-connect script, and clean ancestry/status/diff/scope gates.
+The guarded SQL cases remain unexecuted because `RHEMA_TEST_SQLSERVER` is absent; no database was accessed.
+Independent GPT-5.6 Sol High cycle-2 review is active over every finding and preserved C1-C8 authority.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
