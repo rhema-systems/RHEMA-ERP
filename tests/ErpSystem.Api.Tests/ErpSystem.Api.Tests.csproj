@@ -183,6 +183,9 @@
     <Compile Include="Services\Finance\ProcurementFinanceReconciliationTests.cs" />
     <Compile Include="Services\Finance\InventoryValuationFinancePostingTests.cs" />
     <Compile Include="Services\Finance\E2E012InventoryAdjustmentFinancePostingTests.cs" />
+    <!-- C9 centralizes Stock Adjustment valuation in a pure Finance-owned intent builder.
+         Keep parity/purity coverage discoverable because this project disables implicit items. -->
+    <Compile Include="Services\Finance\StockAdjustmentValuationIntentBuilderC9Tests.cs" />
     <Compile Include="Services\Finance\InventoryValuationReconciliationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryAnalyticsServiceTests.cs" />
     <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
