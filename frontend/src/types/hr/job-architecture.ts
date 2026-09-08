@@ -371,6 +371,8 @@ export interface JobDescriptionSummary {
   versionNumber: number;
   effectiveDate: string;
   status: JobDescriptionStatus;
+  /** The enum's NAME, as `JobDescriptionSummaryDto.StatusName` computes it. */
+  statusName?: string;
   nextReviewDate?: string | null;
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -19,6 +20,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
@@ -98,6 +107,21 @@ export default function JobDescriptionDetailPage() {
     queryKey: ['job-description', id, 'valuation'],
     queryFn: () => jobArchitectureService.getValuation(id),
     enabled: !!id,
+  });
+
+  /**
+   * Every version this position has had.
+   *
+   * ⚠ `getVersionHistory` and `getJobDescriptionsForPosition` had NO caller anywhere in the
+   * frontend — the screen talked about versions constantly (a version number in the header, "New
+   * version" in the toolbar, a supersession badge) and offered no way to see the others. The two
+   * endpoints also run the identical query: same filter, same ordering, both returning summaries.
+   */
+  const positionId = jd?.positionId;
+  const { data: versions } = useQuery({
+    queryKey: ['job-description', id, 'versions', positionId],
+    queryFn: () => jobArchitectureService.getVersionHistory(positionId as string),
+    enabled: !!positionId,
   });
 
   const refresh = () => {
@@ -298,11 +322,15 @@ export default function JobDescriptionDetailPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <Badge className={STATUS_TONE[status] ?? 'bg-slate-100 text-slate-700'}>{status}</Badge>
+        {/* The record names its successor, so the badge is a way there rather than a dead end:
+            someone told their description is superseded needs the one that replaced it. */}
         {jd.supersededByVersionId && (
-          <Badge variant="outline" className="gap-1">
-            <AlertTriangle className="h-3 w-3" />
-            Superseded by a later version
-          </Badge>
+          <Link href={`/hr/job-descriptions/${jd.supersededByVersionId}`}>
+            <Badge variant="outline" className="gap-1 hover:bg-muted">
+              <AlertTriangle className="h-3 w-3" />
+              Superseded — open the version that replaced it
+            </Badge>
+          </Link>
         )}
         {hasWorkflow && workflow?.currentStepName && (
           <Badge variant="outline">Awaiting: {workflow.currentStepName}</Badge>
@@ -324,8 +352,25 @@ export default function JobDescriptionDetailPage() {
               <Field label="Occupation code" value={jd.occupationCode} />
               {/* The only place engagement type is recorded at all — the position has no such column. */}
               <Field label="Employment type" value={jd.intendedEmploymentType} />
+              {/* ⚠ The FLAG, not just the union. `IsBargainingUnitRole` routes the approval and
+                  prints the offer letter's bargaining-unit clause, and a role can carry it with no
+                  union named — in which case showing only the union showed nothing at all. */}
+              <Field
+                label="Bargaining unit"
+                value={jd.isBargainingUnitRole ? 'Covered by a CBA' : 'Not covered'}
+              />
               <Field label="Union" value={jd.unionName} />
             </dl>
+
+            {/* Settable since the port, displayed nowhere until now. It is the ADA-shaped
+                statement — what the role cannot be performed without — so it belongs beside the
+                summary rather than buried in a tab. */}
+            {jd.essentialFunctionsSummary && (
+              <div>
+                <div className="text-xs text-muted-foreground">Essential functions</div>
+                <p className="whitespace-pre-wrap text-sm">{jd.essentialFunctionsSummary}</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -350,6 +395,9 @@ export default function JobDescriptionDetailPage() {
                 value={fmtDate(jd.nextReviewDate)}
                 sub={`every ${jd.reviewCycleMonths} months`}
               />
+              {/* Why this version exists. Set by "New version" and editable afterwards — and the
+                  one field on the record that explains the version number beside it. */}
+              <Field label="Reason for this version" value={jd.revisionReason} />
             </dl>
           </CardContent>
         </Card>
@@ -401,6 +449,7 @@ export default function JobDescriptionDetailPage() {
             Medical ({jd.medicalRequirements?.length ?? 0})
           </TabsTrigger>
           <TabsTrigger value="valuation">Valuation</TabsTrigger>
+          <TabsTrigger value="versions">Versions ({versions?.length ?? 0})</TabsTrigger>
         </TabsList>
 
         {/*
@@ -512,6 +561,7 @@ export default function JobDescriptionDetailPage() {
               <Field label="Autonomy" value={jd.autonomyLevel} />
               <Field label="Decision scope" value={jd.decisionMakingScope} />
               <Field label="Financial authority" value={fmtMoney(jd.financialAuthorityLimit)} />
+              <Field label="Approval authority" value={jd.approvalAuthorityNotes} />
               {jd.valuationNotes && (
                 <div className="sm:col-span-2">
                   <div className="text-xs text-muted-foreground">Notes</div>
@@ -550,6 +600,66 @@ export default function JobDescriptionDetailPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="versions" className="pt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Every version of this position&rsquo;s job description</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-0">Version</TableHead>
+                    <TableHead>Number</TableHead>
+                    <TableHead>Job title</TableHead>
+                    <TableHead>Effective</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(versions ?? []).map((v) => {
+                    const vStatus = (v.statusName ?? v.status) as JobDescriptionStatus;
+                    const isThisOne = v.id === id;
+                    return (
+                      <TableRow
+                        key={v.id}
+                        className={isThisOne ? 'bg-muted/50' : 'cursor-pointer'}
+                        onClick={isThisOne ? undefined : () => router.push(`/hr/job-descriptions/${v.id}`)}
+                      >
+                        <TableCell className="font-mono">v{v.versionNumber}</TableCell>
+                        <TableCell className="font-mono text-xs">{v.jobDescriptionNumber}</TableCell>
+                        <TableCell className="font-medium">{v.jobTitle}</TableCell>
+                        <TableCell>{fmtDate(v.effectiveDate)}</TableCell>
+                        <TableCell>
+                          <Badge className={STATUS_TONE[vStatus] ?? 'bg-slate-100 text-slate-700'}>
+                            {vStatus}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">
+                          {/* "In force" is read off the status rather than off supersession: the
+                              summary projection carries no SupersededByVersionId. Two rows showing
+                              it at once is not a rendering bug — it is the supersession defect
+                              OfferLetterService trips over, and worth seeing. */}
+                          {isThisOne && <span className="font-medium text-foreground">You are here</span>}
+                          {!isThisOne && (vStatus === 'Approved' || vStatus === 'Active') && 'In force'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+
+              {(versions ?? []).length <= 1 && (
+                <p className="pt-4 text-sm text-muted-foreground">
+                  This is the only description the position has ever had. Approving a successor
+                  retires it automatically.
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
