@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage B2 — Inventory neutral AccountingEvent producer cutover through C7 |
-| Status | `BLOCKED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
 | Branch | `codex/inventory-accounting-event-cutover-c7` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Inventory implementer: GPT-5.6 Terra Medium; substantive Finance correction: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
-| Review status | Accounting-design decision required: disposal has two separately identified economic postings; no candidate exists |
+| Review status | User authorized the recommended atomic two-intent Finance group boundary; fresh C8 activation in progress |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -864,6 +864,16 @@ approval, and execute zero-or-all with the owner mutation in one Serializable tr
 Finance/C7 extension rather than bounded Inventory wiring and requires explicit user authorization, Sol Medium
 implementation and independent Sol High review. The Inventory worktree remains clean with no edits, commits,
 migrations or database access.
+
+The user explicitly authorized the recommended Finance-owned atomic producer-intent group design. A new bounded
+C8 foundation stage will preserve the disposal-proceeds and Stock Adjustment valuation events as two distinct
+neutral source identities, derive/freeze each event's C5 authority inside Finance, bind them to one immutable
+group request and maker/checker decision, and execute the complete group plus the later owner mutation zero-or-all
+inside one shared Serializable transaction. Group retry, correction/reversal lineage, failure evidence and audit
+must remain deterministic and reconstructible; no event may be silently dropped or partially posted. C8 remains
+disabled by default and Finance-only. After clean Sol High approval/integration, Inventory will be reissued on
+Terra Medium, followed by Sales, HR/Payroll and the final regression/deployment-readiness gates. Further scope
+expansion is prohibited unless independent review finds a material accounting or data-integrity defect.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
