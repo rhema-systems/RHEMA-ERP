@@ -60,9 +60,17 @@ import {
 } from '@/lib/procurement-currency';
 import { format } from 'date-fns';
 import { getPurchaseOrderItemMappingError } from '@/lib/purchase-order-item-mapping';
+import {
+  createApprovedPurchaseOrderItems,
+  findApprovedPurchaseOrderLine,
+  retainApprovedPurchaseOrderTerms,
+  supportsApprovedPurchaseOrderUnit,
+} from '@/lib/purchase-order-approved-lines';
+import { ApprovedPurchaseOrderUnit } from '@/components/procurement/ApprovedPurchaseOrderUnit';
 
 interface POItemFormData extends CreatePurchaseOrderItemDto {
   tempId: string;
+  approvedSourceLineId?: string;
   itemCode?: string;
   itemName?: string;
   warehouseId?: string;
@@ -472,6 +480,7 @@ function NewPurchaseOrderPageContent() {
     
     const item = inventoryItems.find(i => i.id === itemId);
     if (!item) return;
+    const approvedLine = findApprovedPurchaseOrderLine(selectedSource?.approvedLines || [], editingItem);
 
     try {
       setLoadingUOMs(true);
@@ -491,6 +500,10 @@ function NewPurchaseOrderPageContent() {
       
       // Load available UOMs
       const uoms = await inventoryManagementService.getItemUnitsOfMeasure(itemId);
+      if (approvedLine && !supportsApprovedPurchaseOrderUnit(approvedLine, item.unitOfMeasure, uoms)) {
+        toast.error(`The selected stock item does not support the approved unit ${approvedLine.unitOfMeasure}. Select the matching stock item or have its units configured.`);
+        return;
+      }
       setAvailableUOMs(uoms);
       
       // Set default to purchase UOM or base UOM
@@ -508,7 +521,7 @@ function NewPurchaseOrderPageContent() {
       let finalPrice = item.lastPurchaseCost || item.standardCost || item.currentCost || 0;
       
       // Load price if supplier is selected
-      if (selectedSupplierId) {
+      if (selectedSupplierId && !approvedLine) {
         try {
           const price = await pricingService.getSupplierItemPrice(
             selectedSupplierId,
@@ -527,7 +540,7 @@ function NewPurchaseOrderPageContent() {
         }
       }
       
-      setEditingItem({
+      setEditingItem(retainApprovedPurchaseOrderTerms({
         ...editingItem,
         inventoryItemId: item.id,
         itemCode: item.itemCode,
@@ -536,7 +549,7 @@ function NewPurchaseOrderPageContent() {
         unitOfMeasure: finalUOM,
         itemUnitOfMeasureId: finalUOMId,
         unitPrice: finalPrice
-      });
+      }, approvedLine, uoms));
 
       // If no warehouse selected yet, and the item is assigned to exactly one warehouse, auto-select it.
       if (orderType !== 'Consignment' && !normalizeSelectedWarehouseId(editingItem.warehouseId)) {
@@ -566,6 +579,7 @@ function NewPurchaseOrderPageContent() {
       ) ?? null,
     [selectedSourceKey, sourceStatus]
   );
+  const editingApprovedLine = findApprovedPurchaseOrderLine(selectedSource?.approvedLines || [], editingItem);
 
   const documentCurrency = normalizeProcurementCurrency(
     selectedSource?.currencyCode,
@@ -584,31 +598,20 @@ function NewPurchaseOrderPageContent() {
     if (
       source.sourceType === 'RfqAward' ||
       source.sourceType === 'TenderAward' ||
+      source.sourceType === 'Contract' ||
       source.sourceType === 'ApprovedException'
     ) {
-      const authoritativeLines: POItemFormData[] = (source.approvedLines || []).map(
-        (line, index) => ({
-          tempId: `source-${line.sourceLineId || index}`,
-          inventoryItemId: line.inventoryItemId || '',
-          itemCode: line.itemCode,
-          itemName: line.description,
-          supplierItemCode: '',
-          itemDescription: line.description,
-          orderedQuantity: line.quantity,
-          unitOfMeasure: line.unitOfMeasure || 'EA',
-          unitPrice: line.unitPrice,
-          expectedDeliveryDate: requiredDate || '',
-          notes: ''
-        })
+      const authoritativeLines: POItemFormData[] = createApprovedPurchaseOrderItems(
+        source.approvedLines || [], requiredDate || '',
       );
       setItems(authoritativeLines);
       setEditingRowIndex(null);
       setIsAddingNewRow(false);
       setEditingItem(null);
       if (authoritativeLines.length > 0) {
-        toast.success('Approved award quantities and prices applied');
+        toast.success('Approved source lines loaded. Map each line to its stock item and warehouse.');
       } else {
-        toast.error('The selected award has no authoritative commercial lines');
+        toast.error('The selected source has no authoritative commercial lines');
       }
     }
   };
@@ -679,9 +682,10 @@ function NewPurchaseOrderPageContent() {
   // Start editing existing row
   const handleEditRow = async (index: number) => {
     const item = items[index];
+    const approvedLine = findApprovedPurchaseOrderLine(selectedSource?.approvedLines || [], item);
     setEditingRowIndex(index);
     setIsAddingNewRow(false);
-    setEditingItem({ ...item });
+    setEditingItem(retainApprovedPurchaseOrderTerms({ ...item }, approvedLine));
     
     // Load UOMs if item has inventoryItemId
     if (item.inventoryItemId) {
@@ -695,6 +699,9 @@ function NewPurchaseOrderPageContent() {
         setLoadingUOMs(true);
         const uoms = await inventoryManagementService.getItemUnitsOfMeasure(item.inventoryItemId);
         setAvailableUOMs(uoms);
+        setEditingItem(current => current?.tempId === item.tempId
+          ? retainApprovedPurchaseOrderTerms(current, approvedLine, uoms)
+          : current);
       } catch (error) {
         console.error('Error loading UOMs:', error);
         setAvailableUOMs([]);
@@ -736,12 +743,20 @@ function NewPurchaseOrderPageContent() {
       return;
     }
 
+    const savedItem = retainApprovedPurchaseOrderTerms(editingItem, editingApprovedLine, availableUOMs);
+    const mappedInventoryItem = inventoryItems.find(item => item.id === savedItem.inventoryItemId);
+    if (editingApprovedLine && mappedInventoryItem && !supportsApprovedPurchaseOrderUnit(
+      editingApprovedLine, mappedInventoryItem.unitOfMeasure, availableUOMs,
+    )) {
+      toast.error(`The selected stock item does not support the approved unit ${editingApprovedLine.unitOfMeasure}. Select the matching stock item or have its units configured.`);
+      return;
+    }
     if (isAddingNewRow) {
-      setItems([...items, editingItem]);
+      setItems([...items, savedItem]);
       toast.success('Item added');
     } else if (editingRowIndex !== null) {
       const updatedItems = [...items];
-      updatedItems[editingRowIndex] = editingItem;
+      updatedItems[editingRowIndex] = savedItem;
       setItems(updatedItems);
       toast.success('Item updated');
     }
@@ -897,6 +912,7 @@ function NewPurchaseOrderPageContent() {
           itemDescription: item.itemDescription || undefined,
           orderedQuantity: item.orderedQuantity,
           unitOfMeasure: item.unitOfMeasure || 'EA',
+          itemUnitOfMeasureId: item.itemUnitOfMeasureId || undefined,
           warehouseId:
             orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined,
           unitPrice: item.unitPrice,
@@ -1000,6 +1016,7 @@ function NewPurchaseOrderPageContent() {
           itemDescription: item.itemDescription || undefined,
           orderedQuantity: item.orderedQuantity,
           unitOfMeasure: item.unitOfMeasure || 'EA',
+          itemUnitOfMeasureId: item.itemUnitOfMeasureId || undefined,
           warehouseId:
             orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined,
           unitPrice: item.unitPrice,
@@ -1519,6 +1536,7 @@ function NewPurchaseOrderPageContent() {
                             <TableCell>
                               <Input
                                 value={editingItem?.itemDescription || ''}
+                                readOnly={Boolean(editingApprovedLine)}
                                 onChange={(e) => setEditingItem(prev => prev ? { ...prev, itemDescription: e.target.value } : null)}
                                 placeholder="Description"
                               />
@@ -1553,7 +1571,9 @@ function NewPurchaseOrderPageContent() {
                               />
                             </TableCell>
                             <TableCell>
-                              {availableUOMs.length > 0 ? (
+                              {editingApprovedLine ? (
+                                <ApprovedPurchaseOrderUnit unit={editingApprovedLine.unitOfMeasure} />
+                              ) : availableUOMs.length > 0 ? (
                                 <Select
                                   value={editingItem?.unitOfMeasure || '__none__'}
                                   onValueChange={(value) => {
@@ -1594,6 +1614,7 @@ function NewPurchaseOrderPageContent() {
                                 min="0"
                                 step="0.01"
                                 value={editingItem?.unitPrice || 0}
+                                readOnly={Boolean(editingApprovedLine)}
                                 onChange={(e) => setEditingItem(prev => prev ? { ...prev, unitPrice: parseFloat(e.target.value) || 0 } : null)}
                               />
                             </TableCell>
@@ -1729,6 +1750,7 @@ function NewPurchaseOrderPageContent() {
                         <TableCell>
                           <Input
                             value={editingItem.itemDescription || ''}
+                            readOnly={Boolean(editingApprovedLine)}
                             onChange={(e) => setEditingItem(prev => prev ? { ...prev, itemDescription: e.target.value } : null)}
                             placeholder="Description"
                           />
@@ -1763,7 +1785,9 @@ function NewPurchaseOrderPageContent() {
                           />
                         </TableCell>
                         <TableCell>
-                          {availableUOMs.length > 0 ? (
+                          {editingApprovedLine ? (
+                            <ApprovedPurchaseOrderUnit unit={editingApprovedLine.unitOfMeasure} />
+                          ) : availableUOMs.length > 0 ? (
                             <Select
                               value={editingItem.unitOfMeasure || '__none__'}
                               onValueChange={(value) => {
@@ -1804,6 +1828,7 @@ function NewPurchaseOrderPageContent() {
                             min="0"
                             step="0.01"
                             value={editingItem.unitPrice || 0}
+                            readOnly={Boolean(editingApprovedLine)}
                             onChange={(e) => setEditingItem(prev => prev ? { ...prev, unitPrice: parseFloat(e.target.value) || 0 } : null)}
                           />
                         </TableCell>
