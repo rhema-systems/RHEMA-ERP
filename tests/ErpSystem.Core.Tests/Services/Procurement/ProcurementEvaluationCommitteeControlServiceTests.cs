@@ -22,6 +22,81 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
     [Fact]
+    public async Task AttendanceAfterFailedQuorumReopensMeetingAndRequiresFreshConfirmation()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var meeting = await fixture.Service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical,
+                MeetingMode = "InPerson", MeetingChannel = "UAT room",
+                ScheduledAtUtc = DateTime.UtcNow,
+                CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "retry-meeting"
+            }, "retry-meeting");
+        var failed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
+            new ConfirmProcurementEvaluationQuorumRequest
+            {
+                RowVersion = meeting.RowVersion, IdempotencyKey = "premature-quorum"
+            }, "premature-quorum");
+        failed.Status.Should().Be(ProcurementEvaluationMeetingStatus.QuorumFailed);
+        failed.SignedVotingAttendanceCount.Should().Be(0);
+        var failedRecord = await fixture.Context.ProcurementEvaluationMeetings.AsNoTracking()
+            .SingleAsync(item => item.Id == meeting.Id);
+        var failedSnapshot = failedRecord.QuorumSnapshotJson;
+        var failedHash = failedRecord.QuorumIntegrityHash;
+
+        foreach (var member in control.Members)
+        {
+            fixture.SwitchUser(member.UserId);
+            var current = await fixture.Service.GetAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+            var request = new SignProcurementEvaluationAttendanceRequest
+            {
+                IsPresent = true,
+                MeetingRowVersion = current.Meetings.Single().RowVersion,
+                AppointmentRowVersion = current.Members.Single(item => item.Id == member.Id).RowVersion,
+                IdempotencyKey = $"retry-attendance-{member.Id}"
+            };
+            var signed = await fixture.Service.SignAttendanceAsync(meeting.Id, request, "retry-attendance");
+            var reopened = await fixture.Service.GetAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+            reopened.Meetings.Single().Status.Should().Be(ProcurementEvaluationMeetingStatus.Draft);
+            reopened.Meetings.Single().QuorumMet.Should().BeFalse();
+            request.MeetingRowVersion = reopened.Meetings.Single().RowVersion;
+            (await fixture.Service.SignAttendanceAsync(meeting.Id, request, "replay-attendance"))
+                .Id.Should().Be(signed.Id);
+            (await fixture.Service.EnsureScorerEligibleAsync(ProcurementEvaluationSourceType.Tender,
+                fixture.Tender.Id, ProcurementEvaluationPhase.Technical, "before-reconfirmation"))
+                .Allowed.Should().BeFalse();
+        }
+
+        var pending = await fixture.Context.ProcurementEvaluationMeetings.AsNoTracking()
+            .SingleAsync(item => item.Id == meeting.Id);
+        pending.QuorumSnapshotJson.Should().Be(failedSnapshot);
+        pending.QuorumIntegrityHash.Should().Be(failedHash);
+        (await fixture.Context.ProcurementEvaluationAttendanceRecords.CountAsync())
+            .Should().Be(control.Members.Count);
+
+        fixture.SwitchAdministrator();
+        var ready = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        var confirmed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
+            new ConfirmProcurementEvaluationQuorumRequest
+            {
+                RowVersion = ready.Meetings.Single().RowVersion, IdempotencyKey = "fresh-quorum"
+            }, "fresh-quorum");
+        confirmed.Status.Should().Be(ProcurementEvaluationMeetingStatus.QuorumConfirmed);
+        confirmed.QuorumMet.Should().BeTrue();
+        confirmed.SignedVotingAttendanceCount.Should().Be(control.Members.Count(item => item.IsVoting));
+        fixture.SwitchUser(control.Members[0].UserId);
+        var lateAttendance = () => fixture.Service.SignAttendanceAsync(meeting.Id,
+            new SignProcurementEvaluationAttendanceRequest { IdempotencyKey = "after-confirmation" }, "late");
+        await lateAttendance.Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(error => error.Code == "EVALUATION_ATTENDANCE_CLOSED");
+    }
+
+    [Fact]
     public async Task TenderProjectionCreatesEveryVotingSeatOnceAndPreservesSignedCommittee()
     {
         await using var fixture = new Fixture();
