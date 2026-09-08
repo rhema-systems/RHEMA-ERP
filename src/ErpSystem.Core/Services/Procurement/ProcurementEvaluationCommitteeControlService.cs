@@ -737,6 +737,12 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         };
         CaptureAttendance(attendance, appointment);
         await Attendance.AddAsync(attendance);
+        // A failed quorum is a historical attempt, not a live attendance tally.
+        // Reopen the meeting before saving new attendance so the SQL lifecycle
+        // guard does not compare it with that stale attempt. Retain its snapshot
+        // and audit evidence; only ConfirmQuorumAsync can confirm the new quorum.
+        if (meeting.Status == ProcurementEvaluationMeetingStatus.QuorumFailed)
+            meeting.Status = ProcurementEvaluationMeetingStatus.Draft;
         Touch(meeting, now);
         await Meetings.UpdateAsync(meeting);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
