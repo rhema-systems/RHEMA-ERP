@@ -1,5 +1,13 @@
 # Fresh Supplier, Procurement, Inventory and Stores UAT
 
+## 8 September: optional verification comments correction prepared (not deployed)
+
+- **Verified blocker:** the live Award Verification Checklist required notes or a file despite labeling comments optional. A visible click on **Verify Bidder** reproduced the missing-evidence validation; the unrelated award lookup 404 only meant no award existed yet.
+- **Correction:** review and overall comments are optional. Required checklist decisions, reviewer identity/time, explicitly required same-tenant documents, completed-review locks and award-readiness checks remain enforced. The form now labels **Review comments (optional)** and explains that **Verify Bidder** saves the decisions. No Finance, permission, schema, checklist configuration or existing review data was changed.
+- **Validation:** 35 focused frontend tests and 25 backend policy/completion/readiness tests passed. Coverage includes empty/whitespace comments, required-document rejection, attribution, failed reviews and read-only completed reviews. Backend build succeeded with existing repository warnings.
+- **Live UAT checkpoint:** the user saved Harbourline's bidder verification as **Passed** at 12:16 UTC. At the subsequent read-only check the overall verification was still **InProgress**; **Complete Verification** is the next action, followed by independent award-readiness reassessment. This is not an award or final approval.
+- **Deployment boundary:** both running servers were deliberately left unchanged while the user continued UAT. The corrected blank-comments flow is covered by automated tests, but live-browser acceptance of the new build remains pending deployment during a UAT pause. Do not describe the correction as already active on localhost.
+
 ## 8 September: attendance retry after failed quorum verified
 
 - **Current attendance checkpoint (11:21 UTC):** TND-2026-0003 has progressed beyond the earlier document rehearsal below. Its existing Combined meeting `ccc562e6-93af-421f-a5e0-b4f09dbb3e0b` had a failed quorum attempt before attendance. SQL error **51333** then prevented the first member from signing: the save compared new attendance with the retained zero-attendee quorum snapshot.
