@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Post-Phase-6 Stage C7 — Finance-owned staged producer-intent adapter |
-| Status | `IN_PROGRESS` |
+| Status | `COMPLETE` |
 | Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `b73e6886a78e03ac366410ace0e956a0f1227ae5` |
 | Branch | `codex/finance-producer-intent-staging-c7` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 cycle 4 `APPROVED` at `a634b6fc4cb9e6317ddc04f0eee97db07c19f424`; ordered local integration active |
+| Review status | C7 cycle 4 `APPROVED`; four reviewed commits integrated and primary verification passed |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -807,6 +807,16 @@ exact C6-to-C7 no-connect script all passed. Fresh validation produced a zero-er
 with 13 guarded SQL skips and 362 widened passes with 37 guarded SQL skips and no failures. SQL guards were not
 executed because `RHEMA_TEST_SQLSERVER` is unset; no database was accessed. Ordered local integration of the
 four approved commits is active, after which primary verification and a fresh Inventory reissue remain required.
+
+The coordinator integrated the four reviewed C7 commits without conflict as `0e9dc805`, `bce6b3d1`,
+`7de0989a` and `8eeb8a1e`. All candidate-owned blobs exactly match approved HEAD `a634b6fc`; protected unrelated
+primary dirt remains untouched. Because the user's running API process held the normal output assemblies, primary
+verification used isolated build artifacts and did not interrupt that process. The isolated API-test-project
+build passed with zero warnings and zero errors, and the focused C6/C7 run passed 43 tests with 13 guarded SQL
+skips and no failures. Independent widened validation already passed 362 tests with 37 guarded skips and no
+failures; EF/model, migration discovery and no-connect script gates passed on the byte-identical reviewed tree.
+No migration was applied and no database was accessed. Stage C7 is complete; the next authorized action is a
+fresh exact-base Inventory B2 reissue using the internal ambient receipt boundary on GPT-5.6 Terra Medium.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
