@@ -124,6 +124,79 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
         return Map(prepared!);
     }
 
+    async Task<AccountingEventDto> ITrustedAccountingEventExecutor.PrepareGroupMemberInAmbientTransactionAsync(
+        CreateAccountingEventDto request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!_options.Enabled) throw new InvalidOperationException("ACCOUNTING_EVENT_ORCHESTRATION_DISABLED: C6 multi-book release is not enabled.");
+        var transaction = RequireAmbientTransaction();
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var actor = RequireActor();
+        var posting = request.PostingRequest ?? throw new InvalidOperationException("A Finance posting request is required.");
+        RequirePreparedOwnerEffect(request);
+        var preparedIdentity = FinancePreparedIdentityNormalizer.Normalize(
+            posting.OriginModuleCode ?? posting.SourceModule, posting.SourceDocumentType, posting.PostingAction);
+        var key = CanonicalKey(request.SelectionIdempotencyKey);
+        await AcquireEventLockAsync(tenantId, key, cancellationToken);
+        var existing = await FindByKeyAsync(tenantId, key, cancellationToken);
+        if (existing is not null)
+        {
+            RequireRetryMatch(existing, Fingerprint(request, key, existing.Version, existing.RootAccountingEventId));
+            RequireProducerMakerMatch(existing, actor);
+            RequireSnapshotMatch(existing, request);
+            RequireTransactionIdentity(transaction.TransactionId);
+            return Map(existing);
+        }
+
+        var eventId = request.AccountingEventId.GetValueOrDefault(Guid.NewGuid());
+        if (eventId == Guid.Empty) eventId = Guid.NewGuid();
+        var lineage = await ResolveLineageAsync(tenantId, request, cancellationToken);
+        var rootId = lineage.RootId == Guid.Empty ? eventId : lineage.RootId;
+        var fingerprint = Fingerprint(request, key, lineage.Version, rootId);
+        if (lineage.Target is not null
+            && !string.Equals(request.ExpectedSelectionFingerprint, lineage.Target.SelectionFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException("ACCOUNTING_EVENT_LINEAGE_SELECTION_CONFLICT: corrections and reversals must bind the target's frozen selection fingerprint.");
+        var now = DateTime.UtcNow;
+        request.AccountingEventId = eventId;
+        var producerSnapshot = JsonSerializer.Serialize(request, ProducerSnapshotJsonOptions);
+        var prepared = new AccountingEvent
+        {
+            Id = eventId, TenantId = tenantId, RootAccountingEventId = rootId,
+            EventKind = lineage.Kind, Version = lineage.Version, SupersedesAccountingEventId = lineage.SupersedesId,
+            CorrectsAccountingEventId = lineage.CorrectsId, ReversesAccountingEventId = lineage.ReversesId,
+            OriginatingModuleCode = preparedIdentity.OriginatingModuleCode,
+            SourceDocumentType = preparedIdentity.SourceDocumentType, SourceDocumentId = posting.SourceDocumentId,
+            PostingAction = preparedIdentity.PostingAction, IdempotencyKey = key,
+            SelectionFingerprint = request.ExpectedSelectionFingerprint, RequestFingerprint = fingerprint,
+            Status = AccountingEventStatuses.PendingApproval, EventDate = posting.PostingDate.Date,
+            RequestedAtUtc = now, RequestedByUserId = actor, PreparedByUserId = actor, PreparedAtUtc = now,
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Pending,
+            ProducerParticipantIdentity = request.ProducerParticipantIdentity.Trim().ToUpperInvariant(),
+            ProducerIntentSnapshotJson = producerSnapshot,
+            ProducerIntentSnapshotHash = Sha256(producerSnapshot), CreatedAt = now, CreatedBy = ActorName()
+        };
+        _db.AccountingEvents.Add(prepared);
+        await _db.SaveChangesAsync(cancellationToken);
+        await AuditAsync(FinanceAuditEvents.AccountingEventPrepared, prepared, cancellationToken);
+        RequireTransactionIdentity(transaction.TransactionId);
+        return Map(prepared);
+    }
+
+    async Task<AccountingEventDto> ITrustedAccountingEventExecutor.ValidatePreparedGroupMemberAsync(
+        Guid accountingEventId, CreateAccountingEventDto request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var prepared = await Query().SingleOrDefaultAsync(item => item.TenantId == tenantId
+            && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("AccountingEvent was not found.");
+        request.AccountingEventId = accountingEventId;
+        RequireRetryMatch(prepared, Fingerprint(request, CanonicalKey(request.SelectionIdempotencyKey),
+            prepared.Version, prepared.RootAccountingEventId));
+        RequireSnapshotMatch(prepared, request);
+        return Map(prepared);
+    }
+
     public async Task<AccountingEventDto> ReleaseAsync(Guid accountingEventId, ReleaseAccountingEventDto release, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(release);
@@ -164,6 +237,9 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
                 prepared = await _db.AccountingEvents.SingleOrDefaultAsync(item => item.TenantId == tenantId
                     && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
                     ?? throw new KeyNotFoundException("AccountingEvent was not found.");
+                if (await _db.ProducerIntentGroupMembers.AsNoTracking().AnyAsync(item => item.TenantId == tenantId
+                    && item.AccountingEventId == accountingEventId && !item.IsDeleted, cancellationToken))
+                    throw new InvalidOperationException("PRODUCER_INTENT_GROUP_DECISION_REQUIRED: group members can only be decided as one immutable group.");
                 RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey),
                     prepared.Version, prepared.RootAccountingEventId));
                 RequireSnapshotMatch(prepared, release.Request);
@@ -205,6 +281,9 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
         var tenantId = _currentUser.GetRequiredFinanceTenantId();
         var prepared = await Query().SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
             ?? throw new KeyNotFoundException("AccountingEvent was not found.");
+        if (await _db.ProducerIntentGroupMembers.AsNoTracking().AnyAsync(item => item.TenantId == tenantId
+            && item.AccountingEventId == accountingEventId && !item.IsDeleted, cancellationToken))
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_EXECUTION_REQUIRED: group members cannot execute through the single-intent boundary.");
         if (prepared.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved
             || prepared.Status is not (AccountingEventStatuses.PendingApproval or AccountingEventStatuses.Failed or AccountingEventStatuses.Posted))
             throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: execution requires durable independent approval.");
@@ -214,6 +293,42 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
         RequireReceiptMatch(release.Request, receipt, tenantId);
         RequireSnapshotMatch(prepared, release.Request);
         return await OrchestrateAsync(release.Request, prepared.ProducerDecisionReason!, receipt, cancellationToken);
+    }
+
+    async Task<AccountingEventDto> ITrustedAccountingEventExecutor.ExecuteApprovedGroupMemberInAmbientTransactionAsync(
+        Guid accountingEventId, ReleaseAccountingEventDto release, Guid producerIntentGroupId, Guid approvedCheckerId,
+        Guid expectedAmbientTransactionId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(release);
+        if (approvedCheckerId == Guid.Empty)
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_CHECKER_REQUIRED: group execution requires durable checker authority.");
+        RequireTransactionIdentity(expectedAmbientTransactionId);
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var prepared = await Query().SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountingEventId && !item.IsDeleted,
+            cancellationToken) ?? throw new KeyNotFoundException("AccountingEvent was not found.");
+        var membership = await _db.ProducerIntentGroupMembers.AsNoTracking()
+            .Include(item => item.ProducerIntentGroup).ThenInclude(item => item.Receipt)
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.AccountingEventId == accountingEventId
+                && item.ProducerIntentGroupId == producerIntentGroupId && !item.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MEMBER_AUTHORITY: event is not bound to the executing group.");
+        var group = membership.ProducerIntentGroup;
+        if (group.Status is not (ProducerIntentGroupStatuses.Approved or ProducerIntentGroupStatuses.Failed)
+            || group.DecidedByUserId != approvedCheckerId || group.Receipt is null
+            || !string.Equals(group.DecisionReason, release.Reason, StringComparison.Ordinal)
+            || !string.Equals(group.GroupFingerprint, group.Receipt.GroupFingerprint, StringComparison.Ordinal)
+            || !string.Equals(membership.MemberFingerprint, prepared.RequestFingerprint, StringComparison.Ordinal)
+            || !string.Equals(group.ParticipantCode, prepared.ProducerParticipantIdentity, StringComparison.Ordinal))
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MEMBER_AUTHORITY: complete approved group evidence does not match this member execution.");
+        RequireTransactionIdentity(expectedAmbientTransactionId);
+        if (prepared.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Pending
+            || prepared.Status is not (AccountingEventStatuses.PendingApproval or AccountingEventStatuses.Posted))
+            throw new InvalidOperationException("PRODUCER_INTENT_GROUP_MEMBER_STATE: group members remain pending group authority until zero-or-all execution.");
+        release.Request.AccountingEventId = accountingEventId;
+        RequireRetryMatch(prepared, Fingerprint(release.Request, CanonicalKey(release.Request.SelectionIdempotencyKey),
+            prepared.Version, prepared.RootAccountingEventId));
+        RequireSnapshotMatch(prepared, release.Request);
+        return await OrchestrateAsync(release.Request, release.Reason, null, cancellationToken,
+            groupExecution: true, approvedProducerCheckerId: approvedCheckerId);
     }
 
     async Task ITrustedAccountingEventExecutor.RecordApprovedFailureAfterRollbackAsync(Guid accountingEventId,
@@ -246,10 +361,12 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
         CreateAccountingEventDto request,
         string releaseReason,
         ProducerOwnerEffectReceiptDto? producerReceipt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool groupExecution = false,
+        Guid? approvedProducerCheckerId = null)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var producerExecution = producerReceipt is not null;
+        var producerExecution = producerReceipt is not null || groupExecution;
         if (!producerExecution && !string.IsNullOrWhiteSpace(request.ProducerParticipantIdentity))
             throw new InvalidOperationException("PARALLEL_BOOK_POSTING_DISABLED: producer intents require the internal approved ambient-transaction boundary.");
         if (!_options.Enabled)
@@ -293,14 +410,18 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
                 {
                     requestFingerprint = Fingerprint(request, key, raced.Version, raced.RootAccountingEventId);
                     RequireRetryMatch(raced, requestFingerprint);
-                    var retryChecker = !producerExecution ? actorId : raced.ProducerDecidedByUserId
+                    var retryChecker = !producerExecution ? actorId : approvedProducerCheckerId
+                        ?? raced.ProducerDecidedByUserId
                         ?? throw new InvalidOperationException("Posted producer AccountingEvent approval evidence is incomplete.");
                     RequireReleaseMatch(raced, retryChecker, releaseReason);
                     if (producerExecution)
                     {
                         RequireSnapshotMatch(raced, request);
-                        RequireReceiptMatch(request, producerReceipt!, tenantId);
-                        RequirePersistedReceiptMatch(raced.ProducerReceipt, producerReceipt!, raced.RequestFingerprint);
+                        if (!groupExecution)
+                        {
+                            RequireReceiptMatch(request, producerReceipt!, tenantId);
+                            RequirePersistedReceiptMatch(raced.ProducerReceipt, producerReceipt!, raced.RequestFingerprint);
+                        }
                     }
                     attempted = raced;
                     RequireTransactionIdentity(transaction.TransactionId);
@@ -312,22 +433,26 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
                     throw new InvalidOperationException("ACCOUNTING_EVENT_RELEASE_IDENTITY_CONFLICT: the prepared event no longer matches its canonical release identity.");
                 requestFingerprint = Fingerprint(request, key, raced.Version, raced.RootAccountingEventId);
                 RequireRetryMatch(raced, requestFingerprint);
-                var approvalCheckerId = !producerExecution ? actorId : raced.ProducerDecidedByUserId
+                var approvalCheckerId = !producerExecution ? actorId : approvedProducerCheckerId
+                    ?? raced.ProducerDecidedByUserId
                     ?? throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: approved checker evidence is missing.");
                 RequireReleaseMatch(raced, approvalCheckerId, releaseReason);
-                if (producerExecution && raced.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
+                if (producerExecution && !groupExecution && raced.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
                     throw new InvalidOperationException("ACCOUNTING_EVENT_APPROVAL_REQUIRED: producer execution requires durable independent approval.");
                 if (producerExecution)
                 {
                     RequireSnapshotMatch(raced, request);
-                    RequireReceiptMatch(request, producerReceipt!, tenantId);
-                    if (raced.ProducerReceipt is not null)
-                        RequirePersistedReceiptMatch(raced.ProducerReceipt, producerReceipt!, raced.RequestFingerprint);
-                    else if (await _db.AccountingEventProducerReceipts.AsNoTracking().AnyAsync(item =>
-                        item.TenantId == tenantId && item.AccountingEventId != raced.Id
-                        && item.ParticipantCode == producerReceipt!.ParticipantCode.Trim().ToUpperInvariant()
-                        && item.EffectFingerprint == producerReceipt.EffectFingerprint.Trim().ToUpperInvariant(), cancellationToken))
-                        throw new InvalidOperationException("ACCOUNTING_EVENT_OWNER_EFFECT_REUSED: receipt effect already belongs to another AccountingEvent.");
+                    if (!groupExecution)
+                    {
+                        RequireReceiptMatch(request, producerReceipt!, tenantId);
+                        if (raced.ProducerReceipt is not null)
+                            RequirePersistedReceiptMatch(raced.ProducerReceipt, producerReceipt!, raced.RequestFingerprint);
+                        else if (await _db.AccountingEventProducerReceipts.AsNoTracking().AnyAsync(item =>
+                            item.TenantId == tenantId && item.AccountingEventId != raced.Id
+                            && item.ParticipantCode == producerReceipt!.ParticipantCode.Trim().ToUpperInvariant()
+                            && item.EffectFingerprint == producerReceipt.EffectFingerprint.Trim().ToUpperInvariant(), cancellationToken))
+                            throw new InvalidOperationException("ACCOUNTING_EVENT_OWNER_EFFECT_REUSED: receipt effect already belongs to another AccountingEvent.");
+                    }
                 }
                 var lineage = new Lineage(raced.EventKind, raced.Version, raced.RootAccountingEventId,
                     raced.SupersedesAccountingEventId, raced.CorrectsAccountingEventId,
@@ -371,7 +496,8 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
                 attempted.Status = AccountingEventStatuses.Pending;
                 attempted.CompletedAtUtc = null;
                 attempted.FailureMessage = null;
-                var releaseActorId = !producerExecution ? actorId : attempted.ProducerDecidedByUserId
+                var releaseActorId = !producerExecution ? actorId : approvedProducerCheckerId
+                    ?? attempted.ProducerDecidedByUserId
                     ?? throw new InvalidOperationException("Approved producer checker evidence is incomplete.");
                 attempted.ReleasedByUserId ??= releaseActorId;
                 attempted.ReleasedAtUtc ??= now;
@@ -386,7 +512,7 @@ public sealed class AccountingEventService : IAccountingEventService, ITrustedAc
                         Status = AccountingEventStatuses.Pending, CreatedAt = now, CreatedBy = ActorName()
                     }).ToList();
                 await _db.SaveChangesAsync(cancellationToken);
-                if (producerExecution && attempted.ProducerReceipt is null)
+                if (producerExecution && !groupExecution && attempted.ProducerReceipt is null)
                 {
                     attempted.ProducerReceipt = NewReceipt(tenantId, eventId, attempted.RequestFingerprint, producerReceipt!, actorId);
                     await _db.SaveChangesAsync(cancellationToken);
@@ -954,7 +1080,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
     private string ActorName() => _currentUser.UserName ?? "system";
     private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 
-    private static AccountingEventDto Map(AccountingEvent item) => new()
+    internal static AccountingEventDto Map(AccountingEvent item) => new()
     {
         Id = item.Id, RootAccountingEventId = item.RootAccountingEventId, Version = item.Version,
         EventKind = item.EventKind, OriginatingModuleCode = item.OriginatingModuleCode,

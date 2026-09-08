@@ -147,6 +147,12 @@ public static class FinancePermissionPolicyMap
                 "Approve" or "Reject" => One(FinancePermissions.OrchestrateAccountingEvents),
                 _ => One(FinancePermissions.ViewAccountingEvents)
             },
+            "ProducerIntentGroups" => action switch
+            {
+                "Prepare" => One(FinancePermissions.PrepareAccountingEvents),
+                "Approve" or "Reject" => One(FinancePermissions.OrchestrateAccountingEvents),
+                _ => One(FinancePermissions.ViewAccountingEvents)
+            },
             "AccountClassifications" => ReadOrManage(action, methods, FinancePermissions.ManageChartOfAccounts),
             "AccountBookCurrencyPolicies" => action switch
             {

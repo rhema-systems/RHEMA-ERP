@@ -14,6 +14,46 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class AccountingEventC6MigrationSqlServerTests
 {
     [SqlServerFact]
+    public async Task C8PreflightEmptyDownAndEvidenceRefusal_AreExecutableAndRestoreC7()
+    {
+        await using var preflight = await DisposableDatabase.CreateAsync();
+        await preflight.CreatePredecessorAsync();
+        await preflight.ApplyAsync(up: true);
+        await FluentActions.Awaiting(() => preflight.ApplyC8Async(up: true))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C8_PREFLIGHT*");
+        (await preflight.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'ProducerIntentGroup%'")).Should().Be(0);
+
+        await using var empty = await DisposableDatabase.CreateAsync();
+        await empty.CreatePredecessorAsync(); await empty.ApplyAsync(up: true); await empty.ApplyC7Async(up: true);
+        await empty.ApplyC8Async(up: true);
+        (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'ProducerIntentGroup%'")).Should().Be(4);
+        await empty.ApplyC8Async(up: false);
+        (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE name LIKE 'ProducerIntentGroup%'")).Should().Be(0);
+        (await empty.ScalarAsync<int>("SELECT COUNT(*) FROM sys.triggers WHERE name='TR_AccountingEvents_C7ProducerDecision'")).Should().Be(1);
+
+        await using var evidence = await DisposableDatabase.CreateAsync();
+        await evidence.CreatePredecessorAsync(); await evidence.ApplyAsync(up: true); await evidence.ApplyC7Async(up: true);
+        await evidence.ApplyC8Async(up: true);
+        var tenant = Guid.NewGuid(); var maker = Guid.NewGuid(); var group = Guid.NewGuid();
+        var first = Guid.NewGuid(); var second = Guid.NewGuid();
+        await evidence.ExecuteAsync($"INSERT Tenants(Id) VALUES('{tenant}');");
+        await evidence.ExecuteAsync(ProducerEventInsert(tenant, first, maker, "C8-MEMBER-1"));
+        await evidence.ExecuteAsync(ProducerEventInsert(tenant, second, maker, "C8-MEMBER-2"));
+        await evidence.ExecuteAsync($@"
+INSERT ProducerIntentGroups(Id,IdempotencyKey,GroupKind,Version,RootProducerIntentGroupId,Status,MemberCount,
+ ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,ExpectedOwnerEffectFingerprint,RequestSnapshotJson,
+ RequestSnapshotHash,GroupFingerprint,PreparedByUserId,PreparedAtUtc,CreatedAt,IsDeleted,TenantId)
+VALUES('{group}',N'C8-GROUP-1',N'Original',1,'{group}',N'PendingApproval',2,N'INVENTORY.DISPOSAL.V1',
+ N'INVENTORYDISPOSAL','{Guid.NewGuid()}',N'DISPOSE',REPLICATE('F',64),N'{{}}',REPLICATE('D',64),REPLICATE('C',64),
+ '{maker}',SYSUTCDATETIME(),SYSUTCDATETIME(),0,'{tenant}');
+INSERT ProducerIntentGroupMembers(Id,ProducerIntentGroupId,AccountingEventId,MemberOrder,MemberFingerprint,CreatedAt,IsDeleted,TenantId)
+VALUES(NEWID(),'{group}','{first}',1,REPLICATE('A',64),SYSUTCDATETIME(),0,'{tenant}'),
+      (NEWID(),'{group}','{second}',2,REPLICATE('A',64),SYSUTCDATETIME(),0,'{tenant}');");
+        await FluentActions.Awaiting(() => evidence.ApplyC8Async(up: false))
+            .Should().ThrowAsync<SqlException>().WithMessage("*C8_DOWN_REFUSED*");
+    }
+
+    [SqlServerFact]
     public async Task C7PreflightAndEmptyDown_AreExecutableAndScoped()
     {
         await using var preflight = await DisposableDatabase.CreateAsync();
@@ -495,6 +535,13 @@ CREATE TABLE FinancePostingEvents(Id uniqueidentifier NOT NULL CONSTRAINT PK_Fin
             var generator = context.GetService<IMigrationsSqlGenerator>(); var migration = new ExposedC7Migration();
             foreach (var command in generator.Generate(up ? migration.UpOperations() : migration.DownOperations())) await ExecuteAsync(command.CommandText);
         }
+        public async Task ApplyC8Async(bool up)
+        {
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(_connection).Options;
+            await using var context = new ApplicationDbContext(options);
+            var generator = context.GetService<IMigrationsSqlGenerator>(); var migration = new ExposedC8Migration();
+            foreach (var command in generator.Generate(up ? migration.UpOperations() : migration.DownOperations())) await ExecuteAsync(command.CommandText);
+        }
         public async Task<SqlConnection> OpenAsync() { var connection = new SqlConnection(_connection); await connection.OpenAsync(); return connection; }
         public async Task ExecuteAsync(string sql) { await using var connection = await OpenAsync(); await using var command = new SqlCommand(sql, connection) { CommandTimeout = 120 }; await command.ExecuteNonQueryAsync(); }
         public async Task<T> ScalarAsync<T>(string sql) { await using var connection = await OpenAsync(); await using var command = new SqlCommand(sql, connection); return (T)Convert.ChangeType(await command.ExecuteScalarAsync(), typeof(T)); }
@@ -507,6 +554,11 @@ CREATE TABLE FinancePostingEvents(Id uniqueidentifier NOT NULL CONSTRAINT PK_Fin
             public IReadOnlyList<MigrationOperation> DownOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Down(b); return b.Operations; }
         }
         private sealed class ExposedC7Migration : AddProducerIntentStagingC7
+        {
+            public IReadOnlyList<MigrationOperation> UpOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Up(b); return b.Operations; }
+            public IReadOnlyList<MigrationOperation> DownOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Down(b); return b.Operations; }
+        }
+        private sealed class ExposedC8Migration : AddProducerIntentGroupsC8
         {
             public IReadOnlyList<MigrationOperation> UpOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Up(b); return b.Operations; }
             public IReadOnlyList<MigrationOperation> DownOperations() { var b = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Down(b); return b.Operations; }

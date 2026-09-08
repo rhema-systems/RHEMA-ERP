@@ -24633,6 +24633,424 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PeriodModuleLock", (string)null);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CorrectsProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ExpectedOwnerEffectFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("GroupFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("GroupKind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("MemberCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OwnerAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid>("OwnerEntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerEntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ParticipantCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("PreparedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RequestSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("ReversesProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RootProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("SupersedesProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CorrectsProducerIntentGroupId");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "GroupFingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ReversesProducerIntentGroupId");
+
+                    b.HasIndex("TenantId", "SupersedesProducerIntentGroupId")
+                        .IsUnique()
+                        .HasFilter("[SupersedesProducerIntentGroupId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "RootProducerIntentGroupId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroups", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Decision", "([Status] = 'PendingApproval' AND [DecidedByUserId] IS NULL AND [DecidedAtUtc] IS NULL AND [DecisionReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] IN ('Approved','Rejected') AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_EffectFingerprint", "LEN([ExpectedOwnerEffectFingerprint]) = 64 AND [ExpectedOwnerEffectFingerprint] <> REPLICATE('0',64) AND [ExpectedOwnerEffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Kind", "[GroupKind] IN ('Original','Correction','Reversal')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Lineage", "([GroupKind] = 'Original' AND [Version] = 1 AND [RootProducerIntentGroupId] = [Id] AND [SupersedesProducerIntentGroupId] IS NULL AND [CorrectsProducerIntentGroupId] IS NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Correction' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [CorrectsProducerIntentGroupId] AND [CorrectsProducerIntentGroupId] IS NOT NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Reversal' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [ReversesProducerIntentGroupId] AND [ReversesProducerIntentGroupId] IS NOT NULL AND [CorrectsProducerIntentGroupId] IS NULL)");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_MakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_MemberCount", "[MemberCount] BETWEEN 2 AND 20");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_SnapshotHash", "LEN([RequestSnapshotHash]) = 64 AND [RequestSnapshotHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Status", "[Status] IN ('PendingApproval','Approved','Rejected','Posted','Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("FailedAccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("FailedMemberOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("GroupFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProducerIntentGroupId", "AttemptNumber")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroupAttempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Fingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Number", "[AttemptNumber] > 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Result", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MemberFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("MemberOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingEventId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ProducerIntentGroupId", "MemberOrder")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroupMembers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroupMembers_Fingerprint", "LEN([MemberFingerprint]) = 64 AND [MemberFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupMembers_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupMembers_Order", "[MemberOrder] > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EffectFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("GroupFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid>("OwnerEntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerEntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ParticipantCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("ProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProducerIntentGroupId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ParticipantCode", "EffectFingerprint")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroupReceipts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_EffectFingerprint", "LEN([EffectFingerprint]) = 64 AND [EffectFingerprint] <> REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_NoDelete", "[IsDeleted] = 0");
+                        });
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.RatioDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -174203,6 +174621,119 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("ModuleDefinition");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "CorrectsProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CorrectsProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ReversesProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ReversesProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "RootProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "RootProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "SupersedesProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "SupersedesProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CorrectsProducerIntentGroup");
+
+                    b.Navigation("ReversesProducerIntentGroup");
+
+                    b.Navigation("RootProducerIntentGroup");
+
+                    b.Navigation("SupersedesProducerIntentGroup");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupAttempt", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ProducerIntentGroup")
+                        .WithMany("Attempts")
+                        .HasForeignKey("TenantId", "ProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProducerIntentGroup");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupMember", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "AccountingEvent")
+                        .WithOne()
+                        .HasForeignKey("ErpSystem.Core.Entities.Finance.ProducerIntentGroupMember", "TenantId", "AccountingEventId")
+                        .HasPrincipalKey("ErpSystem.Core.Entities.Finance.AccountingEvent", "TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ProducerIntentGroup")
+                        .WithMany("Members")
+                        .HasForeignKey("TenantId", "ProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingEvent");
+
+                    b.Navigation("ProducerIntentGroup");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupReceipt", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ProducerIntentGroup")
+                        .WithOne("Receipt")
+                        .HasForeignKey("ErpSystem.Core.Entities.Finance.ProducerIntentGroupReceipt", "TenantId", "ProducerIntentGroupId")
+                        .HasPrincipalKey("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProducerIntentGroup");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.RatioDefinition", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -215399,6 +215930,15 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.PaymentMethod", b =>
                 {
                     b.Navigation("Transactions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", b =>
+                {
+                    b.Navigation("Attempts");
+
+                    b.Navigation("Members");
+
+                    b.Navigation("Receipt");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.RecurringJournalTemplate", b =>

@@ -827,6 +827,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>());
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.IFinanceProducerApprovedExecution>(provider =>
                 provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>());
+            services.AddOptions<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentGroupOptions>()
+                .BindConfiguration(ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentGroupOptions.SectionName);
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentGroupService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceProducerIntentGroupService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentGroupService>());
+            services.AddScoped<ErpSystem.Api.Services.Finance.GL.IFinanceProducerIntentGroupApprovedExecution>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentGroupService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountClassificationService, ErpSystem.Api.Services.Finance.Settings.AccountClassificationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountBookCurrencyPolicyService, ErpSystem.Api.Services.Finance.MultiCurrency.AccountBookCurrencyPolicyService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService, ErpSystem.Api.Services.Finance.GL.FinanceAccountProvisioningService>();

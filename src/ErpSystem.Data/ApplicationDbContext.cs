@@ -134,6 +134,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AccountingEventPosting> AccountingEventPostings { get; set; }
     public DbSet<AccountingEventAttempt> AccountingEventAttempts { get; set; }
     public DbSet<AccountingEventProducerReceipt> AccountingEventProducerReceipts { get; set; }
+    public DbSet<ProducerIntentGroup> ProducerIntentGroups { get; set; }
+    public DbSet<ProducerIntentGroupMember> ProducerIntentGroupMembers { get; set; }
+    public DbSet<ProducerIntentGroupReceipt> ProducerIntentGroupReceipts { get; set; }
+    public DbSet<ProducerIntentGroupAttempt> ProducerIntentGroupAttempts { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
     public DbSet<AccountBookCurrencyPolicy> AccountBookCurrencyPolicies { get; set; }
     public DbSet<AccountClassification> AccountClassifications { get; set; }
@@ -3016,6 +3020,96 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(item => item.AccountingEvent).WithOne(item => item.ProducerReceipt)
                 .HasForeignKey<AccountingEventProducerReceipt>(item => new { item.TenantId, item.AccountingEventId })
                 .HasPrincipalKey<AccountingEvent>(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroup>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroups", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroups_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Status", "[Status] IN ('PendingApproval','Approved','Rejected','Posted','Failed')");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_MemberCount", "[MemberCount] BETWEEN 2 AND 20");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Kind", "[GroupKind] IN ('Original','Correction','Reversal')");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Lineage", "([GroupKind] = 'Original' AND [Version] = 1 AND [RootProducerIntentGroupId] = [Id] AND [SupersedesProducerIntentGroupId] IS NULL AND [CorrectsProducerIntentGroupId] IS NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Correction' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [CorrectsProducerIntentGroupId] AND [CorrectsProducerIntentGroupId] IS NOT NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Reversal' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [ReversesProducerIntentGroupId] AND [ReversesProducerIntentGroupId] IS NOT NULL AND [CorrectsProducerIntentGroupId] IS NULL)");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Decision", "([Status] = 'PendingApproval' AND [DecidedByUserId] IS NULL AND [DecidedAtUtc] IS NULL AND [DecisionReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] IN ('Approved','Rejected') AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_MakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_SnapshotHash", "LEN([RequestSnapshotHash]) = 64 AND [RequestSnapshotHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_EffectFingerprint", "LEN([ExpectedOwnerEffectFingerprint]) = 64 AND [ExpectedOwnerEffectFingerprint] <> REPLICATE('0',64) AND [ExpectedOwnerEffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.GroupFingerprint }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.RootProducerIntentGroupId, item.Version }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.SupersedesProducerIntentGroupId }).IsUnique()
+                .HasFilter("[SupersedesProducerIntentGroupId] IS NOT NULL");
+            entity.HasOne(item => item.RootProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.RootProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SupersedesProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SupersedesProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.CorrectsProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.CorrectsProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ReversesProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.ReversesProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroupMember>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroupMembers", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroupMembers_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroupMembers_Order", "[MemberOrder] > 0");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_ProducerIntentGroupMembers_Fingerprint", "LEN([MemberFingerprint]) = 64 AND [MemberFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.ProducerIntentGroupId, item.MemberOrder }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId }).IsUnique();
+            entity.HasOne(item => item.ProducerIntentGroup).WithMany(item => item.Members)
+                .HasForeignKey(item => new { item.TenantId, item.ProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingEvent).WithOne()
+                .HasForeignKey<ProducerIntentGroupMember>(item => new { item.TenantId, item.AccountingEventId })
+                .HasPrincipalKey<AccountingEvent>(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroupReceipt>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroupReceipts", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_EffectFingerprint", "LEN([EffectFingerprint]) = 64 AND [EffectFingerprint] <> REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasIndex(item => new { item.TenantId, item.ProducerIntentGroupId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.ParticipantCode, item.EffectFingerprint }).IsUnique();
+            entity.HasOne(item => item.ProducerIntentGroup).WithOne(item => item.Receipt)
+                .HasForeignKey<ProducerIntentGroupReceipt>(item => new { item.TenantId, item.ProducerIntentGroupId })
+                .HasPrincipalKey<ProducerIntentGroup>(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroupAttempt>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroupAttempts", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Number", "[AttemptNumber] > 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Result", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Fingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.ProducerIntentGroupId, item.AttemptNumber }).IsUnique();
+            entity.HasOne(item => item.ProducerIntentGroup).WithMany(item => item.Attempts)
+                .HasForeignKey(item => new { item.TenantId, item.ProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountingBookApplicabilityPolicy>(entity =>

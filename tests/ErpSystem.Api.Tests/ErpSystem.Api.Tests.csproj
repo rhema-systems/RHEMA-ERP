@@ -241,6 +241,7 @@
     <Compile Include="Services\Finance\AccountingEventC6ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\FinanceProducerIntentC7Tests.cs" />
     <Compile Include="Services\Finance\FinanceProducerIntentC7MigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerIntentGroupC8Tests.cs" />
     <Compile Include="Services\Finance\BookBalanceConsumerAuthorityC2Tests.cs" />
     <Compile Include="Services\Finance\GeneralLedgerPrimaryBalanceCompatibilityC2Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />

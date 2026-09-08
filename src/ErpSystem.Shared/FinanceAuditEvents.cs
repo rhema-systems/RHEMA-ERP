@@ -40,6 +40,11 @@ public static class FinanceAuditEvents
     public const string AccountingEventPrepared = "Finance.GL.AccountingEvent.Prepared";
     public const string ProducerAccountingIntentApproved = "Finance.GL.ProducerAccountingIntent.Approved";
     public const string ProducerAccountingIntentRejected = "Finance.GL.ProducerAccountingIntent.Rejected";
+    public const string ProducerIntentGroupPrepared = "Finance.GL.ProducerIntentGroup.Prepared";
+    public const string ProducerIntentGroupApproved = "Finance.GL.ProducerIntentGroup.Approved";
+    public const string ProducerIntentGroupRejected = "Finance.GL.ProducerIntentGroup.Rejected";
+    public const string ProducerIntentGroupPosted = "Finance.GL.ProducerIntentGroup.Posted";
+    public const string ProducerIntentGroupFailed = "Finance.GL.ProducerIntentGroup.Failed";
     public const string AccountingEventFailed = "Finance.GL.AccountingEvent.Failed";
     public const string FxPolicyOverrideChanged = "Finance.FX.Policy.OverrideChanged";
     public const string FxPolicyOverrideRequested = "Finance.FX.Policy.OverrideRequested";

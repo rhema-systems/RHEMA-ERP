@@ -375,6 +375,13 @@ public sealed class FinanceProducerIntentC7Tests
     {
         public AccountingEventDto Result { get; set; } = new();
         public ProducerOwnerEffectReceiptDto? Receipt { get; private set; }
+        public Task<AccountingEventDto> PrepareGroupMemberInAmbientTransactionAsync(CreateAccountingEventDto request,
+            CancellationToken cancellationToken = default) => Task.FromResult(Result);
+        public Task<AccountingEventDto> ValidatePreparedGroupMemberAsync(Guid accountingEventId,
+            CreateAccountingEventDto request, CancellationToken cancellationToken = default) => Task.FromResult(Result);
+        public Task<AccountingEventDto> ExecuteApprovedGroupMemberInAmbientTransactionAsync(Guid accountingEventId,
+            ReleaseAccountingEventDto request, Guid producerIntentGroupId, Guid approvedCheckerId,
+            Guid expectedAmbientTransactionId, CancellationToken cancellationToken = default) => Task.FromResult(Result);
         public Task<AccountingEventDto> ExecuteApprovedInAmbientTransactionAsync(Guid accountingEventId,
             ReleaseAccountingEventDto request, ProducerOwnerEffectReceiptDto receipt, CancellationToken cancellationToken = default)
         { Receipt = receipt; return Task.FromResult(Result); }

@@ -97,7 +97,7 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             receipt, failure, cancellationToken);
     }
 
-    private async Task<CreateAccountingEventDto> BuildRequestAsync(ProducerAccountingIntentDto intent, CancellationToken ct)
+    internal async Task<CreateAccountingEventDto> BuildRequestAsync(ProducerAccountingIntentDto intent, CancellationToken ct)
     {
         ValidateIntent(intent);
         var posting = intent.PostingRequest;
@@ -148,7 +148,7 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         };
     }
 
-    private async Task<CreateAccountingEventDto> BuildPreparedRequestAsync(Guid accountingEventId,
+    internal async Task<CreateAccountingEventDto> BuildPreparedRequestAsync(Guid accountingEventId,
         ProducerAccountingIntentDto intent, CancellationToken ct)
     {
         ValidateIntent(intent);
