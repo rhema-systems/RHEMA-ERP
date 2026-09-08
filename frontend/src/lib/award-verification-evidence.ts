@@ -5,10 +5,7 @@ type EvidenceItem = {
   documents: unknown[];
 };
 
-/** Pre-save UX validation; the server validates retained evidence and reviewer attribution. */
+/** Comments are optional. The server retains reviewer attribution and checks required documents. */
 export function hasAwardVerificationEvidence(item: EvidenceItem): boolean {
-  if (!item.isRequired) return true;
-  return item.requiresDocument
-    ? item.documents.length > 0
-    : item.documents.length > 0 || item.comments.trim().length > 0;
+  return !item.isRequired || !item.requiresDocument || item.documents.length > 0;
 }

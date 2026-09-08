@@ -18,9 +18,9 @@ internal static class AwardVerificationEvidencePolicy
         var hasDocument = item.Documents.Any(document => !document.IsDeleted &&
             document.TenantId == item.TenantId && document.ItemResultId == item.Id &&
             !string.IsNullOrWhiteSpace(document.FilePath));
-        return item.ChecklistItem.RequiresDocument
-            ? hasDocument
-            : hasDocument || !string.IsNullOrWhiteSpace(item.Comments);
+        // The attributed decision is the review record. Comments are optional;
+        // only a checklist's explicit document requirement needs an attachment.
+        return !item.ChecklistItem.RequiresDocument || hasDocument;
     }
 
     internal static void EnsureComplete(IEnumerable<TenderAwardVerificationItemResult> results)
@@ -32,6 +32,6 @@ internal static class AwardVerificationEvidencePolicy
         if (missing.Count != 0)
             throw new InvalidOperationException("AWARD_VERIFICATION_EVIDENCE_REQUIRED: " +
                 string.Join("; ", missing.Select(item => $"{item.ChecklistItem.ItemText}: " +
-                    (item.ChecklistItem.RequiresDocument ? "attach the required document" : "record review notes or attach existing evidence"))));
+                    (item.ChecklistItem.RequiresDocument ? "attach the required document" : "retain the reviewer identity and verification time"))));
     }
 }

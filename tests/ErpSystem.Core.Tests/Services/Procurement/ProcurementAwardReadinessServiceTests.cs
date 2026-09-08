@@ -425,6 +425,37 @@ public sealed partial class ProcurementAwardReadinessServiceTests
             .IntegrityHash.Should().HaveLength(64);
     }
 
+    [Theory]
+    [InlineData(false, ProcurementAwardReadinessPrerequisiteStatus.Passed)]
+    [InlineData(true, ProcurementAwardReadinessPrerequisiteStatus.Failed)]
+    public async Task VerificationReadinessAllowsOptionalCommentsButStillRequiresConfiguredDocuments(
+        bool requiresDocument, ProcurementAwardReadinessPrerequisiteStatus expected)
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddFailedVerificationAsync();
+        var bidder = await fixture.Context.Set<TenderAwardVerificationBidder>().SingleAsync();
+        bidder.Status = "Passed";
+        var item = await fixture.Context.Set<TenderAwardVerificationItemResult>().SingleAsync();
+        item.Status = "Passed";
+        item.VerifiedById = Guid.NewGuid();
+        item.Comments = null;
+        var checklistItem = await fixture.Context.Set<AwardVerificationChecklistItem>().SingleAsync();
+        checklistItem.RequiresDocument = requiresDocument;
+        await fixture.Context.SaveChangesAsync();
+        var verification = await fixture.Context.Set<TenderAwardVerification>().SingleAsync();
+        verification.CompletedDate = DateTime.UtcNow;
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            fixture.Request("optional-verification-comments"),
+            "optional-verification-comments");
+
+        result.PrerequisiteGroups.SelectMany(group => group.Items).Should().Contain(item =>
+            item.Code == "AWARD_VERIFICATION_PASSED" && item.Status == expected);
+    }
+
     [Fact]
     public async Task CrossTenantReadCannotDiscoverExistingDecision()
     {
