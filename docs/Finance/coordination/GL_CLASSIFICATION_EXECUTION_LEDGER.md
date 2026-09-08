@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Post-Phase-6 Stage C7 — Finance-owned staged producer-intent adapter |
-| Status | `COMPLETE` |
-| Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
-| Exact base | `b73e6886a78e03ac366410ace0e956a0f1227ae5` |
-| Branch | `codex/finance-producer-intent-staging-c7` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-producer-intent-c7` |
+| Phase | Stage B2 — Inventory neutral AccountingEvent producer cutover through C7 |
+| Status | `IN_PROGRESS` |
+| Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
+| Exact base | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
+| Branch | `codex/inventory-accounting-event-cutover-c7` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-c7` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `b73e6886a78e03ac366410ace0e956a0f1227ae5` |
+| Primary HEAD at activation | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Model routing | Implementer: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later Inventory conversion: GPT-5.6 Terra Medium |
-| Review status | C7 cycle 4 `APPROVED`; four reviewed commits integrated and primary verification passed |
+| Model routing | Inventory implementer: GPT-5.6 Terra Medium; substantive Finance correction: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
+| Review status | Inventory implementation active; independent review not started |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -817,6 +817,18 @@ skips and no failures. Independent widened validation already passed 362 tests w
 failures; EF/model, migration discovery and no-connect script gates passed on the byte-identical reviewed tree.
 No migration was applied and no database was accessed. Stage C7 is complete; the next authorized action is a
 fresh exact-base Inventory B2 reissue using the internal ambient receipt boundary on GPT-5.6 Terra Medium.
+
+Stage B2 Inventory was reissued from fresh exact base `1858cd16ffb1334d8ca8b84b3574772267dc49b8`
+on branch `codex/inventory-accounting-event-cutover-c7` in a new clean worktree. The bounded Terra Medium packet
+replaces `InventoryDisposalService`'s active V1/single-book Finance posting construction with one neutral C7
+producer intent. Inventory must preserve its source identity, economics, owner state/transaction semantics,
+`ALL_ACTIVE_BOOKS` rejection and exact retry behavior; it must not resolve or enumerate books, call the posting
+leaf per book, enable C6/C7 defaults, alter Finance authority/schema/migrations, or include Delta/reporting-
+currency books. The owner must stage its tracked stock adjustment, provide the deterministic C7 owner-effect
+receipt and invoke approved execution inside the same shared Serializable transaction, rolling back before the
+separate durable-failure boundary. Required evidence includes neutral-intent preparation, disabled-by-default,
+tenant/source denial, maker/checker separation, exact retry, zero partial mutation and no remaining active
+Inventory V1 constructor. Independent Sol High review and all database/remote-operation gates remain required.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
