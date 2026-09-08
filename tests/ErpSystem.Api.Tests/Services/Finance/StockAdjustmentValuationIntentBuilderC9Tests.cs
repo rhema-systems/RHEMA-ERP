@@ -147,6 +147,38 @@ public sealed class StockAdjustmentValuationIntentBuilderC9Tests
     }
 
     [Fact]
+    public async Task Preview_NormalizesEquivalentUtcLocalAndSqlUnspecifiedDatesButConflictsOnActualTimeChange()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = Context();
+        await SeedSettingsAsync(db, tenantId, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        db.ChangeTracker.Clear();
+        var adjustment = Adjustment(tenantId);
+        adjustment.Items = [Item(tenantId, -1m, -12m, DateTime.UtcNow, "Date normalization")];
+        var utc = new DateTime(2026, 9, 8, 12, 34, 56, 789, DateTimeKind.Utc).AddTicks(1234);
+        var builder = new StockAdjustmentValuationIntentBuilder(db);
+
+        adjustment.AdjustmentDate = utc;
+        var utcIntent = await builder.BuildAsync(adjustment);
+        adjustment.AdjustmentDate = utc.ToLocalTime();
+        var localIntent = await builder.BuildAsync(adjustment);
+        adjustment.AdjustmentDate = DateTime.SpecifyKind(utc, DateTimeKind.Unspecified);
+        var unspecifiedIntent = await builder.BuildAsync(adjustment);
+
+        localIntent.ExpectedOwnerEffect.EffectFingerprint.Should().Be(utcIntent.ExpectedOwnerEffect.EffectFingerprint,
+            "the same instant represented as Local must use the reviewed C6 UTC canonical form");
+        unspecifiedIntent.ExpectedOwnerEffect.EffectFingerprint.Should().Be(utcIntent.ExpectedOwnerEffect.EffectFingerprint,
+            "SQL/EF Unspecified values preserve the UTC wall-clock ticks used before persistence");
+        localIntent.AccountingEventId.Should().Be(utcIntent.AccountingEventId);
+        unspecifiedIntent.IdempotencyKey.Should().Be(utcIntent.IdempotencyKey);
+
+        adjustment.AdjustmentDate = DateTime.SpecifyKind(utc.AddTicks(1), DateTimeKind.Unspecified);
+        var changedInstant = await builder.BuildAsync(adjustment);
+        changedInstant.ExpectedOwnerEffect.EffectFingerprint.Should().NotBe(utcIntent.ExpectedOwnerEffect.EffectFingerprint,
+            "a genuine tick change is a conflicting economic request");
+    }
+
+    [Fact]
     public async Task Preview_FailsClosedForTenantSourceOwnerAndAccountAuthorityConflicts()
     {
         var tenantId = Guid.NewGuid();

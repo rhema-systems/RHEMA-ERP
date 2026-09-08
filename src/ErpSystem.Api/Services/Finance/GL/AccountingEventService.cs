@@ -930,19 +930,8 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
         return canonical.Hash();
     }
 
-    private static string? CanonicalDateTime(DateTime? value)
-    {
-        if (!value.HasValue) return null;
-        var utc = value.Value.Kind switch
-        {
-            DateTimeKind.Utc => value.Value,
-            DateTimeKind.Local => value.Value.ToUniversalTime(),
-            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
-        };
-        // Unspecified Finance inputs are deliberately UTC wall-clock values; Local inputs represent
-        // local instants and normalize to their equivalent UTC instant before hashing and ordering.
-        return utc.ToString("O", CultureInfo.InvariantCulture);
-    }
+    // Retain the reviewed C6 seam while sharing its exact normalization with later Finance producers.
+    private static string? CanonicalDateTime(DateTime? value) => FinanceCanonicalDateTime.Format(value);
 
     private sealed class CanonicalFingerprintWriter(string version)
     {

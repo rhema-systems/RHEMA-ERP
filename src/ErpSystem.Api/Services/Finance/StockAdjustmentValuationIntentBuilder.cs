@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
@@ -183,7 +184,7 @@ public sealed partial class StockAdjustmentValuationIntentBuilder(ApplicationDbC
         Add(canonical, posting.PostingAction);
         Add(canonical, posting.SourceDocumentReference);
         Add(canonical, posting.Description);
-        Add(canonical, posting.PostingDate.ToString("O", CultureInfo.InvariantCulture));
+        Add(canonical, FinanceCanonicalDateTime.Format(posting.PostingDate));
         Add(canonical, posting.FunctionalCurrencyCode);
         Add(canonical, posting.IdempotencyKey);
         foreach (var line in posting.Lines)
