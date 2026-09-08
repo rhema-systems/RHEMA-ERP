@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage B2 — Inventory neutral AccountingEvent producer cutover through C7 |
+| Phase | Stage C8 — Finance-owned atomic producer-intent groups |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
-| Exact base | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
-| Branch | `codex/inventory-accounting-event-cutover-c7` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-c7` |
+| Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
+| Exact base | `2367be6ed99634f7c5a25c0e294221bc26730b38` |
+| Branch | `codex/finance-producer-intent-groups-c8` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-producer-groups-c8` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
+| Primary HEAD at activation | `2367be6ed99634f7c5a25c0e294221bc26730b38` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
-| Model routing | Inventory implementer: GPT-5.6 Terra Medium; substantive Finance correction: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
-| Review status | User authorized the recommended atomic two-intent Finance group boundary; fresh C8 activation in progress |
+| Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
+| Review status | C8 implementation active; independent review not started |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -874,6 +874,14 @@ must remain deterministic and reconstructible; no event may be silently dropped 
 disabled by default and Finance-only. After clean Sol High approval/integration, Inventory will be reissued on
 Terra Medium, followed by Sales, HR/Payroll and the final regression/deployment-readiness gates. Further scope
 expansion is prohibited unless independent review finds a material accounting or data-integrity defect.
+
+Stage C8 was activated from fresh exact base `2367be6ed99634f7c5a25c0e294221bc26730b38` on branch
+`codex/finance-producer-intent-groups-c8` in a new clean worktree, routed to GPT-5.6 Sol Medium. The implementation
+is limited to Finance-owned group identity, immutable ordered membership, maker/checker group decision, per-member
+C5 freeze and C6 event linkage, ambient zero-or-all execution, exact group/member idempotency, original frozen-set
+correction/reversal authority, rollback-before-durable-group-failure evidence, governed API/UI only where needed,
+and an unapplied fail-closed migration if durable group state requires it. Owner modules, producer enumeration,
+automatic enablement, Delta/reporting-currency selection and persistent database mutation remain prohibited.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
