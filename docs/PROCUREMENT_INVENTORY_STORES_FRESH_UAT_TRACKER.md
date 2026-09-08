@@ -1,5 +1,12 @@
 # Fresh Supplier, Procurement, Inventory and Stores UAT
 
+## 8 September: contract-first PO approved-line mapping correction
+
+- **Verified blocker:** active contract `CTR-2026-00002` did not populate its approved commercial lines in **New Purchase Order**. Selecting stock inserted catalogue descriptions, prices and purchasing-unit defaults; `EA` then failed the approved PVC line's exact `EACH` unit check (`PO_SOURCE_LINE_NOT_APPROVED`). The selected contract and its approval were valid; no PO was saved by the failed attempts.
+- **Correction:** selecting the contract loads its approved lines. Stock/warehouse mapping retains the approved description, unit and price, with the unit displayed directly. Partial contract quantities remain editable; stock identity is not guessed, and unit aliases/conversions are not invented. Server source, price, quantity, currency and approval checks remain unchanged. Save/submit retains a real matching item-unit reference when available.
+- **Validation:** 35 focused frontend tests passed; the changed production files and their TypeScript dependencies have zero diagnostics. PR #211 contains the focused correction. No backend, database, role or Finance-module changes; unrelated documents and uploads are excluded.
+- **Deployment checkpoint:** an isolated production build based on the currently running frontend is being prepared with only these PO changes. The user approved switching after a successful build and acknowledged that refreshing clears the unsaved form. Live corrected-form acceptance and successful PO persistence are not yet claimed.
+
 ## 8 September: optional verification comments correction prepared (not deployed)
 
 - **Verified blocker:** the live Award Verification Checklist required notes or a file despite labeling comments optional. A visible click on **Verify Bidder** reproduced the missing-evidence validation; the unrelated award lookup 404 only meant no award existed yet.
