@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage C9 — Finance-owned Stock Adjustment valuation-intent builder |
-| Status | `IN_PROGRESS` |
+| Status | `COMPLETE` |
 | Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `3adaf2afba11dfd57f6b1caf9e8d4753e718e36e` |
 | Branch | `codex/finance-stock-adjustment-valuation-intent-c9` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C9 `APPROVED` at exact clean HEAD `26864136f432105d03f695593d427d2109b14ab4`; ordered local integration active |
+| Review status | C9 `APPROVED`, integrated as `f5d6315b`, `90d9988b`; exact candidate blobs verified |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1074,6 +1074,14 @@ shared .NET host was removed externally during the final review, so the reviewer
 assembly through Visual Studio's runner; the implementer's fresh correction build and EF gate had already passed.
 No database was accessed. Ordered integration is active, with primary validation to use an available reviewed
 toolchain before the fresh Inventory handoff.
+
+Stage C9 integration completed in approved order on the primary branch as `f5d6315b` and `90d9988b`. Every
+candidate-owned blob matches exact approved HEAD `26864136`, the integrated range passes `git diff --check`, and
+unrelated primary changes remain preserved. The implementer's fresh build and EF gate passed before handoff, and
+the reviewer executed the correction-built assembly successfully. A fresh primary SDK build cannot currently run
+because the machine's shared .NET host and SDK payload were removed externally; only Visual Studio's .NET runtime
+remains. This is an environment failure rather than a candidate defect. C9 is complete and no database was
+accessed, but the next Inventory implementation must remain paused until a usable .NET 9 SDK is restored.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
