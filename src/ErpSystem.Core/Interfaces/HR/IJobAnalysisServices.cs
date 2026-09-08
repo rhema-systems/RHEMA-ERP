@@ -120,7 +120,11 @@ public interface IJobDescriptionService
 
     // Job Evaluation / Valuation
     /// <summary>Computes the valuation summary and persists the estimated range + suggested grade.</summary>
+    /// <summary>Computes the valuation and returns it. Safe: changes nothing.</summary>
     Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
+
+    /// <summary>Computes the valuation and stores it on the job description. Refuses an approved one.</summary>
+    Task<JobValuationSummaryDto> RecalculateValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
 
     // Responsibility KPI operations
     Task<JobResponsibilityKpiDto> AddResponsibilityKpiAsync(CreateJobResponsibilityKpiDto createDto, CancellationToken cancellationToken = default);

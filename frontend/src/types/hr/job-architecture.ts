@@ -630,7 +630,12 @@ export interface CreateJobQualification {
 }
 
 /** ⚠ `jobResponsibilityId` is absent — the link is fixed at creation. */
-export interface UpdateJobQualification extends Omit<CreateJobQualification, 'jobResponsibilityId'> {
+/**
+ * ⚠ `jobResponsibilityId` is part of an update now — it was omitted here because the C# DTO did not
+ * declare it, which made the attachment permanent once made. Like every field on these DTOs it
+ * REPLACES: omit it and the row is detached from its responsibility.
+ */
+export interface UpdateJobQualification extends CreateJobQualification {
   id: string;
 }
 
@@ -647,7 +652,8 @@ export interface CreateJobCompetency {
 }
 
 /** ⚠ `jobResponsibilityId` is absent — the link is fixed at creation. */
-export interface UpdateJobCompetency extends Omit<CreateJobCompetency, 'jobResponsibilityId'> {
+/** ⚠ Carries `jobResponsibilityId` for the same reason as {@link UpdateJobQualification}. */
+export interface UpdateJobCompetency extends CreateJobCompetency {
   id: string;
 }
 
@@ -800,6 +806,39 @@ export interface UpdateJobDescription extends CreateJobDescription {
   id: string;
   status: JobDescriptionStatus;
   nextReviewDate?: string | null;
+}
+
+/** One qualification or competency, with the money the organisation attaches to it for this role. */
+export interface JobValuationLine {
+  id: string;
+  name: string;
+  monetaryValue?: number | null;
+}
+
+/**
+ * What a job valuation works out. See `jobArchitectureService.getValuation` — ⚠ reading this
+ * WRITES the estimate back onto the job description.
+ */
+export interface JobValuationSummary {
+  jobDescriptionId: string;
+  jobTitle: string;
+  totalQualificationValue: number;
+  totalCompetencyValue: number;
+  roleIntrinsicValue: number;
+  /** Server-computed: the three figures above added together. */
+  totalEstimatedValue: number;
+  roleCriticality?: RoleCriticalityLevel | null;
+  roleCriticalityName?: string | null;
+  industryBenchmarkSalary?: number | null;
+  estimatedSalaryLow?: number | null;
+  estimatedSalaryHigh?: number | null;
+  suggestedSalaryGradeId?: string | null;
+  suggestedSalaryGradeName?: string | null;
+  suggestedGradeMinSalary?: number | null;
+  suggestedGradeMaxSalary?: number | null;
+  valuationNotes?: string | null;
+  qualificationLines: JobValuationLine[];
+  competencyLines: JobValuationLine[];
 }
 
 export interface JobAnalytics {

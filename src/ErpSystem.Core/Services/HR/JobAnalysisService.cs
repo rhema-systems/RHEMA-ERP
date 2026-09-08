@@ -132,6 +132,34 @@ public class JobDescriptionService : IJobDescriptionService
         return entity;
     }
 
+    /// <summary>
+    /// A qualification or competency may hang off a responsibility of its OWN job description, and
+    /// no other. Null is legitimate — the row then belongs to the document as a whole.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Nothing checked this. `JobResponsibilityId` is a plain nullable Guid on the create DTO, so
+    /// any responsibility id in the tenant was accepted — including one belonging to a different
+    /// job description, which silently files a requirement under another document's accountability
+    /// and makes the valuation group it there. The FK is satisfied, so nothing failed.
+    /// </remarks>
+    private async Task RequireResponsibilityOfAsync(
+        Guid? responsibilityId, Guid jobDescriptionId, CancellationToken cancellationToken)
+    {
+        if (responsibilityId == null) return;
+
+        var tenantId = GetTenantId();
+        var belongs = await _responsibilityRepository.GetQueryable()
+            .AnyAsync(r => r.Id == responsibilityId.Value
+                        && r.TenantId == tenantId
+                        && !r.IsDeleted
+                        && r.JobDescriptionId == jobDescriptionId, cancellationToken);
+
+        if (!belongs)
+            throw JobArchitectureException.Invalid(
+                "That responsibility belongs to a different job description. A qualification or " +
+                "competency can only be attached to a responsibility of its own job description.");
+    }
+
     /// <summary>The same gate for a KPI, which reaches its job description through its responsibility.</summary>
     private async Task<JobDescription> RequireAuthorableForResponsibilityAsync(Guid responsibilityId)
     {
@@ -1174,6 +1202,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobQualificationDto> AddQualificationAsync(CreateJobQualificationDto createDto, CancellationToken cancellationToken = default)
     {
         await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            createDto.JobResponsibilityId, createDto.JobDescriptionId, cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -1207,6 +1237,8 @@ public class JobDescriptionService : IJobDescriptionService
             throw JobArchitectureException.NotFound("Qualification not found");
 
         await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            updateDto.JobResponsibilityId, entity.JobDescriptionId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -1242,6 +1274,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobCompetencyDto> AddCompetencyAsync(CreateJobCompetencyDto createDto, CancellationToken cancellationToken = default)
     {
         await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            createDto.JobResponsibilityId, createDto.JobDescriptionId, cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -1269,6 +1303,8 @@ public class JobDescriptionService : IJobDescriptionService
             throw JobArchitectureException.NotFound("Competency not found");
 
         await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            updateDto.JobResponsibilityId, entity.JobDescriptionId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -1687,7 +1723,45 @@ public class JobDescriptionService : IJobDescriptionService
 
     #region Job Evaluation / Valuation
 
-    public async Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    /// <summary>Works out what the role is worth and returns it. Changes nothing.</summary>
+    /// <remarks>
+    /// ⚠ This used to persist what it computed, which made a GET a write. Everything in an HTTP
+    /// stack assumes a GET is safe and repeats it freely — a retry on a dropped connection, a cache
+    /// revalidation, a client refetching on window focus, a health probe — and every one of those
+    /// became an UPDATE. The values were at least deterministic, so nothing corrupted; what it did
+    /// cost was real all the same: <c>SaveChanges</c> stamps <c>UpdatedAt</c> on any modified row,
+    /// so reading a valuation bumped the job description's last-modified date, on an approved and
+    /// in-force document as readily as on a draft. Persisting now belongs to
+    /// <see cref="RecalculateValuationAsync"/>, which is a POST, is gated on Write, and refuses an
+    /// approved record.
+    /// </remarks>
+    public Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+        => ValueRoleAsync(jobDescriptionId, persist: false, cancellationToken);
+
+    /// <summary>Works the valuation out and STORES it on the job description.</summary>
+    public async Task<JobValuationSummaryDto> RecalculateValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var status = await _jobDescriptionRepository.GetQueryable()
+            .Where(x => x.Id == jobDescriptionId && x.TenantId == tenantId)
+            .Select(x => (JobDescriptionStatus?)x.Status)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (status == null)
+            throw JobArchitectureException.NotFound($"Job description with ID '{jobDescriptionId}' not found.");
+
+        // The same rule the rest of the document follows: an approved description is the one in
+        // force for its position, and its stored figures are part of what was approved. Re-valuing
+        // it would rewrite them with no new version and no trace.
+        if (status == JobDescriptionStatus.Approved)
+            throw JobArchitectureException.InvalidState(
+                "Cannot re-value an approved job description. Create a new version instead.");
+
+        return await ValueRoleAsync(jobDescriptionId, persist: true, cancellationToken);
+    }
+
+    private async Task<JobValuationSummaryDto> ValueRoleAsync(
+        Guid jobDescriptionId, bool persist, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var jd = await _jobDescriptionRepository.GetQueryable()
@@ -1727,12 +1801,15 @@ public class JobDescriptionService : IJobDescriptionService
                           ?? grades.OrderBy(g => Math.Abs(g.MinSalary - midpoint)).FirstOrDefault();
         }
 
-        // Persist the computed estimate + suggested grade on the JD.
-        jd.EstimatedSalaryLow = low;
-        jd.EstimatedSalaryHigh = high;
-        jd.SuggestedSalaryGradeId = suggestedGrade?.Id;
-        await _jobDescriptionRepository.UpdateAsync(jd);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // Only when asked. The read path computes the same figures and leaves the record alone.
+        if (persist)
+        {
+            jd.EstimatedSalaryLow = low;
+            jd.EstimatedSalaryHigh = high;
+            jd.SuggestedSalaryGradeId = suggestedGrade?.Id;
+            await _jobDescriptionRepository.UpdateAsync(jd);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
 
         return new JobValuationSummaryDto
         {

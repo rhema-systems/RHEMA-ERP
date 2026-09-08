@@ -39,6 +39,7 @@ import type {
   JobResponsibility,
   JobResponsibilityKpi,
   JobSubFamily,
+  JobValuationSummary,
   JobWorkingCondition,
   ManpowerBudget,
   ManpowerBudgetLine,
@@ -135,6 +136,29 @@ class JobArchitectureService {
 
   updateJobDescription(id: string, payload: UpdateJobDescription) {
     return apiService.put<JobDescription>(`${this.jobs}/descriptions/${id}`, payload);
+  }
+
+  /**
+   * What the role is worth, from the money attached to its qualifications and competencies plus its
+   * intrinsic value, blended with any industry benchmark and banded at ±10%.
+   *
+   * Safe: it computes and returns, and changes nothing — so it belongs in a `useQuery` like any
+   * other read. Until 2026-09-07 it was not safe, and that is the whole point of the pair below:
+   * this GET persisted what it computed, so a retry, a cache revalidation or a refetch-on-focus was
+   * an UPDATE, and `SaveChanges` stamped `UpdatedAt` on the record every time.
+   */
+  getValuation(id: string) {
+    return apiService.get<JobValuationSummary>(`${this.jobs}/descriptions/${id}/valuation`);
+  }
+
+  /**
+   * Work the valuation out and STORE it on the job description.
+   *
+   * ⚠ `HR.JobArchitecture.Write`, and the API refuses an approved record — storing an estimate is
+   * an edit to the document, and an approved one is the version in force for its position.
+   */
+  recalculateValuation(id: string) {
+    return apiService.post<JobValuationSummary>(`${this.jobs}/descriptions/${id}/valuation`);
   }
 
   submitJobDescription(id: string) {

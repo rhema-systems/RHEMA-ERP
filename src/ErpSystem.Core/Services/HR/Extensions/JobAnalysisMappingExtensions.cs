@@ -338,6 +338,7 @@ public static class JobAnalysisMappingExtensions
 
     public static void UpdateEntity(this UpdateJobQualificationDto dto, JobQualification entity)
     {
+        entity.JobResponsibilityId = dto.JobResponsibilityId;
         entity.Type = dto.Type;
         entity.QualificationId = dto.QualificationId;
         entity.Title = dto.Title;
@@ -400,6 +401,7 @@ public static class JobAnalysisMappingExtensions
 
     public static void UpdateEntity(this UpdateJobCompetencyDto dto, JobCompetency entity)
     {
+        entity.JobResponsibilityId = dto.JobResponsibilityId;
         entity.SkillId = dto.SkillId;
         entity.CompetencyId = dto.CompetencyId;
         entity.CompetencyName = dto.CompetencyName;

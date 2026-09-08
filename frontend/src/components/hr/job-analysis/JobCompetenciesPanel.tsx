@@ -63,7 +63,9 @@ const empty: Form = {
  * Functional here produces a 400 from the enum converter, which is exactly what this screen's
  * first draft would have done — the TypeScript union had it.
  *
- * ⚠ **The responsibility link is create-only**, the same as qualifications.
+ * ⚠ **The responsibility link** says the job needs this competency BECAUSE of that accountability;
+ * "the job as a whole" is a legitimate answer, not an empty field. Create-only until 2026-09-07 —
+ * see `QualificationsPanel` for what changed and why.
  */
 export function JobCompetenciesPanel({
   jobDescriptionId,
@@ -107,6 +109,8 @@ export function JobCompetenciesPanel({
         : r.responsibilityDescription,
   }));
 
+  const responsibilityLabels = new Map(responsibilityOptions.map((o) => [o.value, o.label]));
+
   return (
     <ResourceCollectionTab<JobCompetency, Form>
       parentId={jobDescriptionId}
@@ -134,6 +138,7 @@ export function JobCompetenciesPanel({
       }
       update={(_id, competencyRowId, v) =>
         jobArchitectureService.updateJobCompetency(competencyRowId, {
+          jobResponsibilityId: idOrNull(v.jobResponsibilityId),
           skillId: idOrNull(v.skillId),
           competencyId: idOrNull(v.competencyId),
           competencyName: v.competencyName.trim(),
@@ -163,6 +168,20 @@ export function JobCompetenciesPanel({
               <Badge variant="secondary">Unlinked</Badge>
             ),
         },
+        {
+          // ⚠ The attachment was write-only — settable on add, shown nowhere afterwards. The
+          // responsibility is WHY a competency is required, and it is also how the valuation
+          // groups it, so a list that hides it hides the argument. Resolved client-side from the
+          // list already fetched for the picker; the DTO carries only the id.
+          header: 'For responsibility',
+          cell: (c) => (
+            <span className="text-muted-foreground">
+              {c.jobResponsibilityId
+                ? responsibilityLabels.get(c.jobResponsibilityId) ?? 'Another responsibility'
+                : 'The job as a whole'}
+            </span>
+          ),
+        },
         { header: '', cell: (c) => (c.isCritical ? <Badge variant="outline">Critical</Badge> : null) },
       ]}
       schema={schema}
@@ -178,7 +197,7 @@ export function JobCompetenciesPanel({
         monetaryValue: c.monetaryValue ?? null,
         jobResponsibilityId: c.jobResponsibilityId ?? '',
       })}
-      renderFields={(form, editing) => (
+      renderFields={(form) => (
         <>
           <TextField
             form={form}
@@ -242,7 +261,10 @@ export function JobCompetenciesPanel({
             />
           </FieldRow>
 
-          {!editing && responsibilityOptions.length > 0 && (
+          {/* Editable now: `JobResponsibilityId` reached the update DTO on 2026-09-07. The API
+              refuses a responsibility from ANOTHER job description, so the options are this
+              document's own and nothing else. */}
+          {responsibilityOptions.length > 0 && (
             <SelectField
               form={form}
               name="jobResponsibilityId"
@@ -253,12 +275,10 @@ export function JobCompetenciesPanel({
               options={responsibilityOptions}
             />
           )}
-          {editing && (
-            <p className="text-xs text-muted-foreground">
-              Which responsibility a competency belongs to is fixed when it is added. To move it,
-              remove it and add it again.
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            Why the job needs it. Leave it on the job as a whole when it is not there for one
+            particular accountability.
+          </p>
         </>
       )}
     />

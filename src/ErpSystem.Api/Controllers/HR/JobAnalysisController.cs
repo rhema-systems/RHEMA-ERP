@@ -601,10 +601,23 @@ public class JobAnalysisController : ControllerBase
 
     #region Valuation
 
+    /// <summary>What the role is worth. Safe — computes and returns, changes nothing.</summary>
     [Authorize(Policy = HrPermissions.JobArchitectureReadPolicy)]
     [HttpGet("descriptions/{jobDescriptionId:guid}/valuation")]
     public async Task<ActionResult<JobValuationSummaryDto>> GetValuation(Guid jobDescriptionId)
         => Ok(await _jobDescriptionService.GetValuationAsync(jobDescriptionId));
+
+    /// <summary>Works the valuation out and stores it on the job description.</summary>
+    /// <remarks>
+    /// ⚠ The GET above did this until 2026-09-07, which made every retry, refetch and cache
+    /// revalidation an UPDATE — and stamped the record's <c>UpdatedAt</c> each time, approved
+    /// documents included. Storing an estimate is an act: it is a POST, it is gated on Write
+    /// rather than Read, and it refuses an approved description like every other edit does.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
+    [HttpPost("descriptions/{jobDescriptionId:guid}/valuation")]
+    public async Task<ActionResult<JobValuationSummaryDto>> RecalculateValuation(Guid jobDescriptionId)
+        => Ok(await _jobDescriptionService.RecalculateValuationAsync(jobDescriptionId));
 
     #endregion
 

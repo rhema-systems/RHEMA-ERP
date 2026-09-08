@@ -19,9 +19,9 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
-import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import { unionService } from '@/services/hr/union.service';
+import type { EmploymentType } from '@/types/hr/employee';
 import type {
   CreateJobDescription,
   DecisionAuthorityLevel,
@@ -31,6 +31,15 @@ import type {
 const CRITICALITY: RoleCriticalityLevel[] = ['Low', 'Medium', 'High', 'MissionCritical'];
 /** ⚠ Three values, not five. Read off the enum, not off the word "level". */
 const AUTONOMY: DecisionAuthorityLevel[] = ['Operational', 'Tactical', 'Strategic'];
+
+/**
+ * ⚠ Checked against the C# enum, member for member — a hand-written union is a claim about a
+ * foreign system, and `JsonStringEnumConverter` 400s on a name it does not hold.
+ */
+const EMPLOYMENT_TYPES: EmploymentType[] = [
+  'Permanent', 'Contract', 'FixedTerm', 'Internship', 'Casual',
+  'PartTime', 'Temporary', 'Consultant', 'Freelance',
+];
 
 /** A Radix `Select` cannot hold an empty string as a value, so "unset" is this sentinel. */
 const NONE = '__none__';
@@ -119,10 +128,6 @@ export function JobDescriptionForm({
     queryKey: ['hr', 'staff-levels', 'active'],
     queryFn: () => staffLevelService.getActive(),
   });
-  const { data: grades } = useQuery({
-    queryKey: ['hr', 'salary-grades', 'active'],
-    queryFn: () => salaryGradeService.getActive(),
-  });
 
   /**
    * Changing the family clears the sub-family. The API refuses a sub-family belonging to a
@@ -139,10 +144,52 @@ export function JobDescriptionForm({
     setForm((f) => (f.jobSubFamilyId ? { ...f, jobSubFamilyId: null } : f));
   }, [form.jobFamilyId]);
 
+  /**
+   * The post this description is for. On create it comes out of the picker's own list; on edit the
+   * picker is locked and that list is never loaded, so the one position is fetched.
+   */
+  const { data: editPosition } = useQuery({
+    queryKey: ['positions', 'one', form.positionId],
+    queryFn: () => employeePositionService.getById(form.positionId),
+    enabled: mode === 'edit' && !!form.positionId,
+  });
   const selectedPosition = useMemo(
-    () => (positions ?? []).find((p) => p.id === form.positionId),
-    [positions, form.positionId],
+    () => (mode === 'edit' ? editPosition : (positions ?? []).find((p) => p.id === form.positionId)),
+    [mode, editPosition, positions, form.positionId],
   );
+
+  /**
+   * The staff level is INHERITED from the position, not typed again.
+   *
+   * The post's own `StaffLevelId` is the one with consequences — payroll bonus profiles, the
+   * employee import, and everything that resolves a person's tier (leave entitlement, travel,
+   * medical, benefits, the probation confirming authority) reads it through the employee's
+   * position. The copy on a job description is read in exactly one place, as approval-routing
+   * context, so two independently-typed dropdowns would produce drift where only one side matters.
+   * Choosing a position adopts its tier; overriding it afterwards is a proposal, and the form says
+   * so rather than leaving the difference silent.
+   */
+  // ⚠ Two things this guard has to get right, and the obvious version gets both wrong.
+  //
+  // On EDIT it must never fire: the ref starts on the record's own position, which cannot change,
+  // so the saved tier is not thrown away before the author has touched anything.
+  //
+  // On CREATE it must fire even when the position arrived preselected — the coverage-gaps screen
+  // links straight to `new?positionId=...`, which is the commonest way a description gets written
+  // at all, so a ref seeded from the current value would skip inheritance on exactly that path.
+  // It also has to wait for the position list, or it would mark the position handled while the
+  // staff level it was going to inherit is still loading.
+  const previousPosition = useRef<string | undefined>(mode === 'edit' ? form.positionId : undefined);
+  useEffect(() => {
+    if (mode !== 'create' || !positions || !form.positionId) return;
+    if (previousPosition.current === form.positionId) return;
+    previousPosition.current = form.positionId;
+    const inherited = positions.find((p) => p.id === form.positionId)?.staffLevelId ?? null;
+    setForm((f) => ({ ...f, staffLevelId: inherited }));
+  }, [mode, form.positionId, positions]);
+
+  const positionStaffLevelId = selectedPosition?.staffLevelId ?? null;
+  const staffLevelMatchesPosition = (form.staffLevelId ?? null) === positionStaffLevelId;
 
   const set = <K extends keyof CreateJobDescription>(key: K, value: CreateJobDescription[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -241,6 +288,24 @@ export function JobDescriptionForm({
               value={toDateInput(form.effectiveDate)}
               onChange={(e) => set('effectiveDate', e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            {/*
+              ⚠ Not cosmetic. `GetCurrentVersionForPositionAsync` treats a description as the
+              position's current one only while `ExpiryDate` is null or still in the future, and
+              supersession stamps it with today. Setting it here is how a role that ends with a
+              project, a season or a contract says so in advance.
+            */}
+            <Label>Expires</Label>
+            <Input
+              type="date"
+              value={toDateInput(form.expiryDate)}
+              onChange={(e) => set('expiryDate', e.target.value || null)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional. After this date the description stops being the position&rsquo;s current one.
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -349,6 +414,43 @@ export function JobDescriptionForm({
                 {(staffLevels ?? []).map((sl) => (
                   <SelectItem key={sl.id} value={sl.id}>
                     {sl.rank}. {sl.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedPosition &&
+              (staffLevelMatchesPosition ? (
+                <p className="text-xs text-muted-foreground">
+                  From the position{selectedPosition.staffLevelName ? ` (${selectedPosition.staffLevelName})` : ''}.
+                  The post&rsquo;s own tier is what payroll, leave and benefits read.
+                </p>
+              ) : (
+                <p className="text-xs text-amber-700">
+                  Differs from the position, which is{' '}
+                  {selectedPosition.staffLevelName ?? 'unassigned'}. Approving this description does
+                  not change the post — update the position itself to move the tier.
+                </p>
+              ))}
+          </div>
+
+          <div className="space-y-2">
+            {/*
+              The only place engagement type can be expressed at all: EmployeePosition carries no
+              such column, so without this the intended basis of the role is unrecordable.
+            */}
+            <Label>Intended employment type</Label>
+            <Select
+              value={form.intendedEmploymentType ?? NONE}
+              onValueChange={(v) => set('intendedEmploymentType', v === NONE ? null : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Not stated" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>Not stated</SelectItem>
+                {EMPLOYMENT_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t.replace(/([a-z])([A-Z])/g, '$1 $2')}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -490,27 +592,14 @@ export function JobDescriptionForm({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label>Suggested salary grade</Label>
-            <Select
-              value={form.suggestedSalaryGradeId ?? NONE}
-              onValueChange={(v) => set('suggestedSalaryGradeId', v === NONE ? null : v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="None" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>None</SelectItem>
-                {(grades ?? []).map((g) => (
-                  <SelectItem key={g.id} value={g.id}>
-                    {g.code} — {g.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {/* Payroll owns the grade store; this is a suggestion, never an assignment. */}
-            <p className="text-xs text-muted-foreground">A suggestion for payroll, not an assignment.</p>
-          </div>
+          {/*
+            ⚠ There is deliberately NO salary-grade control here. `SuggestedSalaryGradeId` is an
+            OUTPUT: the valuation matches it from the estimated range, and the post's real grade
+            lives on the position, where payroll reads it. A picker would let someone hand-set a
+            derived figure that nothing reconciles, and would read as "the grade for this post",
+            which it is not. It is shown, read-only, on the job description's Valuation tab, next
+            to the Recalculate action that produces it.
+          */}
 
           <div className="space-y-2">
             <Label>Autonomy</Label>

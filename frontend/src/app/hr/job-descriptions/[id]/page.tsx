@@ -10,6 +10,7 @@ import {
   GitBranch,
   Loader2,
   Lock,
+  Calculator,
   Pencil,
   Send,
 } from 'lucide-react';
@@ -83,6 +84,19 @@ export default function JobDescriptionDetailPage() {
   const { data: workflow } = useQuery({
     queryKey: ['job-description', id, 'workflow'],
     queryFn: () => workflowApiService.getWorkflowEntitySummary('JobDescription', id),
+    enabled: !!id,
+  });
+
+  /**
+   * What the role is worth as of now — the breakdown behind the stored figures.
+   *
+   * It reads freely because the GET is safe: it computes and returns and changes nothing. That was
+   * not true before 2026-09-07, when the same endpoint persisted its result, and a query like this
+   * one would have rewritten the record on every mount and refocus. Storing is now its own POST.
+   */
+  const { data: valuation } = useQuery({
+    queryKey: ['job-description', id, 'valuation'],
+    queryFn: () => jobArchitectureService.getValuation(id),
     enabled: !!id,
   });
 
@@ -170,6 +184,21 @@ export default function JobDescriptionDetailPage() {
   const canDelete =
     authorableStatus &&
     (hasAnyPermission(['HR.JobArchitecture.Admin']) || hasAnyRole(HR_ADMIN_ROLES));
+
+  /**
+   * Whether the estimate ON the record still matches what the job adds up to today.
+   *
+   * Worth showing rather than hiding behind the button: the stored figures are what every other
+   * screen and report reads, and a qualification added or re-valued this morning does not change
+   * them until someone stores a new valuation. Comparing the live computation with the stored one
+   * is only possible at all because the read no longer writes — before the split the two could
+   * never disagree, since reading rewrote the record to match.
+   */
+  const valuationIsStale =
+    !!valuation &&
+    ((valuation.estimatedSalaryLow ?? null) !== (jd.estimatedSalaryLow ?? null) ||
+      (valuation.estimatedSalaryHigh ?? null) !== (jd.estimatedSalaryHigh ?? null) ||
+      (valuation.suggestedSalaryGradeId ?? null) !== (jd.suggestedSalaryGradeId ?? null));
 
   const childProps = {
     jobDescriptionId: id,
@@ -293,6 +322,8 @@ export default function JobDescriptionDetailPage() {
               <Field label="Career level" value={jd.jobLevelName} />
               <Field label="Staff level" value={jd.staffLevelName} />
               <Field label="Occupation code" value={jd.occupationCode} />
+              {/* The only place engagement type is recorded at all — the position has no such column. */}
+              <Field label="Employment type" value={jd.intendedEmploymentType} />
               <Field label="Union" value={jd.unionName} />
             </dl>
           </CardContent>
@@ -308,6 +339,12 @@ export default function JobDescriptionDetailPage() {
               <Field label="Reviewed by" value={jd.reviewedByName} sub={fmtDate(jd.reviewedDate)} />
               <Field label="Approved by" value={jd.approvedByName} sub={fmtDate(jd.approvalDate)} />
               <Field label="Effective" value={fmtDate(jd.effectiveDate)} />
+              {/* Null until it is superseded — or until someone sets an expiry deliberately. Past
+                  this date the description is no longer the position's current one. */}
+              <Field
+                label="Expires"
+                value={jd.expiryDate ? fmtDate(jd.expiryDate) : 'Does not expire'}
+              />
               <Field
                 label="Next review"
                 value={fmtDate(jd.nextReviewDate)}
@@ -413,7 +450,50 @@ export default function JobDescriptionDetailPage() {
           <MedicalRequirementsPanel {...childProps} />
         </TabsContent>
 
-        <TabsContent value="valuation">
+        <TabsContent value="valuation" className="space-y-4 pt-4">
+          {/*
+            What the valuation is FOR: the money entered against each qualification and competency,
+            plus the role's intrinsic value, blended with any industry benchmark, banded at ±10%
+            and matched to a salary grade. Until this button existed the endpoint that does it had
+            no caller anywhere, so the estimated range below could never be anything but a dash and
+            the monetary values the panels collect fed nothing at all.
+
+            ⚠ Offered only to an author of a draft. The API gates it on Read even though it WRITES
+            the result onto the record — so a read-only user could overwrite the stored figures of
+            an in-force document. This is the narrower rule the server ought to be holding.
+          */}
+          {canAuthor && (
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 rounded-md border p-4 ${
+                valuationIsStale ? 'border-amber-200 bg-amber-50' : 'bg-muted/40'
+              }`}
+            >
+              <p className={`text-sm ${valuationIsStale ? 'text-amber-900' : 'text-muted-foreground'}`}>
+                {valuationIsStale
+                  ? 'The figures above are not what the job now adds up to — the qualifications, competencies or values have changed since the estimate was stored.'
+                  : 'The stored estimate matches what the job currently adds up to.'}
+              </p>
+              <Button
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() =>
+                  run(
+                    'store the valuation',
+                    () => jobArchitectureService.recalculateValuation(id),
+                    'Valuation stored on the job description',
+                  )
+                }
+              >
+                {busy === 'store the valuation' ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Calculator className="mr-2 h-4 w-4" />
+                )}
+                {valuationIsStale ? 'Store the new estimate' : 'Recalculate'}
+              </Button>
+            </div>
+          )}
+
           <Card>
             <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
               <Field label="Criticality" value={jd.roleCriticalityName ?? jd.roleCriticality} />
@@ -440,8 +520,67 @@ export default function JobDescriptionDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Where the figures above came from — shown only for a valuation this screen just ran,
+              because the breakdown is not stored on the record. */}
+          {valuation && (
+            <Card>
+              <CardHeader>
+                <CardTitle>How that was worked out</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <dl className="grid gap-3 sm:grid-cols-4">
+                  <Field label="Qualifications" value={fmtMoney(valuation.totalQualificationValue)} />
+                  <Field label="Competencies" value={fmtMoney(valuation.totalCompetencyValue)} />
+                  <Field label="Role intrinsic value" value={fmtMoney(valuation.roleIntrinsicValue)} />
+                  <Field label="Total" value={fmtMoney(valuation.totalEstimatedValue)} />
+                </dl>
+
+                {valuation.suggestedGradeMinSalary != null && (
+                  <p className="text-sm text-muted-foreground">
+                    Matched to {valuation.suggestedSalaryGradeName} (
+                    {fmtMoney(valuation.suggestedGradeMinSalary)} –{' '}
+                    {fmtMoney(valuation.suggestedGradeMaxSalary)}). The post&rsquo;s actual grade is set
+                    on the position, not here.
+                  </p>
+                )}
+
+                <ValuationLines title="Qualifications" lines={valuation.qualificationLines} />
+                <ValuationLines title="Competencies" lines={valuation.competencyLines} />
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+/**
+ * The rows a valuation added up. A line carrying no money is shown as such rather than skipped —
+ * a qualification nobody has valued is exactly why a total comes out lower than expected.
+ */
+function ValuationLines({
+  title,
+  lines,
+}: {
+  title: string;
+  lines: { id: string; name: string; monetaryValue?: number | null }[];
+}) {
+  if (!lines.length) return null;
+  return (
+    <div>
+      <div className="mb-1 text-xs text-muted-foreground">{title}</div>
+      <ul className="divide-y rounded-md border text-sm">
+        {lines.map((l) => (
+          <li key={l.id} className="flex items-center justify-between px-3 py-2">
+            <span>{l.name}</span>
+            <span className={l.monetaryValue == null ? 'text-muted-foreground' : 'font-medium'}>
+              {l.monetaryValue == null ? 'not valued' : fmtMoney(l.monetaryValue)}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

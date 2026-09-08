@@ -549,6 +549,17 @@ public class CreateJobQualificationDto : CreateDtoBase
 /// </summary>
 public class UpdateJobQualificationDto : UpdateDtoBase
 {
+    /// <summary>
+    /// The responsibility this row hangs off, within its own job description. Null detaches it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was missing from this DTO entirely, so an attachment made on create could never be
+    /// moved or cleared — and, because the screen knew that, it hid the control on edit rather than
+    /// offering a change the API would silently discard. Like every other field here it REPLACES:
+    /// a payload that omits it detaches the row.
+    /// </remarks>
+    public Guid? JobResponsibilityId { get; set; }
+
     [Required]
     public QualificationType Type { get; set; }
 
@@ -633,6 +644,17 @@ public class CreateJobCompetencyDto : CreateDtoBase
 /// </summary>
 public class UpdateJobCompetencyDto : UpdateDtoBase
 {
+    /// <summary>
+    /// The responsibility this row hangs off, within its own job description. Null detaches it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It was missing from this DTO entirely, so an attachment made on create could never be
+    /// moved or cleared — and, because the screen knew that, it hid the control on edit rather than
+    /// offering a change the API would silently discard. Like every other field here it REPLACES:
+    /// a payload that omits it detaches the row.
+    /// </remarks>
+    public Guid? JobResponsibilityId { get; set; }
+
     public Guid? SkillId { get; set; }
     public Guid? CompetencyId { get; set; }
 
