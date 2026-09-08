@@ -824,10 +824,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (!validityDays.HasValue || validityDays.Value <= 0)
             throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_REQUIRED",
                 "Record the positive bid-validity period in calendar days stated in the approved tender document.");
-        if (!approvedDays.HasValue && (string.IsNullOrWhiteSpace(request.BidValidityTermsReference) ||
-            request.BidValidityTermsReference.Trim().Length > 500))
-            throw Validation("TENDER_DOCUMENT_VALIDITY_REFERENCE_REQUIRED",
-                "Identify the approved document and clause stating the bid-validity period (up to 500 characters). Do not assume a duration.");
+        var validityNote = request.BidValidityTermsReference?.Trim();
+        if (validityNote?.Length > 500)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_REFERENCE_INVALID",
+                "The optional validity page/clause note must not exceed 500 characters.");
         var validityBasis = request.ScheduleChange is null ? deadline : EnsureUtc(request.ScheduleChange.SubmissionDeadlineUtc);
         DateTime validity;
         try { validity = ProcurementBidValidity.Calculate(validityBasis, validityDays.Value); }
@@ -910,8 +910,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             await RecordRegisterEventAsync(register, source, "RegisterBound",
                 ProcurementControlEventResult.Succeeded, null, RegisterSnapshot(register),
                 $"Exact published template, sourcing lineage and issue terms bound. Bid validity: {validityDays.Value} calendar days from {validityBasis:O}; " +
-                (approvedDays.HasValue ? $"saved tender terms {source.Reference}." :
-                    $"transcribed from approved document clause {request.BidValidityTermsReference!.Trim()}; version {template.Id}; checksum {template.ContentChecksumSha256}."),
+                (approvedDays.HasValue ? $"saved tender terms {source.Reference}; " : "transcribed from selected approved document; ") +
+                $"version {template.Id}; checksum {template.ContentChecksumSha256}." +
+                (string.IsNullOrEmpty(validityNote) ? string.Empty : $" Page/clause note: {validityNote}"),
                 [], correlation, now, cancellationToken);
             if (request.ScheduleChange is { } schedule)
             {

@@ -44,7 +44,7 @@ public sealed class ProcurementTenderDocumentControlServiceTests
     [InlineData("zero")]
     [InlineData("negative")]
     [InlineData("overflow")]
-    [InlineData("reference")]
+    [InlineData("long-reference")]
     [InlineData("override")]
     [InlineData("unapproved")]
     public async Task InvalidValidityTermsFailBeforeRegisterCreation(string variant)
@@ -57,13 +57,37 @@ public sealed class ProcurementTenderDocumentControlServiceTests
             case "zero": request.BidValidityPeriodDays = 0; break;
             case "negative": request.BidValidityPeriodDays = -1; break;
             case "overflow": request.BidValidityPeriodDays = int.MaxValue; break;
-            case "reference": request.BidValidityTermsReference = " "; break;
+            case "long-reference": request.BidValidityTermsReference = new string('x', 501); break;
             case "override": fixture.Tender.BidValidityPeriodDays = 30; await fixture.Context.SaveChangesAsync(); break;
             case "unapproved": fixture.Tender.BidValidityPeriodDays = 90; fixture.Tender.Status = "Draft"; await fixture.Context.SaveChangesAsync(); break;
         }
         var action = () => fixture.Service.BindAsync(request, "invalid-validity-terms");
         await action.Should().ThrowAsync<ProcurementTenderDocumentControlValidationException>();
         (await fixture.Context.ProcurementTenderDocumentRegisters.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("  Page 12, clause 18  ")]
+    public async Task BindingAutomaticallyLinksApprovedVersionWithOptionalValidityNote(string? note)
+    {
+        await using var fixture = new Fixture(ProcurementTenderDocumentFeeMode.Free, published: false);
+        var request = fixture.FirstBindingWithSchedule();
+        request.BidValidityTermsReference = note;
+        var result = await fixture.Service.BindAsync(request, "optional-validity-note");
+        var register = await fixture.Context.ProcurementTenderDocumentRegisters.SingleAsync();
+        register.InitialTemplateVersionId.Should().Be(fixture.TemplateId);
+        result.OriginalBidValidityUntilUtc.Should().Be(request.ScheduleChange!.SubmissionDeadlineUtc.AddDays(90));
+        var template = await fixture.Context.ProcurementTenderDocumentTemplateVersions.SingleAsync(t => t.Id == fixture.TemplateId);
+        var audit = await fixture.Context.ProcurementControlEvents.SingleAsync(e => e.Action == "RegisterBound");
+        audit.Reason.Should().Contain($"version {template.Id}; checksum {template.ContentChecksumSha256}");
+        if (string.IsNullOrWhiteSpace(note))
+            audit.Reason.Should().NotContain("Page/clause note:");
+        else
+            audit.Reason.Should().EndWith($"Page/clause note: {note.Trim()}");
+        fixture.Tender.SubmissionDeadline.Should().Be(request.SubmissionDeadlineUtc);
     }
 
     [Fact]

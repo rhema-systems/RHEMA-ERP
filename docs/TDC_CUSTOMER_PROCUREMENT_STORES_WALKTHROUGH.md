@@ -277,64 +277,66 @@ Save the existing draft, Submit for Approval. **`procurementapprover`** independ
 
 ### B8. Controlled documents and publication
 
-**Actor:** `procurementofficer` → tender process sidebar → **Open document register**, under Controlled documents and publication.
+**Document-step restart — TND-2026-0003:** as `procurementofficer`, open [the empty v3 Draft](http://localhost:3000/procurement/tender-documents/fd4b772b-5c76-43fd-8ba8-5e9fc96b9bf2) → **Start document preparation**, then follow B8a from step 2. This route passed through tender publication on 8 September and was reset to Approved/unbound. Demonstrate v3, not the retained Published v2. After **8 September 11:00 UTC**, use B8d before tender publication.
 
-**First check whether an eligible Published document already exists.** If **Bind approved version** is available, reuse the matching approved document; do not create another workflow unnecessarily. If the register says no Published template matches the locked policy/profile/method, complete B8a–B8d below first.
+**Start:** the tender is **Approved**, but not Published. Sign in as `procurementofficer` and use the process sidebar → **Open document register**.
 
-#### B8a. Prepare the document setup — Procurement Officer
+Choose the matching starting point:
 
-Open [Controlled tender documents](http://localhost:3000/procurement/tender-documents). Open an existing appropriate template and **Clone new Draft**, then open the newly created Draft from the register; alternatively use **New controlled Draft**. A clone does not itself change the procurement-policy version. In the Draft explicitly select the exact policy locked on this tender, its source profile and the applicable method, then save. For the current NCT demonstration these are **TDC-F05B-NCT · v8**, source **TDC-ACCEPTANCE-20260720201906**, **NCT only**, and **TDC Sourcing Approval · v1**. For another route, use its actual configured policy/method/workflow rather than copying this example.
+- **An Effective document is already listed:** it is already bound; go to **B8c**.
+- **Bind approved version is available:** a published document exists; go to **B8b**.
+- **No matching published document:** prepare one using **B8a**.
 
-TDC supplies the tender document: requirements/specifications, submission instructions, eligibility/evaluation requirements and terms for bidders. This is **not** a bidder's technical/commercial proposal or supplier-registration certificate. Use an approved existing TDC document/template where appropriate; for this local simulation only, a clearly labelled sample PDF is acceptable. Prepare the file on your computer, but **upload is not available on the initial Draft**.
+For a fresh document rehearsal, use B8a. A new Draft has no uploaded file; it does **not** reset a tender's existing binding.
 
-Click **Start document preparation** (formerly **Submit exact workflow**). In the confirmation dialog enter the existing preparation/change reference in **Shared evidence reference**, add a comment, then **Start preparation**. For a simulation, use an explicitly labelled reference such as `LOCAL-UAT-NCT-DOCUMENT-PREPARATION-001`; it is a traceability note, **not the document upload or proof of approval**.
+#### B8a. Prepare and approve a document
 
-**Expected:** One workflow starts and the page says **Awaiting document upload**, with the preparer shown under **Waiting with**. It has not reached the independent approver. Do not submit again or delete/recreate the Draft because no file was attached before starting.
+Have TDC's tender document ready: bidding instructions, specifications and terms—not the supplier's proposal. A clearly labelled sample file is acceptable for local UAT only.
 
-#### B8b. Upload and send — same Procurement Officer
+| Step | Account | What to do |
+| --- | --- | --- |
+| 1. Create Draft | `procurementofficer` | Open [Controlled tender documents](http://localhost:3000/procurement/tender-documents) → **New controlled Draft**, or open a suitable published version → **Clone new Draft**. Match the tender's policy, profile, method and workflow; save. |
+| 2. Start preparation | `procurementofficer` | **Start document preparation** → enter the preparation reference/comment → **Start preparation**. Expect **Awaiting document upload**. |
+| 3. Upload and send | `procurementofficer` | Choose the file → **Upload controlled content** → wait for success → **Send for approval**. Check **Waiting with** for the reviewer. |
+| 4. Review | Assigned reviewer: `procurementapprover` in this setup | Open the same document, review the clean-scanned file, complete required verification/checklists, then **Approve workflow**. |
+| 5. Attach | `procurementofficer` | Select the reviewed file under **Controlled workflow evidence document** → **Attach eligible content**. |
+| 6. Publish document | `procurementapprover` | **Publish approved version** → review and confirm. Expect **Document published**. |
 
-On the same template page, find **Upload tender document**. Click **Browse / Choose file**, select the tender PDF/DOC/DOCX, then **Upload controlled content**. Wait for a successful upload; choosing a file alone does not upload it. If it fails, correct the displayed error and retry the retained file.
+**Current NCT setup:** policy **TDC-F05B-NCT · v8**; profile **TDC-ACCEPTANCE-20260720201906**; method **NCT**; workflow **TDC Sourcing Approval · v1**. Use the actual tender's settings for other routes.
 
-**Expected:** **Awaiting send for approval**. Click **Send for approval** (formerly **Send content for approval**). The existing workflow advances to review; this does **not** start a second approval workflow. The progress panel should show the current review step and actual pending reviewer(s). If assignment cannot be loaded, refresh to confirm it; do not guess a reviewer or resubmit.
+**Start preparation and Send for approval advance one workflow—not two approvals. Publishing the document does not publish the tender.**
 
-**Sequence:** Prepare → Upload → Review → Publish document. The two buttons mean **start preparation**, then **hand the uploaded file to the reviewer**; they are not two separate approvals.
+#### B8b. Bind the published document
 
-#### B8c. Verify the file and approve the workflow — independent reviewer
+As `procurementofficer`:
 
-Sign out and sign in as the assigned reviewer shown on the template. In the current **TDC Sourcing Approval · v1** setup, the approval step requires **TDC_HEAD_OF_PROCUREMENT**, held by **`procurementapprover`**; the preparer is `procurementofficer`. Verify the actual assignment before switching accounts.
+1. Return to the tender → process sidebar → **Open document register** → **Refresh** → **Bind approved version**.
+2. Select the matching published version and check the submission/opening dates.
+3. If the validity period is blank, copy the days stated in the approved document; do not guess. **Bid valid until** calculates automatically. The **page/clause note is optional**.
+4. Check currency and free/paid document terms. If dates are suitable, leave **Request new dates for approval** unchecked.
+5. Click **Bind immutable version** once. Expect the effective document to be listed and readiness **Ready**; resolve any displayed blocker first.
 
-Open the **same template**, inspect its uploaded document in the document-review section, wait for a clean scan, and complete any required independent file verification. Then use **Approve workflow** and satisfy the configured checklist/signature requirements. File verification and workflow approval are distinct checks within this one process; approval does not automatically publish the document.
+#### B8c. Publish the tender
 
-**Expected:** Completed approval workflow. If content is not attached, the page says **Awaiting document attachment**. Do not bypass rejected, unsafe, unverified or otherwise ineligible evidence.
+As `procurementofficer`, click **Tender** → **Publish Tender**. Review the publication checks and any required advertisement evidence, then confirm when ready.
 
-#### B8d. Attach and publish the document, then publish the tender
+**Pass:** tender status is **Published**. Only then issue documents to suppliers and continue to **B9: supplier bidding**.
 
-**`procurementofficer`:** select the reviewed, eligible file in **Controlled workflow evidence document**, then **Attach eligible content**. Only files allowed by the server's exact-workflow/policy checks may be used.
+#### B8d. Date changes — exception only
 
-**Authorized publisher (`procurementapprover` in this local setup):** open the same template and **Publish approved version**, review the confirmation and complete it. Attached controlled content supplies publication evidence; retain any additional reference required by the actual decision. All configured readiness checks still apply.
+<details>
+<summary>Open only if submission/opening dates need changing before publication</summary>
 
-**Expected:** **Document published**. This publishes the reusable controlled document, **not the tender advertisement**.
+Use this only when the application offers the action.
 
-**`procurementofficer`:** return to the original tender's process sidebar → **Open document register** → **Refresh** → **Bind approved version**. Check the exact approved version and issue/fee terms. **Original submission deadline** and **Original opening scheduled** are read-only: they record the tender's existing schedule, not a place to overwrite it. **Bid validity period (calendar days)** is read-only when already saved with the tender. **Bid valid until (calculated)** is calculated automatically from the applicable submission deadline plus that period; do not enter an arbitrary expiry date.
+1. **Not bound yet:** in **Bind approved version**, select **Request new dates for approval**. **Already bound:** use **Reschedule before publication**.
+2. Enter a future submission deadline later than the original, and an opening time later than both that deadline and the original opening. Select the approval workflow and enter the reason/evidence reference.
+3. Submit once. Follow **Waiting with**: complete any preparation task first, then the assigned independent reviewer approves the change. Requesters must not approve their own changes.
+4. Return as `procurementofficer` → **Refresh**. Continue only when the change is **Approved**, the effective dates are correct and readiness checks pass.
 
-**Existing tender/RFQ without a saved period:** copy the number of calendar days actually stated in the selected approved document and enter **Approved validity document/clause reference**. The server calculates expiry and retains the transcription reference in the binding audit event. This does not authorize inventing or changing tender terms. If the approved document does not state a period, have the document owner settle and approve the terms before binding. Existing bound registers and approved validity extensions retain their history. The architecture document does not itself specify this field or a default duration.
+Requesting dates does **not** immediately change them or publish the tender. Do not backdate or bypass controls.
 
-**If the dates are still suitable:** leave **Request new dates for approval** unchecked and select **Bind immutable version**.
-
-**If dates expired before the first binding, or need moving before publication:** for an eligible approved, never-published open NCT, use the same **Bind approved version** dialog:
-
-1. Select **Request new dates for approval** (already selected when the existing deadline has elapsed).
-2. Enter **New submission deadline** in the future and later than the original; set **New opening scheduled** later than both submission and the original opening. **Bid valid until (calculated)** updates from the proposed submission deadline using the recorded validity period. The proposal still requires approval; no original source date is changed by this preview. Use the agreed demonstration dates; do not backdate.
-3. Select the Published **Schedule approval workflow** (`TDC Sourcing Approval · v1` for this local setup), enter **Reason for new dates** and **Schedule evidence reference**. A reference such as `LOCAL-UAT-NCT-SCHEDULE-001` is simulated UAT evidence, not proof of real approval.
-4. Click **Bind and request schedule approval** once. This records the exact approved document and original schedule together with a **Pending approval** schedule change. **It does not change the tender dates or publish the tender.** If saving succeeds but the page cannot refresh, use **Refresh register**, not another submission.
-5. Check the pending change's embedded workflow. If it starts with a **Submitted** preparation task assigned to `procurementofficer`, complete its required checklist/attachments and **Complete Task** first. Then sign in as the independent reviewer shown there (`procurementapprover` / `TDC_HEAD_OF_PROCUREMENT` in this setup). Open the same document register, review the proposed dates and evidence, complete any required checklist or signature review, then approve the workflow and its schedule decision as prompted. The requester must not approve their own request.
-6. Return as `procurementofficer` and **Refresh**. Confirm the change is **Approved**, both effective dates match the tender, and the original dates remain visible in history. If rejected or still pending, do not publish. An already-bound register uses **Reschedule before publication** instead of binding again.
-
-This recovery is not offered for published/previously published tenders, restricted or QCBS routes, or sources with bids, issued documents or statutory advertisement controls. Use the applicable governed process; do not edit SQL, backdate or bypass the server controls. Check any required publication/advertisement evidence separately before publishing.
-
-Return to the tender and **Publish Tender** only after its readiness conditions pass. Do not issue documents to bidders before tender publication. After publication, record document issue/sale to the actual recipient using saved records; retain any fee/receipt evidence required by the terms.
-
-**Pass:** Published with publication history and usable controlled documents. An open NCT is not invitation-only: zero invitations is not the same as zero eligible bidders. A recorded document recipient identifies who received that exact version; it does not turn NCT into a restricted supplier list.
+</details>
 
 ### B9. Supplier submits the bid before closing
 
