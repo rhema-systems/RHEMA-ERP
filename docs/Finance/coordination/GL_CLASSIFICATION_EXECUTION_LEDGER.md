@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage C8 — Finance-owned atomic producer-intent groups |
-| Status | `IN_PROGRESS` |
+| Status | `COMPLETE` |
 | Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `2367be6ed99634f7c5a25c0e294221bc26730b38` |
 | Branch | `codex/finance-producer-intent-groups-c8` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 `APPROVED` at exact clean HEAD `bebf8941a3b466ca9edab85e43e5fe080e6b1ecb`; ordered local integration active |
+| Review status | C8 `APPROVED`, integrated as `66c6e5cc`, `1f5e224e`, `a922f576`, `72fb4845`; primary validation passed |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -981,6 +981,13 @@ C1-C8 tests with 36 guarded SQL skips, EF parity, exact 456-migration discovery,
 and clean ancestry/status/diff/scope/credential checks. Guarded SQL remained unavailable and no database was
 accessed. Ordered local integration of the four approved commits is active; Inventory remains gated until the
 integrated checkpoint is independently reconciled.
+
+Stage C8 integration completed in approved order on the primary branch as `66c6e5cc`, `1f5e224e`, `a922f576`
+and `72fb4845`. Every candidate-owned blob matches exact approved HEAD `bebf8941`; the full integrated range
+passes `git diff --check`, and unrelated primary worktree changes remain preserved. An isolated primary solution
+build passed with zero errors and 1,106 inherited warnings after an isolated restore; the focused C6-C8 regression
+passed 56 tests with 17 guarded SQL skips and zero failures. No migration was applied and configured `RHEMAERP`
+was not accessed. C8 is complete; the next exact checkpoint will be the fresh Stage B2 Inventory cutover base.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
