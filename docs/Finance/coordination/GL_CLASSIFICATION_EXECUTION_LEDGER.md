@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C8 cycle 3 independent GPT-5.6 Sol High review active at corrected HEAD `df8d88ac0c443936d6e3a5798edcf22e9494e5dc` |
+| Review status | C8 cycle 3 `CHANGES_REQUIRED` at corrected HEAD `df8d88ac0c443936d6e3a5798edcf22e9494e5dc`; final bounded Sol Medium correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -946,6 +946,18 @@ under strict current-policy drift. Validation passed a zero-error build, 12 C8 t
 guarded skips, EF parity, exact 456-migration discovery, the C7-to-C8 no-connect script, and clean ancestry/status/
 diff/scope gates. Guarded SQL remains unexecuted because `RHEMA_TEST_SQLSERVER` is absent; no database was accessed.
 Independent GPT-5.6 Sol High cycle-3 review is active; integration and Inventory remain gated.
+
+Stage C8 independent review cycle 3 confirmed the attempt-driven terminal transition, bare-update denial,
+reciprocal receipt locking, frozen lineage and expanded migrated-SQL evidence, but returned `CHANGES_REQUIRED`
+at exact clean HEAD `df8d88ac`. P1: the SQL attempt trigger requires a concrete failed member for every Failed
+attempt, while runtime intentionally records pre-member validation, lineage, receipt and lock failures with null
+member coordinates; permit the exact group-level null pair or an exact bound member pair and prove the pre-member
+failure/retry/audit path on migrated SQL Server. P2: seven new ASCII/byte-length constraints exist only in the raw
+migration and are absent from `ApplicationDbContext` and the model snapshot, so model metadata does not describe
+the migrated schema despite the no-pending-model gate passing. Reviewer validation otherwise passed a zero-error
+build, 55 focused C6-C8 tests with 17 guarded SQL skips, 356 widened C1-C8 tests with 36 guarded skips, EF parity,
+exact 456-migration discovery, no-connect script generation and clean ancestry/status/diff/scope checks. No
+database was accessed. One final bounded Sol Medium correction is active; integration and Inventory remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
