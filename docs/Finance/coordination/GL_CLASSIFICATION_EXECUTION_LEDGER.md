@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C9 `CHANGES_REQUIRED` at exact clean HEAD `59e694a9d6e02b869898a47a615b935ccd030e55`; bounded timestamp-fingerprint correction active |
+| Review status | Final independent GPT-5.6 Sol High C9 approval review active at corrected HEAD `26864136f432105d03f695593d427d2109b14ab4` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1054,6 +1054,15 @@ parity, purity, source/economic/dimensional authority and scope gates were sound
 build and 10 focused tests; the widened run passed 367 with 36 guarded SQL skips and only the two byte-identical
 baseline receipt/landed-cost fixture failures. EF parity, exact 456-migration discovery, ancestry, diff, scope,
 schema and credential checks passed; no database was accessed. One bounded Sol Medium correction is active.
+
+The C9 implementer completed the bounded timestamp correction as clean commit
+`26864136f432105d03f695593d427d2109b14ab4` on top of `59e694a9`. The reviewed C6 DateTime rule is now shared:
+UTC remains UTC, Local converts to its equivalent UTC instant, and SQL/EF Unspecified preserves wall-clock ticks as
+UTC before invariant round-trip serialization. C9 hashes the normalized posting time, with tests proving equivalent
+UTC/Local/Unspecified fingerprints and a one-tick conflict. Focused C6/C9/legacy tests passed 12/12, a clean widened
+C6-C9 plus Inventory run passed 68/68, and the full build, EF parity, diff/status/scope/credential/ledger gates all
+passed. No schema, migration, Inventory or configured-database change occurred. Final independent Sol High approval
+review is active; integration and Inventory remain gated.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
