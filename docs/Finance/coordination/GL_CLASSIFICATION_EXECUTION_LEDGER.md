@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage B2 — Inventory neutral AccountingEvent producer cutover through C7 |
-| Status | `BLOCKED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
 | Branch | `codex/inventory-accounting-event-cutover-c7` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Inventory implementer: GPT-5.6 Terra Medium; substantive Finance correction: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
-| Review status | Pre-implementation reconciliation blocked on Stock Adjustment transaction ownership; no candidate exists |
+| Review status | User-authorized bounded Stock Adjustment ambient-participant correction active; independent review not started |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -840,6 +840,17 @@ Adjustment producer/transaction contract and may change its existing accounting 
 worktree remains clean at the exact base with no commits, migrations or database access. Progress requires an
 explicit authorization either for a bounded Inventory Stock Adjustment ambient-participant refactor (recommended,
 with separate Terra implementation and Sol High review) or for a different asynchronous disposal workflow.
+
+The user explicitly authorized the recommended bounded refactor. Inventory may add an internal, disposal-scoped
+Stock Adjustment participant that stages the same tracked stock mutation in the caller's existing scoped
+`ApplicationDbContext` Serializable transaction without starting, committing, rolling back or disposing that
+transaction and without invoking the legacy Stock Adjustment Finance adapter. The existing public
+`IStockAdjustmentService.PostAsync` path and every other caller must remain behaviorally unchanged. The disposal
+execution path must stage that owner effect, produce the deterministic C7 receipt, invoke approved C7 execution
+inside the same transaction, and commit only when both owner and all selected-book representations succeed; on
+failure it must roll back before the separate durable-failure call. This bounded Inventory-only expansion is
+active on GPT-5.6 Terra Medium and requires independent GPT-5.6 Sol High accounting/concurrency review before
+integration. Finance schema/migrations, C1-C7 authority and disabled defaults remain out of scope.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
