@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage B2 — Inventory atomic accounting-event group cutover |
-| Status | `BLOCKED` |
-| Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
-| Exact base | `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` |
-| Branch | `codex/inventory-accounting-event-cutover-c8` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-c8` |
+| Phase | Stage C9 — Finance-owned Stock Adjustment valuation-intent builder |
+| Status | `IN_PROGRESS` |
+| Implementing task | Coordinator subagent `/root/producer_intent_adapter`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
+| Exact base | `3adaf2afba11dfd57f6b1caf9e8d4753e718e36e` |
+| Branch | `codex/finance-stock-adjustment-valuation-intent-c9` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-stock-adjustment-valuation-c9` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` |
+| Primary HEAD at activation | `3adaf2afba11dfd57f6b1caf9e8d4753e718e36e` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Material Finance authority decision required: pure pre-prepare Stock Adjustment valuation-intent builder, then Inventory resumes |
+| Review status | User authorized bounded C9 implementation; independent GPT-5.6 Sol High review required before Inventory resumes |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1021,6 +1021,18 @@ builder that derives the existing Stock Adjustment economics and canonical dimen
 books or mutating state; the existing adapter would consume the same builder to prevent duplicated accounting
 logic. This is a material Finance authority boundary beyond the bounded owner refactor, so Inventory remains clean
 and blocked pending the decision. No migration or database access occurred.
+
+The user authorized the recommended Finance-owned pre-prepare valuation-intent boundary. Stage C9 is limited to
+a pure, deterministic Stock Adjustment valuation builder that accepts a stable preassigned adjustment identity and
+complete economic input, returns one neutral C8-compatible valuation intent with the existing source identity,
+accounts, amounts, currency, descriptions and dimensional intent, and performs no `SaveChanges`, owner mutation,
+transaction ownership or external side effect. Read-only validation/lookups may fail closed. The existing legacy
+Stock Adjustment Finance adapter must consume the same builder so its posting behavior is preserved and valuation
+logic is not duplicated; any required dimension synchronization/freezing writes remain in the existing governed
+execution path, never in preview. C9 may not edit Inventory disposal orchestration, select/enumerate books, derive
+C5 selection, call posting leaves per book, enable C6-C8, alter schema/migrations or access configured `RHEMAERP`.
+After clean Sol Medium implementation and independent Sol High approval, C9 will integrate locally and Stage B2
+Inventory will restart from a fresh exact base.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
