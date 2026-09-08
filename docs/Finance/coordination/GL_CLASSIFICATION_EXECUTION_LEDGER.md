@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Final C8 independent GPT-5.6 Sol High approval review active at corrected HEAD `bebf8941a3b466ca9edab85e43e5fe080e6b1ecb` |
+| Review status | C8 `APPROVED` at exact clean HEAD `bebf8941a3b466ca9edab85e43e5fe080e6b1ecb`; ordered local integration active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -970,6 +970,17 @@ tests with 41 guarded SQL skips, EF parity, exact 456-migration discovery, the C
 clean ancestry/status/diff/scope/credential gates. Guarded SQL remains unexecuted because
 `RHEMA_TEST_SQLSERVER` is absent; no database was accessed. Final independent Sol High approval review is active;
 integration and Inventory remain gated.
+
+Final independent GPT-5.6 Sol High review returned `APPROVED` at exact clean C8 HEAD
+`bebf8941a3b466ca9edab85e43e5fe080e6b1ecb` with no remaining P1/P2 findings. The reviewer verified group-level
+null/null and exact member-bound failure coordinates, migrated-SQL rollback/failure/audit/retry evidence, and
+byte-identical metadata parity for all seven canonical constraints, together with every prior C8 receipt-lock,
+lineage, frozen-selection, zero-or-all, terminal-attempt, audit, disabled-default and C1-C7 preservation gate.
+Fresh review validation passed a zero-error build, 56 focused C6-C8 tests with 17 guarded SQL skips, 357 widened
+C1-C8 tests with 36 guarded SQL skips, EF parity, exact 456-migration discovery, the C7-to-C8 no-connect script,
+and clean ancestry/status/diff/scope/credential checks. Guarded SQL remained unavailable and no database was
+accessed. Ordered local integration of the four approved commits is active; Inventory remains gated until the
+integrated checkpoint is independently reconciled.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
