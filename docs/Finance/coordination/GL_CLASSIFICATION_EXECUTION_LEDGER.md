@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage B2 — Inventory neutral AccountingEvent producer cutover through C7 |
-| Status | `IN_PROGRESS` |
+| Status | `BLOCKED` |
 | Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `1858cd16ffb1334d8ca8b84b3574772267dc49b8` |
 | Branch | `codex/inventory-accounting-event-cutover-c7` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Inventory implementer: GPT-5.6 Terra Medium; substantive Finance correction: GPT-5.6 Sol Medium; independent review: GPT-5.6 Sol High |
-| Review status | Inventory implementation active; independent review not started |
+| Review status | Pre-implementation reconciliation blocked on Stock Adjustment transaction ownership; no candidate exists |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -829,6 +829,17 @@ receipt and invoke approved execution inside the same shared Serializable transa
 separate durable-failure boundary. Required evidence includes neutral-intent preparation, disabled-by-default,
 tenant/source denial, maker/checker separation, exact retry, zero partial mutation and no remaining active
 Inventory V1 constructor. Independent Sol High review and all database/remote-operation gates remain required.
+
+The fresh Inventory implementer reconciled the owner path before editing and found a material transaction-
+ownership blocker. `InventoryDisposalService` can post its stock adjustment only through
+`IStockAdjustmentService.PostAsync`, which always opens and commits its own Serializable unit-of-work transaction
+and invokes its separate Finance posting adapter before returning. It therefore cannot stage the tracked stock
+mutation inside the caller-owned uncommitted `ApplicationDbContext` transaction required by C7, and a failure in
+C7 could not roll it back. Bypassing or refactoring this path would broaden B2 into the independent Stock
+Adjustment producer/transaction contract and may change its existing accounting semantics. The Inventory
+worktree remains clean at the exact base with no commits, migrations or database access. Progress requires an
+explicit authorization either for a bounded Inventory Stock Adjustment ambient-participant refactor (recommended,
+with separate Terra implementation and Sol High review) or for a different asynchronous disposal workflow.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
