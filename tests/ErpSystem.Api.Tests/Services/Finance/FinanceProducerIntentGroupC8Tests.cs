@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -264,7 +265,8 @@ public sealed class FinanceProducerIntentGroupC8Tests
         harness.Db.AccountingEventPostings.Should().BeEmpty();
         var durable = await harness.Db.ProducerIntentGroups.Include(group => group.Attempts).SingleAsync();
         durable.Status.Should().Be(ProducerIntentGroupStatuses.Failed);
-        durable.Attempts.Should().ContainSingle(attempt => attempt.Status == AccountingEventStatuses.Failed);
+        durable.Attempts.Should().ContainSingle(attempt => attempt.Status == AccountingEventStatuses.Failed
+            && attempt.FailedMemberOrder == null && attempt.FailedAccountingEventId == null);
         (await harness.Db.AccountingEvents.ToListAsync()).Should().OnlyContain(item => item.Status == AccountingEventStatuses.PendingApproval);
     }
 
@@ -411,6 +413,44 @@ public sealed class FinanceProducerIntentGroupC8Tests
             .And.Contain("ALTER TRIGGER [TR_AccountingEventProducerReceipts_C7Immutable]");
         down.IndexOf("C8_DOWN_REFUSED", StringComparison.Ordinal).Should()
             .BeLessThan(down.IndexOf("DROP TABLE [ProducerIntentGroupAttempts]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SqlServerModelMetadata_ExactlyDescribesAllSevenMigratedCanonicalIdentityConstraints()
+    {
+        var migration = new ExposedMigration();
+        var up = string.Join("\n", migration.UpOperations().OfType<SqlOperation>().Select(operation => operation.Sql));
+        var expected = new Dictionary<Type, IReadOnlyDictionary<string, string>>
+        {
+            [typeof(ProducerIntentGroup)] = new Dictionary<string, string>
+            {
+                ["CK_ProducerIntentGroups_IdempotencyAscii"] = "DATALENGTH([IdempotencyKey])=LEN([IdempotencyKey])*2 AND LEFT([IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z0-9]' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.:-]%' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')",
+                ["CK_ProducerIntentGroups_ParticipantAscii"] = "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')",
+                ["CK_ProducerIntentGroups_OwnerEntityAscii"] = "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')",
+                ["CK_ProducerIntentGroups_OwnerActionAscii"] = "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')"
+            },
+            [typeof(ProducerIntentGroupReceipt)] = new Dictionary<string, string>
+            {
+                ["CK_ProducerIntentGroupReceipts_ParticipantAscii"] = "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')",
+                ["CK_ProducerIntentGroupReceipts_OwnerEntityAscii"] = "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')",
+                ["CK_ProducerIntentGroupReceipts_OwnerActionAscii"] = "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')"
+            }
+        };
+        using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=C8_METADATA_ONLY;Trusted_Connection=True;ConnectRetryCount=0")
+            .Options);
+
+        foreach (var (entityType, constraints) in expected)
+        {
+            var metadata = db.GetService<IDesignTimeModel>().Model.FindEntityType(entityType)!.GetCheckConstraints()
+                .ToDictionary(item => item.Name!, item => item.Sql!);
+            foreach (var (name, expression) in constraints)
+            {
+                metadata.Should().ContainKey(name).WhoseValue.Should().Be(expression);
+                up.Should().Contain($"CONSTRAINT [{name}] CHECK ({expression})");
+            }
+        }
+        expected.SelectMany(item => item.Value).Should().HaveCount(7);
     }
 
     private static HarnessState Harness(bool groupEnabled = true)

@@ -414,6 +414,76 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             };
         }
 
+        var preMemberRequest = JsonSerializer.Deserialize<ProducerIntentGroupRequestDto>(JsonSerializer.Serialize(request))!;
+        preMemberRequest.ProducerIntentGroupId = null;
+        preMemberRequest.IdempotencyKey = "C8:REAL:PREMEMBER:GROUP";
+        preMemberRequest.ExpectedOwnerEffect.EffectFingerprint = new string('6', 64);
+        for (var index = 0; index < preMemberRequest.Members.Count; index++)
+        {
+            var member = preMemberRequest.Members[index];
+            member.AccountingEventId = null;
+            member.IdempotencyKey = $"C8:REAL:PREMEMBER:{index + 1}";
+            member.PostingRequest.SourceDocumentId = Guid.NewGuid();
+            member.ExpectedOwnerEffect.EffectFingerprint = preMemberRequest.ExpectedOwnerEffect.EffectFingerprint;
+        }
+        ProducerIntentGroupDto preMemberPrepared;
+        await using (var prepare = database.Context())
+            preMemberPrepared = await GroupService(prepare, database.TenantId, database.MakerId, persistAudit: true)
+                .PrepareAsync(preMemberRequest);
+        await using (var approve = database.Context())
+            await GroupService(approve, database.TenantId, database.CheckerId, persistAudit: true).ApproveAsync(preMemberPrepared.Id,
+                new DecideProducerIntentGroupRequestDto { Group = preMemberRequest, Reason = "approve pre-member rollback proof" });
+        var preMemberReceipt = new ProducerOwnerEffectReceiptDto
+        {
+            TenantId = database.TenantId, ParticipantCode = preMemberRequest.ExpectedOwnerEffect.ParticipantCode,
+            OwnerEntityType = preMemberRequest.ExpectedOwnerEffect.OwnerEntityType,
+            OwnerEntityId = preMemberRequest.ExpectedOwnerEffect.OwnerEntityId,
+            OwnerAction = preMemberRequest.ExpectedOwnerEffect.OwnerAction,
+            EffectFingerprint = preMemberRequest.ExpectedOwnerEffect.EffectFingerprint
+        };
+        await using (var execute = database.Context())
+        {
+            var service = GroupService(execute, database.TenantId, database.MakerId, persistAudit: true);
+            await using var tx = await execute.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            var owner = await execute.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId);
+            owner.Status = InventoryDisposalStatus.AuditVerified;
+            owner.AuditVerifiedById = database.MakerId;
+            owner.AuditVerifiedAtUtc = DateTime.UtcNow;
+            owner.AuditFindings = "must roll back before any member starts";
+            await execute.SaveChangesAsync();
+            await tx.RollbackAsync();
+            await tx.DisposeAsync();
+            execute.ChangeTracker.Entries<InventoryDisposalCase>().Should().ContainSingle();
+            var preMemberFailure = new InvalidOperationException("owner staging failed before member execution");
+            await ((IFinanceProducerIntentGroupApprovedExecution)service).RecordFailureAfterRollbackAsync(
+                preMemberPrepared.Id, preMemberRequest, preMemberReceipt, preMemberFailure);
+            await ((IFinanceProducerIntentGroupApprovedExecution)service).RecordFailureAfterRollbackAsync(
+                preMemberPrepared.Id, preMemberRequest, preMemberReceipt, preMemberFailure);
+        }
+        await using (var failed = database.Context())
+        {
+            (await failed.InventoryDisposalCases.SingleAsync(item => item.Id == seeded.DisposalCaseId)).Status
+                .Should().Be(InventoryDisposalStatus.Identified);
+            var group = await failed.ProducerIntentGroups.Include(item => item.Attempts)
+                .SingleAsync(item => item.Id == preMemberPrepared.Id);
+            group.Status.Should().Be(ProducerIntentGroupStatuses.Failed);
+            group.Attempts.Should().ContainSingle(item => item.Status == AccountingEventStatuses.Failed
+                && item.FailedMemberOrder == null && item.FailedAccountingEventId == null);
+            (await failed.AuditLogs.CountAsync(item => item.Action == FinanceAuditEvents.ProducerIntentGroupFailed
+                && item.ResourceId == preMemberPrepared.Id.ToString())).Should().Be(1);
+            (await failed.ProducerIntentGroupReceipts.CountAsync(item => item.ProducerIntentGroupId == preMemberPrepared.Id)).Should().Be(0);
+            var preMemberEventIds = preMemberPrepared.Members.Select(item => item.AccountingEvent.Id).ToList();
+            (await failed.AccountingEvents.CountAsync(item => preMemberEventIds.Contains(item.Id)
+                && item.AccountingBookSelectionEvidenceId != null)).Should().Be(0);
+            (await failed.AccountingEventPostings.CountAsync(item => preMemberEventIds.Contains(item.AccountingEventId))).Should().Be(0);
+            (await failed.AccountingEvents.CountAsync(item => preMemberEventIds.Contains(item.Id)
+                && item.Status == AccountingEventStatuses.PendingApproval)).Should().Be(2);
+            (await failed.FinancePostingEvents.CountAsync()).Should().Be(0);
+            (await failed.JournalEntries.CountAsync()).Should().Be(0);
+            (await failed.AccountBalances.CountAsync()).Should().Be(0);
+            (await failed.AccountCurrencyExposures.CountAsync()).Should().Be(0);
+        }
+
         ProducerIntentGroupDto prepared;
         await using (var prepare = database.Context()) prepared = await GroupService(prepare, database.TenantId, database.MakerId, persistAudit: true).PrepareAsync(request);
         await using (var direct = database.Context())

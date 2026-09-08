@@ -24789,6 +24789,8 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProducerIntentGroups_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
 
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_IdempotencyAscii", "DATALENGTH([IdempotencyKey])=LEN([IdempotencyKey])*2 AND LEFT([IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z0-9]' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.:-]%' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
                             t.HasCheckConstraint("CK_ProducerIntentGroups_Kind", "[GroupKind] IN ('Original','Correction','Reversal')");
 
                             t.HasCheckConstraint("CK_ProducerIntentGroups_Lineage", "([GroupKind] = 'Original' AND [Version] = 1 AND [RootProducerIntentGroupId] = [Id] AND [SupersedesProducerIntentGroupId] IS NULL AND [CorrectsProducerIntentGroupId] IS NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Correction' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [CorrectsProducerIntentGroupId] AND [CorrectsProducerIntentGroupId] IS NOT NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Reversal' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [ReversesProducerIntentGroupId] AND [ReversesProducerIntentGroupId] IS NOT NULL AND [CorrectsProducerIntentGroupId] IS NULL)");
@@ -24798,6 +24800,12 @@ namespace ErpSystem.Data.Migrations
                             t.HasCheckConstraint("CK_ProducerIntentGroups_MemberCount", "[MemberCount] BETWEEN 2 AND 20");
 
                             t.HasCheckConstraint("CK_ProducerIntentGroups_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_OwnerActionAscii", "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_OwnerEntityAscii", "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_ParticipantAscii", "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
 
                             t.HasCheckConstraint("CK_ProducerIntentGroups_SnapshotHash", "LEN([RequestSnapshotHash]) = 64 AND [RequestSnapshotHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
 
@@ -24886,7 +24894,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Number", "[AttemptNumber] > 0");
 
-                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Result", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Result", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL AND (([FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([FailedMemberOrder] IS NOT NULL AND [FailedAccountingEventId] IS NOT NULL)))");
 
                             t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
                         });
@@ -25048,6 +25056,12 @@ namespace ErpSystem.Data.Migrations
                             t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
 
                             t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_OwnerActionAscii", "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_OwnerEntityAscii", "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_ParticipantAscii", "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
                         });
                 });
 

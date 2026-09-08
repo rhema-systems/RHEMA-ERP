@@ -119,7 +119,7 @@ CREATE TABLE [ProducerIntentGroupAttempts] (
  CONSTRAINT [CK_ProducerIntentGroupAttempts_NoDelete] CHECK ([IsDeleted]=0),
  CONSTRAINT [CK_ProducerIntentGroupAttempts_Number] CHECK ([AttemptNumber]>0),
  CONSTRAINT [CK_ProducerIntentGroupAttempts_Status] CHECK ([Status] IN ('Pending','Posted','Failed')),
- CONSTRAINT [CK_ProducerIntentGroupAttempts_Result] CHECK (([Status]='Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status]='Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status]='Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)),
+ CONSTRAINT [CK_ProducerIntentGroupAttempts_Result] CHECK (([Status]='Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status]='Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status]='Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL AND (([FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([FailedMemberOrder] IS NOT NULL AND [FailedAccountingEventId] IS NOT NULL)))),
  CONSTRAINT [CK_ProducerIntentGroupAttempts_Fingerprint] CHECK (LEN([GroupFingerprint])=64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'),
  CONSTRAINT [FK_ProducerIntentGroupAttempts_Groups] FOREIGN KEY ([TenantId],[ProducerIntentGroupId]) REFERENCES [ProducerIntentGroups]([TenantId],[Id]),
  CONSTRAINT [FK_ProducerIntentGroupAttempts_Tenants] FOREIGN KEY ([TenantId]) REFERENCES [Tenants]([Id])
@@ -211,8 +211,9 @@ BEGIN
    OR a.[AttemptNumber]<>(SELECT ISNULL(MAX(prior.[AttemptNumber]),0)+1 FROM [ProducerIntentGroupAttempts] prior
       WHERE prior.[TenantId]=a.[TenantId] AND prior.[ProducerIntentGroupId]=a.[ProducerIntentGroupId])
    OR (a.[Status]=N'Failed' AND (g.[Status]<>N'Approved' OR a.[FailureMessage] IS NULL
-      OR a.[FailedMemberOrder] IS NULL OR a.[FailedAccountingEventId] IS NULL
-      OR NOT EXISTS(SELECT 1 FROM [ProducerIntentGroupMembers] failed
+      OR (a.[FailedMemberOrder] IS NULL AND a.[FailedAccountingEventId] IS NOT NULL)
+      OR (a.[FailedMemberOrder] IS NOT NULL AND a.[FailedAccountingEventId] IS NULL)
+      OR (a.[FailedMemberOrder] IS NOT NULL AND NOT EXISTS(SELECT 1 FROM [ProducerIntentGroupMembers] failed
          WHERE failed.[TenantId]=g.[TenantId] AND failed.[ProducerIntentGroupId]=g.[Id]
           AND failed.[MemberOrder]=a.[FailedMemberOrder] AND failed.[AccountingEventId]=a.[FailedAccountingEventId])))
    OR (a.[Status]=N'Posted' AND (g.[Status] NOT IN (N'Approved',N'Failed') OR a.[FailureMessage] IS NOT NULL

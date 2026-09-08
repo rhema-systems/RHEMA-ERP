@@ -158,6 +158,19 @@ WHERE g.Id='{failure.GroupId}';");
         await FluentActions.Awaiting(() => db.ExecuteAsync($"UPDATE ProducerIntentGroups SET Status=N'Approved',CompletedAtUtc=NULL,FailureMessage=NULL WHERE Id='{failure.GroupId}'"))
             .Should().ThrowAsync<SqlException>().WithMessage("*C8_GROUP_WORKFLOW*");
 
+        var groupLevel = await SeedAsync("GROUP-LEVEL-FAILURE", 'A');
+        await FluentActions.Awaiting(() => db.ExecuteAsync($@"INSERT ProducerIntentGroupAttempts(Id,ProducerIntentGroupId,AttemptNumber,GroupFingerprint,Status,StartedAtUtc,CompletedAtUtc,
+ FailedMemberOrder,FailedAccountingEventId,FailureMessage,CreatedAt,IsDeleted,TenantId)
+SELECT NEWID(),g.Id,1,g.GroupFingerprint,N'Failed',SYSUTCDATETIME(),SYSUTCDATETIME(),1,NULL,N'invalid half-bound failure',SYSUTCDATETIME(),0,g.TenantId
+FROM ProducerIntentGroups g WHERE g.Id='{groupLevel.GroupId}';"))
+            .Should().ThrowAsync<SqlException>();
+        await db.ExecuteAsync($@"INSERT ProducerIntentGroupAttempts(Id,ProducerIntentGroupId,AttemptNumber,GroupFingerprint,Status,StartedAtUtc,CompletedAtUtc,
+ FailedMemberOrder,FailedAccountingEventId,FailureMessage,CreatedAt,IsDeleted,TenantId)
+SELECT NEWID(),g.Id,1,g.GroupFingerprint,N'Failed',SYSUTCDATETIME(),SYSUTCDATETIME(),NULL,NULL,N'owner staging failed before member execution',SYSUTCDATETIME(),0,g.TenantId
+FROM ProducerIntentGroups g WHERE g.Id='{groupLevel.GroupId}';");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM ProducerIntentGroups g JOIN ProducerIntentGroupAttempts a ON a.TenantId=g.TenantId AND a.ProducerIntentGroupId=g.Id WHERE g.Id='{groupLevel.GroupId}' AND g.Status=N'Failed' AND a.Status=N'Failed' AND a.FailedMemberOrder IS NULL AND a.FailedAccountingEventId IS NULL"))
+            .Should().Be(1);
+
         var individualFirst = await SeedAsync("INDIVIDUAL-FIRST", 'B');
         await db.ExecuteAsync($@"INSERT AccountingEventProducerReceipts(Id,AccountingEventId,ParticipantCode,OwnerEntityType,OwnerEntityId,OwnerAction,
  EffectFingerprint,RequestFingerprint,RecordedAtUtc,RecordedByUserId,CreatedAt,IsDeleted,TenantId)
