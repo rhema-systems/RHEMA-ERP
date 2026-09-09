@@ -156,20 +156,20 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         var adjustmentJournalId = Guid.NewGuid();
         var valuationEventId = Guid.NewGuid();
         var participant = new Mock<IInventoryDisposalStockAdjustmentParticipant>();
-        participant.Setup(value => value.PreviewDisposalAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
+        participant.Setup(value => value.PreviewAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((InventoryDisposalStockAdjustmentRequest request, CancellationToken _) => new StockAdjustment
             {
                 Id = request.AdjustmentId, TenantId = tenantId, AdjustmentNumber = request.AdjustmentNumber,
                 AdjustmentDate = request.PostingDateUtc, WarehouseId = request.Create.WarehouseId,
                 ReasonCode = request.Create.ReasonCode, Status = "Draft"
             });
-        participant.Setup(value => value.StageApprovedDisposalAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
+        participant.Setup(value => value.StageApprovedAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((InventoryDisposalStockAdjustmentRequest request, CancellationToken _) =>
             {
                 adjustmentRequest = request;
                 return new StockAdjustment { Id = request.AdjustmentId, TenantId = tenantId, Status = "Approved" };
             });
-        participant.Setup(value => value.StagePostedDisposalAsync(It.IsAny<StockAdjustment>(), completionId,
+        participant.Setup(value => value.StagePostedAsync(It.IsAny<StockAdjustment>(), completionId,
                 adjustmentPostingEventId, adjustmentJournalId, It.IsAny<IReadOnlyDictionary<Guid, Guid>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         var valuation = new Mock<IStockAdjustmentValuationIntentBuilder>();
@@ -187,16 +187,33 @@ public sealed class E2E013InventoryDisposalLifecycleTests
                 }
             });
         var groups = new Mock<IFinanceProducerIntentGroupService>();
+        ProducerIntentGroupRequestDto? preparedGroup = null;
         groups.Setup(value => value.PrepareAsync(It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ProducerIntentGroupRequestDto request, CancellationToken _) => new ProducerIntentGroupDto { Id = request.ProducerIntentGroupId!.Value });
+            .ReturnsAsync((ProducerIntentGroupRequestDto request, CancellationToken _) =>
+            {
+                preparedGroup = request;
+                return new ProducerIntentGroupDto { Id = request.ProducerIntentGroupId!.Value };
+            });
         groups.Setup(value => value.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, CancellationToken _) => new ProducerIntentGroupDto { Id = id, Status = "Approved", DecidedByUserId = completionId, DecidedAtUtc = DateTime.UtcNow });
+            .ReturnsAsync((Guid id, CancellationToken _) => new ProducerIntentGroupDto
+            {
+                Id = id, Status = "Approved", PreparedByUserId = executorId, DecidedByUserId = completionId,
+                DecidedAtUtc = DateTime.UtcNow, GroupFingerprint = "E2E-GROUP",
+                ExpectedOwnerEffect = preparedGroup!.ExpectedOwnerEffect,
+                Members = preparedGroup.Members.Select((member, index) => new ProducerIntentGroupMemberDto
+                {
+                    MemberOrder = index + 1, MemberFingerprint = index == 0 ? "P" : "V",
+                    AccountingEvent = new AccountingEventDto { Id = member.AccountingEventId!.Value,
+                        RequestFingerprint = index == 0 ? "P" : "V" }
+                }).ToList()
+            });
         var intents = new Mock<IFinanceProducerIntentService>();
         var groupExecution = new Mock<IFinanceProducerIntentGroupApprovedExecution>();
         groupExecution.Setup(value => value.ExecuteWithCompatibilityResultInAmbientTransactionAsync(It.IsAny<Guid>(), It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FinanceProducerIntentGroupApprovedExecutionResult(Guid.NewGuid(), "E2E", "Posted",
-            [new FinanceProducerIntentGroupMemberExecutionResult(1, "P", Guid.NewGuid(), "P", postingEventId, journalEntryId),
-             new FinanceProducerIntentGroupMemberExecutionResult(2, "V", Guid.NewGuid(), "V", adjustmentPostingEventId, adjustmentJournalId)]));
+            .ReturnsAsync((Guid groupId, ProducerIntentGroupRequestDto request, ProducerOwnerEffectReceiptDto _, CancellationToken _) =>
+                new FinanceProducerIntentGroupApprovedExecutionResult(groupId, "E2E-GROUP", "Posted",
+                [new FinanceProducerIntentGroupMemberExecutionResult(1, "P", request.Members[0].AccountingEventId!.Value, "P", postingEventId, journalEntryId),
+                 new FinanceProducerIntentGroupMemberExecutionResult(2, "V", request.Members[1].AccountingEventId!.Value, "V", adjustmentPostingEventId, adjustmentJournalId)]));
         var intentExecution = new Mock<IFinanceProducerApprovedExecution>();
         var controlEventRequests = new List<ProcurementControlEventWriteRequest>();
         var controlEvents = new Mock<IProcurementControlEventService>();
@@ -339,8 +356,8 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         adjustmentRequest.Create.Items.Should().ContainSingle(value =>
             value.InventoryItemId == item.Id && value.LocationId == location.Id && value.AdjustmentQuantity == -4m);
         adjustmentRequest.Create.Evidence.Should().HaveCount(2);
-        participant.Verify(value => value.PreviewDisposalAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
-        participant.Verify(value => value.StageApprovedDisposalAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        participant.Verify(value => value.PreviewAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        participant.Verify(value => value.StageApprovedAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()), Times.Once);
 
         sodRequest.Should().NotBeNull();
         sodRequest!.ProhibitedActorUserIds.Should().BeEquivalentTo(new[] { requesterId, auditorId }.Concat(committeeIds));

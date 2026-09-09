@@ -433,7 +433,10 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         if (replay is not null)
         {
             EnsurePayload(replay.PayloadHash, payloadHash);
-            return Map(item);
+            if (replay.ActionType == InventoryDisposalActionType.Completed && item.Status == InventoryDisposalStatus.Completed)
+                return Map(item);
+            throw Error("INV_DISPOSAL_COMPLETION_REPLAY_CONFLICT",
+                "The completion idempotency key is already bound to a non-completed disposal action.");
         }
         EnsureRowVersion(item.RowVersion, request.RowVersion);
         if (item.Status != InventoryDisposalStatus.Approved && item.Status != InventoryDisposalStatus.AdjustmentPending)
@@ -505,6 +508,7 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
             throw Error("INV_DISPOSAL_FINANCE_APPROVAL_REQUIRED",
                 "The prepared neutral Finance intent does not retain complete independent-checker evidence.");
 
+        _db.ChangeTracker.Clear();
         try
         {
             var strategy = _db.Database.CreateExecutionStrategy();
@@ -513,16 +517,41 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
                 await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
                 try
                 {
+                    await AcquireDisposalLockAsync(id, cancellationToken);
                     item = await FullQuery().SingleAsync(value => value.TenantId == _currentUser.TenantId && value.Id == id && !value.IsDeleted,
                         cancellationToken);
+                    var lockedReplay = item.Actions.SingleOrDefault(value => value.IdempotencyKey == key);
+                    if (lockedReplay is not null)
+                    {
+                        EnsurePayload(lockedReplay.PayloadHash, payloadHash);
+                        if (lockedReplay.ActionType == InventoryDisposalActionType.Completed &&
+                            item.Status == InventoryDisposalStatus.Completed)
+                        {
+                            await transaction.CommitAsync(cancellationToken);
+                            return Map(item);
+                        }
+                        throw Error("INV_DISPOSAL_COMPLETION_REPLAY_CONFLICT",
+                            "The completion idempotency key is already bound to a non-completed disposal action.");
+                    }
+                    EnsureRowVersion(item.RowVersion, request.RowVersion);
+                    if (item.Status != InventoryDisposalStatus.AdjustmentPending || !item.StockAdjustmentId.HasValue ||
+                        item.Actions.Count(action => action.ActionType == InventoryDisposalActionType.AdjustmentStaged) != 1)
+                        throw Error("INV_DISPOSAL_COMPLETION_STATE_CONFLICT",
+                            "The locked disposal no longer has one immutable staged adjustment authority.");
+                    await RevalidateEvidenceAsync(item, cancellationToken);
                     var stagedPlan = await BuildFinancePlanAsync(item, item.ProceedsAmount, item.ProceedsAccountId,
                         Required(item.ExecutionReference, 200, "Execution reference"), [], StagingMaker(item), cancellationToken);
+                    var lockedDecision = await GetApprovedDecisionAsync(stagedPlan, cancellationToken);
+                    if (lockedDecision.Status is not ("Approved" or "Failed" or "Posted") ||
+                        !lockedDecision.DecidedByUserId.HasValue || !lockedDecision.DecidedAtUtc.HasValue)
+                        throw Error("INV_DISPOSAL_FINANCE_APPROVAL_REQUIRED",
+                            "The locked Finance intent is no longer independently approved for owner completion.");
                     var participantRequest = stagedPlan.StockAdjustmentRequest with
                     {
-                        ApprovedById = decision.DecidedByUserId.Value,
-                        ApprovedAtUtc = decision.DecidedAtUtc
+                        ApprovedById = lockedDecision.DecidedByUserId.Value,
+                        ApprovedAtUtc = lockedDecision.DecidedAtUtc
                     };
-                    var adjustment = await _disposalAdjustments.StageApprovedDisposalAsync(participantRequest, cancellationToken);
+                    var adjustment = await _disposalAdjustments.StageApprovedAsync(participantRequest, cancellationToken);
                     var receipt = ReceiptFor(stagedPlan);
                     var compatibility = stagedPlan.IsGroup
                         ? await _producerGroupExecution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
@@ -532,12 +561,13 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
                         ? null
                         : await _producerExecution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
                             stagedPlan.ApprovalId, stagedPlan.ValuationIntent, receipt, cancellationToken);
+                    ValidateCompatibility(stagedPlan, lockedDecision, compatibility, single);
                     var valuation = stagedPlan.IsGroup
                         ? compatibility!.Members.Single(member => member.MemberOrder == 2)
                         : new FinanceProducerIntentGroupMemberExecutionResult(1, string.Empty,
                             single!.AccountingEventId, single.AccountingEventRequestFingerprint,
                             single.FinancePostingEventId, single.JournalEntryId);
-                    await _disposalAdjustments.StagePostedDisposalAsync(adjustment, _currentUser.UserId,
+                    await _disposalAdjustments.StagePostedAsync(adjustment, _currentUser.UserId,
                         valuation.FinancePostingEventId, valuation.JournalEntryId,
                         NegativeOverrides(item, stagedPlan, request), cancellationToken);
                     if (stagedPlan.IsGroup)
@@ -675,14 +705,18 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
                 Notes = $"{item.Method}: {executionReference}"
             }).ToList()
         };
+        var owner = OwnerEffect(item, adjustmentId, itemIds, proceeds, proceedsAccountId, executionReference, postingDate);
         var participantRequest = new InventoryDisposalStockAdjustmentRequest
         {
+            TenantId = item.TenantId, DisposalCaseId = item.Id,
+            FinanceApprovalId = isSaleOrAuction
+                ? DeterministicGuid($"RHEMA:INV_DISPOSAL:C8:V1:{item.TenantId:N}:{item.Id:N}")
+                : DeterministicGuid($"FIN:C9:STOCK_ADJUSTMENT_EVENT:V1:{item.TenantId:N}:{adjustmentId:N}:POST"),
             AdjustmentId = adjustmentId, ItemIds = itemIds,
             AdjustmentNumber = $"IDP-SA-{item.Id:N}"[..23].ToUpperInvariant(), PostingDateUtc = postingDate,
-            RequestedById = makerId, Create = create
+            RequestedById = makerId, PreparedOwnerEffectFingerprint = owner.EffectFingerprint, Create = create
         };
-        var preview = await _disposalAdjustments.PreviewDisposalAsync(participantRequest, cancellationToken);
-        var owner = OwnerEffect(item, adjustmentId, itemIds, proceeds, proceedsAccountId, executionReference, postingDate);
+        var preview = await _disposalAdjustments.PreviewAsync(participantRequest, cancellationToken);
         var valuation = await _valuationIntent.BuildAsync(preview, owner, cancellationToken);
         if (!isSaleOrAuction)
             return new DisposalFinancePlan(item.TenantId, adjustmentId, participantRequest.AdjustmentNumber,
@@ -763,11 +797,63 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         if (plan.IsGroup)
         {
             var group = await _producerGroups.GetAsync(plan.ApprovalId, cancellationToken);
-            return new DisposalFinanceDecision(group.Status, group.DecidedByUserId, group.DecidedAtUtc);
+            if (group.Id != plan.ApprovalId || group.PreparedByUserId != plan.StockAdjustmentRequest.RequestedById ||
+                !OwnerMatches(group.ExpectedOwnerEffect, plan.Owner) || group.Members.Count != 2 ||
+                group.Members.OrderBy(member => member.MemberOrder).Select(member => member.MemberOrder)
+                    .SequenceEqual([1, 2]) == false)
+                throw Error("INV_DISPOSAL_FINANCE_AUTHORITY_INVALID",
+                    "The durable Finance group does not retain the exact two-member disposal authority.");
+            return new DisposalFinanceDecision(group.Status, group.DecidedByUserId, group.DecidedAtUtc,
+                group.GroupFingerprint, group.Members.OrderBy(member => member.MemberOrder)
+                    .Select(member => new DisposalFinanceMemberAuthority(member.MemberOrder,
+                        member.MemberFingerprint, member.AccountingEvent.Id, member.AccountingEvent.RequestFingerprint)).ToList(),
+                null, null);
         }
         var intent = await _producerIntents.GetAsync(plan.ApprovalId, cancellationToken);
+        if (intent.Id != plan.ApprovalId || intent.PreparedByUserId != plan.StockAdjustmentRequest.RequestedById ||
+            !string.Equals(intent.ProducerParticipantIdentity, plan.Owner.ParticipantCode, StringComparison.Ordinal))
+            throw Error("INV_DISPOSAL_FINANCE_AUTHORITY_INVALID",
+                "The durable Finance valuation event does not match the prepared disposal authority.");
         return new DisposalFinanceDecision(intent.ProducerDecisionStatus, intent.ProducerDecidedByUserId,
-            intent.ProducerDecidedAtUtc);
+            intent.ProducerDecidedAtUtc, null, [], intent.Id, intent.RequestFingerprint);
+    }
+
+    private static bool OwnerMatches(ProducerOwnerEffectIdentityDto? actual, ProducerOwnerEffectIdentityDto expected) =>
+        actual is not null && actual.OwnerEntityId == expected.OwnerEntityId &&
+        string.Equals(actual.ParticipantCode, expected.ParticipantCode, StringComparison.Ordinal) &&
+        string.Equals(actual.OwnerEntityType, expected.OwnerEntityType, StringComparison.Ordinal) &&
+        string.Equals(actual.OwnerAction, expected.OwnerAction, StringComparison.Ordinal) &&
+        string.Equals(actual.EffectFingerprint, expected.EffectFingerprint, StringComparison.Ordinal);
+
+    private static void ValidateCompatibility(DisposalFinancePlan plan, DisposalFinanceDecision decision,
+        FinanceProducerIntentGroupApprovedExecutionResult? group,
+        FinanceProducerApprovedExecutionResult? single)
+    {
+        if (plan.IsGroup)
+        {
+            if (group is null || group.ProducerIntentGroupId != plan.ApprovalId ||
+                !string.Equals(group.GroupFingerprint, decision.GroupFingerprint, StringComparison.Ordinal) ||
+                !string.Equals(group.Status, "Posted", StringComparison.Ordinal) || group.Members.Count != 2)
+                throw Error("INV_DISPOSAL_FINANCE_COMPATIBILITY_INVALID",
+                    "Finance compatibility evidence does not match the approved disposal group.");
+            var expected = decision.Members.OrderBy(member => member.MemberOrder).ToList();
+            var actual = group.Members.OrderBy(member => member.MemberOrder).ToList();
+            if (expected.Count != 2 || actual.Select(member => member.MemberOrder).Distinct().Count() != 2 ||
+                expected.Where((value, index) => value.MemberOrder != actual[index].MemberOrder ||
+                    value.AccountingEventId != actual[index].AccountingEventId ||
+                    !string.Equals(value.MemberFingerprint, actual[index].MemberFingerprint, StringComparison.Ordinal) ||
+                    !string.Equals(value.AccountingEventRequestFingerprint, actual[index].AccountingEventRequestFingerprint, StringComparison.Ordinal) ||
+                    actual[index].FinancePostingEventId == Guid.Empty || actual[index].JournalEntryId == Guid.Empty).Any())
+                throw Error("INV_DISPOSAL_FINANCE_COMPATIBILITY_INVALID",
+                    "Finance compatibility members are swapped, incomplete, or not bound to the prepared group.");
+            return;
+        }
+        if (single is null || single.AccountingEventId != plan.ApprovalId || single.AccountingEventId != decision.AccountingEventId ||
+            !string.Equals(single.AccountingEventRequestFingerprint, decision.AccountingEventRequestFingerprint, StringComparison.Ordinal) ||
+            !string.Equals(single.Status, "Posted", StringComparison.Ordinal) || single.FinancePostingEventId == Guid.Empty ||
+            single.JournalEntryId == Guid.Empty)
+            throw Error("INV_DISPOSAL_FINANCE_COMPATIBILITY_INVALID",
+                "Finance valuation compatibility evidence does not match the approved disposal event.");
     }
 
     private static ProducerOwnerEffectReceiptDto ReceiptFor(DisposalFinancePlan plan) => new()
@@ -832,6 +918,18 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         return new Guid(bytes.AsSpan(0, 16));
     }
 
+    private async Task AcquireDisposalLockAsync(Guid disposalCaseId, CancellationToken cancellationToken)
+    {
+        // The Finance execution boundary separately locks the owner-effect fingerprint. This lock
+        // closes the earlier owner-side window so concurrent contexts cannot stage the same graph.
+        // SQLite's serializable writer lock is sufficient for its relational test path.
+        if (!_db.Database.IsSqlServer()) return;
+        var resource = $"RHEMA:INV_DISPOSAL:C11:{_currentUser.TenantId:N}:{disposalCaseId:N}";
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"EXEC sp_getapplock @Resource = {resource}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000",
+            cancellationToken);
+    }
+
     private sealed record DisposalFinancePlan(Guid TenantId, Guid AdjustmentId, string AdjustmentNumber,
         InventoryDisposalStockAdjustmentRequest StockAdjustmentRequest, ProducerOwnerEffectIdentityDto Owner,
         ProducerAccountingIntentDto ValuationIntent, ProducerIntentGroupRequestDto? Group,
@@ -842,7 +940,11 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
             ?? throw new InvalidOperationException("INV_DISPOSAL_FINANCE_IDENTITY_REQUIRED: prepared Finance identity is required.");
     }
 
-    private sealed record DisposalFinanceDecision(string Status, Guid? DecidedByUserId, DateTime? DecidedAtUtc);
+    private sealed record DisposalFinanceDecision(string Status, Guid? DecidedByUserId, DateTime? DecidedAtUtc,
+        string? GroupFingerprint, IReadOnlyList<DisposalFinanceMemberAuthority> Members,
+        Guid? AccountingEventId, string? AccountingEventRequestFingerprint);
+    private sealed record DisposalFinanceMemberAuthority(int MemberOrder, string MemberFingerprint,
+        Guid AccountingEventId, string AccountingEventRequestFingerprint);
 
     private async Task AddEvidenceAsync(InventoryDisposalCase item, IEnumerable<InventoryControlEvidenceRequest> requests,
         string stage, bool required, CancellationToken cancellationToken)

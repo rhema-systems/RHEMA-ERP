@@ -764,8 +764,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryIssueFinanceAssetService, ErpSystem.Api.Services.Finance.InventoryIssueFinanceAssetPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReturnControlService, ErpSystem.Core.Services.Inventory.InventoryReturnControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryRequisitionService, ErpSystem.Core.Services.Inventory.InventoryRequisitionService>();
-            services.AddScoped<ErpSystem.Core.Services.Inventory.IStockAdjustmentService, ErpSystem.Core.Services.Inventory.StockAdjustmentService>();
-            services.AddScoped<ErpSystem.Core.Services.Inventory.IInventoryDisposalStockAdjustmentParticipant, ErpSystem.Core.Services.Inventory.StockAdjustmentService>();
+            services.AddScoped<ErpSystem.Core.Services.Inventory.StockAdjustmentService>();
+            services.AddScoped<ErpSystem.Core.Services.Inventory.IStockAdjustmentService>(provider =>
+                provider.GetRequiredService<ErpSystem.Core.Services.Inventory.StockAdjustmentService>());
+            services.AddScoped<ErpSystem.Api.Services.Inventory.IInventoryDisposalStockAdjustmentParticipant,
+                ErpSystem.Api.Services.Inventory.InventoryDisposalStockAdjustmentParticipant>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IStockAdjustmentValuationIntentBuilder, ErpSystem.Api.Services.Finance.StockAdjustmentValuationIntentBuilder>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryAdjustmentFinancePostingService, ErpSystem.Api.Services.Finance.InventoryAdjustmentFinancePostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReceiptFinancePostingService, ErpSystem.Api.Services.Finance.InventoryReceiptFinancePostingService>();

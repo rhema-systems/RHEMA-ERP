@@ -21,7 +21,7 @@ namespace ErpSystem.Core.Services.Inventory;
 /// Service for managing stock adjustments
 /// Handles positive and negative inventory adjustments outside of normal purchasing/requisition flows
 /// </summary>
-public class StockAdjustmentService : IStockAdjustmentService, IInventoryDisposalStockAdjustmentParticipant
+public class StockAdjustmentService : IStockAdjustmentService
 {
     private readonly IStockAdjustmentRepository _adjustmentRepository;
     private readonly IInventoryItemRepository _itemRepository;
@@ -910,7 +910,7 @@ public class StockAdjustmentService : IStockAdjustmentService, IInventoryDisposa
     // This is deliberately not part of the public adjustment workflow. Inventory disposal owns the
     // surrounding serializable transaction and Finance C7/C8 handoff; this participant only builds
     // and tracks the same stock graph without acquiring, saving, or completing that transaction.
-    public async Task<StockAdjustment> PreviewDisposalAsync(
+    internal async Task<StockAdjustment> PreviewDisposalAsync(
         InventoryDisposalStockAdjustmentRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -918,7 +918,7 @@ public class StockAdjustmentService : IStockAdjustmentService, IInventoryDisposa
         return await BuildDisposalGraphAsync(request, cancellationToken);
     }
 
-    public async Task<StockAdjustment> StageApprovedDisposalAsync(
+    internal async Task<StockAdjustment> StageApprovedDisposalAsync(
         InventoryDisposalStockAdjustmentRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -952,7 +952,7 @@ public class StockAdjustmentService : IStockAdjustmentService, IInventoryDisposa
         return adjustment;
     }
 
-    public async Task StagePostedDisposalAsync(
+    internal async Task StagePostedDisposalAsync(
         StockAdjustment adjustment,
         Guid postingUserId,
         Guid financePostingEventId,
@@ -964,6 +964,9 @@ public class StockAdjustmentService : IStockAdjustmentService, IInventoryDisposa
         if (!_unitOfWork.HasActiveTransaction)
             throw new InvalidOperationException(
                 "INV_DISPOSAL_AMBIENT_TRANSACTION_REQUIRED: disposal posting requires the caller-owned transaction.");
+        if (financePostingEventId == Guid.Empty || financeJournalEntryId == Guid.Empty)
+            throw new InvalidOperationException(
+                "INV_DISPOSAL_ADJUSTMENT_FINANCE_IDENTITY_REQUIRED: Finance posting and journal identities are required.");
         if (adjustment.Status == "Posted")
         {
             if (adjustment.FinancePostingEventId != financePostingEventId ||
@@ -1376,6 +1379,10 @@ public class StockAdjustmentService : IStockAdjustmentService, IInventoryDisposa
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Create);
         EnsureActor(_currentUserProvider.UserId);
+        if (request.TenantId != _currentUserProvider.TenantId || request.DisposalCaseId == Guid.Empty ||
+            request.FinanceApprovalId == Guid.Empty || string.IsNullOrWhiteSpace(request.PreparedOwnerEffectFingerprint))
+            throw new InvalidOperationException(
+                "INV_DISPOSAL_ADJUSTMENT_AUTHORITY_INVALID: disposal, tenant and prepared Finance authority are required.");
         if (request.RequestedById == Guid.Empty)
             throw new InvalidOperationException(
                 "INV_DISPOSAL_ADJUSTMENT_IDENTITY_INVALID: a stable disposal maker identity is required.");
@@ -1385,11 +1392,24 @@ public class StockAdjustmentService : IStockAdjustmentService, IInventoryDisposa
             request.ItemIds.Distinct().Count() != request.ItemIds.Count)
             throw new InvalidOperationException(
                 "INV_DISPOSAL_ADJUSTMENT_IDENTITY_INVALID: stable adjustment, ordered item identities and posting date are required.");
-        if (request.Create.Items.Any(item => item.AdjustmentQuantity == 0m))
-            throw new InvalidOperationException("INV_DISPOSAL_ADJUSTMENT_LINE_INVALID: every disposal adjustment line must be non-zero.");
+        if (request.Create.Items.Any(item => item.AdjustmentQuantity >= 0m))
+            throw new InvalidOperationException("INV_DISPOSAL_ADJUSTMENT_LINE_INVALID: every disposal adjustment line must be strictly negative.");
+        var expectedAdjustmentId = DeterministicGuid(
+            $"RHEMA:INV_DISPOSAL:ADJUSTMENT:V1:{request.TenantId:N}:{request.DisposalCaseId:N}");
+        if (request.AdjustmentId != expectedAdjustmentId ||
+            !string.Equals(request.AdjustmentNumber, $"IDP-SA-{request.DisposalCaseId:N}"[..23].ToUpperInvariant(), StringComparison.Ordinal) ||
+            !string.Equals(request.Create.IdempotencyKey, $"disposal:{request.DisposalCaseId:N}:adjustment", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "INV_DISPOSAL_ADJUSTMENT_AUTHORITY_INVALID: deterministic disposal identity does not match the prepared authority.");
         if (requireApproval && (request.ApprovedById == Guid.Empty || !request.ApprovedAtUtc.HasValue))
             throw new InvalidOperationException(
                 "INV_DISPOSAL_ADJUSTMENT_APPROVAL_REQUIRED: the durable independent checker decision is required before staging.");
+    }
+
+    private static Guid DeterministicGuid(string canonical)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return new Guid(bytes.AsSpan(0, 16));
     }
 
     private static void EnsureDisposalGraphMatch(StockAdjustment existing,
@@ -2163,6 +2183,10 @@ public sealed class StockAdjustmentIdempotencyConflictException(string message) 
 /// </summary>
 public sealed record InventoryDisposalStockAdjustmentRequest
 {
+    public Guid TenantId { get; init; }
+    public Guid DisposalCaseId { get; init; }
+    public Guid FinanceApprovalId { get; init; }
+    public string PreparedOwnerEffectFingerprint { get; init; } = string.Empty;
     public Guid AdjustmentId { get; init; }
     public IReadOnlyList<Guid> ItemIds { get; init; } = [];
     public string AdjustmentNumber { get; init; } = string.Empty;
@@ -2171,18 +2195,6 @@ public sealed record InventoryDisposalStockAdjustmentRequest
     public Guid ApprovedById { get; init; }
     public DateTime? ApprovedAtUtc { get; init; }
     public CreateStockAdjustmentDto Create { get; init; } = new();
-}
-
-public interface IInventoryDisposalStockAdjustmentParticipant
-{
-    Task<StockAdjustment> PreviewDisposalAsync(InventoryDisposalStockAdjustmentRequest request,
-        CancellationToken cancellationToken = default);
-    Task<StockAdjustment> StageApprovedDisposalAsync(InventoryDisposalStockAdjustmentRequest request,
-        CancellationToken cancellationToken = default);
-    Task StagePostedDisposalAsync(StockAdjustment adjustment, Guid postingUserId,
-        Guid financePostingEventId, Guid financeJournalEntryId,
-        IReadOnlyDictionary<Guid, Guid> negativeStockOverrideIds,
-        CancellationToken cancellationToken = default);
 }
 
 public interface IStockAdjustmentService
