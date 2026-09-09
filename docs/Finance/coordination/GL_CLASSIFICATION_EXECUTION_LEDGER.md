@@ -1136,6 +1136,16 @@ books. GPT-5.6 Sol Medium owns implementation, followed by independent GPT-5.6 S
 Inventory c9b worktree remains preserved and will be superseded by a fresh exact-base reissue after C10 approval
 and integration. No schema/migration or configured-database mutation is authorized.
 
+The C10 implementer completed one clean commit, `c732171beafd7e54a0c8af8d31234fd80051b989`, on the exact
+`181d4616` base. The additive internal C7 and C8 result paths return only Finance-resolved compatibility
+posting/journal identities, bound to immutable event/group/member fingerprints and exposing no book identity.
+Finance requires exactly one active default book and one Posted representation from the event's frozen selection;
+zero/multiple defaults, missing/duplicate/incomplete representations and inconsistent group membership fail closed.
+Focused C10 tests passed 7/7, widened non-database C1-C10 authority tests passed 255/255, the solution built with
+zero errors, EF model parity passed, and scope/diff/credential gates are clean. No owner module, migration or
+database was touched. Independent GPT-5.6 Sol High accounting/security/concurrency review is active at this exact
+commit; integration and the fresh Inventory reissue remain gated on approval.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
