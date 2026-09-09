@@ -1284,6 +1284,12 @@ explicitly authorized a new minimal shared-connection SQLite fixture as directly
 the existing C8/C9 relational service and seed helpers. This is a test-infrastructure gap rather than a production
 contract or accounting decision; the task remains active and integration remains blocked.
 
+The new relational-fixture foundation is committed as `9851839c9d5256a29cdbce43d885bfa5bac79298`. It creates a
+shared-connection SQLite ApplicationDbContext and parameterizes Donation/Destruction no-proceeds shape, but its
+initial 72-line form does not yet invoke the real owner, Stock Adjustment, C7 or C10 services and remains
+uncompiled. Terra Medium is extending the same fixture into the required real success/failure/recovery/retry
+evidence before any review handoff.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
