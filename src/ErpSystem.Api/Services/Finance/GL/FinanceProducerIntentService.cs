@@ -17,7 +17,8 @@ namespace ErpSystem.Api.Services.Finance.GL;
 /// Producer-facing Finance adapter. It converts one neutral intent into governed C5 preview evidence and
 /// C6 maker/checker state; book choice and per-book execution remain entirely inside Finance.
 /// </summary>
-public sealed partial class FinanceProducerIntentService : IFinanceProducerIntentService, IFinanceProducerApprovedExecution
+public sealed partial class FinanceProducerIntentService : IFinanceProducerIntentService, IFinanceProducerApprovedExecution,
+    IFinanceProducerApprovedExecutionService
 {
     private readonly IAccountingBookApplicabilityService _applicability;
     private readonly IAccountingEventService _events;
@@ -136,6 +137,29 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             new ReleaseAccountingEventDto { Request = request, Reason = prepared.ProducerDecisionReason ?? string.Empty },
             receipt, failure, cancellationToken);
     }
+
+    async Task<FinanceProducerApprovedExecutionResultDto>
+        IFinanceProducerApprovedExecutionService.ExecuteInAmbientTransactionAsync(
+            Guid accountingEventId, ProducerAccountingIntentDto preparedIntent,
+            ProducerOwnerEffectReceiptDto receipt, CancellationToken cancellationToken)
+    {
+        var result = await ((IFinanceProducerApprovedExecution)this)
+            .ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+                accountingEventId, preparedIntent, receipt, cancellationToken);
+        return new FinanceProducerApprovedExecutionResultDto(
+            result.AccountingEventId,
+            result.AccountingEventRequestFingerprint,
+            result.Status,
+            result.FinancePostingEventId,
+            result.JournalEntryId);
+    }
+
+    Task IFinanceProducerApprovedExecutionService.RecordFailureAfterRollbackAsync(
+        Guid accountingEventId, ProducerAccountingIntentDto preparedIntent,
+        ProducerOwnerEffectReceiptDto receipt, Exception failure,
+        CancellationToken cancellationToken) =>
+        ((IFinanceProducerApprovedExecution)this).RecordFailureAfterRollbackAsync(
+            accountingEventId, preparedIntent, receipt, failure, cancellationToken);
 
     internal async Task<CreateAccountingEventDto> BuildRequestAsync(ProducerAccountingIntentDto intent, CancellationToken ct)
     {

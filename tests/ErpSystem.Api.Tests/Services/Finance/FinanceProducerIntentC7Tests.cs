@@ -178,6 +178,25 @@ public sealed class FinanceProducerIntentC7Tests
     }
 
     [Fact]
+    public void CoreFacingExecution_UsesTheSameScopedFinanceImplementation()
+    {
+        typeof(FinanceProducerIntentService).GetInterfaces().Should().Contain([
+            typeof(IFinanceProducerIntentService),
+            typeof(IFinanceProducerApprovedExecution),
+            typeof(IFinanceProducerApprovedExecutionService)
+        ]);
+
+        var root = FindRepositoryRoot();
+        var registrations = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Extensions",
+            "ServiceCollectionExtensions.cs"));
+        registrations.Should().Contain(
+            "AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceProducerApprovedExecutionService>(provider =>");
+        registrations.Should().Contain(
+            "provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>()",
+            "the public and internal execution contracts must share the scoped Finance service and DbContext");
+    }
+
+    [Fact]
     public async Task ApprovalAndRejection_AreDecisionOnlyCalls()
     {
         var applicability = Applicability();
@@ -368,6 +387,76 @@ public sealed class FinanceProducerIntentC7Tests
         first.FinancePostingEventId.Should().Be(primaryPosting.FinancePostingEventId!.Value);
         first.JournalEntryId.Should().Be(primaryPosting.JournalEntryId!.Value);
         retry.Should().Be(first);
+    }
+
+    [Fact]
+    public async Task CoreFacingExecution_DelegatesToExactC7AndC10Authority()
+    {
+        var events = new Mock<IAccountingEventService>();
+        var intent = Intent();
+        events.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved,
+            Status = AccountingEventStatuses.PendingApproval,
+            ProducerDecisionReason = "Reviewed",
+            ProducerParticipantIdentity = "INVENTORY.DISPOSAL.V1",
+            ProducerIntentSnapshotJson = Prepared(intent).ProducerIntentSnapshotJson
+        });
+        var harness = Harness(Applicability(), events);
+        var primaryBook = new AccountingBook
+        {
+            TenantId = harness.TenantId, Code = "IFRS", Name = "IFRS", IsDefault = true,
+            IsActive = true, AllowsPosting = true, FunctionalCurrencyCode = "GHS"
+        };
+        harness.Db.AccountingBooks.Add(primaryBook);
+        await harness.Db.SaveChangesAsync();
+        var postingEventId = Guid.NewGuid();
+        var journalEntryId = Guid.NewGuid();
+        harness.Executor.Result = new AccountingEventDto
+        {
+            Id = Guid.NewGuid(), Status = AccountingEventStatuses.Posted, RequestFingerprint = Hash('C'),
+            Postings =
+            [
+                new AccountingEventPostingDto
+                {
+                    AccountingBookId = primaryBook.Id, AccountingBookCode = primaryBook.Code,
+                    Status = AccountingEventStatuses.Posted,
+                    FinancePostingEventId = postingEventId, JournalEntryId = journalEntryId
+                }
+            ]
+        };
+
+        var result = await ((IFinanceProducerApprovedExecutionService)harness.Service)
+            .ExecuteInAmbientTransactionAsync(harness.Executor.Result.Id, intent,
+                Receipt(harness.TenantId, intent));
+
+        result.Should().Be(new FinanceProducerApprovedExecutionResultDto(
+            harness.Executor.Result.Id, Hash('C'), AccountingEventStatuses.Posted,
+            postingEventId, journalEntryId));
+    }
+
+    [Fact]
+    public async Task CoreFacingFailureRecording_DelegatesToExactPostRollbackAuthority()
+    {
+        var events = new Mock<IAccountingEventService>();
+        var intent = Intent();
+        events.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved,
+            ProducerDecisionReason = "Reviewed",
+            ProducerIntentSnapshotJson = Prepared(intent).ProducerIntentSnapshotJson
+        });
+        var harness = Harness(Applicability(), events);
+        var eventId = Guid.NewGuid();
+        var receipt = Receipt(harness.TenantId, intent);
+        var failure = new InvalidOperationException("owner transaction failed");
+
+        await ((IFinanceProducerApprovedExecutionService)harness.Service)
+            .RecordFailureAfterRollbackAsync(eventId, intent, receipt, failure);
+
+        harness.Executor.FailedEventId.Should().Be(eventId);
+        harness.Executor.Receipt.Should().BeSameAs(receipt);
+        harness.Executor.Failure.Should().BeSameAs(failure);
     }
 
     [Fact]
@@ -621,6 +710,14 @@ public sealed class FinanceProducerIntentC7Tests
         OwnerAction = intent.ExpectedOwnerEffect.OwnerAction, EffectFingerprint = intent.ExpectedOwnerEffect.EffectFingerprint
     };
 
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !Directory.Exists(Path.Combine(directory.FullName, "src")))
+            directory = directory.Parent;
+        return directory?.FullName ?? throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+
     private sealed record TestHarness(FinanceProducerIntentService Service, ApplicationDbContext Db, Guid TenantId,
         StubExecutor Executor);
 
@@ -640,6 +737,8 @@ public sealed class FinanceProducerIntentC7Tests
     {
         public AccountingEventDto Result { get; set; } = new();
         public ProducerOwnerEffectReceiptDto? Receipt { get; private set; }
+        public Guid? FailedEventId { get; private set; }
+        public Exception? Failure { get; private set; }
         public Task<AccountingEventDto> PrepareGroupMemberInAmbientTransactionAsync(CreateAccountingEventDto request,
             CancellationToken cancellationToken = default) => Task.FromResult(Result);
         public Task<AccountingEventDto> ValidatePreparedGroupMemberAsync(Guid accountingEventId,
@@ -651,6 +750,12 @@ public sealed class FinanceProducerIntentC7Tests
             ReleaseAccountingEventDto request, ProducerOwnerEffectReceiptDto receipt, CancellationToken cancellationToken = default)
         { Receipt = receipt; return Task.FromResult(Result); }
         public Task RecordApprovedFailureAfterRollbackAsync(Guid accountingEventId, ReleaseAccountingEventDto request,
-            ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default) => Task.CompletedTask;
+            ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default)
+        {
+            FailedEventId = accountingEventId;
+            Receipt = receipt;
+            Failure = failure;
+            return Task.CompletedTask;
+        }
     }
 }
