@@ -1246,6 +1246,15 @@ build and 56 focused tests passed; the widened slice passed 186 with five guarde
 inventory-valuation NRE baselines. A bounded owner correction was returned to GPT-5.6 Terra Medium; no database
 was accessed or mutated and integration remains blocked pending approval.
 
+The Inventory owner correction produced clean commit `a8f0161fdaac69611ba1df76d3fca6e297030bba` on top of
+`ea93e4a5`. It internalizes the disposal Stock Adjustment participant, adds deterministic disposal/tenant/Finance
+authority and negative-quantity binding, locks and revalidates completion inside the Serializable transaction,
+supports read-only committed replay, and validates complete C10 group/member/event/request fingerprints before
+owner completion. The build and 15 focused disposal tests pass and static scope gates are clean. The handoff is
+not yet review-ready because the required real-service multi-context/second-member rollback and full C7 method
+recovery matrix was not added. GPT-5.6 Terra Medium remains assigned to finish that executable evidence before
+Sol High re-review; no database or migration operation occurred.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
