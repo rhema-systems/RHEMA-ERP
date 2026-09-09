@@ -1038,6 +1038,13 @@ The new Core contract test was omitted from normal discovery because `ErpSystem.
 default compile items. A narrow correction is active to add the explicit compile include and prove ordinary
 test discovery; integration and Sales remain gated. No database or migration was touched.
 
+Final independent Sol High review approved C12 at exact clean
+`de251747d8d34b64dc2f369dd68640c0383f75a5`. Ordinary Core discovery now lists and passes the contract test;
+the two-commit ancestry, full-range diff, zero-error builds and prior 69 focused plus 328 widened passing tests
+remain valid. The two approved commits were integrated locally as `4ed93425` and `9038a676`. No conflict,
+owner/schema/migration/default change or configured-database access occurred. C12 is complete and the next gate
+is a fresh exact-base Sales reissue.
+
 Stage B2 Inventory is activated from fresh exact base `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` in clean worktree
 `RHEMA-ERP-inventory-accounting-event-c8` on branch `codex/inventory-accounting-event-cutover-c8`. The authorized
 bounded conversion must preserve the disposal-proceeds/recovery and Stock Adjustment valuation postings as two
