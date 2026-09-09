@@ -24,6 +24,8 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { AddressFields } from '@/components/reference/AddressFields';
 import { employeeService } from '@/services/hr/employee.service';
 import { referenceDimensionService } from '@/services/hr/lookup.service';
+import { policySettingsService } from '@/services/hr/policy-settings.service';
+import { contractTypeService } from '@/services/hr/contract-type.service';
 import {
   GENDER_OPTIONS,
   MARITAL_STATUS_OPTIONS,
@@ -75,7 +77,14 @@ export const employeeSchema = z.object({
   employmentType: z.string().min(1),
   staffStatus: z.string().min(1),
   dateEmployed: opt,
+  // ⚠ Derived, not typed. The server settles the term against the POSITION and refuses a value
+  // that contradicts it, so the form holds whatever it is going to show and only SENDS it where the
+  // position is silent. Kept in the schema because the field is still editable in that case.
   probationPeriodDays: z.coerce.number().int('Must be a whole number').min(0),
+  /** Import mode only: somebody confirmed before this system existed. */
+  confirmationDate: z.string().optional().or(z.literal('')),
+  /** The kind of engagement the first contract records. Optional. */
+  contractTypeId: z.string().optional().or(z.literal('')),
   isFullTime: z.boolean(),
   // Payroll membership gates the salary block below. The server enforces the same rule
   // (EmployeeService.ValidatePayrollMembership); these refinements just say it before the round trip.
@@ -148,6 +157,8 @@ export const emptyEmployee: EmployeeFormValues = {
   staffStatus: 'Active',
   dateEmployed: '',
   probationPeriodDays: 90,
+  confirmationDate: '',
+  contractTypeId: '',
   isFullTime: true,
   isOnPayroll: true,
   offPayrollReason: '',
@@ -171,7 +182,16 @@ interface EmployeeFormProps {
   locations: Location[];
   locationLevels: LocationLevel[];
   defaultValues: EmployeeFormValues;
-  onSubmit: (values: EmployeeFormValues) => Promise<void>;
+  /**
+   * @param meta.probationIsDerived
+   *   Whether the selected position states the probation term. ⚠ The page needs it because the
+   *   mapper must then send `null` rather than the number on screen — the server refuses a value
+   *   that contradicts the post, and the form is showing the post's own figure.
+   */
+  onSubmit: (
+    values: EmployeeFormValues,
+    meta: { probationIsDerived: boolean },
+  ) => Promise<void>;
   submitting: boolean;
   submitLabel: string;
   onCancel: () => void;
@@ -191,6 +211,15 @@ interface EmployeeFormProps {
    */
   importMode?: boolean;
   onImportModeChange?: (value: boolean) => void;
+  /**
+   * Whether this is a create rather than an edit.
+   *
+   * ⚠ The contract kind is only offered on a create, because that is the only path that opens a
+   * contract. On an edit the employee already HAS contracts and the kind belongs to whichever one
+   * is in force — the Contracts tab edits it. Offering the field here would be a control that
+   * looks like it changes something and does not.
+   */
+  isCreate?: boolean;
 }
 
 // Sort comparators: levels by number then name; everything else alphabetical.
@@ -303,6 +332,7 @@ export function EmployeeForm({
   showNumberingRule = false,
   importMode = false,
   onImportModeChange,
+  isCreate = false,
 }: EmployeeFormProps) {
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema) as any,
@@ -357,6 +387,66 @@ export function EmployeeForm({
 
   const registerLabel =
     EMPLOYMENT_TYPE_OPTIONS.find((o) => o.value === employmentType)?.label.toLowerCase() ?? 'these';
+
+  // ── the probation term, which belongs to the POST ─────────────────────────
+  //
+  // ⚠ This box used to be a free number defaulted to 90, and 90 is nobody's probation at TDC:
+  // junior posts run three months, senior and management six, and 123 of 146 positions carry the
+  // term. Every create was overwriting a maintained figure with a form default. The server now
+  // settles it against the position and REFUSES a contradicting value, so the form shows what the
+  // post says and only opens the field where the post says nothing.
+  const policySettings = useQuery({
+    queryKey: ['hr', 'policy-settings'],
+    queryFn: () => policySettingsService.get(),
+  });
+
+  const positionProbationMonths = selectedPosition?.probationPeriodMonths ?? null;
+  const policyProbationMonths = policySettings.data?.defaultProbationMonths ?? null;
+
+  const probationFromPosition = positionProbationMonths != null && positionProbationMonths > 0;
+  const probationMonths = probationFromPosition
+    ? positionProbationMonths
+    : policyProbationMonths;
+
+  // The stored unit is days, and months × 30 is the conversion the hire path established.
+  const derivedProbationDays = probationMonths != null ? probationMonths * 30 : null;
+
+  // Editable only where the post is silent — then the company default stands unless somebody
+  // says otherwise for this person, which is the one case an override is a real answer.
+  const probationIsDerived = probationFromPosition;
+
+  useEffect(() => {
+    if (probationIsDerived && derivedProbationDays != null) {
+      form.setValue('probationPeriodDays', derivedProbationDays);
+    }
+  }, [probationIsDerived, derivedProbationDays, form]);
+
+  const dateEmployed = form.watch('dateEmployed');
+  const probationDaysShown = form.watch('probationPeriodDays');
+
+  // What the profile will show as "expected confirmation" — the same arithmetic the server does on
+  // read, put in front of whoever is filling the form in rather than discovered a quarter later.
+  const expectedConfirmation = useMemo(() => {
+    if (!dateEmployed || !probationDaysShown || probationDaysShown <= 0) return null;
+    const start = new Date(dateEmployed);
+    if (Number.isNaN(start.getTime())) return null;
+    start.setDate(start.getDate() + Number(probationDaysShown));
+    return start.toISOString().slice(0, 10);
+  }, [dateEmployed, probationDaysShown]);
+
+  const probationHint = !probationIsDerived
+    ? policyProbationMonths != null
+      ? `This position states no probation period, so the company default of ${policyProbationMonths} month(s) applies. Change it here only for this employee.`
+      : 'This position states no probation period.'
+    : `${positionProbationMonths} month(s), from the position${
+        expectedConfirmation ? ` — expected confirmation ${expectedConfirmation}` : ''
+      }. Change it on the position, not here.`;
+
+  const contractTypes = useQuery({
+    queryKey: ['hr', 'contract-types', 'active'],
+    queryFn: () => contractTypeService.getActive(),
+    enabled: isCreate,
+  });
   const numberIsIssued = showNumberingRule && !importMode && !!numberingRule?.autoGenerate;
 
   // A disabled input still submits whatever react-hook-form holds. Without this, typing a number
@@ -423,7 +513,7 @@ export function EmployeeForm({
 
   return (
     <Card>
-      <form onSubmit={form.handleSubmit(onSubmit)}>
+      <form onSubmit={form.handleSubmit((values) => onSubmit(values, { probationIsDerived }))}>
         <CardHeader>
           <CardTitle>Employee Details</CardTitle>
         </CardHeader>
@@ -776,8 +866,55 @@ export function EmployeeForm({
               </Field>
             </div>
             <div className={GRID3}>
-              <Field label="Probation (days)" htmlFor="probationPeriodDays" error={err('probationPeriodDays')}>
-                <Input id="probationPeriodDays" type="number" min={0} {...form.register('probationPeriodDays')} />
+              {/* A different axis from Employment Type above: that is the system's fixed set, this
+                  is the organisation's own vocabulary, and its duration dates the first contract. */}
+              {isCreate && (
+              <Field
+                label="Contract kind"
+                htmlFor="contractTypeId"
+                hint="What the appointment letter calls this engagement. Its duration dates the first contract."
+              >
+                <OptionalSelect
+                  id="contractTypeId"
+                  value={form.watch('contractTypeId') ?? ''}
+                  onChange={(v) => form.setValue('contractTypeId', v)}
+                  placeholder="Not stated"
+                  options={(contractTypes.data ?? []).map((t) => ({
+                    value: t.id,
+                    label: t.duration > 0 ? `${t.name} — ${t.duration} months` : `${t.name} — open-ended`,
+                  }))}
+                />
+              </Field>
+              )}
+              {/* ⚠ Import mode ONLY. A confirmation date is an outcome the probation record
+                  produces, with a letter behind it, and the server refuses it from a hire and from
+                  the ordinary employee edit. Somebody recorded from a register may have passed
+                  probation years before this system existed and has no record to confirm through. */}
+              {importMode && (
+                <Field
+                  label="Confirmation date"
+                  htmlFor="confirmationDate"
+                  hint="Only for staff already confirmed before this system. Leave blank if they are still on probation."
+                >
+                  <Input id="confirmationDate" type="date" {...form.register('confirmationDate')} />
+                </Field>
+              )}
+            </div>
+            <div className={GRID3}>
+              <Field
+                label="Probation (days)"
+                htmlFor="probationPeriodDays"
+                error={err('probationPeriodDays')}
+                hint={probationHint}
+              >
+                <Input
+                  id="probationPeriodDays"
+                  type="number"
+                  min={0}
+                  readOnly={probationIsDerived}
+                  disabled={probationIsDerived}
+                  {...form.register('probationPeriodDays')}
+                />
               </Field>
               <div className="grid grid-cols-2 gap-4 sm:col-span-2 lg:col-span-1 lg:self-end">
                 <SwitchRow

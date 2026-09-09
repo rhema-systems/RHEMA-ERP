@@ -168,7 +168,29 @@ public class Employee : TenantEntity
 
     public int ProbationPeriodDays { get; set; } = 90;
 
-    public DateOnly? ConfirmationDate { get; set; } // Date probation was passed
+    /// <summary>
+    /// Where <see cref="ProbationPeriodDays"/> came from — the post, the company policy, or a
+    /// length supplied for this person.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Null on rows created before lane D1 (2026-09-09). See <see cref="Core.Enums.ProbationSource"/>
+    /// for why it is not defaulted.
+    /// </remarks>
+    public ProbationSource? ProbationSource { get; set; }
+
+    /// <summary>
+    /// The date probation was passed. <b>An outcome, not a term.</b>
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Written by <c>ProbationService.MarkEmployeeConfirmed</c> — and, for staff confirmed
+    /// before this system existed, by the IMPORT door only. The ordinary employee update refuses
+    /// it (lane D1): until then <c>UpdateEmployeeDto.ConfirmationDate</c> was applied straight onto
+    /// this column by <c>EmployeeMappingExtensions.Apply</c> with no guard at all, so anyone who
+    /// could edit an employee could confirm them — bypassing the authority, the letter and the
+    /// probation record. The contract's own copy had been guarded since lane 3d; the header, which
+    /// is the one the guard READS, had not.
+    /// </remarks>
+    public DateOnly? ConfirmationDate { get; set; }
 
     public DateOnly? RetirementDate { get; set; }
 
@@ -1041,7 +1063,22 @@ public class EmployeeContractType : TenantEntity
 
     public string? Description { get; set; }
 
+    /// <summary>How long this kind of engagement normally runs, in MONTHS. Zero means open-ended.</summary>
+    /// <remarks>
+    /// It is what gives <see cref="EmployeeContractDetail.ContractEndDate"/> a default: pick
+    /// "Fixed Term" (12) on a contract starting 1 March and the end date offered is 28 February.
+    /// </remarks>
     public int Duration { get; set; }
+
+    /// <summary>
+    /// Retire a kind of engagement without deleting the contracts written against it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Added in lane D1. The table was seeded with seven TDC rows in 2026 and had no DTO, no
+    /// service, no controller and no screen — it could be read only by opening the database. It is
+    /// now the contract-kind picker, so it needs the retire-without-delete every other HR lookup has.
+    /// </remarks>
+    public bool IsActive { get; set; } = true;
 }
 
 #endregion
@@ -1408,8 +1445,34 @@ public class EmployeeContractDetail : TenantEntity
 
     public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
 
+    /// <summary>
+    /// Which kind of engagement this is, from the tenant's own vocabulary.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A DIFFERENT axis from <see cref="EmploymentType"/>, which is the system's fixed enum.
+    /// This is TDC's list — Permanent, Contract, Fixed Term, National Service, Internship, Casual,
+    /// Consultancy — the one the appointment letter picks from, and it carries the
+    /// <see cref="EmployeeContractType.Duration"/> that gives <see cref="ContractEndDate"/> a default.
+    /// Nullable: rows written before lane D1, and tenants that keep no such list, name no kind.
+    /// </remarks>
+    public Guid? ContractTypeId { get; set; }
+
+    [ForeignKey(nameof(ContractTypeId))]
+    public virtual EmployeeContractType? ContractType { get; set; }
+
     public DateOnly StartDate { get; set; }
 
+    /// <summary>
+    /// When the engagement ACTUALLY ended.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not the same date as <see cref="ContractEndDate"/>, which is when it was SCHEDULED to end.
+    /// A two-year contract run to term has both, equal; one terminated in month seven has an
+    /// EndDate of month seven and a ContractEndDate still in month twenty-four, and the gap between
+    /// them is the fact a separation or a renewal report is asking about. This column is written by
+    /// the terminate and separate paths (<c>EndDate ??= terminationDate</c>) and by the supersede
+    /// path, which closes an open row the day before its successor takes effect.
+    /// </remarks>
     public DateOnly? EndDate { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
@@ -1441,15 +1504,40 @@ public class EmployeeContractDetail : TenantEntity
     /// </summary>
     public bool IsTaxExempt { get; set; } = false;
 
-    public DateOnly EffectiveDate { get; set; }
- 
     /// <summary>
-    /// Null for permanent employment; populated for fixed-term/contract.
+    /// The day these terms take effect — the one the contract history is ordered and closed on.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Every row added through the manual tab before lane D1 carried <c>0001-01-01</c>:
+    /// <c>AddContractAsync</c> never set it and the DTO did not expose it. It now defaults to
+    /// <see cref="StartDate"/> when a caller says nothing, and superseding a current row uses it to
+    /// date the closure.
+    /// </remarks>
+    public DateOnly EffectiveDate { get; set; }
+
+    /// <summary>
+    /// When the engagement is SCHEDULED to end. Null for permanent employment; populated for
+    /// fixed-term and contract appointments.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="EndDate"/> for the distinction. Defaulted from
+    /// <see cref="EmployeeContractType.Duration"/> when a kind is named and no date is given.
+    /// </remarks>
     public DateOnly? ContractEndDate { get; set; }
 
     public int WorkingHoursPerWeek { get; set; } = 40;
 
+    /// <summary>
+    /// The annual leave this contract grants, as the contract states it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Written by NOTHING and read by NOTHING until lane D1 — a column with a default of 20 that
+    /// no caller could reach, sitting beside <see cref="VacationDaysPerYear"/> (default 15), which
+    /// the DTOs did expose. Two numbers for one entitlement, disagreeing by five days out of the
+    /// box. This is the one the appointment letter quotes and the one the leave module's
+    /// entitlement should be reconciled against; <see cref="VacationDaysPerYear"/> stays for the
+    /// rows that hold it.
+    /// </remarks>
     public int AnnualLeaveEntitlementDays { get; set; } = 20;
 
     public int VacationDaysPerYear { get; set; } = 15;
@@ -1469,8 +1557,21 @@ public class EmployeeContractDetail : TenantEntity
     public string? SpecialConditions { get; set; }
 
     /// <summary>
-    /// Whether this is the employee's currently active terms record.
+    /// Whether these are the terms in force today. At most one row per employee carries it.
     /// </summary>
+    /// <remarks>
+    /// <para>⚠ Until lane D1 this was a default nobody maintained: <c>AddContractAsync</c> left it
+    /// at <c>true</c> on every row it inserted, nothing closed the row it superseded, and the two
+    /// termination paths cleared <c>IsActive</c> without clearing this — so
+    /// <see cref="Employee.CurrentTerms"/>, which reads it, returned whichever contract EF happened
+    /// to materialise first, terminated ones included.</para>
+    ///
+    /// <para>It is now maintained by one helper, and it is the flag the "current contract" read and
+    /// the header write-through both key off. <see cref="IsActive"/> and
+    /// <see cref="ContractStatus"/> remain the ROW's own lifecycle: a superseded contract is not
+    /// current, and it is also no longer active — but an inactive row that was never superseded
+    /// (a draft, a backfilled historical term) is not current either.</para>
+    /// </remarks>
     public bool IsCurrent { get; set; } = true;
 
     public bool IsActive { get; set; } = true;

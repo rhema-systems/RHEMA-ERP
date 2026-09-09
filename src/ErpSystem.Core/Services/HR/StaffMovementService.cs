@@ -28,6 +28,10 @@ public class StaffMovementService : IStaffMovementService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+
+    // Terms of employment are the employee service's to write — one door, one supersede rule.
+    private readonly IEmployeeService _employees;
+
     private readonly ILogger<StaffMovementService> _logger;
 
     /// <summary>
@@ -47,6 +51,7 @@ public class StaffMovementService : IStaffMovementService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IEmployeeService employees,
         ILogger<StaffMovementService> logger)
     {
         _movementRepo   = movementRepo;
@@ -58,6 +63,7 @@ public class StaffMovementService : IStaffMovementService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
         _unitOfWork     = unitOfWork;
+        _employees      = employees;
         _logger         = logger;
     }
 
@@ -820,6 +826,18 @@ public class StaffMovementService : IStaffMovementService
         employee.UpdatedBy = actorEmployeeId.ToString();
         await _unitOfWork.Repository<Employee>().UpdateAsync(employee);
 
+        // Coming back is a change of terms as much as going was: an acting appointment that paid an
+        // allowance ends, and the contract has to say so from the day they return. Same helper, so
+        // the return cannot leave the pair of rows in a state the outward move could not.
+        if (movement.CurrentSalary > 0 && employee.IsOnPayroll)
+            await _employees.SupersedeCurrentContractAsync(
+                movement.EmployeeId,
+                DateOnly.FromDateTime(returnDate),
+                movement.CurrentSalary,
+                newEmploymentType: null,
+                $"{movement.MovementNumber}: returned from temporary assignment",
+                cancellationToken);
+
         var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();
         var openStep = await careerRepo
             .GetQueryable(c => c.TenantId == movement.TenantId
@@ -1016,6 +1034,25 @@ public class StaffMovementService : IStaffMovementService
         employee.UpdatedAt = DateTime.UtcNow;
         employee.UpdatedBy = actorEmployeeId.ToString();
         await _unitOfWork.Repository<Employee>().UpdateAsync(employee);
+
+        // ── The terms of employment ───────────────────────────────────────────
+        //
+        // E-7d. New pay is new terms. Until lane D1 a promotion updated Employee.Salary, the career
+        // path and the position history, and left the CONTRACT still quoting the old figure — the
+        // one document the organisation would produce if asked what it pays this person.
+        //
+        // ⚠ A conversion between employment types (contract → permanent, the case the feedback
+        // named) cannot be driven from here: StaffMovement carries no NewEmploymentType, only a new
+        // position, unit, location, supervisor and pay. Converting somebody today means changing the
+        // employment type on the employee header, which writes through to the current contract. A
+        // column on the movement is a schema change, and is recorded as owed rather than smuggled in.
+        await _employees.SupersedeCurrentContractAsync(
+            movement.EmployeeId,
+            DateOnly.FromDateTime(effective),
+            movement.NewSalary > 0 ? movement.NewSalary : null,
+            newEmploymentType: null,
+            $"{movement.MovementNumber}: {movement.Reason}",
+            cancellationToken);
 
         // ── Career path: close the open step, open the new one ────────────────
         var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();

@@ -134,6 +134,26 @@ public interface IEmployeeService
     // Contracts
     Task<IEnumerable<EmployeeContractDetailDto>> GetContractsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto?> GetActiveContractAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Opens a fresh set of terms when something outside the contract tab changes them, closing the
+    /// terms it replaces. Returns null when nothing changed, or when the employee has no contract.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ For <c>StaffMovementService</c>. A promotion that raises the salary used to update
+    /// <c>Employee.Salary</c>, the career-path row and the position history, and leave the contract
+    /// still quoting the old figure — the document the organisation would actually produce if asked
+    /// what it pays this person. Nothing is opened for an employee who has no contract at all: the
+    /// start date would have to be invented, and the register has thousands of such rows from before
+    /// contracts were written on create.
+    /// </remarks>
+    Task<EmployeeContractDetailDto?> SupersedeCurrentContractAsync(
+        Guid employeeId,
+        DateOnly effectiveDate,
+        decimal? newSalary,
+        EmploymentType? newEmploymentType,
+        string reason,
+        CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> AddContractAsync(CreateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> UpdateContractAsync(UpdateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveContractAsync(Guid contractId, CancellationToken cancellationToken = default);

@@ -2,6 +2,8 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+// ProbationPeriod lives under Recruitment — the hire path opened it, so that is where it was filed.
+using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -35,12 +37,16 @@ public class EmployeeService : IEmployeeService
         IStaffNumberService staffNumbers,
         IPayrollMembershipService payrollMembership,
         IGeographyService geography,
+        INumberSequenceService numberSequence,
+        ICompanyHrPolicySettingsService policySettings,
         ILogger<EmployeeService> logger)
     {
         _currencies = currencies;
         _staffNumbers = staffNumbers;
         _payrollMembership = payrollMembership;
         _geography = geography;
+        _numberSequence = numberSequence;
+        _policySettings = policySettings;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
@@ -69,6 +75,17 @@ public class EmployeeService : IEmployeeService
     // Procurement will read too. HR only asks it to resolve an area into the region/town names the
     // snapshot columns carry, so the two can never disagree.
     private readonly IGeographyService _geography;
+
+    // Contract numbers. The hire-from-offer path had compiled in `CTR-{employeeNumber}`, which is a
+    // number an employee can only ever have ONE of — fine while nothing but a hire wrote a contract,
+    // wrong the moment a second set of terms supersedes the first.
+    private readonly INumberSequenceService _numberSequence;
+
+    // Where the probation term falls back to when the post is silent about it.
+    private readonly ICompanyHrPolicySettingsService _policySettings;
+
+    /// <summary>The sequence key contract numbers count on: <c>CTR-2026-001</c>.</summary>
+    private const string ContractSequenceKey = "CTR";
 
     /// <summary>
     /// Rewrites <c>State</c> and <c>City</c> from the employee's area, so the free-text snapshot
@@ -111,6 +128,150 @@ public class EmployeeService : IEmployeeService
         return tenantId;
     }
 
+    // ── Probation, and the contract that carries it ───────────────────────────
+
+    /// <summary>
+    /// Settles an employee's probation term and says where it came from.
+    /// </summary>
+    /// <remarks>
+    /// <para>The rule the demo feedback asked for in E-2b, and the one
+    /// <c>ProbationService.BuildPolicy</c> was already applying to READ a policy: <b>the position is
+    /// the source</b>, the company policy default is the fallback. What did not exist was anything
+    /// WRITING it — the create form had a free "Probation (days)" box defaulted to 90, and 90 is not
+    /// TDC's number for anybody (junior posts run three months, senior and management six, and 123
+    /// of 146 positions carry the term). So every create overwrote a maintained figure with a form
+    /// default.</para>
+    ///
+    /// <para>⚠ A supplied value that contradicts the post is REFUSED, not quietly dropped. Silently
+    /// ignoring input is how a field comes to look editable while doing nothing — the very failure
+    /// this lane is fixing on the confirmation date. The refusal names the post and both numbers, so
+    /// the caller can either change the post or stop sending the field.</para>
+    ///
+    /// <para>Days, not months, because <c>Employee.ProbationPeriodDays</c> is the stored unit and
+    /// the hire path's months × 30 is the established conversion.</para>
+    /// </remarks>
+    private async Task<(int Days, ProbationSource Source)> ResolveProbationAsync(
+        EmployeePosition? position, int? suppliedDays, CancellationToken cancellationToken)
+    {
+        var positionMonths = position?.ProbationPeriodMonths;
+
+        if (positionMonths is > 0)
+        {
+            var fromPosition = positionMonths.Value * 30;
+            if (suppliedDays.HasValue && suppliedDays.Value != fromPosition)
+                throw new InvalidOperationException(
+                    $"The position '{position!.Title}' sets probation at {positionMonths.Value} month(s), "
+                    + $"which is {fromPosition} days, so {suppliedDays.Value} days cannot be recorded against it. "
+                    + "Change the probation period on the position, or leave the field to the post.");
+
+            return (fromPosition, ProbationSource.Position);
+        }
+
+        var settings = await _policySettings.GetAsync(cancellationToken);
+        var fromPolicy = Math.Max(settings.DefaultProbationMonths, 0) * 30;
+
+        // The position is silent, so a supplied length is this person's own — the only case in which
+        // an override is a real answer rather than a contradiction.
+        if (suppliedDays.HasValue && suppliedDays.Value != fromPolicy)
+            return (suppliedDays.Value, ProbationSource.Override);
+
+        return (fromPolicy, ProbationSource.PolicyDefault);
+    }
+
+    /// <summary>
+    /// Resolves a contract kind from the tenant's vocabulary, refusing an unknown or retired one.
+    /// </summary>
+    private async Task<EmployeeContractType?> ResolveContractTypeAsync(
+        Guid? contractTypeId, CancellationToken cancellationToken)
+    {
+        if (contractTypeId is not { } id || id == Guid.Empty) return null;
+
+        var type = await _unitOfWork.Repository<EmployeeContractType>().GetByIdAsync(id);
+        if (type == null || type.TenantId != GetTenantId() || type.IsDeleted)
+            throw new ArgumentException("Contract type not found.");
+
+        if (!type.IsActive)
+            throw new InvalidOperationException(
+                $"The contract type '{type.Name}' has been retired, so it cannot be put on a contract. "
+                + "Choose a current one, or reinstate it under People Reference Data.");
+
+        return type;
+    }
+
+    /// <summary>
+    /// Files a contract row and, when it is the terms now in force, closes whatever it supersedes.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ This is defect X-4, in one place so every door goes through it.
+    /// <c>AddContractAsync</c> inserted <c>EffectiveDate = 0001-01-01</c> (it never set the field),
+    /// left <c>IsCurrent</c> at the entity default of <c>true</c>, and closed nothing — so an
+    /// employee accumulated contracts that all claimed to be current, and
+    /// <c>Employee.CurrentTerms</c>, which reads that flag, returned whichever one EF materialised
+    /// first.</para>
+    ///
+    /// <para>Superseding closes the previous row completely — not current, not active, status
+    /// <c>Expired</c> if it was Active, and an <c>EndDate</c> of the day before its successor takes
+    /// effect, so the two never both claim the same day. A row the caller marks inactive or expired
+    /// is filed as history and supersedes nothing; that is how a backfilled old contract is recorded
+    /// without disturbing the terms in force.</para>
+    ///
+    /// <para>A new current row dated BEFORE the open one is refused rather than back-dated over it —
+    /// the same rule lane B1 settled for organisation-unit history, for the same reason: the closing
+    /// date is derived from the successor, so an out-of-order insert would close a row on a date
+    /// before it opened.</para>
+    /// </remarks>
+    private async Task<EmployeeContractDetail> FileContractAsync(
+        EmployeeContractDetail contract, CancellationToken cancellationToken)
+    {
+        var repo = _unitOfWork.Repository<EmployeeContractDetail>();
+
+        if (contract.IsCurrent)
+        {
+            var superseded = await repo.GetQueryable()
+                .Where(c => c.TenantId == contract.TenantId
+                         && c.EmployeeId == contract.EmployeeId
+                         && c.IsCurrent
+                         && !c.IsDeleted)
+                .OrderByDescending(c => c.EffectiveDate)
+                .ToListAsync(cancellationToken);
+
+            foreach (var open in superseded)
+            {
+                if (open.EffectiveDate > contract.EffectiveDate)
+                    throw new InvalidOperationException(
+                        $"The terms in force ({open.ContractNumber}) took effect on {open.EffectiveDate:yyyy-MM-dd}, "
+                        + $"which is after {contract.EffectiveDate:yyyy-MM-dd}. Correct that contract's effective "
+                        + "date first, or date this one after it.");
+
+                open.IsCurrent = false;
+                open.IsActive = false;
+                if (open.ContractStatus == ContractStatus.Active)
+                    open.ContractStatus = ContractStatus.Expired;
+
+                // DateOnly.MinValue.AddDays(-1) throws, and every row written through the manual tab
+                // before this lane carries exactly that effective date — so an X-4 row is closed on
+                // its own date rather than taking the save down with it.
+                if (open.EndDate == null)
+                    open.EndDate = contract.EffectiveDate > DateOnly.MinValue
+                        ? contract.EffectiveDate.AddDays(-1)
+                        : contract.EffectiveDate;
+
+                await repo.UpdateAsync(open);
+            }
+        }
+
+        await repo.AddAsync(contract);
+        return contract;
+    }
+
+    /// <summary>The employee's terms in force, tracked, or null.</summary>
+    private async Task<EmployeeContractDetail?> GetCurrentContractEntityAsync(
+        Guid employeeId, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .Where(c => c.EmployeeId == employeeId && c.IsCurrent && !c.IsDeleted)
+            .OrderByDescending(c => c.EffectiveDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
     #region 1) Core Employee Lifecycle
 
     public async Task<EmployeeDetailDto> CreateEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default)
@@ -125,7 +286,7 @@ public class EmployeeService : IEmployeeService
         var employeeNumber = await _staffNumbers.ResolveForCreateAsync(
             dto.EmploymentType, dto.EmployeeNumber, cancellationToken);
 
-        return await CreateWithNumberAsync(dto, employeeNumber, cancellationToken);
+        return await CreateWithNumberAsync(dto, employeeNumber, isImport: false, cancellationToken);
     }
 
     public async Task<EmployeeDetailDto> ImportEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default)
@@ -141,7 +302,7 @@ public class EmployeeService : IEmployeeService
         // Everything else about an import is an ordinary create — the same validation, the same
         // position history. The ONE difference is where the number comes from, so this shares the
         // body rather than reimplementing it: a second copy of employee validation would drift.
-        var created = await CreateWithNumberAsync(dto, supplied, cancellationToken);
+        var created = await CreateWithNumberAsync(dto, supplied, isImport: true, cancellationToken);
 
         // ⚠ Deliberately AFTER the row is committed. The counter is a watermark over numbers that
         // are actually in the register, and advancing it for an import that then failed validation
@@ -157,8 +318,15 @@ public class EmployeeService : IEmployeeService
     /// <summary>
     /// Everything a create does once the staff number has been settled, whichever way it was settled.
     /// </summary>
+    /// <param name="isImport">
+    /// Whether this came through the import door, i.e. an employee who already exists rather than a
+    /// new hire. ⚠ It decides ONE thing: whether a <c>ConfirmationDate</c> may be supplied. Somebody
+    /// whose probation ended before this system existed arrives already confirmed and has no
+    /// probation record to confirm them through; a new hire has not passed a probation that has not
+    /// started. See <see cref="Entities.HR.Employee.ConfirmationDate"/>.
+    /// </param>
     private async Task<EmployeeDetailDto> CreateWithNumberAsync(
-        CreateEmployeeDto dto, string employeeNumber, CancellationToken cancellationToken)
+        CreateEmployeeDto dto, string employeeNumber, bool isImport, CancellationToken cancellationToken)
     {
         // Null when blank: email is optional, and the unique index is filtered on NOT NULL.
         var email = NormalizeEmail(dto.EmailAddress);
@@ -242,9 +410,25 @@ public class EmployeeService : IEmployeeService
             await ValidateManagerAssignmentAsync(Guid.Empty, dto.ManagerId.Value, cancellationToken);
         }
 
+        // The probation term belongs to the POST. Resolved before the entity is built, so a row is
+        // never persisted carrying a length its own position contradicts.
+        var (probationDays, probationSource) =
+            await ResolveProbationAsync(position, dto.ProbationPeriodDays, cancellationToken);
+
+        // ⚠ Confirmation is an OUTCOME, not a term. The probation confirm action writes it, against
+        // an authority and a letter. The one exception is somebody who arrives already confirmed,
+        // which is precisely what the import door means.
+        if (dto.ConfirmationDate.HasValue && !isImport)
+            throw new InvalidOperationException(
+                "A confirmation date cannot be set when hiring: it records that probation was passed, and "
+                + "the probation record is what passes it. To record an employee who was confirmed before "
+                + "this system, use the import door — tick that they already have a staff number.");
+
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
         employeeEntity.TenantId = GetTenantId();
+        employeeEntity.ProbationPeriodDays = probationDays;
+        employeeEntity.ProbationSource = probationSource;
 
         // Before the insert: State and City are written from the tree so the row is never
         // persisted with a snapshot that disagrees with its own GeoAreaId, not even briefly.
@@ -258,6 +442,13 @@ public class EmployeeService : IEmployeeService
             await _employeeRepository.AddAsync(employeeEntity);
             await _unitOfWork.SaveChangesAsync(ct);
             await EnsureInitialPositionHistoryExistsAsync(employeeEntity, ct);
+
+            // ⚠ In the SAME transaction as the employee, deliberately. An employee whose terms of
+            // employment do not exist is a record nothing can quote — no salary history, no notice
+            // period, nothing for a probation to hang off (ProbationPeriod.ContractDetailId is NOT
+            // NULL). Measured 2026-08: 4 contract rows for 2,351 employees, because the hire-from-
+            // offer path was the only writer and almost nobody arrives that way.
+            await OpenInitialContractAsync(employeeEntity, dto.ContractTypeId, ct);
         }, cancellationToken);
 
         _logger.LogInformation("Employee created: {EmployeeNumber} ({EmployeeId})", employeeEntity.EmployeeNumber, employeeEntity.Id);
@@ -270,6 +461,89 @@ public class EmployeeService : IEmployeeService
         var created = await _employeeRepository.GetByIdWithDetailsAsync(employeeEntity.Id);
         if (created == null) throw new InvalidOperationException("Employee created but could not be reloaded.");
         return created.ToDetailDto();
+    }
+
+    /// <summary>
+    /// Opens the employee's first contract — their terms of employment — and, for a permanent
+    /// appointment, the probation period that runs against it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Mirrors what the hire-from-offer path has always done
+    /// (<c>JobOfferHireService</c>), which was the only door that did it. The header supplies the
+    /// terms: employment type, start date, salary, the probation term just resolved from the post.
+    /// A contract kind, if one is named, supplies the scheduled end date from its duration.</para>
+    ///
+    /// <para>The probation row is keyed to <c>Permanent</c> because the enforcement is
+    /// (<c>ProbationService.BuildPolicy</c> sets <c>IsEnforced</c> that way): a contract or
+    /// temporary appointment is governed by its own contract terms. It is also skipped for anybody
+    /// arriving already confirmed — an imported employee who passed probation years ago does not
+    /// need one opened for them today.</para>
+    /// </remarks>
+    private async Task OpenInitialContractAsync(
+        Employee employee, Guid? contractTypeId, CancellationToken cancellationToken)
+    {
+        var start = employee.DateEmployed ?? DateOnly.FromDateTime(DateTime.UtcNow.Date);
+        var type = await ResolveContractTypeAsync(contractTypeId, cancellationToken);
+
+        var contract = new EmployeeContractDetail
+        {
+            TenantId = employee.TenantId,
+            CreatedById = employee.CreatedById,
+            EmployeeId = employee.Id,
+            ContractNumber = await _numberSequence.GenerateAsync(ContractSequenceKey, cancellationToken),
+            ContractTypeId = type?.Id,
+            EmploymentType = employee.EmploymentType,
+            StartDate = start,
+            EffectiveDate = start,
+            // Zero duration means open-ended: a permanent appointment has no scheduled end.
+            ContractEndDate = type is { Duration: > 0 } ? start.AddMonths(type.Duration) : null,
+            Salary = employee.Salary ?? 0m,
+            ProbationPeriodDays = employee.ProbationPeriodDays,
+            WorkSchedule = employee.EmploymentType == EmploymentType.PartTime
+                ? WorkArrangementType.PartTime
+                : WorkArrangementType.FullTime,
+            IsCurrent = true,
+            IsActive = true,
+            ContractStatus = ContractStatus.Active,
+            Notes = "Opened with the employee record.",
+        };
+
+        await FileContractAsync(contract, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        if (employee.EmploymentType != EmploymentType.Permanent
+            || employee.ProbationPeriodDays <= 0
+            || employee.ConfirmationDate != null)
+            return;
+
+        // Back to months, the unit ProbationPeriod counts in. At least one: a term of a few days is
+        // still a probation, and a zero-month row would end the day it began.
+        var months = Math.Max(1, (int)Math.Round(employee.ProbationPeriodDays / 30.0));
+        var probationEnd = start.AddMonths(months);
+
+        await _unitOfWork.Repository<ProbationPeriod>().AddAsync(new ProbationPeriod
+        {
+            TenantId = employee.TenantId,
+            CreatedById = employee.CreatedById,
+            EmployeeId = employee.Id,
+            ContractDetailId = contract.Id,
+            StartDate = start,
+            OriginalEndDate = probationEnd,
+            CurrentEndDate = probationEnd,
+            DurationMonths = months,
+            Status = ProbationStatus.Active,
+        });
+
+        // ⚠ Only from Active, never over a status the caller chose. Employee.IsOnProbation is
+        // computed from StaffStatus, and leaving a person with a live probation row flagged Active
+        // would tell the benefit rules they are past it. The hire path sets this the same way.
+        if (employee.StaffStatus == StaffStatus.Active)
+        {
+            employee.StaffStatus = StaffStatus.Probation;
+            await _employeeRepository.UpdateAsync(employee);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private async Task EnsureInitialPositionHistoryExistsAsync(Employee employee, CancellationToken cancellationToken)
@@ -411,11 +685,51 @@ public class EmployeeService : IEmployeeService
             (dto.PayTax ?? false) || (dto.SSFund ?? false) || (dto.GrossUp ?? false)
                 || (dto.Tier2Only ?? false) || (dto.Overtime ?? false));
 
+        // ⚠ The hole this lane closes. `EmployeeMappingExtensions.Apply` wrote
+        // `e.ConfirmationDate = dto.ConfirmationDate` with NO guard of any kind, so anybody who
+        // could edit an employee could confirm them — or un-confirm them, or move the date —
+        // bypassing the confirming authority, the probation record and the letter. The contract's
+        // own copy of the date had been guarded since lane 3d, and that guard READS this column, so
+        // the protected copy was the one nothing wrote and the authoritative one was open.
+        //
+        // Echoing the stored value back is fine: a form that round-trips the field is not asking to
+        // change it. Anything else is refused, whoever is asking.
+        if (dto.ConfirmationDate.HasValue && dto.ConfirmationDate != employee.ConfirmationDate)
+            throw new InvalidOperationException(
+                employee.ConfirmationDate is { } already
+                    ? $"This employee was confirmed on {already:yyyy-MM-dd}. The date is recorded by the "
+                      + "probation record that issued the letter, and is corrected there, not by editing "
+                      + "the employee."
+                    : "A confirmation date is recorded by confirming the employee's probation, not by "
+                      + "editing the employee. Open their probation record and confirm it there.");
+
+        // The post is the source of the probation term here too, so a position change carries the
+        // new post's term with it rather than leaving the old one behind.
+        var positionForProbation = dto.PositionId.HasValue
+            ? await _positionRepository.GetByIdAsync(dto.PositionId.Value)
+            : await _positionRepository.GetByIdAsync(employee.PositionId);
+
+        var reresolveProbation = dto.PositionId.HasValue || dto.ProbationPeriodDays.HasValue;
+        var (resolvedProbationDays, resolvedProbationSource) = reresolveProbation
+            ? await ResolveProbationAsync(positionForProbation, dto.ProbationPeriodDays, cancellationToken)
+            : (employee.ProbationPeriodDays, employee.ProbationSource ?? ProbationSource.PolicyDefault);
+
         // Track position changes for history
         var oldPositionId = employee.PositionId;
         var isPositionChanging = dto.PositionId.HasValue && dto.PositionId.Value != oldPositionId;
+        var previousEmploymentType = employee.EmploymentType;
+        var previousProbationDays = employee.ProbationPeriodDays;
 
         dto.Apply(employee, newOrgLevelId, newLocationLevelId);
+
+        // ⚠ AFTER Apply, which has just written whatever probation length the caller sent. The
+        // resolved value wins, for the same reason the geo snapshot below overwrites the caller's
+        // city: two sources for one fact, and only one of them is maintained.
+        if (reresolveProbation)
+        {
+            employee.ProbationPeriodDays = resolvedProbationDays;
+            employee.ProbationSource = resolvedProbationSource;
+        }
         // null = not supplied; "" = clear. Before 2026-09-03 an email could never be removed.
         if (dto.EmailAddress != null)
             employee.EmailAddress = NormalizeEmail(dto.EmailAddress);
@@ -428,6 +742,9 @@ public class EmployeeService : IEmployeeService
         await ApplyPayrollMembershipAsync(employee, dto, wasOnPayroll, willBeOnPayroll, cancellationToken);
 
         await _employeeRepository.UpdateAsync(employee);
+
+        await WriteThroughToCurrentContractAsync(
+            employee, previousEmploymentType, previousProbationDays, cancellationToken);
 
         // Handle position history if position changed
         if (isPositionChanging && dto.PositionId.HasValue)
@@ -586,6 +903,7 @@ public class EmployeeService : IEmployeeService
         foreach (var c in activeContracts)
         {
             c.IsActive = false;
+            c.IsCurrent = false;
             c.ContractStatus = ContractStatus.Terminated;
             c.TerminationDate = DateOnly.FromDateTime(dto.TerminationDate);
             c.TerminationReason = dto.TerminationReason;
@@ -1557,28 +1875,166 @@ public class EmployeeService : IEmployeeService
         return true;
     }
 
-    public async Task<IEnumerable<EmployeeContractDetailDto>> GetContractsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Carries a change of employment type or probation term from the employee header onto the
+    /// contract in force.
+    /// </summary>
+    /// <remarks>
+    /// <para>E-7b. Both facts live in two places — <c>Employee.EmploymentType</c> /
+    /// <c>ProbationPeriodDays</c> and the current <c>EmployeeContractDetail</c>'s own copies — and
+    /// nothing kept them in step, so a person converted from contract to permanent on the header
+    /// went on holding a contract that said otherwise.</para>
+    ///
+    /// <para><b>One direction only.</b> The header is the source; the contract's copies are a
+    /// snapshot of it. Writing back the other way would mean two editable copies of one fact and no
+    /// answer to which is right — which is the state this is fixing.</para>
+    ///
+    /// <para>⚠ The probation term is NOT copied once the employee is confirmed. It is then a record
+    /// of something that happened, with a letter issued against it — the same rule
+    /// <see cref="RequireUnconfirmedProbationAsync"/> enforces on the contract's own edit path, and
+    /// it would be pointless to guard the direct door and leave this one open.</para>
+    /// </remarks>
+    private async Task WriteThroughToCurrentContractAsync(
+        Employee employee,
+        EmploymentType previousEmploymentType,
+        int previousProbationDays,
+        CancellationToken cancellationToken)
     {
-        var repo = _unitOfWork.Repository<EmployeeContractDetail>();
-        var items = await repo.FindAsync(x => x.EmployeeId == employeeId);
-        return items.OrderByDescending(x => x.StartDate).Select(x => x.ToDto());
+        var employmentTypeChanged = employee.EmploymentType != previousEmploymentType;
+        var probationChanged = employee.ProbationPeriodDays != previousProbationDays
+                            && employee.ConfirmationDate == null;
+
+        if (!employmentTypeChanged && !probationChanged) return;
+
+        var current = await GetCurrentContractEntityAsync(employee.Id, cancellationToken);
+        if (current == null) return;
+
+        if (employmentTypeChanged) current.EmploymentType = employee.EmploymentType;
+        if (probationChanged) current.ProbationPeriodDays = employee.ProbationPeriodDays;
+
+        await _unitOfWork.Repository<EmployeeContractDetail>().UpdateAsync(current);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Contract {ContractNumber} updated from the employee header for {EmployeeNumber}.",
+            current.ContractNumber, employee.EmployeeNumber);
     }
 
+    public async Task<IEnumerable<EmployeeContractDetailDto>> GetContractsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        // Include the kind so the list can print its name rather than a bare id. Ordered on the
+        // effective date, which is what supersession runs on — StartDate can equal it on every row
+        // when a series of amendments all quote the original engagement.
+        var items = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .Include(x => x.ContractType)
+            .Where(x => x.EmployeeId == employeeId)
+            .OrderByDescending(x => x.EffectiveDate)
+            .ThenByDescending(x => x.StartDate)
+            .ToListAsync(cancellationToken);
+
+        return items.Select(x => x.ToDto());
+    }
+
+    /// <remarks>
+    /// ⚠ The terms in FORCE, which is <c>IsCurrent</c> — not the first row that happens to be
+    /// <c>IsActive</c>, which is what this returned before lane D1. With nothing maintaining either
+    /// flag, an employee with three contracts had three actives and the answer was whichever one EF
+    /// materialised first.
+    /// </remarks>
     public async Task<EmployeeContractDetailDto?> GetActiveContractAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var repo = _unitOfWork.Repository<EmployeeContractDetail>();
-        var entity = await repo.FirstOrDefaultAsync(x => x.EmployeeId == employeeId && x.IsActive);
+        var entity = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .Include(x => x.ContractType)
+            .Where(x => x.EmployeeId == employeeId && x.IsCurrent && !x.IsDeleted)
+            .OrderByDescending(x => x.EffectiveDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
         return entity?.ToDto();
+    }
+
+    /// <remarks>
+    /// <para>⚠ <b>Defect X-4.</b> This used to refuse a second contract outright — "Employee already
+    /// has an active contract" — which is the wrong answer to the commonest thing that happens to
+    /// terms of employment: they get replaced. A promotion, a conversion from contract to permanent,
+    /// a renewal all produce NEW terms, and the old ones become history rather than an obstacle. So
+    /// the refusal is gone and the previous current row is closed instead, by
+    /// <see cref="FileContractAsync"/>.</para>
+    ///
+    /// <para>Three fields the writer never set are now set: <c>EffectiveDate</c> (it inserted
+    /// <c>0001-01-01</c> on every row), <c>ContractEndDate</c> and <c>AnnualLeaveEntitlementDays</c>
+    /// — the last two because the DTO did not carry them at all.</para>
+    /// </remarks>
+    /// <inheritdoc />
+    public async Task<EmployeeContractDetailDto?> SupersedeCurrentContractAsync(
+        Guid employeeId,
+        DateOnly effectiveDate,
+        decimal? newSalary,
+        EmploymentType? newEmploymentType,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        var current = await GetCurrentContractEntityAsync(employeeId, cancellationToken);
+        if (current == null)
+        {
+            // Not an error. Most of the register predates contracts being written on create, and
+            // inventing a start date for somebody hired in 2014 would be worse than saying nothing.
+            _logger.LogInformation(
+                "Employee {EmployeeId} has no contract in force, so none was superseded.", employeeId);
+            return null;
+        }
+
+        var salaryChanged = newSalary is > 0 && newSalary.Value != current.Salary;
+        var typeChanged = newEmploymentType.HasValue && newEmploymentType.Value != current.EmploymentType;
+        if (!salaryChanged && !typeChanged) return null;
+
+        var successor = new EmployeeContractDetail
+        {
+            TenantId = current.TenantId,
+            EmployeeId = employeeId,
+            ContractNumber = await _numberSequence.GenerateAsync(ContractSequenceKey, cancellationToken),
+            ContractTypeId = current.ContractTypeId,
+            EmploymentType = newEmploymentType ?? current.EmploymentType,
+            StartDate = effectiveDate,
+            EffectiveDate = effectiveDate,
+            ContractEndDate = current.ContractEndDate,
+            Salary = salaryChanged ? newSalary!.Value : current.Salary,
+            CurrencyCode = current.CurrencyCode,
+            PayFrequency = current.PayFrequency,
+            TaxTreatmentType = current.TaxTreatmentType,
+            WithholdingTaxRate = current.WithholdingTaxRate,
+            IsPensionApplicable = current.IsPensionApplicable,
+            IsTaxExempt = current.IsTaxExempt,
+            WorkingHoursPerWeek = current.WorkingHoursPerWeek,
+            AnnualLeaveEntitlementDays = current.AnnualLeaveEntitlementDays,
+            VacationDaysPerYear = current.VacationDaysPerYear,
+            SickDaysPerYear = current.SickDaysPerYear,
+            ProbationPeriodDays = current.ProbationPeriodDays,
+            // ⚠ ConfirmationDate is deliberately NOT carried across. It is a hand-typed copy of a
+            // fact that lives on the employee, and copying it onto every successor would spread a
+            // duplicate of the one field this lane is trying to keep in a single place.
+            WorkSchedule = current.WorkSchedule,
+            Terms = current.Terms,
+            SpecialConditions = current.SpecialConditions,
+            IsCurrent = true,
+            IsActive = true,
+            ContractStatus = ContractStatus.Active,
+            Notes = reason,
+        };
+
+        await FileContractAsync(successor, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Contract {ContractNumber} opened for employee {EmployeeId}, superseding {Previous}.",
+            successor.ContractNumber, employeeId, current.ContractNumber);
+
+        return successor.ToDto();
     }
 
     public async Task<EmployeeContractDetailDto> AddContractAsync(CreateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
-
-        // One active contract rule
-        if (await HasActiveContractAsync(dto.EmployeeId, cancellationToken) && dto.IsActive && dto.ContractStatus == ContractStatus.Active)
-            throw new InvalidOperationException("Employee already has an active contract.");
 
         ValidateContractTaxRules(dto.TaxTreatmentType, dto.WithholdingTaxRate);
 
@@ -1587,15 +2043,29 @@ public class EmployeeService : IEmployeeService
         // established the pattern against Finance's master — not a second HR-side list.
         await _currencies.RequireKnownCurrencyAsync(dto.CurrencyCode, cancellationToken, optional: true);
 
-        var repo = _unitOfWork.Repository<EmployeeContractDetail>();
+        var type = await ResolveContractTypeAsync(dto.ContractTypeId, cancellationToken);
+
+        // Silence about the effective date means "when it starts", which is what every caller
+        // writing a single contract meant all along.
+        var effectiveDate = dto.EffectiveDate ?? dto.StartDate;
+
+        // A row filed as inactive or already expired is history being recorded, not the terms coming
+        // into force — so it supersedes nothing. That is the door a backfill goes through.
+        var isCurrent = dto.IsActive && dto.ContractStatus == ContractStatus.Active;
+
         var entity = new EmployeeContractDetail
         {
             EmployeeId = dto.EmployeeId,
             TenantId = GetTenantId(),
             ContractNumber = dto.ContractNumber.Trim(),
+            ContractTypeId = type?.Id,
             EmploymentType = dto.EmploymentType,
             StartDate = dto.StartDate,
+            EffectiveDate = effectiveDate,
             EndDate = dto.EndDate,
+            // The kind's duration is the default, not an override: a date the caller gave stands.
+            ContractEndDate = dto.ContractEndDate
+                              ?? (type is { Duration: > 0 } ? dto.StartDate.AddMonths(type.Duration) : null),
             Salary = dto.Salary,
             PayFrequency = dto.PayFrequency,
             TaxTreatmentType = dto.TaxTreatmentType,
@@ -1603,6 +2073,7 @@ public class EmployeeService : IEmployeeService
             IsPensionApplicable = dto.IsPensionApplicable,
             IsTaxExempt = dto.IsTaxExempt,
             WorkingHoursPerWeek = dto.WorkingHoursPerWeek,
+            AnnualLeaveEntitlementDays = dto.AnnualLeaveEntitlementDays ?? 20,
             VacationDaysPerYear = dto.VacationDaysPerYear,
             SickDaysPerYear = dto.SickDaysPerYear,
             ProbationPeriodDays = dto.ProbationPeriodDays,
@@ -1612,6 +2083,7 @@ public class EmployeeService : IEmployeeService
             SpecialConditions = dto.SpecialConditions,
             Notes = dto.Notes,
             Terms = dto.Terms,
+            IsCurrent = isCurrent,
             IsActive = dto.IsActive,
             ContractPath = dto.ContractPath,
             ContractStatus = dto.ContractStatus,
@@ -1619,9 +2091,10 @@ public class EmployeeService : IEmployeeService
             TerminationReason = dto.TerminationReason
         };
 
-        await repo.AddAsync(entity);
+        await FileContractAsync(entity, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        entity.ContractType = type;
         return entity.ToDto();
     }
 
@@ -1654,9 +2127,17 @@ public class EmployeeService : IEmployeeService
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Contract not found.");
 
+        if (!string.IsNullOrWhiteSpace(dto.ContractNumber)) entity.ContractNumber = dto.ContractNumber.Trim();
         if (dto.EmploymentType.HasValue) entity.EmploymentType = dto.EmploymentType.Value;
+        if (dto.ContractTypeId.HasValue)
+        {
+            var type = await ResolveContractTypeAsync(dto.ContractTypeId, cancellationToken);
+            entity.ContractTypeId = type?.Id;
+        }
         if (dto.StartDate.HasValue) entity.StartDate = dto.StartDate.Value;
+        if (dto.EffectiveDate.HasValue) entity.EffectiveDate = dto.EffectiveDate.Value;
         if (dto.EndDate.HasValue) entity.EndDate = dto.EndDate;
+        if (dto.ContractEndDate.HasValue) entity.ContractEndDate = dto.ContractEndDate;
         if (dto.Salary.HasValue) entity.Salary = dto.Salary.Value;
         if (dto.PayFrequency.HasValue) entity.PayFrequency = dto.PayFrequency.Value;
         if (dto.TaxTreatmentType.HasValue) entity.TaxTreatmentType = dto.TaxTreatmentType.Value;
@@ -1664,6 +2145,7 @@ public class EmployeeService : IEmployeeService
         if (dto.IsPensionApplicable.HasValue) entity.IsPensionApplicable = dto.IsPensionApplicable.Value;
         if (dto.IsTaxExempt.HasValue) entity.IsTaxExempt = dto.IsTaxExempt.Value;
         if (dto.WorkingHoursPerWeek.HasValue) entity.WorkingHoursPerWeek = dto.WorkingHoursPerWeek.Value;
+        if (dto.AnnualLeaveEntitlementDays.HasValue) entity.AnnualLeaveEntitlementDays = dto.AnnualLeaveEntitlementDays.Value;
         if (dto.VacationDaysPerYear.HasValue) entity.VacationDaysPerYear = dto.VacationDaysPerYear.Value;
         if (dto.SickDaysPerYear.HasValue) entity.SickDaysPerYear = dto.SickDaysPerYear.Value;
         // ⚠ Ledger lane 3d. Probation terms stayed editable after the employee was confirmed:
@@ -1722,10 +2204,16 @@ public class EmployeeService : IEmployeeService
         var entity = await repo.GetByIdAsync(contractId);
         if (entity == null) throw new ArgumentException("Contract not found.");
 
-        if (await HasActiveContractAsync(entity.EmployeeId, cancellationToken))
-            throw new InvalidOperationException("Employee already has an active contract.");
+        // Reinstating one row while another is in force would leave two claiming to be the terms.
+        // The way to replace terms is to add a contract, which supersedes cleanly.
+        var current = await GetCurrentContractEntityAsync(entity.EmployeeId, cancellationToken);
+        if (current != null && current.Id != entity.Id)
+            throw new InvalidOperationException(
+                $"{current.ContractNumber} is the contract in force since {current.EffectiveDate:yyyy-MM-dd}. "
+                + "Add a new contract to replace it — that closes this one — rather than reactivating an old one.");
 
         entity.IsActive = true;
+        entity.IsCurrent = true;
         entity.ContractStatus = ContractStatus.Active;
 
         await repo.UpdateAsync(entity);
@@ -1741,6 +2229,9 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException("Contract not found.");
 
         entity.IsActive = false;
+        // ⚠ Cleared together, always. Leaving IsCurrent set on a deactivated row is how a terminated
+        // contract went on being returned as the employee's current terms.
+        entity.IsCurrent = false;
         entity.ContractStatus = entity.ContractStatus == ContractStatus.Active ? ContractStatus.Expired : entity.ContractStatus;
 
         await repo.UpdateAsync(entity);
@@ -1758,6 +2249,7 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException("Contract not found.");
 
         entity.IsActive = false;
+        entity.IsCurrent = false;
         entity.ContractStatus = ContractStatus.Terminated;
         entity.TerminationDate = terminationDate;
         entity.TerminationReason = reason.Trim();
@@ -2958,6 +3450,7 @@ public class EmployeeService : IEmployeeService
         foreach (var contract in activeContracts)
         {
             contract.IsActive = false;
+            contract.IsCurrent = false;
             contract.ContractStatus = ContractStatus.Terminated;
             contract.TerminationDate = DateOnly.FromDateTime(effectiveDate);
             contract.TerminationReason = reason?.ToString();

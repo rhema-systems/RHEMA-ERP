@@ -59,6 +59,12 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     staffStatus: d.staffStatus,
     dateEmployed: d.dateEmployed ?? '',
     probationPeriodDays: d.probationPeriodDays,
+    // Shown, never sent from here: the edit form has no import mode, and the server refuses a
+    // change to the confirmation date from this path.
+    confirmationDate: d.confirmationDate ?? '',
+    // The kind belongs to the CONTRACT, not the employee, and is edited on the Contracts tab.
+    // Blank here so an edit cannot silently retype the first contract's kind.
+    contractTypeId: '',
     isFullTime: d.isFullTime,
     isOnPayroll: d.isOnPayroll ?? true,
     offPayrollReason: d.offPayrollReason ?? '',
@@ -118,10 +124,18 @@ export default function EditEmployeePage() {
     enabled: !!employee?.managerId,
   });
 
-  const handleSubmit = async (values: EmployeeFormValues) => {
+  const handleSubmit = async (
+    values: EmployeeFormValues,
+    meta: { probationIsDerived: boolean },
+  ) => {
     setSubmitting(true);
     try {
-      await employeeService.update(id, employeeFormToRequest(values));
+      // ⚠ No importMode here: the ordinary edit may not touch the confirmation date, and the
+      // server refuses it. Recording a pre-system confirmation is the import door's job.
+      await employeeService.update(
+        id,
+        employeeFormToRequest(values, { probationIsDerived: meta.probationIsDerived }),
+      );
       await queryClient.invalidateQueries({ queryKey: ['hr', 'employees'] });
       toast({ title: 'Success', description: 'Employee updated.' });
       router.push(`/hr/employees/${id}`);

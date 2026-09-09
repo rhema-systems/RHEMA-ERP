@@ -417,6 +417,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ILeaveBalanceRecalculationService, LeaveBalanceRecalculationService>();
         services.AddScoped<ILeaveEntitlementService, LeaveEntitlementService>();
         services.AddScoped<IReasonCodeService, ReasonCodeService>();
+        // Round-2 lane D1 (Q-4): the seeded contract-kind vocabulary, which had no service at all.
+        services.AddScoped<IEmployeeContractTypeService, EmployeeContractTypeService>();
         services.AddScoped<IEmployeeRelieverService, EmployeeRelieverService>();
         services.AddScoped<ILeaveYearEndService, LeaveYearEndService>();
         services.AddScoped<IEmolumentService, EmolumentService>();

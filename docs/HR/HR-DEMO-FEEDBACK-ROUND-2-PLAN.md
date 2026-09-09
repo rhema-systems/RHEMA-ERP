@@ -1,6 +1,6 @@
 # HR demo feedback, round 2 — findings, decisions and build plan
 
-> **Status: LANES A, B1, C1 and C2 BUILT 2026-09-09** (A: 88 ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 ×2, `hr-organization/run-b1.mjs`; C1: 36 ×2, `hr-jobarch/run-c1.mjs`; C2: 143 ×2, `hr-jobarch/run-c2.mjs`). Lanes B2, B3, C3, D–F planned, not built. Source: the feedback
+> **Status: LANES A, B1, C1, C2 and D1 BUILT 2026-09-09** (A: 88 ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 ×2, `hr-organization/run-b1.mjs`; C1: 36 ×2, `hr-jobarch/run-c1.mjs`; C2: 143 ×2, `hr-jobarch/run-c2.mjs`; D1: 79 ×2, `hr-probation/run-d1.mjs`). Lanes B2, B3, C3, D2, E, F planned, not built. Source: the feedback
 > document *HR Demo Meetings — Changes and Additions* (4 pages; sections Organization Structure,
 > Job Position, Skills Setup, Employee Profile), brought by the user on 2026-09-08 after the HR
 > module demo. Every bullet of that document is accounted for below — as a bug, a build item, a
@@ -237,9 +237,9 @@ Both are wiring, not schema, except the guarantor needs one nullable FK column.
 | X-1 | Position form allows the same skill on two rows; server keeps the first silently | `EmployeePositionForm.tsx:439-541` (no `takenIds`), `EmployeePositionService.cs:114-116` | C3 — the refuse rule covers it |
 | X-2 | Duplicate benefits/skills are collapsed, never refused (no DTO validation) | `EmployeePositionService.cs:130-132`, `:344` | C3 |
 | X-3 | `EmployeePositionBenefitDto.IsActive` exists with no column behind it | `HRDTOs.cs:2660` | C3 — drop the DTO field or add the column; recommend drop |
-| X-4 | `AddContractAsync` inserts `EffectiveDate = 0001-01-01`, `IsCurrent = true` always; nothing closes the previous current contract | `EmployeeService.cs:1552-1604` | D1 |
+| X-4 | ~~`AddContractAsync` inserts `EffectiveDate = 0001-01-01`, `IsCurrent = true` always; nothing closes the previous current contract~~ **FIXED D1** — one `FileContractAsync` helper every door goes through, plus a migration that repairs the `IsCurrent` every existing row wrongly claims | `EmployeeService.cs:1552-1604` | D1 ✅ |
 | X-5 | Work-history zod max (300) exceeds the column (200) | `WorkHistoryTab.tsx:20` vs `HREntities.cs:1351` | D2 |
-| X-6 | `EmployeeContractType` lookup is seeded with seven TDC rows and has no DTO, service, controller or screen | `HREntities.cs:1028-1039`, `TdcDemoLegacyOrgSeeder.cs:99-140` | D1 — either surface it as the contract-kind picker (recommended: it carries `Duration`, which drives `ContractEndDate`) or delete the seed; Q-4 |
+| X-6 | ~~`EmployeeContractType` lookup is seeded with seven TDC rows and has no DTO, service, controller or screen~~ **FIXED D1** — surfaced as the contract kind, with its own master screen | `HREntities.cs:1028-1039`, `TdcDemoLegacyOrgSeeder.cs:99-140` | D1 ✅ |
 | X-7 | Referee list DTO omits the letter fields; guarantor list DTO omits `HasPhoto` | `HRDTOs.cs:1819-1832`, `:1905-1917` | A |
 | X-8 | `GuarantorFormPath` still accepted on the JSON create — a caller-supplied path, the exact shape lane 3a-ii removed elsewhere | `HRDTOs.cs:2037-2038`, `:2098` | A — retire with the document collection |
 | X-9 | Bank reads never `Include` `Bank`/`Branch`; branch-in-bank unvalidated | `EmployeeService.cs:2353-2365`, `:2367-2416` | A |
@@ -247,6 +247,7 @@ Both are wiring, not schema, except the guarantor needs one nullable FK column.
 | X-11 | Locations require exactly one level below, units allow skipping — two rules for one idiom | `LocationStructureServices.cs:589`, `OrganizationStructureServices.cs:562` | B1 — keep both (documented), the picker reads the rule per family |
 | X-12 | `Team.CostCenterCode` and the four legacy `AccountCode` columns are the same free-text problem as O-2 | `OrganizationStructureEntities.cs:245`; `HREntities.cs:558-666` | B2 — `Team` gets the FK; the legacy four are deprecated tables and stay |
 | X-13 | Payroll upsert writes `employee.Overtime` back into HR — a second writer on an HR column | `PayrollService.cs:2385` | E — recorded for the payroll owner (§ 7.1) |
+| X-15 | **Found during the D1 build, not by the original survey.** `EmployeeMappingExtensions.Apply` wrote `Employee.ConfirmationDate` from the update DTO with **no guard**, so the ordinary employee edit could confirm, un-confirm or re-date anybody — bypassing the confirming authority, the probation record and the letter. Lane 3d guarded the CONTRACT's copy, and that guard reads this column, so the protected copy was the one nothing wrote. **FIXED D1** | `EmployeeMappingExtensions.cs:436` | D1 ✅ |
 | X-14 | Payroll's window hard-codes the salary-basis effective date to today and has no basis history/close | `employee-profiles/page.tsx:717`; `PayrollService.cs:13424` | § 7.1 |
 
 ---
@@ -366,14 +367,33 @@ Six tables, not the five the plan counted: the sweep needs its own run/dispatch 
 
 ### Lane D — Employee profile · 2 slices
 
-**D1 — Probation, confirmation, contract-on-create** (§ 6.7). Migration: `Employee.ProbationSource` (small enum or nullable bool), nothing else — the rest is behaviour.
-- [ ] Create form: probation shown as *"6 months, from the position (expected confirmation 2027-03-08)"* read-only; editable only when the position has no value (then it is the policy default with an override); `probationPeriodDays` still sent (derived).
-- [ ] `ConfirmationDate` on the Overview (read-only) and on the edit form **only in import mode** for staff already confirmed elsewhere.
-- [ ] `CreateWithNumberAsync` opens the first `EmployeeContractDetail` (number from `INumberSequenceService`, `EmploymentType`, `StartDate = DateEmployed`, `EffectiveDate`, `IsCurrent = true`, probation days, contract kind from `EmployeeContractType` if X-6 is adopted) and, for `Permanent`, the `ProbationPeriod` row — mirroring `JobOfferHireService.cs:1509-1551`.
-- [ ] `AddContractAsync` sets `EffectiveDate`/`IsCurrent`, closes the previous current row (X-4); update DTO exposes `ContractEndDate`, `AnnualLeaveEntitlementDays`.
-- [ ] Header write-through: changing `EmploymentType`/probation on the employee updates the current contract's copies (one direction only).
-- [ ] `StaffMovementService`: a movement that changes employment type or contract terms opens a new contract row and closes the old (conversion path).
-- [ ] Harness `hr-probation/run-d1.mjs`: create → one current contract + probation row; second manual contract closes the first; header change reflected; confirmation date refused from the ordinary edit path (guard already exists — assert it stays).
+**D1 — Probation, confirmation, contract-on-create** (§ 6.7). **BUILT 2026-09-09 — 79 ×2, `hr-probation/run-d1.mjs`.** Migration `20260909090940_AddProbationSourceAndContractKind`.
+- [x] Create form: probation shown read-only with its source and the expected confirmation date; editable only where the position states nothing; **`probationPeriodDays` is sent as `null` when derived**, not as the derived number — see the deviation below.
+- [x] `ConfirmationDate` on the Overview (read-only, beside the expected date) and on the create form **only in import mode**.
+- [x] `CreateWithNumberAsync` opens the first `EmployeeContractDetail` (number from `INumberSequenceService`, contract kind from `EmployeeContractType`) and, for `Permanent`, the `ProbationPeriod` row.
+- [x] `AddContractAsync` sets `EffectiveDate`/`IsCurrent` and closes the previous current row (X-4); `ContractEndDate` and `AnnualLeaveEntitlementDays` exposed on both write DTOs.
+- [x] Header write-through, one direction only, skipped once the employee is confirmed.
+- [x] `StaffMovementService` opens a contract on a **pay** change, on implement and on temporary-assignment reversal. ⚠ Employment-type conversion cannot be driven from a movement — see below.
+- [x] Q-4 adopted: `EmployeeContractType` surfaced with full CRUD, a setup screen and an `IsActive` retire flag.
+- [x] Harness `hr-probation/run-d1.mjs`, 79 assertions ×2.
+
+**What the build changed from the design.**
+
+1. **The confirmation-date guard did not exist.** This plan said "guard already exists — assert it stays". It did not: `EmployeeMappingExtensions.Apply` wrote `Employee.ConfirmationDate` straight from the update DTO with **no guard of any kind**, so anyone who could edit an employee could confirm them — bypassing the confirming authority, the probation record and the letter. Lane 3d had guarded the *contract's* copy, and that guard READS this column, so the protected copy was the one nothing wrote and the authoritative one was open. Now: refused on the ordinary create, refused on the ordinary update (echoing the stored value back is allowed, so a round-tripping form still saves), accepted on the import door only.
+2. **`CreateEmployeeDto.ProbationPeriodDays` became `int?`.** It was `int` defaulting to 90, so a caller saying nothing about probation was indistinguishable from one asking for ninety days — and 90 is nobody's term at TDC. Null now means "derive it". A value that contradicts the post is **refused with a sentence naming the post and both numbers**, not silently ignored; silent ignoring is the failure this lane exists to fix.
+3. **`ContractEndDate` and `EndDate` were given distinct meanings** rather than exposing a duplicate. `ContractEndDate` = scheduled end (defaulted from the kind's duration), `EndDate` = actual end — which is already what `TerminateContractAsync` writes into it. Same for `AnnualLeaveEntitlementDays`, which was written and read by **nothing**: it is now the contract's stated entitlement, beside `VacationDaysPerYear`, which the DTOs already exposed.
+4. **The migration is larger than "ProbationSource only"**, and its data half matters more than its schema half. `IsCurrent` defaults to `true` on the entity and **nothing has ever maintained it** — `AddContractAsync` left it at the default on every row, and both termination paths cleared `IsActive` without clearing it. So every contract row in a live database claimed to be the terms in force. Harmless while nothing read it; a terminated contract returned as somebody's current terms the moment D1 made it load-bearing. The migration clears it on deleted rows, on rows the other columns already called finished, and on all but the latest where an employee still holds several. It deliberately writes **no `EndDate`** on those rows: the closing date derives from a successor's effective date, and pre-D1 rows carry `0001-01-01` there.
+5. **The "one active contract" refusal was removed.** `AddContractAsync` refused a second contract outright, which is the wrong answer to the commonest thing that happens to terms of employment — they get replaced. Superseding closes the previous row instead. A row filed inactive or expired supersedes nothing, which is the door a backfill goes through; a current row dated *before* the one in force is refused (the lane B1 rule, for the same reason).
+6. **The employee create now sets `StaffStatus = Probation`** when it opens a probation row and the caller left the status at `Active` — mirroring the hire path. `IsOnProbation` is computed from `StaffStatus`, and a live probation row beside an `Active` status would tell the benefit rules the person is past it.
+7. **The bulk importer no longer ADDS a contract**; it names the one the create opened. Otherwise every imported employee would end with two rows, one closed the day it opened. `ContractNumber` became writable on the update DTO to make that possible.
+
+**What it found, beyond the plan.**
+
+- **`StaffMovement` has no `NewEmploymentType`.** It carries a new position, unit, location, supervisor and pay — nothing else. So a movement can open a contract on a pay change, but the contract→permanent **conversion** the feedback named cannot be driven from a movement without a schema change. Converting somebody today goes through the employment type on the employee header, which writes through. Recorded as owed, not smuggled into this lane.
+- **The movement CALL SITE is unasserted.** Getting a movement to `Implemented` needs an approval chain, employee acceptance, a handover and a checklist — a fixture several times the size of the harness. `SupersedeCurrentContractAsync` itself is covered through the manual add.
+- **`Employee.CurrentTerms` had been arbitrary.** It reads `IsCurrent`, which nothing maintained, so it returned whichever row EF materialised first.
+- Two stale harnesses in `hr-probation` were repaired: `run-lane3d.mjs` was **walking through the confirmation hole** to set up its own fixture (now uses the import door, 35/35), and its D block asserted a create contract retired by lane 3b.
+- ⚠ **`hr-employee-import`'s two suites fail on the staff-number register format** — their synthetic numbers do not match the configured `TDC/00001` pattern, so rows come back `Warning` instead of `Ready`. Pre-existing and environmental, the same root cause as `run-lane3d`'s D block; not repaired here because the fix touches that suite's own count assertions.
 
 **D2 — Geography on sub-records, relationship lookup, work history** (§ 6.8, § 6.9). Migration: geo columns on four tables, `RelationshipType` table + four nullable FKs.
 - [ ] `GeoAreaId`, `CountryId` (where absent), `City`/`Region` snapshots on `EmployeeContact`, `EmployeeEmergencyContact`, `EmployeeGuarantor`, `EmployeeWorkHistory`; `AddressFields` on their tabs; consumers registered in `GeoAreaConsumers.cs`; snapshot helper shared with `ApplyGeoAreaSnapshotAsync`.
@@ -836,7 +856,7 @@ plan and the ledger flip in the same commit as the fix.
 | Q-1 | Offer every active Finance account in the unit's account picker, or only a subset (by `AccountType`/category)? | Every active account; Finance's chart decides | B2 |
 | Q-2 | Reports-to outside the unit's ancestry: soft (filter with "show all") or hard (server refuses)? | Soft — matrix and dotted lines exist | C1 |
 | Q-3 | Move the salary amount and payroll flags off the create form onto the Salary tab, leaving only the on-payroll switch and reason? | Yes — the PDF says all remuneration lives on the Salary tab; the profile is created with no basis and reports `NoPayBasis` until the tab is filled | E1 |
-| Q-4 | Surface the dead `EmployeeContractType` lookup (seven TDC rows, with `Duration`) as the contract kind on the contract row, or delete the seed? | Surface it; `Duration` gives `ContractEndDate` a default | D1 |
+| Q-4 | ~~Surface the dead `EmployeeContractType` lookup (seven TDC rows, with `Duration`) as the contract kind on the contract row, or delete the seed?~~ **DECIDED, BUILT D1**: surfaced, with full CRUD, a *People Reference Data → Contract Types* screen and an `IsActive` retire flag (there is no delete — contracts name their kind by FK). `Duration` defaults `ContractEndDate`. | Surface it; `Duration` gives `ContractEndDate` a default | D1 ✅ |
 | Q-5 | Set members with no per-position override (a position needing a different amount for one benefit uses an individual row and therefore not the set for that benefit) — acceptable? And: should editing a set's membership refuse when a position holds a redundant individual, or allow and mark? | No override; allow and mark | C3 |
 | Q-6 | Create `Certification` catalogue rows from existing `Qualification` rows of type Certification/Licence by a one-time data pass? | Look at the real rows first; do not automate blind | C2 |
 | Q-7 | A generic checklist-template engine shared by teams, SHE, procurement and maintenance? | **No.** Four module-bound checklists already exist; a fifth generic one would be a migration project across other owners' modules. Team tasks get a flat tick list. Revisit if a second HR consumer appears | F1 |

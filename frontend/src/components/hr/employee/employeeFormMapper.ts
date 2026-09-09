@@ -17,8 +17,20 @@ const s = (v?: string | null) => (v && v.trim() ? v.trim() : null);
  * Empty strings become null; enum strings are narrowed; salary parses to a number.
  * Department/Section are intentionally not sent (deprecated; org unit is derived
  * from the selected position).
+ *
+ * @param options.probationIsDerived
+ *   True when the selected POSITION states a probation period, in which case the term is not this
+ *   form's to send. ⚠ The server refuses a `probationPeriodDays` that contradicts the position, and
+ *   the edit form loads whatever the employee currently holds — so a position change with the old
+ *   term still in the payload would be refused on a screen the user had not touched. Sending null
+ *   asks the server to derive it, which is the whole rule.
+ * @param options.importMode
+ *   True on the import door, the only path that may supply a confirmation date.
  */
-export function employeeFormToRequest(values: EmployeeFormValues): CreateEmployeeRequest {
+export function employeeFormToRequest(
+  values: EmployeeFormValues,
+  options: { probationIsDerived?: boolean; importMode?: boolean } = {},
+): CreateEmployeeRequest {
   return {
     employeeNumber: values.employeeNumber?.trim() || undefined,
     firstName: values.firstName,
@@ -56,7 +68,11 @@ export function employeeFormToRequest(values: EmployeeFormValues): CreateEmploye
     telephoneNumber: s(values.telephoneNumber),
     mobileNumber: s(values.mobileNumber),
     employmentType: values.employmentType as EmploymentType,
-    probationPeriodDays: values.probationPeriodDays,
+    contractTypeId: s(values.contractTypeId),
+    probationPeriodDays: options.probationIsDerived ? null : values.probationPeriodDays,
+    // Refused by the server on every other path — a hire has not passed a probation that has not
+    // started, and an ordinary edit is not how a confirmation is recorded.
+    confirmationDate: options.importMode ? s(values.confirmationDate) : null,
     positionId: values.positionId,
     organizationUnitId: values.organizationUnitId,
     locationId: values.locationId,

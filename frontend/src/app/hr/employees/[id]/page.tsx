@@ -38,7 +38,7 @@ import { RelieversTab } from '@/components/hr/employee/tabs/RelieversTab';
 import { TeamsTab } from '@/components/hr/employee/tabs/TeamsTab';
 import { GuarantorsTab } from '@/components/hr/employee/tabs/GuarantorsTab';
 import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
-import { offPayrollReasonLabel, PAYROLL_ISSUE_LABELS } from '@/types/hr/employee';
+import { offPayrollReasonLabel, PAYROLL_ISSUE_LABELS, PROBATION_SOURCE_LABEL } from '@/types/hr/employee';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -267,9 +267,28 @@ export default function EmployeeDetailPage() {
             <InfoRow label="Employment Type" value={e.employmentType} />
             <InfoRow label="Staff Status" value={e.staffStatus} />
             <InfoRow label="Date Employed" value={e.dateEmployed} />
-            <InfoRow label="Probation (days)" value={e.probationPeriodDays} />
+            {/* The term, and where it came from — a number with no provenance is what the demo
+                feedback asked about (E-2b). Source is null on records created before 2026-09-09. */}
+            <InfoRow
+              label="Probation (days)"
+              value={
+                e.probationPeriodDays
+                  ? `${e.probationPeriodDays}${
+                      e.probationSource ? ` — ${PROBATION_SOURCE_LABEL[e.probationSource]}` : ''
+                    }`
+                  : null
+              }
+            />
             <InfoRow label="Full-time" value={yn(e.isFullTime)} />
             <InfoRow label="On Probation" value={yn(e.isOnProbation)} />
+            {/* ⚠ Read-only, here and everywhere. It is written by confirming the probation record,
+                which is what issues the letter; the server refuses it from the employee edit. Shown
+                beside the EXPECTED date so "due" and "done" are never read as the same fact. */}
+            <InfoRow
+              label="Expected Confirmation"
+              value={e.confirmationDate ? null : e.expectedConfirmationDate}
+            />
+            <InfoRow label="Confirmed On" value={e.confirmationDate} />
           </InfoCard>
 
           <InfoCard title="Compensation & Tax">

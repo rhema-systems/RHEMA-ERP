@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.HR;
@@ -592,19 +592,45 @@ public sealed class EmployeeImportService : IEmployeeImportService
                         AssignmentReason = isUpdate ? "Updated from the employee register" : "Imported from the employee register",
                     }, cancellationToken));
 
+                // ⚠ NOT an Add any more. Since lane D1 the create opens the employee's first
+                // contract itself, so adding one here would supersede a row that was written seconds
+                // earlier and leave every imported employee with two — one closed the day it opened.
+                // The file's own contract reference, dates and salary are written ONTO that row.
                 if (resolved.Contract != null && !isUpdate)
-                    await TryChildAsync(issues, "Contract not recorded", () => _employees.AddContractAsync(new CreateEmployeeContractDetailDto
+                    await TryChildAsync(issues, "Contract not recorded", async () =>
                     {
-                        EmployeeId = employeeId,
-                        ContractNumber = Truncate(resolved.Contract.ContractNumber, 50)!,
-                        EmploymentType = resolved.Employee.EmploymentType,
-                        StartDate = resolved.Contract.StartDate,
-                        EndDate = resolved.Contract.EndDate,
-                        Salary = resolved.Contract.MonthlySalary,
-                        PayFrequency = PayFrequency.Monthly,
-                        CurrencyCode = "GHS",
-                        Notes = "Imported from the employee register",
-                    }, cancellationToken));
+                        var opened = await _employees.GetActiveContractAsync(employeeId, cancellationToken);
+
+                        if (opened == null)
+                        {
+                            await _employees.AddContractAsync(new CreateEmployeeContractDetailDto
+                            {
+                                EmployeeId = employeeId,
+                                ContractNumber = Truncate(resolved.Contract.ContractNumber, 50)!,
+                                EmploymentType = resolved.Employee.EmploymentType,
+                                StartDate = resolved.Contract.StartDate,
+                                EffectiveDate = resolved.Contract.StartDate,
+                                EndDate = resolved.Contract.EndDate,
+                                Salary = resolved.Contract.MonthlySalary,
+                                PayFrequency = PayFrequency.Monthly,
+                                CurrencyCode = "GHS",
+                                Notes = "Imported from the employee register",
+                            }, cancellationToken);
+                            return;
+                        }
+
+                        await _employees.UpdateContractAsync(new UpdateEmployeeContractDetailDto
+                        {
+                            Id = opened.Id,
+                            ContractNumber = Truncate(resolved.Contract.ContractNumber, 50),
+                            StartDate = resolved.Contract.StartDate,
+                            EffectiveDate = resolved.Contract.StartDate,
+                            ContractEndDate = resolved.Contract.EndDate,
+                            Salary = resolved.Contract.MonthlySalary,
+                            PayFrequency = PayFrequency.Monthly,
+                            Notes = "Imported from the employee register",
+                        }, cancellationToken);
+                    });
 
                 foreach (var q in resolved.Qualifications)
                     await TryChildAsync(issues, $"{q.Kind} qualification not recorded", () => _employees.AddQualificationAsync(new CreateEmployeeQualificationDto

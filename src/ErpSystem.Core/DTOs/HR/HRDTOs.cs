@@ -111,6 +111,22 @@ public class EmployeeDetailDto : EmployeeDto
     public string? BusinessNumber { get; set; }
     public string? Extension { get; set; }
     public int ProbationPeriodDays { get; set; }
+
+    /// <summary>Where the probation term came from — the post, the policy, or this person.</summary>
+    /// <remarks>Null on rows created before lane D1; the term is there, its provenance is not.</remarks>
+    public ProbationSource? ProbationSource { get; set; }
+
+    /// <summary>
+    /// When probation is due to end, i.e. <c>DateEmployed + ProbationPeriodDays</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ EXPECTED, not agreed. It is arithmetic over the term, computed on read so it cannot go
+    /// stale, and it is null when the employee has no <c>DateEmployed</c> or no probation. The
+    /// date probation was actually passed is <see cref="ConfirmationDate"/>, and nothing but the
+    /// probation confirm action writes that.
+    /// </remarks>
+    public DateOnly? ExpectedConfirmationDate { get; set; }
+
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
     public string? TaxNumber { get; set; }
@@ -252,9 +268,47 @@ public class CreateEmployeeDto
 
     // Employment Details
     public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
-    public int ProbationPeriodDays { get; set; } = 90;
+
+    /// <summary>
+    /// The probation term, in days. <b>Leave it null and the server derives it</b> from the
+    /// position, falling back to the company policy default.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Nullable since lane D1, and that is the point of the change. It was <c>int</c> with
+    /// a default of 90, so a caller that said nothing about probation was indistinguishable from
+    /// one that asked for ninety days — and 90 is not TDC's number for anybody (junior posts run
+    /// three months, senior and management six). The register's own positions carry the term, 123
+    /// of 146 of them, and every create was quietly overwriting it with a form default.</para>
+    ///
+    /// <para>A value supplied against a position that states its own is REFUSED, not silently
+    /// ignored: the caller is told which post it is and what the post says. Where the position is
+    /// silent, a supplied value stands and is recorded as <c>ProbationSource.Override</c>.</para>
+    /// </remarks>
+    public int? ProbationPeriodDays { get; set; }
+
+    /// <summary>
+    /// The date probation was passed. <b>Accepted on the IMPORT path only.</b>
+    /// </summary>
+    /// <remarks>
+    /// ⚠ For staff whose probation ended before this system existed and who arrive already
+    /// confirmed. The ordinary create refuses it with a sentence — a new hire has not passed a
+    /// probation that has not started, and confirmation is an outcome the probation record records,
+    /// with a letter behind it.
+    /// </remarks>
     public DateOnly? ConfirmationDate { get; set; }
+
     public DateOnly? RetirementDate { get; set; }
+
+    /// <summary>
+    /// Which kind of engagement the employee's first contract is, from the tenant's contract-type
+    /// list. Optional — a tenant that keeps no such list names no kind.
+    /// </summary>
+    /// <remarks>
+    /// The create opens the employee's first <c>EmployeeContractDetail</c> (E-7a), and the kind is
+    /// part of the terms it records: it is what the appointment letter says, and its duration is
+    /// what gives a fixed-term contract its end date.
+    /// </remarks>
+    public Guid? ContractTypeId { get; set; }
 
     [Required]
     public Guid DepartmentId { get; set; }
@@ -1023,8 +1077,29 @@ public class EmployeeContractDetailDto
     public Guid EmployeeId { get; set; }
     public string ContractNumber { get; set; } = string.Empty;
     public EmploymentType EmploymentType { get; set; }
+
+    /// <summary>The tenant's own name for this kind of engagement, and its id.</summary>
+    public Guid? ContractTypeId { get; set; }
+    public string? ContractTypeName { get; set; }
+
     public DateOnly StartDate { get; set; }
+
+    /// <summary>The day these terms took effect. Ordering and supersession run on it.</summary>
+    /// <remarks>
+    /// ⚠ Reads <c>0001-01-01</c> on every row the manual tab added before lane D1 — the writer
+    /// never set it. Rows created since carry the start date when nothing else was said.
+    /// </remarks>
+    public DateOnly EffectiveDate { get; set; }
+
+    /// <summary>When the engagement actually ended. Null while it is running.</summary>
     public DateOnly? EndDate { get; set; }
+
+    /// <summary>When the engagement is scheduled to end. Null for permanent employment.</summary>
+    public DateOnly? ContractEndDate { get; set; }
+
+    /// <summary>Whether these are the terms in force today. At most one per employee.</summary>
+    public bool IsCurrent { get; set; }
+
     public decimal Salary { get; set; }
     public string PayFrequency { get; set; } = string.Empty;
     public PayFrequency? PayFrequencyType { get; set; }
@@ -1039,6 +1114,10 @@ public class EmployeeContractDetailDto
 
     public ContractStatus? ContractStatus { get; set; }
     public int WorkingHoursPerWeek { get; set; }
+
+    /// <summary>The annual leave this contract grants, as the contract states it.</summary>
+    public int AnnualLeaveEntitlementDays { get; set; }
+
     public int VacationDaysPerYear { get; set; }
     public int SickDaysPerYear { get; set; }
 
@@ -1093,8 +1172,23 @@ public class CreateEmployeeContractDetailDto
 
     public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
 
+    /// <summary>Which kind of engagement, from the tenant's contract-type list. Optional.</summary>
+    /// <remarks>
+    /// Naming one with no <see cref="ContractEndDate"/> supplied defaults the end date from the
+    /// kind's duration; a kind whose duration is zero is open-ended and defaults nothing.
+    /// </remarks>
+    public Guid? ContractTypeId { get; set; }
+
     public DateOnly StartDate { get; set; }
+
+    /// <summary>The day these terms take effect. Defaults to <see cref="StartDate"/>.</summary>
+    public DateOnly? EffectiveDate { get; set; }
+
+    /// <summary>When the engagement actually ended — normally left null on a new contract.</summary>
     public DateOnly? EndDate { get; set; }
+
+    /// <summary>When the engagement is scheduled to end. Null for permanent employment.</summary>
+    public DateOnly? ContractEndDate { get; set; }
 
     public decimal Salary { get; set; }
 
@@ -1109,6 +1203,11 @@ public class CreateEmployeeContractDetailDto
     public bool IsTaxExempt { get; set; } = false;
 
     public int WorkingHoursPerWeek { get; set; } = 40;
+
+    /// <summary>The annual leave this contract grants. Defaults to 20 on the entity.</summary>
+    [Range(0, 365)]
+    public int? AnnualLeaveEntitlementDays { get; set; }
+
     public int VacationDaysPerYear { get; set; } = 15;
     public int SickDaysPerYear { get; set; } = 10;
     public int? ProbationPeriodDays { get; set; }
@@ -1149,9 +1248,34 @@ public class UpdateEmployeeContractDetailDto
     [Required]
     public Guid Id { get; set; }
 
+    /// <summary>The contract's reference. Correctable since lane D1.</summary>
+    /// <remarks>
+    /// ⚠ It had to become writable because the create now OPENS a contract and numbers it from the
+    /// sequence — so a load carrying the organisation's own reference for that engagement has to be
+    /// able to put it on the row that exists, rather than adding a second one to hold it.
+    /// </remarks>
+    [MaxLength(50)]
+    public string? ContractNumber { get; set; }
+
     public EmploymentType? EmploymentType { get; set; }
+
+    /// <summary>Which kind of engagement, from the tenant's contract-type list.</summary>
+    public Guid? ContractTypeId { get; set; }
+
     public DateOnly? StartDate { get; set; }
+
+    /// <summary>The day these terms take effect.</summary>
+    public DateOnly? EffectiveDate { get; set; }
+
     public DateOnly? EndDate { get; set; }
+
+    /// <summary>When the engagement is scheduled to end. Null for permanent employment.</summary>
+    /// <remarks>
+    /// ⚠ Was on the entity and on no write DTO before lane D1, so the only rows that ever carried
+    /// a scheduled end were the ones the hire-from-offer path wrote.
+    /// </remarks>
+    public DateOnly? ContractEndDate { get; set; }
+
     public decimal? Salary { get; set; }
     public PayFrequency? PayFrequency { get; set; }
     public TaxTreatmentType? TaxTreatmentType { get; set; }
@@ -1162,6 +1286,15 @@ public class UpdateEmployeeContractDetailDto
     public bool? IsPensionApplicable { get; set; }
     public bool? IsTaxExempt { get; set; }
     public int? WorkingHoursPerWeek { get; set; }
+
+    /// <summary>The annual leave this contract grants.</summary>
+    /// <remarks>
+    /// ⚠ Was reachable from nowhere at all before lane D1 — no writer, no reader, a default of 20
+    /// beside <c>VacationDaysPerYear</c>'s 15.
+    /// </remarks>
+    [Range(0, 365)]
+    public int? AnnualLeaveEntitlementDays { get; set; }
+
     public int? VacationDaysPerYear { get; set; }
     public int? SickDaysPerYear { get; set; }
     public int? ProbationPeriodDays { get; set; }

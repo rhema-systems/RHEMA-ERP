@@ -17,6 +17,7 @@ import {
   CreditCard,
   Database,
   DollarSign,
+  FileSignature,
   DoorOpen,
   Fingerprint,
   Flag,
@@ -274,6 +275,16 @@ export const hrSetupGroups: HrSetupGroup[] = [
         href: '/administration/hr/certifications',
         icon: BadgeCheck,
         description: 'The credentials each certifying body issues — what skills, positions and people cite.',
+      },
+      {
+        // Round 2, lane D1 (Q-4). Seeded with TDC's seven kinds in 2026 and reachable from nowhere
+        // until now — and its duration is what dates a fixed-term contract's end, so it is not
+        // decoration.
+        title: 'Contract Types',
+        href: '/administration/hr/contract-types',
+        icon: FileSignature,
+        description:
+          'The kinds of engagement contracts are written under — and how long each normally runs.',
       },
       {
         title: 'Identification Types',

@@ -470,9 +470,23 @@ export interface EmployeeContract {
   employeeId: string;
   contractNumber: string;
   employmentType: EmploymentType;
+  /** The tenant's own name for this kind of engagement. Not the same axis as employmentType. */
+  contractTypeId?: string | null;
+  contractTypeName?: string | null;
   /** DateOnly */
   startDate: string;
+  /**
+   * The day these terms took effect — what the list is ordered on and what supersession runs on.
+   *
+   * ⚠ Reads `0001-01-01` on rows added through this tab before 2026-09-09: the writer never set it.
+   */
+  effectiveDate: string;
+  /** When the engagement ACTUALLY ended. Null while it is running. */
   endDate?: string | null;
+  /** When the engagement is SCHEDULED to end. Null for permanent employment. */
+  contractEndDate?: string | null;
+  /** Whether these are the terms in force today. At most one contract per employee carries it. */
+  isCurrent: boolean;
   salary: number;
   payFrequency: string;
   payFrequencyType?: PayFrequency | null;
@@ -482,6 +496,8 @@ export interface EmployeeContract {
   isTaxExempt?: boolean | null;
   contractStatus?: ContractStatus | null;
   workingHoursPerWeek: number;
+  /** The annual leave the contract grants. Reachable from nowhere at all before 2026-09-09. */
+  annualLeaveEntitlementDays: number;
   vacationDaysPerYear: number;
   sickDaysPerYear: number;
   /**
@@ -519,8 +535,13 @@ export interface CreateEmployeeContractRequest {
   employeeId: string;
   contractNumber: string;
   employmentType: EmploymentType;
+  contractTypeId?: string | null;
   startDate: string;
+  /** Defaults to `startDate` when omitted. */
+  effectiveDate?: string | null;
   endDate?: string | null;
+  /** Defaults from the contract type's duration when a kind is named and no date is given. */
+  contractEndDate?: string | null;
   salary: number;
   payFrequency: PayFrequency;
   taxTreatmentType: TaxTreatmentType;
@@ -528,6 +549,7 @@ export interface CreateEmployeeContractRequest {
   isPensionApplicable: boolean;
   isTaxExempt: boolean;
   workingHoursPerWeek: number;
+  annualLeaveEntitlementDays?: number | null;
   vacationDaysPerYear: number;
   sickDaysPerYear: number;
   probationPeriodDays?: number | null;

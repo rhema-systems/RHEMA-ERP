@@ -124,6 +124,12 @@ public static class EmployeeMappingExtensions
             BusinessNumber = e.BusinessNumber,
             Extension = e.Extension,
             ProbationPeriodDays = e.ProbationPeriodDays,
+            ProbationSource = e.ProbationSource,
+            // Computed on read so it cannot go stale behind a change of hire date or term. Null
+            // where there is nothing to compute from — an employee with no start date, or none.
+            ExpectedConfirmationDate = e.DateEmployed is { } hired && e.ProbationPeriodDays > 0
+                ? hired.AddDays(e.ProbationPeriodDays)
+                : null,
             ConfirmationDate = e.ConfirmationDate,
             RetirementDate = e.RetirementDate,
             TaxNumber = e.TaxNumber,
@@ -246,6 +252,8 @@ public static class EmployeeMappingExtensions
         to.BusinessNumber = from.BusinessNumber;
         to.Extension = from.Extension;
         to.ProbationPeriodDays = from.ProbationPeriodDays;
+        to.ProbationSource = from.ProbationSource;
+        to.ExpectedConfirmationDate = from.ExpectedConfirmationDate;
         to.ConfirmationDate = from.ConfirmationDate;
         to.RetirementDate = from.RetirementDate;
         to.TaxNumber = from.TaxNumber;
@@ -341,7 +349,10 @@ public static class EmployeeMappingExtensions
             Extension = dto.Extension,
 
             EmploymentType = dto.EmploymentType,
-            ProbationPeriodDays = dto.ProbationPeriodDays,
+            // ⚠ A placeholder, overwritten by the caller. The term is settled against the POSITION
+            // (EmployeeService.ResolveProbationAsync), which this mapper cannot see; the entity's
+            // own default stands in only so the property is never left unassigned.
+            ProbationPeriodDays = dto.ProbationPeriodDays ?? 90,
             ConfirmationDate = dto.ConfirmationDate,
             RetirementDate = dto.RetirementDate,
 
@@ -890,8 +901,14 @@ public static class EmployeeMappingExtensions
             EmployeeId = c.EmployeeId,
             ContractNumber = c.ContractNumber,
             EmploymentType = c.EmploymentType,
+            ContractTypeId = c.ContractTypeId,
+            // Null unless the caller Included it — the list and single reads both do.
+            ContractTypeName = c.ContractType?.Name,
             StartDate = c.StartDate,
+            EffectiveDate = c.EffectiveDate,
             EndDate = c.EndDate,
+            ContractEndDate = c.ContractEndDate,
+            IsCurrent = c.IsCurrent,
             Salary = c.Salary,
             PayFrequency = c.PayFrequency.ToString(),
             PayFrequencyType = c.PayFrequency,
@@ -900,6 +917,7 @@ public static class EmployeeMappingExtensions
             IsPensionApplicable = c.IsPensionApplicable,
             IsTaxExempt = c.IsTaxExempt,
             WorkingHoursPerWeek = c.WorkingHoursPerWeek,
+            AnnualLeaveEntitlementDays = c.AnnualLeaveEntitlementDays,
             VacationDaysPerYear = c.VacationDaysPerYear,
             SickDaysPerYear = c.SickDaysPerYear,
             ProbationPeriodDays = c.ProbationPeriodDays,

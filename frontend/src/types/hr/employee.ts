@@ -212,6 +212,20 @@ export interface EmployeeDetail extends Employee {
   businessNumber?: string | null;
   extension?: string | null;
   probationPeriodDays: number;
+  /** Where the term came from. Null on records created before 2026-09-09. */
+  probationSource?: ProbationSource | null;
+  /**
+   * When probation is DUE to end — hire date plus the term, computed by the server on every read.
+   * Not the same thing as `confirmationDate`, which is when it was actually passed.
+   */
+  expectedConfirmationDate?: string | null;
+  /**
+   * The date probation was passed.
+   *
+   * ⚠ Read-only everywhere but the import form. The server refuses a change to it from the
+   * ordinary employee update — it is written by confirming the probation record, which is what
+   * issues the letter.
+   */
   confirmationDate?: string | null;
   retirementDate?: string | null;
   taxNumber?: string | null;
@@ -235,6 +249,20 @@ export interface EmployeeDetail extends Employee {
   terminationNotes?: string | null;
   isOnProbation: boolean;
 }
+
+/**
+ * Where an employee's probation term came from.
+ *
+ * The position is the source and the company policy default is the fallback — the same resolution
+ * the probation policy read has always used. `Override` only happens where the position is silent.
+ */
+export type ProbationSource = 'Position' | 'PolicyDefault' | 'Override';
+
+export const PROBATION_SOURCE_LABEL: Record<ProbationSource, string> = {
+  Position: 'from the position',
+  PolicyDefault: 'the company default',
+  Override: 'set for this employee',
+};
 
 // --- Create / Update requests (Department & Section intentionally omitted) ---
 export interface CreateEmployeeRequest {
@@ -280,7 +308,21 @@ export interface CreateEmployeeRequest {
   telephoneNumber?: string | null;
   mobileNumber?: string | null;
   employmentType: EmploymentType;
-  probationPeriodDays: number;
+  /**
+   * Which kind of engagement the first contract is, from the tenant's contract-type list.
+   * Optional; its duration gives a fixed-term contract its end date.
+   */
+  contractTypeId?: string | null;
+  /**
+   * The probation term in days.
+   *
+   * ⚠ Send `null` and the server derives it from the position, falling back to the company policy
+   * default. A value sent against a position that states its own term is REFUSED — the form only
+   * sends one where the position is silent.
+   */
+  probationPeriodDays?: number | null;
+  /** Accepted on the IMPORT path only: someone confirmed before this system existed. */
+  confirmationDate?: string | null;
   positionId: string;
   organizationUnitId: string; // derived from the selected position
   locationId: string; // required by the service

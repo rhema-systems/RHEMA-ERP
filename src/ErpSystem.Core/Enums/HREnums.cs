@@ -237,6 +237,31 @@ public enum ContractStatus
     Terminated = 3
 }
 
+/// <summary>
+/// Where an employee's probation term came from, recorded so a screen can say it rather than
+/// present a number with no provenance.
+/// </summary>
+/// <remarks>
+/// <para>⚠ Null on every row that predates lane D1 (2026-09-09), and that is the honest answer:
+/// those terms were typed into a free field and nobody knows whether they agreed with the post.
+/// A default of <see cref="Position"/> would have claimed a provenance the data does not have.</para>
+///
+/// <para>The term itself is resolved the way <c>ProbationService.BuildPolicy</c> already resolved
+/// it — the position first, the company policy default second — so this records a decision the
+/// system was already making silently.</para>
+/// </remarks>
+public enum ProbationSource
+{
+    /// <summary>Taken from <c>EmployeePosition.ProbationPeriodMonths</c> — the normal case.</summary>
+    Position = 1,
+
+    /// <summary>The position is silent, so <c>CompanyHrPolicySettings.DefaultProbationMonths</c> applied.</summary>
+    PolicyDefault = 2,
+
+    /// <summary>Neither: a length was supplied for this person, against a silent position.</summary>
+    Override = 3
+}
+
 public enum DependentRelationship
 {
     Spouse = 1,

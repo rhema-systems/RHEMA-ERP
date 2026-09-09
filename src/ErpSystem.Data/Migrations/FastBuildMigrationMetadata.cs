@@ -304,3 +304,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909004030_AddGuarantorIdTypeAndDocuments")] partial class AddGuarantorIdTypeAndDocuments { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909013533_AddOrganizationUnitHistoryNotes")] partial class AddOrganizationUnitHistoryNotes { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909071641_AddCertificationModel")] partial class AddCertificationModel { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260909090940_AddProbationSourceAndContractKind")] partial class AddProbationSourceAndContractKind { }
