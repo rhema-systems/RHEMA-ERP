@@ -1023,6 +1023,14 @@ solution build and EF/model/migration/script/scope gates passed, and configured 
 Independent Sol High accounting/security/concurrency review is active; integration and Sales reissue remain
 gated on approval.
 
+C12 independent Sol High review returned `CHANGES_REQUIRED` at exact clean `81abcfac` for one P2 evidence-
+packaging defect only. Production authority was accepted: the public Core contract remains book-blind, has no
+HTTP execution surface, resolves to the same scoped Finance service and preserves the established C7/C10
+enabled-state, immutable evidence, receipt, ambient Serializable transaction and tracker-clean failure gates.
+The new Core contract test was omitted from normal discovery because `ErpSystem.Core.Tests.csproj` disables
+default compile items. A narrow correction is active to add the explicit compile include and prove ordinary
+test discovery; integration and Sales remain gated. No database or migration was touched.
+
 Stage B2 Inventory is activated from fresh exact base `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` in clean worktree
 `RHEMA-ERP-inventory-accounting-event-c8` on branch `codex/inventory-accounting-event-cutover-c8`. The authorized
 bounded conversion must preserve the disposal-proceeds/recovery and Stock Adjustment valuation postings as two
