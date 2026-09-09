@@ -212,11 +212,13 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             });
         var intents = new Mock<IFinanceProducerIntentService>();
         var groupExecution = new Mock<IFinanceProducerIntentGroupApprovedExecution>();
+        Func<FinanceProducerIntentGroupApprovedExecutionResult,
+            FinanceProducerIntentGroupApprovedExecutionResult> compatibilityDecorator = value => value;
         groupExecution.Setup(value => value.ExecuteWithCompatibilityResultInAmbientTransactionAsync(It.IsAny<Guid>(), It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid groupId, ProducerIntentGroupRequestDto request, ProducerOwnerEffectReceiptDto _, CancellationToken _) =>
-                new FinanceProducerIntentGroupApprovedExecutionResult(groupId, "E2E-GROUP", "Posted",
+                compatibilityDecorator(new FinanceProducerIntentGroupApprovedExecutionResult(groupId, "E2E-GROUP", "Posted",
                 [new FinanceProducerIntentGroupMemberExecutionResult(1, "P", request.Members[0].AccountingEventId!.Value, "P", postingEventId, journalEntryId),
-                 new FinanceProducerIntentGroupMemberExecutionResult(2, "V", request.Members[1].AccountingEventId!.Value, "V", adjustmentPostingEventId, adjustmentJournalId)]));
+                 new FinanceProducerIntentGroupMemberExecutionResult(2, "V", request.Members[1].AccountingEventId!.Value, "V", adjustmentPostingEventId, adjustmentJournalId)])));
         var intentExecution = new Mock<IFinanceProducerApprovedExecution>();
         var controlEventRequests = new List<ProcurementControlEventWriteRequest>();
         var controlEvents = new Mock<IProcurementControlEventService>();
@@ -326,12 +328,39 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             ]
         });
         current.UserId = completionId;
-        var completed = await service.CompleteAsync(identified.Id, new CompleteInventoryDisposalRequest
+        var completionRequest = new CompleteInventoryDisposalRequest
         {
             RowVersion = staged.RowVersion,
             IdempotencyKey = "e2e-013-complete",
             Comment = "Independently approve and post the linked stock adjustment and proceeds."
-        });
+        };
+        var corruptions = new Func<FinanceProducerIntentGroupApprovedExecutionResult,
+            FinanceProducerIntentGroupApprovedExecutionResult>[]
+        {
+            value => value with { ProducerIntentGroupId = Guid.NewGuid() },
+            value => value with { GroupFingerprint = "WRONG" },
+            value => value with { Members = [value.Members[0]] },
+            value => value with { Members = [value.Members[0], value.Members[0]] },
+            value => value with { Members = [value.Members[1], value.Members[0]] },
+            value => value with { Members = [value.Members[0] with { AccountingEventId = Guid.NewGuid() }, value.Members[1]] },
+            value => value with { Members = [value.Members[0] with { MemberFingerprint = "WRONG" }, value.Members[1]] },
+            value => value with { Members = [value.Members[0] with { AccountingEventRequestFingerprint = "WRONG" }, value.Members[1]] },
+            value => value with { Members = [value.Members[0] with { FinancePostingEventId = Guid.Empty }, value.Members[1]] },
+            value => value with { Members = [value.Members[0], value.Members[1] with { JournalEntryId = Guid.Empty }] }
+        };
+        var stagedActionCount = staged.Actions.Count;
+        foreach (var corrupt in corruptions)
+        {
+            compatibilityDecorator = corrupt;
+            await FluentActions.Awaiting(() => service.CompleteAsync(identified.Id, completionRequest)).Should()
+                .ThrowAsync<InvalidOperationException>().WithMessage("INV_DISPOSAL_FINANCE_COMPATIBILITY_INVALID*");
+            var unchanged = await service.GetByIdAsync(identified.Id);
+            unchanged.Status.Should().Be(InventoryDisposalStatus.AdjustmentPending);
+            unchanged.Actions.Should().HaveCount(stagedActionCount);
+            unchanged.StockAdjustmentId.Should().Be(staged.StockAdjustmentId);
+        }
+        compatibilityDecorator = value => value;
+        var completed = await service.CompleteAsync(identified.Id, completionRequest);
 
         completed.Status.Should().Be(InventoryDisposalStatus.Completed);
         completed.StockAdjustmentId.Should().NotBeNull();
