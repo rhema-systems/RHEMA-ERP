@@ -2536,6 +2536,8 @@ public class EmployeeService : IEmployeeService
 
         if (dto.EffectiveDate == default) throw new ArgumentException("EffectiveDate is required.");
 
+        dto.LevelId = await ResolvePlacementLevelAsync(dto.GradeId, dto.LevelId, dto.NotchId, cancellationToken);
+
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
         var entity = dto.ToEntity();
         // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
@@ -2582,6 +2584,9 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException("Salary assignment not found.");
         await RequireOnPayrollAsync(entity.EmployeeId, cancellationToken);
         await RequireOnScaleAsync(entity.EmployeeId, cancellationToken);
+
+        dto.LevelId = await ResolvePlacementLevelAsync(
+            dto.GradeId ?? entity.GradeId, dto.LevelId, dto.NotchId, cancellationToken);
 
         dto.Apply(entity);
         await repo.UpdateAsync(entity);
@@ -3344,6 +3349,61 @@ public class EmployeeService : IEmployeeService
 
         var reloaded = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
         return (reloaded ?? employee).ToDetailDto();
+    }
+
+    /// <summary>
+    /// Settles the level a placement sits on, so a caller never has to know whether the level tier
+    /// is real or implicit.
+    /// </summary>
+    /// <remarks>
+    /// <para>Lane G. A notch names its level, so a notch always wins and a level that disagrees with
+    /// it is a contradiction, not a choice. With no notch: in a two-tier structure the grade's one
+    /// implicit level is filled in, because the caller cannot see it and should not have to; in
+    /// three-tier a supplied level is checked against the grade and an omitted one stays null — a
+    /// placement on the grade alone is allowed, as it always was.</para>
+    /// <para>⚠ The hire-from-offer and staff-movement paths write placements directly and are NOT
+    /// routed through this. A notch-bearing placement from either still resolves its pay through the
+    /// notch (HrBasicPay reads the notch before the level), so nothing is mis-paid; the level column
+    /// is simply left as the caller set it. Recorded, not hidden.</para>
+    /// </remarks>
+    private async Task<Guid?> ResolvePlacementLevelAsync(
+        Guid gradeId, Guid? levelId, Guid? notchId, CancellationToken cancellationToken)
+    {
+        if (notchId is { } nId)
+        {
+            var notch = await _unitOfWork.Repository<SalaryNotch>().GetQueryable()
+                .Include(n => n.Level)
+                .FirstOrDefaultAsync(n => n.Id == nId && !n.IsDeleted, cancellationToken)
+                ?? throw new ArgumentException("Salary notch not found.");
+
+            if (notch.Level.SalaryGradeId != gradeId)
+                throw new InvalidOperationException(
+                    $"Notch {notch.NotchNumber} belongs to a different grade from the one chosen. Pick a notch of that grade.");
+
+            if (levelId.HasValue && levelId.Value != notch.SalaryLevelId)
+                throw new InvalidOperationException(
+                    $"Notch {notch.NotchNumber} sits on level {notch.Level.Code}, not on the level chosen. A notch names its level; pick one or the other.");
+
+            return notch.SalaryLevelId;
+        }
+
+        var levels = await _unitOfWork.Repository<SalaryLevel>().GetQueryable()
+            .Where(l => l.SalaryGradeId == gradeId && !l.IsDeleted && l.IsActive)
+            .Select(l => new { l.Id, l.Code })
+            .ToListAsync(cancellationToken);
+
+        if (levelId is { } lId)
+        {
+            if (levels.All(l => l.Id != lId))
+                throw new InvalidOperationException("The level chosen does not belong to the grade chosen.");
+            return lId;
+        }
+
+        var settings = await _policySettings.GetAsync(cancellationToken);
+        if (settings.SalaryStructureTiers == SalaryStructureTiers.GradeAndNotch && levels.Count == 1)
+            return levels[0].Id;
+
+        return null;
     }
 
     /// <summary>The scale gate: a placement on the grade structure contradicts a negotiated salary.</summary>

@@ -22,6 +22,10 @@ import {
 import { policySettingsService } from '@/services/hr/policy-settings.service';
 import {
   ENFORCEMENT_MODES,
+  SALARY_STRUCTURE_SOURCES,
+  SALARY_STRUCTURE_TIERS,
+  type SalaryStructureSource,
+  type SalaryStructureTiers,
   FISCAL_YEAR_MONTHS,
   type BudgetEnforcementMode,
 } from '@/types/hr/policy-settings';
@@ -85,6 +89,8 @@ const schema = z
 
     budgetEnforcementMode: z.string(),
     establishmentEnforcementMode: z.string(),
+    salaryStructureTiers: z.string(),
+    salaryStructureSource: z.string(),
 
     fitWeightPerformance: z.coerce.number().int().min(0).max(100),
     fitWeightCompetency: z.coerce.number().int().min(0).max(100),
@@ -169,6 +175,8 @@ export default function PolicySettingsPage() {
 
       budgetEnforcementMode: data.budgetEnforcementMode,
       establishmentEnforcementMode: data.establishmentEnforcementMode,
+      salaryStructureTiers: data.salaryStructureTiers ?? 'GradeAndNotch',
+      salaryStructureSource: data.salaryStructureSource ?? 'Payroll',
 
       fitWeightPerformance: data.fitWeightPerformance,
       fitWeightCompetency: data.fitWeightCompetency,
@@ -230,6 +238,8 @@ export default function PolicySettingsPage() {
 
         budgetEnforcementMode: v.budgetEnforcementMode as BudgetEnforcementMode,
         establishmentEnforcementMode: v.establishmentEnforcementMode as BudgetEnforcementMode,
+        salaryStructureTiers: v.salaryStructureTiers as SalaryStructureTiers,
+        salaryStructureSource: v.salaryStructureSource as SalaryStructureSource,
 
         fitWeightPerformance: Number(v.fitWeightPerformance),
         fitWeightCompetency: Number(v.fitWeightCompetency),
@@ -402,6 +412,46 @@ export default function PolicySettingsPage() {
               HR and the Managing Director — so it blocks, because warning about exceeding something
               three people authorised would make the authorisation pointless. A position nobody has
               established is never constrained, whatever these are set to.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Salary structure</CardTitle>
+            <CardDescription>
+              How many tiers the salary scale has, and who maintains it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FieldRow>
+              <SelectField
+                form={form}
+                name="salaryStructureTiers"
+                label="Tiers"
+                options={SALARY_STRUCTURE_TIERS}
+                required
+              />
+              <SelectField
+                form={form}
+                name="salaryStructureSource"
+                label="Maintained in"
+                options={SALARY_STRUCTURE_SOURCES}
+                required
+              />
+            </FieldRow>
+            <p className="text-sm text-muted-foreground">
+              Two-tier places a person on a grade and a notch; three-tier puts a level between them.
+              The setting changes what the screens ask for and what a placement needs — the scale
+              itself is stored the same way in both cases, with a two-tier grade carrying one
+              implicit level nobody sees.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              <strong>Payroll has no level tier</strong>, so three-tier is refused while Payroll is the
+              source. Switching back to two-tier is refused while any grade holds more than one
+              level — which notches survive is a decision, not something to collapse silently.
+              Moving the source from HR back to Payroll makes payroll&apos;s rows overwrite HR&apos;s
+              on the next read wherever the grade codes match.
             </p>
           </CardContent>
         </Card>

@@ -5713,6 +5713,53 @@ public enum CompanyLegalForm
 /// <c>CompanyHrPolicySettings</c>. Enforcement only ever applies when a budget line actually
 /// exists for the requisition's position — an unbudgeted position is never blocked.
 /// </summary>
+/// <summary>
+/// How many tiers the tenant's salary scale has. Decides what screens show and what a placement
+/// needs; it does not change the schema.
+/// </summary>
+/// <remarks>
+/// <para>HR's tables are three-tier (grade → level → notch) with a notch required to hang off a
+/// level. A two-tier scale is represented losslessly as a grade with exactly ONE level, and that is
+/// what the payroll projection has synthesised since lane 3a — so two-tier is the schema's
+/// degenerate case, not a second schema. This setting says which case the tenant is in, so the
+/// level step can be hidden where it is a phantom and required where it is real.</para>
+/// <para>Lane G (salary structure tiers and source), 2026-09-09.</para>
+/// </remarks>
+public enum SalaryStructureTiers
+{
+    /// <summary>Grade → notch. Each grade has one implicit level, never shown, resolved server-side.</summary>
+    [Description("Two-tier: grade and notch")]
+    GradeAndNotch = 2,
+
+    /// <summary>Grade → level → notch. The level is a real band within the grade and is chosen.</summary>
+    [Description("Three-tier: grade, level and notch")]
+    GradeLevelAndNotch = 3,
+}
+
+/// <summary>
+/// Who maintains the tenant's salary scale — the payroll module, or HR itself.
+/// </summary>
+/// <remarks>
+/// <para><b>Payroll</b> is the standing decision of 2026-08-02: payroll's grades and notches are the
+/// source of truth and HR mirrors them by projection; HR's own structure writes answer 409. Payroll
+/// is two-tier and has no level concept, so a tenant on this source cannot be three-tier — the
+/// switch is refused with a sentence, and a level tier in payroll is recorded as an ask to the
+/// payroll owner (round-2 plan § 7.1).</para>
+/// <para><b>Hr</b> is the option decided 2026-09-09 for tenants that do not run this payroll
+/// module: the projection stops, HR's dormant grade/level/notch CRUD opens, and the scale may be
+/// three-tier. Nothing payroll holds is touched by the switch; nothing HR authors is pushed to it.</para>
+/// </remarks>
+public enum SalaryStructureSource
+{
+    /// <summary>Defined in Payroll (Administration → HR → Payroll → Grades Setup); HR is a read-only mirror.</summary>
+    [Description("Payroll")]
+    Payroll = 1,
+
+    /// <summary>Defined in HR (Administration → HR → Pay &amp; Benefits → Salary Structure); the projection is off.</summary>
+    [Description("HR")]
+    Hr = 2,
+}
+
 public enum BudgetEnforcementMode
 {
     /// <summary>No budget checking — requisitions proceed regardless of the manpower budget.</summary>

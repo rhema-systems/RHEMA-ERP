@@ -307,3 +307,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909090940_AddProbationSourceAndContractKind")] partial class AddProbationSourceAndContractKind { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909133438_AddEmployeePayBasis")] partial class AddEmployeePayBasis { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909161346_AddSalaryAssignmentWithdrawal")] partial class AddSalaryAssignmentWithdrawal { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260909204655_AddSalaryStructurePolicy")] partial class AddSalaryStructurePolicy { }

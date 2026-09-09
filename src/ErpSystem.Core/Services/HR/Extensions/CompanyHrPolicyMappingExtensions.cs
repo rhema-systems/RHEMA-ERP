@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Core.Services.HR.Extensions;
@@ -50,6 +50,8 @@ public static class CompanyHrPolicyMappingExtensions
             // not exist, serialised as a bare `0` that maps to no member name. The database said
             // Block; every reader of this endpoint was told 0.
             EstablishmentEnforcementMode   = entity.EstablishmentEnforcementMode,
+            SalaryStructureTiers           = entity.SalaryStructureTiers,
+            SalaryStructureSource          = entity.SalaryStructureSource,
 
             FitWeightPerformance           = entity.FitWeightPerformance,
             FitWeightCompetency            = entity.FitWeightCompetency,
@@ -104,6 +106,8 @@ public static class CompanyHrPolicyMappingExtensions
         // defect, in the one place where it decides whether exceeding an authorised establishment
         // blocks a vacancy or merely warns about it.
         entity.EstablishmentEnforcementMode   = dto.EstablishmentEnforcementMode;
+        entity.SalaryStructureTiers           = dto.SalaryStructureTiers;
+        entity.SalaryStructureSource          = dto.SalaryStructureSource;
 
         entity.FitWeightPerformance           = dto.FitWeightPerformance;
         entity.FitWeightCompetency            = dto.FitWeightCompetency;

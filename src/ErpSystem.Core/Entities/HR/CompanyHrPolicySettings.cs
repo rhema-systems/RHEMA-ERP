@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.HR;
@@ -220,6 +220,29 @@ public class CompanyHrPolicySettings : TenantEntity
     /// That is what makes Block safe on a tenant where most positions still carry the default.</para>
     /// </remarks>
     public BudgetEnforcementMode EstablishmentEnforcementMode { get; set; } = BudgetEnforcementMode.Block;
+
+    // ═══════════════════════════════════════════
+    //  SALARY STRUCTURE (lane G)
+    // ═══════════════════════════════════════════
+
+    /// <summary>
+    /// Two-tier (grade → notch) or three-tier (grade → level → notch). Default two-tier — what
+    /// payroll is, what TDC's 2026 scale is, and what every existing tenant was implicitly.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Governs screens and placement rules only; the tables are three-tier either way, with one
+    /// implicit level per grade in the two-tier case. Switching to three-tier is refused while
+    /// <see cref="SalaryStructureSource"/> is Payroll (payroll has no level tier); switching back to
+    /// two-tier is refused while any active grade holds more than one active level. See
+    /// <c>CompanyHrPolicySettingsService.ValidateSalaryStructureAsync</c>.
+    /// </remarks>
+    public SalaryStructureTiers SalaryStructureTiers { get; set; } = SalaryStructureTiers.GradeAndNotch;
+
+    /// <summary>
+    /// Whether the scale is maintained in Payroll (mirrored into HR, HR read-only) or in HR
+    /// (projection off, HR's own grade/level/notch screens open). Default Payroll.
+    /// </summary>
+    public SalaryStructureSource SalaryStructureSource { get; set; } = SalaryStructureSource.Payroll;
 
     // ═══════════════════════════════════════════
     //  SUCCESSION FIT-SCORE WEIGHTS (relative)

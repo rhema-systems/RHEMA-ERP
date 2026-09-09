@@ -3829,6 +3829,10 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // ⚠ Stricter than the budget ladder on purpose: this only ever fires for a position
                 // whose establishment completed FR-HR-135's chain. See the entity for the reasoning.
                 EstablishmentEnforcementMode   = ErpSystem.Core.Enums.BudgetEnforcementMode.Block,
+                // Lane G. HasData needs every non-nullable property stated, and neither enum has a
+                // zero member — so these are the entity's own defaults, written out.
+                SalaryStructureTiers           = ErpSystem.Core.Enums.SalaryStructureTiers.GradeAndNotch,
+                SalaryStructureSource          = ErpSystem.Core.Enums.SalaryStructureSource.Payroll,
                 FitWeightPerformance           = 35,
                 FitWeightCompetency            = 30,
                 FitWeightPotential             = 20,

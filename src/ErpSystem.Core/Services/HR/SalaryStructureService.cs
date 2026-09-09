@@ -1,7 +1,10 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +30,7 @@ public class SalaryStructureService :
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ISalaryStructureProjectionService _projectionService;
+    private readonly ICompanyHrPolicySettingsService _policySettings;
     private readonly ILogger<SalaryStructureService> _logger;
 
     private readonly IGenericRepository<SalaryGrade> _salaryGradeRepository;
@@ -40,8 +44,10 @@ public class SalaryStructureService :
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ISalaryStructureProjectionService projectionService,
+        ICompanyHrPolicySettingsService policySettings,
         ILogger<SalaryStructureService> logger)
     {
+        _policySettings = policySettings;
         _salaryGradeRepository = salaryGradeRepository;
         _salaryLevelRepository = salaryLevelRepository;
         _salaryNotchRepository = salaryNotchRepository;
@@ -112,6 +118,28 @@ public class SalaryStructureService :
         entity.Code = code;
 
         await _salaryGradeRepository.AddAsync(entity);
+
+        // ⚠ Two-tier: the grade's ONE level is created with it, carrying the grade's own code and
+        // band — the same shape the payroll projection synthesises. The user never sees it; the
+        // notch screen and every placement resolve it from the grade. Without this an HR-mastered
+        // two-tier tenant could create a grade and then have nowhere to hang a notch.
+        var settings = await _policySettings.GetForTenantAsync(tenantId, cancellationToken);
+        if (settings.SalaryStructureTiers == SalaryStructureTiers.GradeAndNotch)
+        {
+            await _salaryLevelRepository.AddAsync(new SalaryLevel
+            {
+                TenantId = tenantId,
+                SalaryGradeId = entity.Id,
+                Code = code,
+                Name = entity.Name,
+                MinSalary = entity.MinSalary,
+                MidSalary = decimal.Round((entity.MinSalary + entity.MaxSalary) / 2m, 2),
+                MaxSalary = entity.MaxSalary,
+                Sequence = 1,
+                IsActive = true,
+            });
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Salary grade created: {GradeId}", entity.Id);
@@ -314,6 +342,23 @@ public class SalaryStructureService :
         if (grade == null)
         {
             throw new ArgumentException($"Salary grade with ID '{dto.SalaryGradeId}' not found.");
+        }
+
+        // Two-tier: a grade has one level, and it was created with the grade. A second is not a
+        // level, it is a change of structure — which is a policy setting, not a row. Checked before
+        // the band and overlap rules on purpose: the answer is "there is no second level here",
+        // not "your band overlaps" — the second is true of any band that fits the grade.
+        var settings = await _policySettings.GetForTenantAsync(tenantId, cancellationToken);
+        if (settings.SalaryStructureTiers == SalaryStructureTiers.GradeAndNotch)
+        {
+            var hasLevel = await _salaryLevelRepository
+                .GetQueryable(l => l.TenantId == tenantId && l.SalaryGradeId == dto.SalaryGradeId && !l.IsDeleted)
+                .AnyAsync(cancellationToken);
+            if (hasLevel)
+                throw new InvalidOperationException(
+                    $"The salary structure is two-tier (grade and notch), so grade {grade.Code} has one level and it "
+                    + "already exists. Add notches to the grade. To place levels between grade and notch, set the "
+                    + "salary structure to three-tier under HR policy settings first.");
         }
 
         EnsureLevelWithinGradeBounds(grade, dto.MinSalary, dto.MaxSalary);

@@ -1,9 +1,11 @@
 'use client';
 
+import { useEffect } from 'react';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { salaryGradeService } from '@/services/hr/salary-grade.service';
+import { policySettingsService } from '@/services/hr/policy-settings.service';
 import { employeeService } from '@/services/hr/employee.service';
 import type { EmployeeSalaryAssignment } from '@/types/hr/employee-subresources';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
@@ -68,6 +70,14 @@ export function SalaryAssignmentsTab({
     queryKey: ['hr', 'salary-grades', 'all'],
     queryFn: () => salaryGradeService.getAll(),
   });
+
+  // Whether the level is a tier the user chooses or the one implicit level a two-tier grade
+  // carries (lane G). Two-tier is the default and TDC's case.
+  const { data: policy } = useQuery({
+    queryKey: ['hr', 'policy-settings'],
+    queryFn: () => policySettingsService.get(),
+  });
+  const threeTier = policy?.salaryStructureTiers === 'GradeLevelAndNotch';
 
   return (
     <div className="space-y-3">
@@ -142,7 +152,9 @@ export function SalaryAssignmentsTab({
         effectiveTo: s.effectiveTo?.slice(0, 10) ?? '',
         assignmentReason: s.assignmentReason ?? s.reason ?? '',
       })}
-      renderFields={(form) => <SalaryAssignmentFields form={form} grades={grades ?? []} />}
+      renderFields={(form) => (
+        <SalaryAssignmentFields form={form} grades={grades ?? []} threeTier={threeTier} />
+      )}
     />
     </div>
   );
@@ -155,9 +167,12 @@ export function SalaryAssignmentsTab({
 function SalaryAssignmentFields({
   form,
   grades,
+  threeTier,
 }: {
   form: any;
   grades: { id: string; code: string; name: string }[];
+  /** Show the level as a step. In two-tier the grade's one implicit level is picked silently. */
+  threeTier: boolean;
 }) {
   const gradeId = form.watch('gradeId') as string;
   const levelId = form.watch('levelId') as string;
@@ -167,6 +182,16 @@ function SalaryAssignmentFields({
     queryFn: () => salaryGradeService.getLevels(gradeId),
     enabled: !!gradeId,
   });
+
+  // ⚠ Two-tier: the level exists in the data but not in the user's head. Resolve it the moment
+  // the grade's levels arrive so the notch list can load, and never ask. The server does the same
+  // resolution for a caller that sends no level at all — this is only so the picker has a parent.
+  useEffect(() => {
+    if (threeTier || !levels || levels.length === 0) return;
+    const sole = levels.find((l) => l.isActive) ?? levels[0];
+    if (sole && levelId !== sole.id) form.setValue('levelId', sole.id, { shouldValidate: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threeTier, levels, levelId]);
 
   const { data: notches } = useQuery({
     queryKey: ['hr', 'salary-levels', levelId, 'notches'],
@@ -184,13 +209,15 @@ function SalaryAssignmentFields({
         options={grades.map((g) => ({ value: g.id, label: `${g.code} — ${g.name}` }))}
       />
       <FieldRow>
-        <SelectField
-          form={form}
-          name="levelId"
-          label="Level"
-          options={(levels ?? []).map((l) => ({ value: l.id, label: l.code || l.name }))}
-          allowEmpty
-        />
+        {threeTier && (
+          <SelectField
+            form={form}
+            name="levelId"
+            label="Level"
+            options={(levels ?? []).map((l) => ({ value: l.id, label: l.code || l.name }))}
+            allowEmpty
+          />
+        )}
         <SelectField
           form={form}
           name="notchId"
@@ -214,7 +241,9 @@ function SalaryAssignmentFields({
         required
       />
       <p className="text-xs text-muted-foreground">
-        Grades, levels and notches are defined in Payroll and mirrored into HR.
+        {threeTier
+          ? 'Grade, then level, then notch. The notch amount is the basic pay.'
+          : 'Grade, then notch. The notch amount is the basic pay.'}
       </p>
     </>
   );

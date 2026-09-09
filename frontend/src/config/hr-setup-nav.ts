@@ -443,6 +443,14 @@ export const hrSetupGroups: HrSetupGroup[] = [
     description: 'What a post is worth, what it attracts, and how payroll is parameterised.',
     links: [
       {
+        // Lane G. Read-only while Payroll is the structure source (the default); the grade, level
+        // and notch screens open when the source is HR — a policy setting.
+        title: 'Salary Structure',
+        href: '/administration/hr/compensation/salary-structure',
+        icon: Coins,
+        description: 'Grades, levels and notches — mirrored from Payroll, or maintained here.',
+      },
+      {
         title: 'Pay Components',
         href: '/administration/hr/compensation/pay-components',
         icon: Coins,

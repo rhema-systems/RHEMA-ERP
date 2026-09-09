@@ -1,5 +1,6 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Extensions;
@@ -16,17 +17,22 @@ namespace ErpSystem.Core.Services.HR;
 public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
 {
     private readonly IGenericRepository<CompanyHrPolicySettings> _repository;
+    // The salary-structure rules read the live structure: a switch to two-tier has to know whether
+    // any grade actually holds more than one level.
+    private readonly IGenericRepository<SalaryGrade> _salaryGrades;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<CompanyHrPolicySettingsService> _logger;
 
     public CompanyHrPolicySettingsService(
         IGenericRepository<CompanyHrPolicySettings> repository,
+        IGenericRepository<SalaryGrade> salaryGrades,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
         ILogger<CompanyHrPolicySettingsService> logger)
     {
         _repository = repository;
+        _salaryGrades = salaryGrades;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _logger = logger;
@@ -78,6 +84,7 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
         ValidateConsistency(dto);
 
         var tenantId = GetTenantId();
+        await ValidateSalaryStructureAsync(tenantId, dto, cancellationToken);
         var entity = await _repository.GetQueryable()
             .Where(s => !s.IsDeleted && s.TenantId == tenantId)
             .FirstOrDefaultAsync(cancellationToken);
@@ -100,6 +107,50 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// The two salary-structure switches that would otherwise leave a setting saying something the
+    /// data cannot honour.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Three-tier while Payroll is the source</b> is refused outright. Payroll's structure
+    /// is grade → notch with no level concept, and HR's structure writes answer 409 while payroll is
+    /// the master — so there would be no door through which a second level could ever be created.
+    /// The sentence names both ways out: payroll grows a level tier (an ask to the payroll owner), or
+    /// the tenant moves the structure to HR.</para>
+    /// <para><b>Two-tier while a grade holds several levels</b> is refused naming the grades. Nothing
+    /// is collapsed silently: which level's notches survive is a decision, not a default.</para>
+    /// <para>Moving the source from HR back to Payroll is allowed in two-tier: the next read
+    /// re-projects, and payroll's rows overwrite HR-authored rows whose codes match. That is what
+    /// "payroll is the master" means, and it is said on the settings screen.</para>
+    /// </remarks>
+    private async Task ValidateSalaryStructureAsync(
+        Guid tenantId, UpdateCompanyHrPolicySettingsDto dto, CancellationToken cancellationToken)
+    {
+        if (dto.SalaryStructureTiers == SalaryStructureTiers.GradeLevelAndNotch
+            && dto.SalaryStructureSource == SalaryStructureSource.Payroll)
+            throw new InvalidOperationException(
+                "Payroll defines the salary structure for this organisation and has no level tier — its scale "
+                + "is grade and notch only — so a three-tier structure cannot be maintained while Payroll is the "
+                + "source. Either ask the payroll owner for a level tier, or set the salary structure source to HR.");
+
+        if (dto.SalaryStructureTiers == SalaryStructureTiers.GradeAndNotch)
+        {
+            var crowded = await _salaryGrades.GetQueryable()
+                .Where(g => g.TenantId == tenantId && !g.IsDeleted && g.IsActive
+                         && g.Levels.Count(l => !l.IsDeleted && l.IsActive) > 1)
+                .OrderBy(g => g.Code)
+                .Select(g => g.Code)
+                .ToListAsync(cancellationToken);
+
+            if (crowded.Count > 0)
+                throw new InvalidOperationException(
+                    "A two-tier structure has one level per grade, but "
+                    + (crowded.Count == 1 ? $"grade {crowded[0]} holds" : $"grades {string.Join(", ", crowded)} hold")
+                    + " more than one active level. Retire the extra levels first — which notches survive is a "
+                    + "decision, not something to collapse silently.");
+        }
     }
 
     private static void ValidateRetirementAges(UpdateCompanyHrPolicySettingsDto dto)

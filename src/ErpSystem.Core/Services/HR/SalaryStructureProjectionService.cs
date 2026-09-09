@@ -1,6 +1,8 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using ErpSystem.Core.Entities.HR.Payroll;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -50,6 +52,8 @@ public class SalaryStructureProjectionService : ISalaryStructureProjectionServic
     private readonly IGenericRepository<SalaryLevel> _salaryLevelRepository;
     private readonly IGenericRepository<SalaryNotch> _salaryNotchRepository;
     private readonly IUnitOfWork _unitOfWork;
+    // Whether this tenant's structure is payroll's to project at all (lane G).
+    private readonly ICompanyHrPolicySettingsService _policySettings;
     private readonly ILogger<SalaryStructureProjectionService> _logger;
 
     public SalaryStructureProjectionService(
@@ -59,8 +63,10 @@ public class SalaryStructureProjectionService : ISalaryStructureProjectionServic
         IGenericRepository<SalaryLevel> salaryLevelRepository,
         IGenericRepository<SalaryNotch> salaryNotchRepository,
         IUnitOfWork unitOfWork,
+        ICompanyHrPolicySettingsService policySettings,
         ILogger<SalaryStructureProjectionService> logger)
     {
+        _policySettings = policySettings;
         _payrollGradeRepository = payrollGradeRepository;
         _payrollGradeNotchRepository = payrollGradeNotchRepository;
         _salaryGradeRepository = salaryGradeRepository;
@@ -79,6 +85,11 @@ public class SalaryStructureProjectionService : ISalaryStructureProjectionServic
 
         var unchanged = new SalaryStructureProjectionResult { SkippedAsUnchanged = true };
         var now = DateTime.UtcNow;
+
+        // ⚠ Checked BEFORE the debounce and the fingerprint. A tenant that maintains its own
+        // structure must never be projected over, not even by a read that happens to arrive first.
+        if (await IsHrMasteredAsync(tenantId, cancellationToken))
+            return unchanged;
 
         if (LastCheckedAtUtc.TryGetValue(tenantId, out var lastChecked) && now - lastChecked < CheckDebounce)
         {
@@ -106,6 +117,13 @@ public class SalaryStructureProjectionService : ISalaryStructureProjectionServic
         }
 
         var warnings = new List<string>();
+
+        // The explicit sync arrives here directly. Refuse rather than skip: somebody pressed a
+        // button expecting payroll's rows to land, and silently doing nothing would look like success.
+        if (await IsHrMasteredAsync(tenantId, cancellationToken))
+            throw new InvalidOperationException(
+                "This organisation maintains its salary structure in HR, so there is nothing to sync from "
+                + "Payroll. Change the salary structure source under HR policy settings to make Payroll the master again.");
 
         var payrollGrades = await _payrollGradeRepository
             .GetQueryable(g => g.TenantId == tenantId)
@@ -350,6 +368,12 @@ public class SalaryStructureProjectionService : ISalaryStructureProjectionServic
         }
 
         return result;
+    }
+
+    private async Task<bool> IsHrMasteredAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var settings = await _policySettings.GetForTenantAsync(tenantId, cancellationToken);
+        return settings.SalaryStructureSource == SalaryStructureSource.Hr;
     }
 
     /// <summary>

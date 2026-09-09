@@ -1,8 +1,9 @@
-// The HR entities are split across sub-namespaces by area rather than living under
+﻿// The HR entities are split across sub-namespaces by area rather than living under
 // ErpSystem.Core.Entities.HR wholesale, so each area needs its own using. SalaryGrade, by contrast,
 // is declared in the GLOBAL namespace and must not be imported.
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Orientation;
@@ -198,6 +199,16 @@ public class HrDemoSeedOrchestrator
             ct => _context.Set<EmployeeContractType>().IgnoreQueryFilters()
                           .AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted, ct),
             ct => new TdcDemoLegacyOrgSeeder(_context, Log<TdcDemoLegacyOrgSeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
+            // TDC's 2026 salary scale (records shared/ERP Salary Scale 2026.xlsx) into PAYROLL's
+            // tables, which are the master; the projection carries it into HR on the next read.
+            // Keyed on a notch the demo-smoke scenario never wrote: 141 invents five per grade, the
+            // scale runs to twenty and beyond. The seeder itself is an ensure — it updates the five.
+            "Salary scale 2026 (payroll grades and notches)",
+            ct => _context.Set<PayrollGradeNotch>().IgnoreQueryFilters()
+                          .AnyAsync(n => n.TenantId == tenantId && !n.IsDeleted && n.GradeId == "M1" && n.Notch == "20", ct),
+            ct => new TdcSalaryScaleSeeder(_context, Log<TdcSalaryScaleSeeder>()).SeedAsync(ct)),
 
         // ── Pay and benefits ────────────────────────────────────────────────────────────────────
 

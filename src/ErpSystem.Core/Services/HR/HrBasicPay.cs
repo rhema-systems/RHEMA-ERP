@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR;
+﻿using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Services.HR;
@@ -59,10 +59,20 @@ public static class HrBasicPay
             return (null, "Negotiated, but no amount is on record: enter it on the payroll profile.");
         }
 
+        // The level is named only when it is a real tier. A two-tier grade's one implicit level
+        // carries the grade's own code (the projection and the HR create both make it so), and
+        // "notch 3, level S2 of S2" would be telling the reader about a thing that does not exist.
+        var gradeCode = assignment?.Grade?.Code ?? "the placed grade";
+        var levelIsReal = assignment?.Level is { } lv && !string.Equals(lv.Code, assignment.Grade?.Code, StringComparison.OrdinalIgnoreCase);
+
         if (assignment?.Notch?.SalaryAmount is { } notch)
-            return (notch, $"Salary scale — notch {assignment.Notch.NotchNumber} of {assignment.Grade?.Code ?? "the placed grade"}.");
+            return (notch, levelIsReal
+                ? $"Salary scale — notch {assignment.Notch.NotchNumber}, level {assignment.Level!.Code} of {gradeCode}."
+                : $"Salary scale — notch {assignment.Notch.NotchNumber} of {gradeCode}.");
         if (assignment?.Level?.MidSalary is { } mid)
-            return (mid, $"Salary scale — mid-point of level {assignment.Level.Code ?? ""} (no notch chosen).");
+            return (mid, levelIsReal
+                ? $"Salary scale — mid-point of level {assignment.Level.Code} of {gradeCode} (no notch chosen)."
+                : $"Salary scale — mid-point of grade {gradeCode} (no notch chosen).");
         if (employee.Salary is > 0m)
             return (employee.Salary, "The flat figure on the employee record; not yet placed on the scale.");
         return (null, "On the scale, but not placed on a grade and no flat figure is on record.");

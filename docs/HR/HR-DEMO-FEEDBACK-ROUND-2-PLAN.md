@@ -109,6 +109,28 @@ space"), and a position that inherits them from a set is maintained in one place
 regulator changes the bundle. Full design in § 6.4, including the duplicate rule the PDF asks for
 in square brackets under both the benefits and the skills bullets.
 
+### 1.6 Salary structure tiers and source (DECIDED 2026-09-09 — not in the PDF)
+
+Raised by the user after lane E1b: a client organisation may run a **three-tier** scale (grade →
+level → notch) or a **two-tier** one (grade → notch), and must be able to switch between them; it
+belongs with the HR policy settings. Two facts settled the shape. HR's three tables are already a
+superset — a two-tier scale is one implicit level per grade, carrying the grade's own code, which
+is exactly what the payroll projection has synthesised since lane 3a — so **the tier count is a
+policy setting, not a schema change.** And payroll's structure has no level tier at all, so a
+three-tier client cannot be served while payroll is the master. Two ways out were put to the user:
+
+- **(a) payroll grows a level tier** — an ask to the payroll owner (§ 7.1 item 6; **not
+  decided**, the user will raise it with the payroll owner later);
+- **(b) a per-tenant structure source** — `Payroll` (HR mirrors, writes are 409) or `Hr` (HR
+  maintains the structure itself; the projection stops; HR's grade/level/notch CRUD opens).
+
+**Decided: (b), built as lane G**, with (a) recorded as the ask. Three-tier is refused while the
+source is Payroll, with a message that names both ways out. The 2026 salary scale
+(`records shared/ERP Salary Scale 2026.xlsx`) is seeded into payroll's tables with the column
+rules the user gave: S1–S3's second (rationalised) column is the 2026 figure; M1–M4's single
+"2025" column IS the 2026 figure; M5 is already rationalised; **M4 has no notch 19** and is seeded
+as it stands.
+
 ---
 
 ## 2. The register — every PDF bullet
@@ -262,9 +284,12 @@ B3 → E2.** A first because the demo audience saw those and they are cheap; C2 
 the sets need the certification catalogue; B3 (the forty-screen sweep) last because it is
 mechanical and long.
 
+Lane G (salary structure tiers and source, § 1.6) was added on 2026-09-09 between E1b and C3; it
+is independent of the rest.
+
 Harness folders under `D:\Rhema\TDC ERPS\dev-harness\` (outside the repo, per the demo-pack
 boundary): existing `hr-employee-docs`, `hr-jobarch`, `hr-payroll-membership`; new
-`hr-organization` and `hr-teams`. Every new table goes into
+`hr-organization`, `hr-teams` and `hr-salary-structure`. Every new table goes into
 `dev-harness/hr-demo-smoke/demo-coverage-manifest.csv` or the UAT rebuild gate reports it. Every
 new migration is guarded and listed in `FastBuildMigrationMetadata` or it is inert on the fast
 build. Every reference-data screen goes into `frontend/src/config/hr-setup-nav.ts` under the
@@ -452,6 +477,68 @@ Not in the original plan. It came out of explaining E1's "same-day placement edg
 **F3 — Workflow.** Entity types `HrTeamObjective`, `HrTeamTermsOfReference` through the four-step recipe; no migration beyond the status enums.
 
 Harness `hr-teams/run-f1..f3.mjs`. Details and assertions in § 6.6.
+
+### Lane G — Salary structure tiers and source · 1 slice (§ 1.6) · ✅ **BUILT 2026-09-09** · 69 ×2, `hr-salary-structure/run-g.mjs`
+
+Migration `20260909204655_AddSalaryStructurePolicy` (two columns on `CompanyHrPolicySettings`,
+guarded, with the entity's own defaults — EF scaffolded `defaultValue: 0` for both enum columns,
+the third time this round). Regression after it: `run-e1.mjs` 73, membership 86, `run-d1.mjs` 79.
+
+- [x] `CompanyHrPolicySettings.SalaryStructureTiers { GradeAndNotch = 2, GradeLevelAndNotch = 3 }`
+  and `SalaryStructureSource { Payroll = 1, Hr = 2 }`, defaults two-tier + Payroll — what every
+  tenant already was. Both on the policy DTOs and the policy screen ("Salary structure" card).
+- [x] Policy validation (`CompanyHrPolicySettingsService`): three-tier under Payroll is refused;
+  a switch to two-tier is refused while any active grade holds more than one active level, and
+  the refusal names the grades.
+- [x] Source = HR stops the projection: `EnsureCurrentAsync` returns without touching anything;
+  `ReconcileAsync` (the sync endpoint) answers 409. **Nothing is deleted on the switch** — the
+  mirrored rows simply become HR's rows, and the read no longer overwrites them (asserted F8, F9).
+- [x] Grades, levels and notches controllers: every write goes through the service when HR is the
+  source and stays 409 otherwise; the 409 text now says how to lift it. Argument → 404,
+  InvalidOperation → 400 (`ClientError`).
+- [x] `CreateGradeAsync` creates the grade's implicit level in two-tier (code, name and band of
+  the grade, sequence 1); `CreateLevelAsync` refuses a second level in two-tier.
+- [x] `EmployeeService.ResolvePlacementLevelAsync` on both placement writes: a notch names its
+  level (a notch of another grade, or of a level other than the one supplied, is refused); in
+  two-tier a placement that names only the grade resolves to its one level.
+- [x] `HrBasicPay` names the level only when it is a real tier ("notch 20 of M1", not "notch 20,
+  level M1 of M1").
+- [x] `TdcSalaryScaleSeeder` — the 2026 scale, **185 notches generated from the workbook** (M1–M3
+  ×20, M4 ×22 without notch 19, M5 ×22, S1–S3 ×27), written into **payroll's** tables as an
+  ensure, so the five invented notches from demo-smoke scenario 141 are corrected rather than
+  duplicated. A demo-orchestrator step ("Salary scale 2026") keyed on M1 notch 20.
+- [x] Frontend: `SalaryAssignmentsTab` hides the level picker in two-tier and sets the sole level
+  itself; new *Pay & Benefits → Salary Structure* screen (grades → levels in three-tier → notches),
+  read-only with "Refresh from Payroll" under Payroll, full CRUD under HR.
+
+**What the build changed from the design, and what it found.**
+
+1. **The seed lives in `seed-hr-demo`, not `seed-hr-all`.** It is demo data for the DEFAULT
+   tenant, so it sits with the workforce and benefits steps; the reference-data orchestrator does
+   not run it. The first attempt used the wrong command and seeded nothing.
+2. **The tier refusal must come before the band rules.** `CreateLevelAsync` first refused a
+   second level in two-tier as "salary ranges cannot overlap" — true of any band that fits the
+   grade, and beside the point. The two-tier check now runs straight after the grade lookup.
+3. **In three-tier the implicit level holds the whole grade band.** A second level cannot be
+   added until the first is narrowed — the standing no-overlap rule, not a lane G one. The harness
+   narrows it (G2a) and asserts the second lands. The screen's users will meet the same rule; the
+   overlap message says what to do.
+4. **Two demo-orchestrator steps re-run on every pass** ("Benefit enrolments and enterprise data",
+   "HR awards report definitions"): their skip keys do not hold. Not lane G's, harmless in effect
+   (their seeders are ensures) — recorded here for the demo-pack owner (§ 8).
+
+**Recorded, not built.**
+
+- **Hire and movement placement writes do not go through the level resolver.** They write
+  `EmployeeSalaryAssignment` rows directly and carry the level from their own DTOs; a two-tier
+  tenant reaching them without a level gets a placement with no level, as before. The movement
+  call site is unasserted (see D1's note). Route them when those screens are next touched.
+- **Switching the source back from HR to Payroll** re-enables the projection, which adopts by
+  code: an HR-authored amount on a code payroll also has is overwritten on the next read, and a
+  grade only HR knows is left as the projection has always left rows it does not recognise. The
+  harness only asserts the restore path. A client that has authored in HR should not switch back
+  without reading that sentence; the policy screen's help text says so.
+- **Option (a)** — payroll grows a level tier — stands as § 7.1 item 6 for the user to raise.
 
 ---
 
@@ -850,6 +937,13 @@ needs). Items, in priority order:
    recorded in `HR-PAYROLL-BOUNDARY.md:120-126, :159`. The embed does **not** rely on #11 —
    HR's door is gated — but the payroll routes it saves through are still open to any internal
    user until payroll gates them.
+6. **A level tier between grade and notch** (§ 1.6, option (a)). Payroll's structure is
+   `PayrollGrade` → `PayrollGradeNotch` only. A client on a three-tier scale (grade → level →
+   notch) cannot be served while payroll is the master; HR ships the per-tenant structure source
+   (option (b), lane G) so such a client maintains the scale in HR and payroll reads nothing.
+   **Not decided** — the user will raise it with the payroll owner. If payroll grows the tier,
+   the projection gains a level mapping and the three-tier-under-Payroll refusal is lifted; the
+   policy setting stays.
 
 ### 7.2 Finance owner
 

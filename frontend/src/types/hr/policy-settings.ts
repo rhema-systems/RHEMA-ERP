@@ -49,6 +49,12 @@ export interface CompanyHrPolicySettings {
   /** FR-HR-136. Defaults to Block, unlike the budget ladder — see the screen for why. */
   establishmentEnforcementMode: BudgetEnforcementMode;
 
+  // Salary structure (lane G)
+  /** Two-tier (grade → notch) or three-tier (grade → level → notch). Screens and rules, not schema. */
+  salaryStructureTiers: SalaryStructureTiers;
+  /** Who maintains the scale. Payroll = HR is a read-only mirror; Hr = HR's own screens open. */
+  salaryStructureSource: SalaryStructureSource;
+
   // Succession fit weights (relative — they need not sum to anything)
   fitWeightPerformance: number;
   fitWeightCompetency: number;
@@ -83,6 +89,22 @@ export type UpdateCompanyHrPolicySettingsRequest = Omit<
   CompanyHrPolicySettings,
   'id' | 'tenantId' | 'createdAt' | 'createdBy' | 'updatedAt' | 'updatedBy'
 >;
+
+/** Mirrors `SalaryStructureTiers` (HREnums.cs). GradeAndNotch=2, GradeLevelAndNotch=3 — there is no zero. */
+export type SalaryStructureTiers = 'GradeAndNotch' | 'GradeLevelAndNotch';
+
+/** Mirrors `SalaryStructureSource` (HREnums.cs). Payroll=1, Hr=2. */
+export type SalaryStructureSource = 'Payroll' | 'Hr';
+
+export const SALARY_STRUCTURE_TIERS: { value: SalaryStructureTiers; label: string }[] = [
+  { value: 'GradeAndNotch', label: 'Two-tier — grade and notch' },
+  { value: 'GradeLevelAndNotch', label: 'Three-tier — grade, level and notch' },
+];
+
+export const SALARY_STRUCTURE_SOURCES: { value: SalaryStructureSource; label: string }[] = [
+  { value: 'Payroll', label: 'Payroll — HR mirrors it, read-only' },
+  { value: 'Hr', label: 'HR — maintained under Pay & Benefits → Salary Structure' },
+];
 
 export const ENFORCEMENT_MODES: { value: BudgetEnforcementMode; label: string }[] = [
   { value: 'Off', label: 'Off — no checking' },

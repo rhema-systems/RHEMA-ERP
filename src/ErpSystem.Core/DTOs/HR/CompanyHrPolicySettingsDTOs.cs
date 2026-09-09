@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -60,6 +60,10 @@ public class CompanyHrPolicySettingsDto : BaseDto
 
     /// <summary>FR-HR-136 enforcement. See the entity for why this defaults to Block.</summary>
     public BudgetEnforcementMode EstablishmentEnforcementMode { get; set; }
+
+    // Salary structure (lane G)
+    public SalaryStructureTiers SalaryStructureTiers { get; set; }
+    public SalaryStructureSource SalaryStructureSource { get; set; }
 
     // Succession fit-score weights (relative)
     public int FitWeightPerformance { get; set; }
@@ -130,6 +134,10 @@ public class UpdateCompanyHrPolicySettingsDto
 
     /// <summary>FR-HR-136 enforcement. See the entity for why this defaults to Block.</summary>
     public BudgetEnforcementMode EstablishmentEnforcementMode { get; set; } = BudgetEnforcementMode.Block;
+
+    // Salary structure (lane G). Both changes are validated against the live structure — see the service.
+    public SalaryStructureTiers SalaryStructureTiers { get; set; } = SalaryStructureTiers.GradeAndNotch;
+    public SalaryStructureSource SalaryStructureSource { get; set; } = SalaryStructureSource.Payroll;
 
     // Succession fit-score weights (relative)
     [Range(0, 100)] public int FitWeightPerformance { get; set; } = 35;
