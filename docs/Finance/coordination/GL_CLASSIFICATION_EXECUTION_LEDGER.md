@@ -1023,6 +1023,13 @@ solution build and EF/model/migration/script/scope gates passed, and configured 
 Independent Sol High accounting/security/concurrency review is active; integration and Sales reissue remain
 gated on approval.
 
+C12 review accepted the production boundary but returned `CHANGES_REQUIRED` at `81abcfac` for one P2 test-
+packaging defect: the Core test project disables default compile items and did not include the new contract test,
+so ordinary discovery skipped it. Narrow correction `de251747d8d34b64dc2f369dd68640c0383f75a5` adds the explicit
+project include only. Ordinary discovery now executes and passes the contract test, the focused C7 suite passes
+20/20, the Core test project builds with zero errors, and ancestry/diff/status/scope gates are clean. Final Sol
+High re-review is active; no production behavior, schema, migration, ledger-in-candidate or database changed.
+
 C12 independent Sol High review returned `CHANGES_REQUIRED` at exact clean `81abcfac` for one P2 evidence-
 packaging defect only. Production authority was accepted: the public Core contract remains book-blind, has no
 HTTP execution surface, resolves to the same scoped Finance service and preserves the established C7/C10
