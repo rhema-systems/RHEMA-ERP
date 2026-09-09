@@ -58,6 +58,7 @@
     <Compile Include="Services\Inventory\InventoryStoresArchitectureSqlServerIntegrationTests.cs" />
     <Compile Include="Services\Inventory\E2E010ProjectMaterialLifecycleTests.cs" />
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerApprovedExecutionContractTests.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">
