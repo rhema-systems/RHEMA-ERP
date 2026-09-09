@@ -1161,6 +1161,16 @@ C7/C8/C10 focused set passed 34/34. No database or migration operation occurred 
 remains preserved. C10 is complete; the next action is a fresh exact-base Inventory B2 reissue implementing the
 approved C8 Sale/Auction and C7 Donation/Destruction split.
 
+Stage B2 Inventory is reissued from fresh exact base `510ecc31b2e2258b78e9af78c5d947e171f264c6` on branch
+`codex/inventory-accounting-event-cutover-c10` in clean worktree `RHEMA-ERP-inventory-accounting-event-c10`.
+GPT-5.6 Terra Medium owns the bounded conversion. Sale/Auction must prepare and later execute the two-member C8
+group; Donation/Destruction must prepare and later execute only the Stock Adjustment valuation through C7. The
+disposal-scoped Stock Adjustment path uses stable preassigned adjustment/item identities, the approved C9 pure
+builder and C10 compatibility results inside the caller-owned shared Serializable transaction, with rollback
+before durable Finance failure evidence. Public Stock Adjustment behavior remains unchanged. Inventory cannot
+select/enumerate books, derive C5 evidence, invoke posting leaves, auto-approve or enable C6-C8. The prior c9/c9b
+worktrees remain preserved and non-authoritative; no database or migration action is authorized.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
