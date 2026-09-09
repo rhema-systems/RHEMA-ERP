@@ -1302,6 +1302,16 @@ pre-commit failure, enabling owner/Finance rollback proof without weakening prod
 needs complete owner construction, authority seeding and executable assertions; those are the next bounded
 commit and compilation remains deferred.
 
+Inventory evidence commit `3d94ebecdf34d56942da57260a1c7c175a460a23` closes the previously uncompiled
+fixture gap with a provider-isolated SQLite model, real C9 valuation builder and real StockAdjustmentService-
+backed disposal participant. The executable ambient-C7 failure test persists the staged Finance marker and
+approved adjustment graph inside one Serializable transaction, injects the Finance failure, rolls back, clears
+tracking and proves zero durable adjustment, adjustment-action or marker state with no transaction left open.
+The focused test-project build passed with zero errors and the complete fixture passed 3/3, including the
+Donation/Destruction no-proceeds shape. This is layered rollback evidence rather than a substitute for the
+separate real C7/C8 authority suites; final Sol High review must assess the combined proof before integration.
+No migration or configured database was accessed.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
