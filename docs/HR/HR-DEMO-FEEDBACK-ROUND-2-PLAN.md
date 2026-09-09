@@ -168,7 +168,7 @@ as it stands.
 | S-1 | If a skill requires certification, select the certifying body and the corresponding certification | `Skill.RequiresCertification` (`:2026`) is stored and shown as a badge (`skills/page.tsx:158`); **no `CertifyingBodyId` or `CertificationId` on `Skill`**; nothing enforces the flag when an `EmployeeSkill` is added. | `SkillCertification` rows (body → certification cascade, one or more accepted credentials). | BUILD — lane C2, § 6.3 |
 | S-2 | Certifying bodies carry the actual certifications they provide, so the body picker can cascade to a certification | `CertifyingBody` (`:2300-2325`) has `Name`, `Abbreviation`, `Description`, `CountryId`, `Website`, `IsActive`; its **only** child collection is `EmployeeSkills`. Setup screen `administration/hr/certifying-bodies/page.tsx` is a single `ResourceListPanel`, no nested list. API `api/hr/reference/certifying-bodies` (`ReferenceDimensionsController.cs:92-131`). | The `Certification` catalogue as a child of the body, with a nested list on the body screen. | BUILD — lane C2 |
 | S-3 | A skills set, a named group of skills, selectable on the position beside individual skills, with the no-duplicate rule | `PositionSkillRequirement` (`:2089-2106`: `SkillId`, `RequiredLevel`, `IsRequired`, `Priority`); unique index `ApplicationDbContext.HR.cs:1698`; service collapses duplicates (`:114-116`, `:284-291`). **No `SkillSet`/`SkillGroup` entity**; `Skill.Category` is free text (`:2021-2022`). ⚠ The form's skill rows have **no** `takenIds` filter (unlike benefits): the same skill can be picked twice and the second silently vanishes on reload (`EmployeePositionForm.tsx:439-541`). | `SkillSet` + members + position link + the rule. | BUILD — lane C3, § 6.4 |
-| S-4 | On the employee's skills tab, show the skills attached to the position (via set or individually) and tick the ones held | `SkillsTab.tsx:48-56` lists **every** active skill; nothing reads `PositionSkillRequirement`. `AddSkillAsync` (`EmployeeService.cs:1302-1303`) rejects only exact duplicates. | An "effective skills for this position" read and a tab that leads with it. | BUILD — lane C3, § 6.4.4 |
+| S-4 | ~~On the employee's skills tab, show the skills attached to the position (via set or individually) and tick the ones held~~ **BUILT C3b** — `GET Employees/{id}/skill-requirements` and `PositionSkillsCard` at the head of the tab; held / below level / not held, naming the set that asks, with a Record that opens the add dialog pre-filled | `SkillsTab.tsx`, `PositionSkillsCard.tsx`, `EmployeeService.GetSkillRequirementsAsync` | C3b ✅ |
 
 ### 2.4 Employee profile
 
@@ -427,7 +427,19 @@ not just the read.
 6. **A retired set stays where it is and cannot be newly attached.** Retiring stops it being offered; it does not strip entitlements from posts already on it.
 7. **New tables get `HasFilter("[IsDeleted] = 0")` on every unique index**, following C2. The older `PositionSkillRequirements` and `EmployeePositionBenefits` indexes lack it, which is exactly why those two syncs must find a soft-deleted row and revive it instead of inserting.
 
-**C3b — the employee skills tab** (§ 6.4.4). Reads C3a's `effective-skills` and leads with it as a checklist: held (level, certified, verified), not held (a tick opens the add row pre-filled). "Other skills" stays below as the free add. A skill whose catalogue row requires certification shows the accepted credentials and whether the person holds one; recording without one stays allowed and flagged.
+**C3b — the employee skills tab.** ✅ **BUILT 2026-09-09 — 33 ×2, `hr-jobarch/run-c3b.mjs`.** No migration.
+- [x] `GET api/hr/Employees/{id}/skill-requirements` — the post's EFFECTIVE skills set against what the person holds, each line carrying the sources C3a made part of the effective read.
+- [x] `PositionSkillsCard` leads the skills tab: held / below the level asked for / not held, the level needed beside the level held, which set asks for it, and a "Record" beside each gap.
+- [x] The card's Record opens the tab's own add dialog **pre-filled** with the skill and the required level.
+- [x] A held skill whose credential is missing is flagged and not barred — the existing rule, surfaced rather than restated.
+
+**What the build settled that § 6.4.4 did not say.**
+
+1. **Three states, not two.** The plan says "held / not held". Recorded *below* the level the post asks for is neither: it reads `BelowLevel`, counts as held, and does not count as met. Above the level asked for is `Held` — **a requirement is a floor, not a target**.
+2. **A preferred skill is never a gap.** The counts and `isCompliant` are over the REQUIRED lines only.
+3. **A post that asks for nothing is vacuously compliant**, and the card renders nothing at all — the same rule as the certification compliance card, so a strip saying "nothing to say" does not appear on every profile.
+4. **The credential rule is not restated.** The read maps held skills through the same mapper the skills list already uses, so "needs a credential and nothing valid evidences it" is decided in one place.
+5. **The shared collection tab learned a ONE-SHOT `prefill`**, not a controlled `open`. The tab owns its dialog; two owners of one boolean is how a dialog ends up flickering or refusing to close. The caller sets a value, the tab consumes it once and calls back so the caller can clear it. Available to every sub-resource tab now, not just skills.
 
 ### Lane D — Employee profile · 2 slices
 

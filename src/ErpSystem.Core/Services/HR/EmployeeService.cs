@@ -23,6 +23,7 @@ public class EmployeeService : IEmployeeService
     private readonly IEmployeePositionRepository _positionRepository;
     private readonly ILocationRepository _locationRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeeService> _logger;
 
@@ -39,6 +40,7 @@ public class EmployeeService : IEmployeeService
         IGeographyService geography,
         INumberSequenceService numberSequence,
         ICompanyHrPolicySettingsService policySettings,
+        IPositionNamedSetService namedSets,
         ILogger<EmployeeService> logger)
     {
         _currencies = currencies;
@@ -47,6 +49,7 @@ public class EmployeeService : IEmployeeService
         _geography = geography;
         _numberSequence = numberSequence;
         _policySettings = policySettings;
+        _namedSets = namedSets;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
@@ -1592,6 +1595,80 @@ public class EmployeeService : IEmployeeService
 
         var reloaded = await repo.GetQueryable().Include(x => x.Qualification).Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// What the employee's post asks of them, against what they hold (round 2, lane C3b).
+    /// </summary>
+    /// <remarks>
+    /// Reads the position's EFFECTIVE skills - its attached skill sets unioned with its individual
+    /// rows - and NOT PositionSkillRequirement directly. A skill the post requires through a set is
+    /// as required as one listed individually, and reading the table would have told the employee
+    /// they were complete while a whole set went unmentioned.
+    /// </remarks>
+    public async Task<EmployeeSkillRequirementsDto> GetSkillRequirementsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+                           .AsNoTracking()
+                           .Include(e => e.Position)
+                           .Where(e => e.Id == employeeId && !e.IsDeleted)
+                           .Select(e => new
+                           {
+                               e.Id,
+                               Name = (e.FirstName + " " + e.LastName).Trim(),
+                               e.PositionId,
+                               PositionTitle = e.Position != null ? e.Position.Title : null,
+                           })
+                           .FirstOrDefaultAsync(cancellationToken)
+                       ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        var result = new EmployeeSkillRequirementsDto
+        {
+            EmployeeId = employee.Id,
+            EmployeeName = employee.Name,
+            PositionId = employee.PositionId == Guid.Empty ? null : employee.PositionId,
+            PositionTitle = employee.PositionTitle,
+            IsCompliant = true,
+        };
+
+        if (employee.PositionId == Guid.Empty) return result;
+
+        var required = await _namedSets.GetEffectiveSkillsAsync(employee.PositionId, null, cancellationToken);
+        // The held rows go through the SAME mapper the skills list uses, so the credential rule is
+        // stated once rather than reimplemented here.
+        var held = (await GetSkillsAsync(employeeId, cancellationToken)).ToList();
+
+        foreach (var r in required)
+        {
+            var mine = held.FirstOrDefault(h => h.SkillId == r.SkillId);
+            var meets = mine is not null && (int)mine.SkillLevel >= (int)r.RequiredLevel;
+
+            result.Lines.Add(new EmployeeSkillRequirementLineDto
+            {
+                SkillId = r.SkillId,
+                SkillName = r.SkillName,
+                SkillCategory = r.SkillCategory,
+                RequiredLevel = r.RequiredLevel,
+                IsRequired = r.IsRequired,
+                Priority = r.Priority,
+                Sources = r.Sources,
+                Held = mine is not null,
+                EmployeeSkillId = mine?.Id,
+                HeldLevel = mine?.SkillLevel,
+                IsVerified = mine?.IsVerified ?? false,
+                MeetsLevel = meets,
+                RequiresCertification = r.RequiresCertification,
+                CredentialSatisfied = mine?.IsCompliant ?? false,
+                Status = mine is null ? "Missing" : meets ? "Held" : "BelowLevel",
+            });
+        }
+
+        var mandatory = result.Lines.Where(l => l.IsRequired).ToList();
+        result.RequiredCount = mandatory.Count;
+        result.RequiredHeldCount = mandatory.Count(l => l.Held);
+        result.RequiredAtLevelCount = mandatory.Count(l => l.MeetsLevel);
+        result.IsCompliant = result.RequiredAtLevelCount == result.RequiredCount;
+        return result;
     }
 
     public async Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default)

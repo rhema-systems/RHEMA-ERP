@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,7 @@ import { employeeService } from '@/services/hr/employee.service';
 import { certificationService } from '@/services/hr/certification.service';
 import { SKILL_LEVEL_OPTIONS } from '@/types/hr/position';
 import type { EmployeeSkill } from '@/types/hr/employee-subresources';
+import { PositionSkillsCard } from '@/components/hr/employee/PositionSkillsCard';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
 import { DateField, FieldRow, SelectField, TextField, TextareaField } from './fields';
 
@@ -49,6 +51,10 @@ const empty: FormValues = {
 };
 
 export function SkillsTab({ employeeId }: { employeeId: string }) {
+  // Round 2, lane C3b. One-shot: set to open the add dialog pre-filled from the gap card, cleared
+  // by the tab once it has been consumed so the dialog does not reopen on every render.
+  const [prefill, setPrefill] = useState<FormValues | null>(null);
+
   const { data: skills } = useQuery({
     queryKey: ['hr', 'skills', 'active'],
     queryFn: () => skillService.getActive(),
@@ -86,8 +92,22 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
     }));
 
   return (
+    <div className="space-y-4">
+      {/*
+        What the post asks for, ahead of what the person happens to have recorded (register row
+        S-4). The tab used to list every skill in the catalogue and never mention the job.
+      */}
+      <PositionSkillsCard
+        employeeId={employeeId}
+        onAddSkill={(line) =>
+          setPrefill({ ...empty, skillId: line.skillId, skillLevel: line.requiredLevel })
+        }
+      />
+
     <EmployeeSubResourceTab<EmployeeSkill, FormValues>
       employeeId={employeeId}
+      prefill={prefill}
+      onPrefillConsumed={() => setPrefill(null)}
       title="skills"
       singular="skill"
       queryKey="skills"
@@ -236,5 +256,6 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
         </>
       )}
     />
+    </div>
   );
 }

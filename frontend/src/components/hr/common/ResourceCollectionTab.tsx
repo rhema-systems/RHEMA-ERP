@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useForm, type UseFormReturn, type DefaultValues, type FieldValues } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { ZodType } from 'zod';
@@ -112,6 +112,17 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
    */
   renderFields: (form: UseFormReturn<TForm>, editing: boolean) => ReactNode;
 
+  /**
+   * Open the ADD dialog pre-filled, from outside the tab (round 2, lane C3b). Set it to a form
+   * value and the dialog opens on it; the tab calls `onPrefillConsumed` once, so the caller can
+   * clear its own state and the dialog does not reopen on every render.
+   *
+   * ⚠ Deliberately one-shot rather than a controlled `open` prop: the tab owns its dialog, and two
+   * owners of one boolean is how a dialog ends up flickering or refusing to close.
+   */
+  prefill?: TForm | null;
+  onPrefillConsumed?: () => void;
+
   getId: (item: TItem) => string;
   dialogClassName?: string;
   emptyDescription?: string;
@@ -150,6 +161,8 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   dialogClassName = 'sm:max-w-[560px]',
   emptyDescription,
   dialogHint,
+  prefill,
+  onPrefillConsumed,
 }: ResourceCollectionTabProps<TItem, TForm>) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -228,6 +241,17 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
     form.reset(emptyForm as DefaultValues<TForm>);
     setDialogOpen(true);
   };
+
+  // Round 2, lane C3b — a caller outside the tab (the skills gap card) asking for the add dialog
+  // pre-filled. Consumed once; the caller clears its own state in the callback.
+  useEffect(() => {
+    if (!prefill) return;
+    setEditing(null);
+    form.reset(prefill as DefaultValues<TForm>);
+    setDialogOpen(true);
+    onPrefillConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
 
   const openEdit = (item: TItem) => {
     setEditing(item);

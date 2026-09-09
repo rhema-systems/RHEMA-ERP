@@ -171,3 +171,41 @@ export const isRedundantIndividual = (sources: EffectiveSource[]): boolean =>
 /** The set names covering a line, for the "covered by X — remove" hint. */
 export const coveringSetNames = (sources: EffectiveSource[]): string[] =>
   sources.filter((s) => s.kind === 'Set').map((s) => s.setName ?? s.setCode ?? 'a set');
+
+// ── What the post asks of the person (lane C3b) ──────────────────────────────
+
+/** Held at the level asked for, held below it, or not held at all. */
+export type SkillRequirementStatus = 'Held' | 'BelowLevel' | 'Missing';
+
+export interface EmployeeSkillRequirementLine {
+  skillId: string;
+  skillName: string;
+  skillCategory?: string | null;
+  requiredLevel: SkillLevel;
+  isRequired: boolean;
+  priority: number;
+  /** Individual row on the post, or the set(s) that ask for it. */
+  sources: EffectiveSource[];
+  held: boolean;
+  employeeSkillId?: string | null;
+  heldLevel?: SkillLevel | null;
+  isVerified: boolean;
+  meetsLevel: boolean;
+  requiresCertification: boolean;
+  /** False when the skill needs a credential and nothing valid evidences it. Flagged, not gating. */
+  credentialSatisfied: boolean;
+  status: SkillRequirementStatus;
+}
+
+export interface EmployeeSkillRequirements {
+  employeeId: string;
+  employeeName: string;
+  positionId?: string | null;
+  positionTitle?: string | null;
+  lines: EmployeeSkillRequirementLine[];
+  /** Counts over the REQUIRED lines only — a preferred skill is not a gap. */
+  requiredCount: number;
+  requiredHeldCount: number;
+  requiredAtLevelCount: number;
+  isCompliant: boolean;
+}

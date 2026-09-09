@@ -1039,6 +1039,21 @@ public class EmployeesController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// What the post asks of this person against what they hold (round 2, lane C3b). Leads the
+    /// skills tab: held, held below the level asked for, or not held at all.
+    /// </summary>
+    [HttpGet("{employeeId:guid}/skill-requirements")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [ProducesResponseType(typeof(EmployeeSkillRequirementsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeSkillRequirementsDto>> GetSkillRequirements(Guid employeeId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        try { return Ok(await _service.GetSkillRequirementsAsync(employeeId, cancellationToken)); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+    }
+
     // NEW ENDPOINTS: Skills & certifications
     [HttpGet("{employeeId:guid}/skills")]
     [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]

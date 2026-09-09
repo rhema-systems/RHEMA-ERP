@@ -109,6 +109,13 @@ public interface IEmployeeService
 
     // Skills & certifications
     Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What the employee's post asks of them, against what they hold - the position's EFFECTIVE
+    /// skills (attached sets unioned with individual rows) set against their skill records
+    /// (round 2, lane C3b).
+    /// </summary>
+    Task<EmployeeSkillRequirementsDto> GetSkillRequirementsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> AddSkillAsync(CreateEmployeeSkillDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> UpdateSkillAsync(UpdateEmployeeSkillDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveSkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);

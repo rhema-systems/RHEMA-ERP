@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import type { EmployeeSkillRequirements } from '@/types/hr/named-sets';
 import type { PagedResult } from '@/types/hr/common';
 import type {
   Employee,
@@ -413,6 +414,16 @@ class EmployeeService {
 
   getEmployeeSkills(employeeId: string): Promise<EmployeeSkill[]> {
     return apiService.get<EmployeeSkill[]>(this.sub(employeeId, 'skills'));
+  }
+
+  /**
+   * What the employee's post asks of them against what they hold (round 2, lane C3b).
+   *
+   * ⚠ The post's requirement is its EFFECTIVE one — the skill sets attached to it unioned with its
+   * individual rows — so a skill required through a set counts exactly as one listed individually.
+   */
+  getSkillRequirements(employeeId: string): Promise<EmployeeSkillRequirements> {
+    return apiService.get<EmployeeSkillRequirements>(this.sub(employeeId, 'skill-requirements'));
   }
 
   addEmployeeSkill(employeeId: string, data: CreateEmployeeSkillRequest): Promise<EmployeeSkill> {

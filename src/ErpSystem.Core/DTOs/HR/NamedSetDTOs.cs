@@ -269,3 +269,63 @@ public class EffectiveCertificationDto
 }
 
 #endregion
+
+#region What the post asks of the person (lane C3b)
+
+/// <summary>
+/// The employee's position's EFFECTIVE skills set against what the employee actually holds
+/// (round 2, lane C3b, plan section 6.4.4). The same shape as the certification compliance read.
+/// </summary>
+public class EmployeeSkillRequirementsDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public Guid? PositionId { get; set; }
+    public string? PositionTitle { get; set; }
+
+    public List<EmployeeSkillRequirementLineDto> Lines { get; set; } = new();
+
+    /// <summary>Counts over the REQUIRED lines only - a preferred skill is not a gap.</summary>
+    public int RequiredCount { get; set; }
+    public int RequiredHeldCount { get; set; }
+    public int RequiredAtLevelCount { get; set; }
+
+    /// <summary>True when every required skill is held at or above the level the post asks for.</summary>
+    public bool IsCompliant { get; set; }
+}
+
+public class EmployeeSkillRequirementLineDto
+{
+    public Guid SkillId { get; set; }
+    public string SkillName { get; set; } = string.Empty;
+    public string? SkillCategory { get; set; }
+
+    public SkillLevel RequiredLevel { get; set; }
+    public bool IsRequired { get; set; }
+    public int Priority { get; set; }
+
+    /// <summary>Individual row, or the set(s) that ask for it - the position's effective sources.</summary>
+    public List<EffectiveSourceDto> Sources { get; set; } = new();
+
+    public bool Held { get; set; }
+    public Guid? EmployeeSkillId { get; set; }
+    public SkillLevel? HeldLevel { get; set; }
+    public bool IsVerified { get; set; }
+
+    /// <summary>Held at or above <see cref="RequiredLevel"/>.</summary>
+    public bool MeetsLevel { get; set; }
+
+    public bool RequiresCertification { get; set; }
+
+    /// <summary>
+    /// The skill's own credential rule, straight off the employee's skill row: false when the skill
+    /// needs a credential and nothing valid evidences it. Recording is NOT gating - the row is
+    /// allowed and flagged, exactly as the skills list already shows it.
+    /// </summary>
+    public bool CredentialSatisfied { get; set; }
+
+    /// <summary>"Held", "BelowLevel" or "Missing" - what a screen prints without recomputing.</summary>
+    public string Status { get; set; } = "Missing";
+}
+
+#endregion
