@@ -428,6 +428,21 @@ Six tables, not the five the plan counted: the sweep needs its own run/dispatch 
 - Tax reliefs and component exceptions have **no employee filter on payroll's routes** (loans and advances do). The tab filters those two client-side; recorded under § 7.1 as the by-employee reads payroll still owes.
 - Two stale fixtures repaired in `hr-payroll-membership`: `api.mjs`'s actor minter sent a staff number on the ordinary create (repointed to the import door); `run-payroll-membership.mjs`'s `base()` sent both a number and `probationPeriodDays: 90` against a six-month post — the latter refused by **D1's** rule, correctly.
 
+**E1b — Withdrawal of a grade placement becomes a fact of its own.** **BUILT 2026-09-09 — 73 ×2, the same `hr-payroll-membership/run-e1.mjs` (section E); membership suite 86 ×2.** Migration `20260909161346_AddSalaryAssignmentWithdrawal`.
+
+Not in the original plan. It came out of explaining E1's "same-day placement edge" to the user, which turned out to be the harmless instance of a real defect.
+
+**The defect.** One date interval was carrying two questions — *when were these terms in force* and *was this row withdrawn*. Withdrawal was expressed by pulling `EffectiveTo` back to yesterday, which cannot be done to a placement that has not started without ending it before it begins; so the code clamped the end to the row's own start date. **A one-day window in the future is not a closed placement — it is a scheduled one.** A promotion booked for 1 October and withdrawn on 15 September matched the as-of predicate again *on 1 October*, and `EmolumentService` — and through it benefit enrolment — read that notch as basic pay for the day.
+
+- [x] `EmployeeSalaryAssignment.WithdrawnAt` + `WithdrawnReason`. The window now says only when the terms were in force; a placement withdrawn before it took effect carries no window at all.
+- [x] **Four copies of the as-of predicate had drifted**, and two of them (`GetCurrentAsync`, the `IsActive` projection) never asked whether the placement had *started* — so a future-dated placement read as "current" and rendered "Active" today. All four now agree; `IsInForceOn()` is the in-memory twin beside the projections, and the query sites still spell it out because EF cannot translate a method.
+- [x] `AssignSalaryAsync` had a third instance: two placements sharing an effective date — the ordinary way a mistake is corrected — ended the first the day before the second, i.e. before it began. Withdrawn instead.
+- [x] **There were two basic-pay resolvers and E1 only fixed one.** `EmolumentService` had its own copy that had never heard of `PayBasis`, so a negotiated employee's benefit contribution came from a notch HR had said was not their pay. One `HrBasicPay.Resolve` now serves the reconciliation, emoluments and the separation settlement.
+- [x] The Salary tab distinguishes Active / Scheduled / Ended / Withdrawn, and prints the withdrawal reason.
+- [x] Migration repair, **measured first**: 10 live placements, 6 carrying the clamp's fingerprint, 4 still able to fire, 0 negative windows — all 4 harness litter on deleted fixtures. The repair is a heuristic (`EffectiveTo = EffectiveDate` cannot be told from a deliberate one-day placement), so it is scoped to rows that can *still* fire plus any negative window. Past clamped rows are left alone: rewriting history to tidy a flag is the worse trade.
+
+⚠ `run-payroll-membership.mjs` § 4 was **asserting the defect** ("placement is closed (effectiveTo set)") and was rewritten to assert withdrawal.
+
 **E2 — Benefits, allowances, deductions inside HR.** Blocked on § 7.1 (payroll builds the per-employee components editor and a by-employee read). When it lands, host it as a fourth section of the same tab. Until then the read-only "Payroll items" section stands in.
 
 ### Lane F — Teams and committees sub-module · 3 slices (§ 6.6)

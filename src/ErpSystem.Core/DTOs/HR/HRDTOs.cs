@@ -1961,8 +1961,22 @@ public class EmployeeSalaryAssignmentListDto
     public DateTime EffectiveDate { get; set; }
     public DateTime? EffectiveTo { get; set; }
     public string? Reason { get; set; }
+
+    /// <summary>In force TODAY: taken effect, not ended, not withdrawn.</summary>
+    /// <remarks>
+    /// ⚠ Was <c>EffectiveTo == null || EffectiveTo &gt;= today</c>, which never asked whether the
+    /// placement had STARTED — so one dated next month read as active now — and knew nothing of
+    /// withdrawal. Corrected in lane E1b.
+    /// </remarks>
     public bool IsActive { get; set; }
-    
+
+    /// <summary>Takes effect in the future: dated forward, not withdrawn.</summary>
+    public bool IsScheduled { get; set; }
+
+    /// <summary>Withdrawn rather than superseded or run to its end. See the entity's remarks.</summary>
+    public DateTime? WithdrawnAt { get; set; }
+    public string? WithdrawnReason { get; set; }
+
     // Computed/projected amount from Grade/Level/Notch
     public decimal? Amount { get; set; }
 }

@@ -2542,15 +2542,28 @@ public class EmployeeService : IEmployeeService
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
         entity.TenantId = GetTenantId();
 
-        // Prevent overlaps: close any assignment overlapping the new EffectiveDate
+        // Prevent overlaps: end any placement the new one takes over from.
         var current = await repo.FirstOrDefaultAsync(a =>
             a.EmployeeId == dto.EmployeeId &&
+            a.WithdrawnAt == null &&
             a.EffectiveDate <= dto.EffectiveDate &&
             (a.EffectiveTo == null || a.EffectiveTo >= dto.EffectiveDate));
 
         if (current != null)
         {
-            current.EffectiveTo = dto.EffectiveDate.AddDays(-1);
+            // ⚠ The two placements can share an effective date — re-placing somebody on the same
+            // day to correct a mistake is the ordinary way that happens. Ending the old one "the
+            // day before the new one" would then close it before it began. It never took effect,
+            // so it is withdrawn rather than closed, for the same reason as above.
+            if (current.EffectiveDate >= dto.EffectiveDate)
+            {
+                current.WithdrawnAt = DateTime.UtcNow;
+                current.WithdrawnReason = $"Replaced by a placement effective {dto.EffectiveDate:yyyy-MM-dd}.";
+            }
+            else
+            {
+                current.EffectiveTo = dto.EffectiveDate.AddDays(-1);
+            }
             await repo.UpdateAsync(current);
         }
 
@@ -3257,33 +3270,50 @@ public class EmployeeService : IEmployeeService
     }
 
     /// <summary>
-    /// Ends every open grade placement as of yesterday. Close, never delete: the row is the record
-    /// of where they were graded while that was their pay.
+    /// Withdraws every grade placement that is still standing, because the notch has stopped being
+    /// this person's pay. Withdraw and close, never delete: the row is the record.
     /// </summary>
     /// <remarks>
-    /// Shared by the off-payroll flip and the switch to negotiated pay (lane E1) — one rule for
-    /// "the notch is no longer this person's pay", whichever fact changed. A placement that starts
-    /// today or later is closed on its own start date so the window stays valid
-    /// (<c>EffectiveTo &gt;= EffectiveDate</c>) instead of going negative.
+    /// <para>Shared by the off-payroll flip and the switch to negotiated pay — one rule for "the
+    /// notch is no longer this person's pay", whichever fact changed.</para>
+    ///
+    /// <para><b>⚠ The end date is written ONLY for a placement that had actually taken effect.</b>
+    /// This used to clamp <c>EffectiveTo</c> to the row's own start date when yesterday would have
+    /// been earlier, to keep the window from going negative — which quietly turned a withdrawn
+    /// FUTURE placement into a one-day window on its start date. A promotion booked for 1 October
+    /// and withdrawn on 15 September came back to life on 1 October and was read as basic pay for
+    /// the day. The window now says only what it means — when these terms were in force — and
+    /// withdrawal is recorded as the separate act it is.</para>
     /// </remarks>
     private async Task CloseOpenSalaryAssignmentsAsync(Employee employee, string because, CancellationToken cancellationToken)
     {
         var today = DateTime.UtcNow.Date;
+        var yesterday = today.AddDays(-1);
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
-        var open = await repo.GetQueryable()
+
+        var standing = await repo.GetQueryable()
             .Where(a => a.EmployeeId == employee.Id && !a.IsDeleted
+                     && a.WithdrawnAt == null
                      && (a.EffectiveTo == null || a.EffectiveTo >= today))
             .ToListAsync(cancellationToken);
-        foreach (var assignment in open)
+
+        foreach (var assignment in standing)
         {
-            assignment.EffectiveTo = assignment.EffectiveDate > today.AddDays(-1)
-                ? assignment.EffectiveDate
-                : today.AddDays(-1);
+            assignment.WithdrawnAt = DateTime.UtcNow;
+            assignment.WithdrawnReason = because;
+
+            // Took effect at some point before today, so it genuinely ran until yesterday. One that
+            // starts today or later never ran at all and gets no window — WithdrawnAt is what keeps
+            // it out of every as-of read.
+            if (assignment.EffectiveDate <= yesterday)
+                assignment.EffectiveTo = yesterday;
+
             await repo.UpdateAsync(assignment);
         }
-        if (open.Count > 0)
+
+        if (standing.Count > 0)
             _logger.LogInformation(
-                "Closed {Count} open salary assignment(s) for {EmployeeId}: {Because}.", open.Count, employee.Id, because);
+                "Withdrew {Count} salary placement(s) for {EmployeeId}: {Because}.", standing.Count, employee.Id, because);
     }
 
     /// <inheritdoc />

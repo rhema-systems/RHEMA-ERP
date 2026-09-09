@@ -110,8 +110,25 @@ export function SalaryAssignmentsTab({
         { header: 'Effective', cell: (s) => s.effectiveDate?.slice(0, 10) || '—' },
         { header: 'Until', cell: (s) => s.effectiveTo?.slice(0, 10) || '—' },
         {
+          // ⚠ Four states, not two. A withdrawn placement used to be indistinguishable from one
+          // that ran its course — and a placement dated next month was labelled "Active" outright,
+          // because the old flag never asked whether it had started.
           header: 'Status',
-          cell: (s) => (s.isActive ? <Badge variant="secondary">Active</Badge> : '—'),
+          cell: (s) =>
+            s.withdrawnAt ? (
+              <span className="inline-flex flex-col gap-0.5">
+                <Badge variant="outline" className="w-fit text-muted-foreground">Withdrawn</Badge>
+                {s.withdrawnReason && (
+                  <span className="text-xs text-muted-foreground">{s.withdrawnReason}</span>
+                )}
+              </span>
+            ) : s.isActive ? (
+              <Badge variant="secondary">Active</Badge>
+            ) : s.isScheduled ? (
+              <Badge variant="outline">Scheduled</Badge>
+            ) : (
+              <Badge variant="outline" className="text-muted-foreground">Ended</Badge>
+            ),
         },
       ]}
       schema={schema}

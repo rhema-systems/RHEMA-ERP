@@ -68,7 +68,11 @@ public class PayrollMembershipService : IPayrollMembershipService
             .Include(a => a.Notch)
             .Include(a => a.Level)
             .Include(a => a.Grade)
+            // ⚠ WithdrawnAt is part of the predicate, not an afterthought: a placement withdrawn
+            // before its start date has no window to exclude it, so this is the only thing keeping
+            // it out. See EmployeeSalaryAssignment.WithdrawnAt.
             .Where(a => a.TenantId == tenantId && !a.IsDeleted
+                     && a.WithdrawnAt == null
                      && a.EffectiveDate <= asOf
                      && (a.EffectiveTo == null || a.EffectiveTo >= asOf));
 
@@ -89,9 +93,7 @@ public class PayrollMembershipService : IPayrollMembershipService
             .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
 
         var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
-        var (hrBasic, source) = employee.IsOnPayroll
-            ? HrBasicPay(employee, assignment, payrollBasic)
-            : (null, "Not on payroll.");
+        var (hrBasic, source) = HrBasicPay.Resolve(employee, assignment, payrollBasic);
 
         return new EmployeePayrollStatusDto
         {
@@ -150,7 +152,7 @@ public class PayrollMembershipService : IPayrollMembershipService
             .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
         var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
 
-        return HrBasicPay(employee, assignment, payrollBasic);
+        return HrBasicPay.Resolve(employee, assignment, payrollBasic);
     }
 
     public async Task<PayrollReconciliationDto> GetReconciliationAsync(CancellationToken cancellationToken = default)
@@ -186,7 +188,7 @@ public class PayrollMembershipService : IPayrollMembershipService
             profileByEmployee.TryGetValue(e.Id, out var profile);
             assignmentByEmployee.TryGetValue(e.Id, out var assignment);
             var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
-            var hrBasic = e.IsOnPayroll ? HrBasicPay(e, assignment, payrollBasic).MonthlyBasicPay : null;
+            var hrBasic = HrBasicPay.Resolve(e, assignment, payrollBasic).Amount;
 
             var issue = IssueFor(e, profile != null, profile?.PayrollActive, assignment, hrBasic, payrollBasic);
             if (issue == null) continue;
@@ -391,37 +393,6 @@ public class PayrollMembershipService : IPayrollMembershipService
         profile.DefaultPaymentMethodId = method.Id;
         await profiles.UpdateAsync(profile);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// The HR-side basic pay and where it came from, by pay basis.
-    /// </summary>
-    /// <remarks>
-    /// <para><b>On the scale</b> — the same chain EmolumentService resolves: the current notch's
-    /// amount, else the level's mid-point, else the flat figure on the record.</para>
-    /// <para><b>Negotiated</b> — the amount entered in payroll's window IS the negotiated salary
-    /// (round-2 plan § 6.5.2), so payroll's active basis comes first and the flat figure is the
-    /// fallback for somebody payroll has not set up yet. The placement is deliberately not consulted:
-    /// a negotiated person has none by rule, and a stale one left from before the switch must not
-    /// resurface as their pay.</para>
-    /// </remarks>
-    private static (decimal? MonthlyBasicPay, string Source) HrBasicPay(
-        Employee employee, EmployeeSalaryAssignment? assignment, decimal? payrollBasic)
-    {
-        if (employee.PayBasis == PayBasis.Negotiated)
-        {
-            if (payrollBasic is > 0m) return (payrollBasic, "Negotiated — the amount on payroll's salary basis.");
-            if (employee.Salary is > 0m) return (employee.Salary, "Negotiated — the flat figure on the employee record; payroll has no basis yet.");
-            return (null, "Negotiated, but no amount is on record: enter it on the payroll profile.");
-        }
-
-        if (assignment?.Notch?.SalaryAmount is { } notch)
-            return (notch, $"Salary scale — notch {assignment.Notch.NotchNumber} of {assignment.Grade?.Code ?? "the placed grade"}.");
-        if (assignment?.Level?.MidSalary is { } mid)
-            return (mid, $"Salary scale — mid-point of level {assignment.Level.Code ?? ""} (no notch chosen).");
-        if (employee.Salary is > 0m)
-            return (employee.Salary, "The flat figure on the employee record; not yet placed on the scale.");
-        return (null, "On the scale, but not placed on a grade and no flat figure is on record.");
     }
 
     private static PayrollReconciliationIssue? IssueFor(

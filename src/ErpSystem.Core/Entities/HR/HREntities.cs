@@ -1749,9 +1749,45 @@ public class EmployeeSalaryAssignment : TenantEntity
     public Guid? NotchId { get; set; }
     
     public DateTime EffectiveDate { get; set; }
-    
+
+    /// <summary>
+    /// The last day these terms were in force. Null while they still are.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Written ONLY for a placement that actually took effect. A placement withdrawn before its
+    /// start date was never in force, so it has no window at all — see <see cref="WithdrawnAt"/>.
+    /// </remarks>
     public DateTime? EffectiveTo { get; set; }
-    
+
+    /// <summary>
+    /// When this placement was withdrawn — as opposed to superseded by a later one, or simply run
+    /// to its end. Null on a placement that stands, and on one replaced in the ordinary way.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ This column exists because one date interval was carrying two different facts,
+    /// and the collision had teeth.</b> "When were these terms in force" is the window; "was this
+    /// row withdrawn" is a separate act. Closing used to express the second by clamping the first,
+    /// and the clamp could not go earlier than the row's own start date without producing a window
+    /// that ends before it begins. So a placement withdrawn on or before its start date was closed
+    /// to <c>EffectiveTo = EffectiveDate</c> — a one-day window.</para>
+    ///
+    /// <para>For a placement starting TODAY that was a cosmetic lag: it read as in force until
+    /// midnight. For a FUTURE-dated one — a promotion booked ahead, then withdrawn when the person
+    /// moved to negotiated pay or came off payroll — it was a live defect: the window
+    /// <c>[1 Oct, 1 Oct]</c> matches the as-of predicate again ON 1 October, weeks after the
+    /// withdrawal, and <c>EmolumentService</c> would read that notch as basic pay for the day.
+    /// Benefit enrolment computes contributions from that figure.</para>
+    ///
+    /// <para>Every as-of read must exclude withdrawn rows. Kept rather than deleted, and kept
+    /// distinct from <c>IsDeleted</c> — "entered in error" and "withdrawn because the pay basis
+    /// changed" are different statements, and the second is worth showing on the tab.</para>
+    /// </remarks>
+    public DateTime? WithdrawnAt { get; set; }
+
+    /// <summary>Why it was withdrawn — "taken off payroll", "pay basis changed to negotiated".</summary>
+    [MaxLength(500)]
+    public string? WithdrawnReason { get; set; }
+
     public string AssignmentReason { get; set; } = string.Empty; // Promotion, Annual Review, etc.
     
     [ForeignKey(nameof(EmployeeId))]

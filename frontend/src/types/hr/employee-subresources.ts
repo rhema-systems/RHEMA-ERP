@@ -712,7 +712,18 @@ export interface EmployeeSalaryAssignment {
   effectiveDate: string;
   effectiveTo?: string | null;
   reason?: string | null;
+  /** In force TODAY: taken effect, not ended, not withdrawn. */
   isActive: boolean;
+  /** Dated forward and not withdrawn — it has not taken effect yet. */
+  isScheduled: boolean;
+  /**
+   * Withdrawn rather than superseded or run to its end.
+   *
+   * ⚠ A placement withdrawn before its start date has NO end date — it was never in force, so it
+   * has no window. This is the only thing that marks it, and every as-of read excludes it.
+   */
+  withdrawnAt?: string | null;
+  withdrawnReason?: string | null;
   amount?: number | null;
   assignmentReason?: string;
 }

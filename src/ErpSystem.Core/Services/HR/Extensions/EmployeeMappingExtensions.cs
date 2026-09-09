@@ -1275,6 +1275,22 @@ public static class EmployeeMappingExtensions
     private static string? NullIfBlank(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    /// <summary>
+    /// Whether this placement is the one in force on <paramref name="asOf"/>: taken effect, not
+    /// ended, and not withdrawn.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The in-memory twin of the predicate every as-of QUERY uses (<c>ActiveAssignments</c>,
+    /// <c>EmolumentService</c>, <c>GetCurrentAsync</c>). The four copies had drifted — two never
+    /// asked whether the placement had STARTED — and a projection that disagrees with the query is
+    /// how a screen says "Active" about a row no calculation will use. EF cannot translate a method
+    /// into SQL, so the query sites still spell it out; this is for materialised rows.
+    /// </remarks>
+    public static bool IsInForceOn(this EmployeeSalaryAssignment s, DateTime asOf)
+        => s.WithdrawnAt == null
+        && s.EffectiveDate <= asOf
+        && (s.EffectiveTo == null || s.EffectiveTo >= asOf);
+
     public static EmployeeSalaryAssignmentListDto ToListDto(this EmployeeSalaryAssignment s)
         => new()
         {
@@ -1290,7 +1306,10 @@ public static class EmployeeMappingExtensions
             EffectiveDate = s.EffectiveDate,
             EffectiveTo = s.EffectiveTo,
             Reason = s.AssignmentReason,
-            IsActive = s.EffectiveTo == null || s.EffectiveTo >= DateTime.Today,
+            IsActive = s.IsInForceOn(DateTime.Today),
+            IsScheduled = s.WithdrawnAt == null && s.EffectiveDate > DateTime.Today,
+            WithdrawnAt = s.WithdrawnAt,
+            WithdrawnReason = s.WithdrawnReason,
             Amount = s.Notch?.SalaryAmount ?? s.Level?.MidSalary
         };
 
@@ -1310,7 +1329,10 @@ public static class EmployeeMappingExtensions
             EffectiveTo = s.EffectiveTo,
             AssignmentReason = s.AssignmentReason,
             Reason = s.AssignmentReason,
-            IsActive = s.EffectiveTo == null || s.EffectiveTo >= DateTime.Today,
+            IsActive = s.IsInForceOn(DateTime.Today),
+            IsScheduled = s.WithdrawnAt == null && s.EffectiveDate > DateTime.Today,
+            WithdrawnAt = s.WithdrawnAt,
+            WithdrawnReason = s.WithdrawnReason,
             Amount = s.Notch?.SalaryAmount ?? s.Level?.MidSalary
         };
 
