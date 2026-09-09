@@ -3,10 +3,18 @@ using ErpSystem.Api.Services.Inventory;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Inventory;
 using ErpSystem.Data;
+using ErpSystem.Data.Repositories.Inventory;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Inventory;
@@ -34,9 +42,10 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
         fixture.Db.InventoryDisposalCases.Add(disposal);
         await fixture.Db.SaveChangesAsync();
 
-        disposal.ProceedsAmount.Should().Be(0m);
-        disposal.ProceedsAccountId.Should().BeNull();
-        (await fixture.Db.InventoryDisposalCases.SingleAsync(value => value.Id == disposal.Id)).Method.Should().Be(method);
+        var durable = await fixture.Db.InventoryDisposalCases.SingleAsync(value => value.Id == disposal.Id);
+        durable.ProceedsAmount.Should().Be(0m);
+        durable.ProceedsAccountId.Should().BeNull();
+        durable.Method.Should().Be(method);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -68,5 +77,21 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
             await Db.DisposeAsync();
             await _connection.DisposeAsync();
         }
+
+        // Kept beside the relational connection so follow-up C7 owner tests cannot accidentally
+        // replace the disposal participant or C9 builder with the old E2E013 mocks.
+        public StockAdjustmentValuationIntentBuilder CreateValuationBuilder() => new(Db);
+
+        public IInventoryDisposalStockAdjustmentParticipant CreateDisposalParticipant(
+            ICurrentUserProvider currentUser, IUnitOfWork unitOfWork) =>
+            new InventoryDisposalStockAdjustmentParticipant(new StockAdjustmentService(
+                new StockAdjustmentRepository(Db), new InventoryItemRepository(Db), new StockMovementRepository(Db),
+                new WarehouseQuantityRepository(Db), new WarehouseLocationRepository(Db), new WarehouseRepository(Db),
+                Mock.Of<IConsignmentSettlementService>(), currentUser, unitOfWork,
+                Mock.Of<IInventoryTrackingControlService>(), Mock.Of<IInventoryNegativeStockControlService>(),
+                Mock.Of<IProcurementAccessControlService>(), Mock.Of<IProcurementSodGuardService>(),
+                Mock.Of<IWorkflowIntegrationService>(), Mock.Of<IProcurementControlEventService>(),
+                Mock.Of<IInventoryAdjustmentFinancePostingService>(), Mock.Of<IInventoryValuationService>(),
+                NullLogger<StockAdjustmentService>.Instance));
     }
 }
