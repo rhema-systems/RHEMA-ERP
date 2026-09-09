@@ -1339,6 +1339,13 @@ the established byte-unchanged receipt/landed-cost valuation baselines. EF repor
 the migration set remains 456. The exact ten-commit ancestry and full-range diff are clean. Local ordered
 integration is now authorized; no configured database or migration was touched.
 
+The ten approved Inventory B2 commits were integrated locally in exact order as `2245b832`, `553c5caf`,
+`039ce4a6`, `5f5adb9c`, `074d7bf7`, `2f380d0b`, `0b7fa46d`, `b8967a7d`, `f9855df0` and `3fcf0bd0`.
+Every task-owned tracked blob is byte-identical to approved candidate `23c8f69d`; the only committed tree
+difference is this coordinator ledger. Unrelated dirty primary work remains untouched. Inventory B2 is locally
+integrated with C6-C8 still disabled by default, no migration applied and configured `RHEMAERP` unaccessed.
+The next phase is Sales from a fresh exact primary base after the restore-point gate.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
