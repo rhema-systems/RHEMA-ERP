@@ -412,6 +412,86 @@ public class EmployeeDocumentsController : ControllerBase
             inline: true, ct);
     }
 
+    // ── Documents that pertain to a guarantor (round 2, lane A-6) ──────────────────────────────
+    //
+    // Many per guarantor, each with a kind from the employee document vocabulary. The photograph
+    // above is one-per-row; these are the papers — the signed form, an ID scan, a payslip.
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("guarantors/{guarantorId:guid}/documents")]
+    public async Task<ActionResult<IEnumerable<EmployeeGuarantorDocumentDto>>> GetGuarantorDocuments(
+        Guid guarantorId, CancellationToken ct = default)
+    {
+        var guarantor = await _service.GetGuarantorAsync(guarantorId, ct);
+        if (guarantor is null) return NotFound(new { message = $"Guarantor '{guarantorId}' was not found." });
+        return Ok(await _service.GetGuarantorDocumentsAsync(guarantorId, ct));
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("guarantors/{guarantorId:guid}/documents")]
+    [RequestSizeLimit(50_000_000)]
+    public async Task<IActionResult> UploadGuarantorDocument(
+        Guid guarantorId,
+        IFormFile? file,
+        [FromForm] Guid documentTypeId,
+        [FromForm] string? title = null,
+        [FromForm] string? description = null,
+        [FromForm] DateOnly? issuedOn = null,
+        [FromForm] DateOnly? expiresOn = null,
+        CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        // Entitlement first, storage second.
+        var guarantor = await _service.GetGuarantorAsync(guarantorId, ct);
+        if (guarantor is null) return NotFound(new { message = $"Guarantor '{guarantorId}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.EmployeeGuarantorDocument),
+            sourceRecordId: guarantorId,
+            sourceLabel: "Guarantor document",
+            documentType: "GuarantorDocument",
+            description: description,
+            persist: (_, document) => _service.AttachGuarantorDocumentAsync(
+                guarantorId, documentTypeId, title, description, issuedOn, expiresOn,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                document.OriginalFileName, document.ContentType, document.FileSize,
+                _currentUser.EmployeeId, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("guarantor-documents/{id:guid}/download")]
+    public async Task<IActionResult> DownloadGuarantorDocument(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var document = await _service.GetGuarantorDocumentEntityAsync(id, ct);
+        if (document is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId,
+            legacyPath: null,
+            document.FileName ?? "guarantor-document",
+            fallbackContentType: document.MimeType,
+            inline: false, ct);
+    }
+
+    /// <summary>Admin tier, the same bar as removing an employee document.</summary>
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [HttpDelete("guarantor-documents/{id:guid}")]
+    public async Task<IActionResult> DeleteGuarantorDocument(Guid id, CancellationToken ct = default)
+    {
+        try { await _service.DeleteGuarantorDocumentAsync(id, ct); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        return NoContent();
+    }
+
     [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [HttpPost("referees/{refereeId:guid}/letter")]
     [RequestSizeLimit(20_000_000)]

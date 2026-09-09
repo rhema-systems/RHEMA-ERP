@@ -39,6 +39,10 @@ sweep closed; coverage queue 3 real endpoints from empty.
 2a's six settings, lane 3's 3a / 3c / 3d-buildable rows, and **all of lane 5** that is not blocked on
 D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 
+▶ **Demo feedback round 2 (2026-09-08) has its own plan:** `docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md`
+§ 5 — six lanes A–F. **Lane A DONE 2026-09-09** (88 assertions ×2; lane 3a and 3c re-run green).
+Next in that plan: B1 (the cascading unit/location picker and unit history dates).
+
 ▶ **Lane 9 — demo dataset — BUILT 2026-09-04.** Every one of the 551 required HR/SHE tables holds data in
 `ErpSystemDB_UAT`, the six runbooks are checked against the database on every rebuild, and the
 rebuild is one command. **One decision is owed** (admin tier vs employee link — § Lane 9 and the
@@ -464,6 +468,17 @@ one schema change, one set of screens, one harness run.
 assertions, green twice; lane 3c re-run 47/47, no regression). Screens: the three new employee
 fields, the guarantor surety + currency, the position's guarantor requirement, the compliance strip,
 the expatriate permits, and a family panel behind a per-row action.
+
+⚠ **CORRECTED 2026-09-09 (demo feedback round 2, lane A).** Three of the ticks above were true of
+the API and false of the product, and the demo audience found all three:
+- The "three new employee fields" (and the disability pair) were on the FORM but
+  `employeeFormMapper.ts` never copied them into the request — typed, and thrown away.
+- The referee letter and the guarantor photograph had upload routes and **no caller anywhere in the
+  frontend**; the same was true of the employee and dependant photo routes.
+The 47 assertions here proved the API. Nothing asserted the screen's payload, which is the area-16
+lesson ("coverage of the API is not coverage of the product") met again. All closed by
+`docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md` lane A — `hr-employee-docs/run-round2-laneA.mjs`, 88
+assertions ×2, whose §1 reads the frontend source and asserts the mapper keys and the callers.
 
 ⚠ **Two decisions the user made, and the assertions that hold them.** Disability is DUPLICATED on
 the employee, not moved from the dependant — the harness records the employee's flag as true and a

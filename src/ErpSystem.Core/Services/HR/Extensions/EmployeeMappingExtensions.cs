@@ -1303,7 +1303,14 @@ public static class EmployeeMappingExtensions
             PhoneNumber = r.PhoneNumber,
             EmailAddress = r.EmailAddress,
             IsPrimary = r.IsPrimary,
-            IsActive = r.IsActive
+            IsActive = r.IsActive,
+            IsContacted = r.IsContacted,
+            // One flag rather than making every screen reason about which of three ids means
+            // "there is a file". The list carries it since round 2 so the tab can show a paperclip.
+            HasLetter = r.LetterFileUploadRecordId != null || r.LetterDocumentRecordId != null,
+            LetterFileName = r.LetterFileName,
+            LetterMimeType = r.LetterMimeType,
+            LetterFileSizeBytes = r.LetterFileSizeBytes
         };
 
     public static EmployeeRefereeDetailDto ToDetailDto(this EmployeeReferee r)
@@ -1374,7 +1381,14 @@ public static class EmployeeMappingExtensions
             PhoneNumber = g.PhoneNumber,
             EmailAddress = g.EmailAddress,
             IsVerified = g.IsVerified,
-            IsActive = g.IsActive
+            IsActive = g.IsActive,
+            HasPhoto = g.PhotoFileUploadRecordId != null || g.PhotoDocumentRecordId != null,
+            // ⚠ Both need the navigations loaded — the list read Includes them. A repository
+            // FindAsync would leave them null and this would read "no type, no documents" for
+            // every row, which is the stale-navigation shape met sixteen times in this module.
+            NationalIdTypeId = g.NationalIdTypeId,
+            NationalIdTypeName = g.NationalIdTypeRef?.Name,
+            DocumentCount = g.Documents?.Count(d => !d.IsDeleted) ?? 0
         };
 
     public static EmployeeGuarantorDetailDto ToDetailDto(this EmployeeGuarantor g)
@@ -1409,6 +1423,9 @@ public static class EmployeeMappingExtensions
             PhotoMimeType = g.PhotoMimeType,
             PhotoFileSizeBytes = g.PhotoFileSizeBytes,
             NationalIdType = g.NationalIdType,
+            NationalIdTypeId = g.NationalIdTypeId,
+            NationalIdTypeName = g.NationalIdTypeRef?.Name,
+            DocumentCount = g.Documents?.Count(d => !d.IsDeleted) ?? 0,
             NationalIdNumberMasked = string.IsNullOrWhiteSpace(g.NationalIdNumber) ? null : Mask(g.NationalIdNumber),
             NationalIdExpiryDate = g.NationalIdExpiryDate,
             HasSignedGuarantorForm = g.HasSignedGuarantorForm,
@@ -1449,11 +1466,12 @@ public static class EmployeeMappingExtensions
             AmountGuaranteedCurrencyCode = dto.AmountGuaranteedCurrencyCode,
             GenderDescription = dto.GenderDescription,
             NationalIdType = dto.NationalIdType,
+            NationalIdTypeId = dto.NationalIdTypeId,
             NationalIdNumber = dto.NationalIdNumber,
             NationalIdExpiryDate = dto.NationalIdExpiryDate,
             HasSignedGuarantorForm = dto.HasSignedGuarantorForm,
             DateFormSigned = dto.DateFormSigned,
-            GuarantorFormPath = dto.GuarantorFormPath,
+            // GuarantorFormPath is deliberately not mapped: it is no longer on the DTO.
             Notes = dto.Notes,
             IsActive = dto.IsActive
         };
@@ -1483,11 +1501,13 @@ public static class EmployeeMappingExtensions
         if (dto.AmountGuaranteedCurrencyCode != null) g.AmountGuaranteedCurrencyCode = dto.AmountGuaranteedCurrencyCode;
         if (dto.GenderDescription != null) g.GenderDescription = dto.GenderDescription;
         if (dto.NationalIdType != null) g.NationalIdType = dto.NationalIdType;
+        if (dto.ClearNationalIdType) g.NationalIdTypeId = null;
+        else if (dto.NationalIdTypeId.HasValue) g.NationalIdTypeId = dto.NationalIdTypeId;
         if (dto.NationalIdNumber != null) g.NationalIdNumber = dto.NationalIdNumber;
         if (dto.NationalIdExpiryDate.HasValue) g.NationalIdExpiryDate = dto.NationalIdExpiryDate;
         if (dto.HasSignedGuarantorForm.HasValue) g.HasSignedGuarantorForm = dto.HasSignedGuarantorForm.Value;
         if (dto.DateFormSigned.HasValue) g.DateFormSigned = dto.DateFormSigned;
-        if (dto.GuarantorFormPath != null) g.GuarantorFormPath = dto.GuarantorFormPath;
+        // GuarantorFormPath is no longer writable — see the entity remark.
         if (dto.IsVerified.HasValue) g.IsVerified = dto.IsVerified.Value;
         if (dto.VerificationDate.HasValue) g.VerificationDate = dto.VerificationDate;
         if (dto.VerifiedByEmployeeId.HasValue) g.VerifiedByEmployeeId = dto.VerifiedByEmployeeId;
@@ -1622,7 +1642,13 @@ public static class EmployeeMappingExtensions
 
     public static void Apply(this UpdateEmployeeBankDetailDto dto, EmployeeBankDetail e)
     {
+        // Nullable-means-not-supplied, so switching a row from a catalogue bank back to a typed
+        // name has to say so explicitly — otherwise the old link would survive beside the new text.
+        if (dto.ClearBankLink)                 { e.BankId = null; e.BranchId = null; }
         if (dto.BankId.HasValue)               e.BankId               = dto.BankId;
+        // Changing the bank without naming a branch drops the old branch rather than pairing it
+        // with a bank it does not belong to; the service refuses the mismatch anyway.
+        if (dto.BankId.HasValue && !dto.BranchId.HasValue) e.BranchId = null;
         if (dto.BranchId.HasValue)             e.BranchId             = dto.BranchId;
         if (dto.BankName != null)              e.BankName             = dto.BankName;
         if (dto.BranchName != null)            e.BranchName           = dto.BranchName;

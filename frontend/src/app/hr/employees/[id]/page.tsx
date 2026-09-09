@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Pencil, UserX, UserCheck, Ban, RotateCcw } from 'lucide-react';
+import { GatedPhoto, PhotoDialog } from '@/components/hr/common/PhotoDialog';
+import { employeeDocumentService } from '@/services/hr/employee-document.service';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -71,6 +73,9 @@ export default function EmployeeDetailPage() {
   const [busy, setBusy] = useState(false);
   const [termDate, setTermDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [termReason, setTermReason] = useState('');
+  const [photoOpen, setPhotoOpen] = useState(false);
+  // Bumped after an upload so the header avatar refetches the same gated URL.
+  const [photoVersion, setPhotoVersion] = useState(0);
 
   const { data: e, isLoading, isError } = useQuery({
     queryKey: ['hr', 'employees', id, 'details'],
@@ -144,6 +149,22 @@ export default function EmployeeDetailPage() {
         backHref="/hr/employees"
         actions={
           <div className="flex items-center gap-2">
+            {/* The employee's photograph, through the gate (round 2, lane A-7). Click to view or
+                replace it — the route existed since lane 3a with nothing calling it. */}
+            <button
+              type="button"
+              className="rounded-full ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              title={e.hasPhoto ? 'View or replace the photograph' : 'Add a photograph'}
+              onClick={() => setPhotoOpen(true)}
+            >
+              <GatedPhoto
+                endpoint={employeeDocumentService.employeePhotoUrl(e.id)}
+                enabled={!!e.hasPhoto || !!e.picturePath}
+                version={photoVersion}
+                alt={e.fullName}
+                className="h-10 w-10"
+              />
+            </button>
             <StatusBadge status={e.staffStatus} />
             <Button variant="outline" onClick={() => router.push(`/hr/employees/${e.id}/edit`)}>
               <Pencil className="mr-2 h-4 w-4" /> Edit
@@ -170,6 +191,18 @@ export default function EmployeeDetailPage() {
             )}
           </div>
         }
+      />
+
+      <PhotoDialog
+        open={photoOpen}
+        onOpenChange={setPhotoOpen}
+        title={`Photograph — ${e.fullName}`}
+        description="Shown on the profile, the ID card and the organogram."
+        endpoint={employeeDocumentService.employeePhotoUrl(e.id)}
+        hasPhoto={!!e.hasPhoto || !!e.picturePath}
+        upload={(file) => employeeDocumentService.uploadEmployeePhoto(e.id, file)}
+        onUploaded={() => { setPhotoVersion((v) => v + 1); void refresh(); }}
+        subjectLabel={e.fullName}
       />
 
       <Tabs defaultValue="overview">

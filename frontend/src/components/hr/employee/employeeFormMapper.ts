@@ -26,6 +26,13 @@ export function employeeFormToRequest(values: EmployeeFormValues): CreateEmploye
     lastName: values.lastName,
     title: s(values.title),
     gender: (values.gender || null) as Gender | null,
+    // ⚠ These four were collected by the form and never sent — lane 3a proved the API, and the
+    // mapper was the layer nothing asserted (demo feedback round 2, lane A-1). Only meaningful
+    // beside a gender of Other, but sent regardless: the server keeps whatever it is given.
+    genderDescription: values.gender === 'Other' ? s(values.genderDescription) : null,
+    hometown: s(values.hometown),
+    hasDisability: values.hasDisability,
+    disabilityDescription: values.hasDisability ? s(values.disabilityDescription) : null,
     dateOfBirth: s(values.dateOfBirth),
     maritalStatus: (values.maritalStatus || null) as MaritalStatus | null,
     religion: s(values.religion),

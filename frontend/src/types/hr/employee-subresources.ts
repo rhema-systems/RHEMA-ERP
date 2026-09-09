@@ -201,7 +201,13 @@ export interface EmployeeDependent {
   occupation?: string | null;
   isEligibleForBenefits: boolean;
   isDeceased: boolean;
+  /** LEGACY caller-supplied location, kept so ported images still resolve. Prefer `hasPhoto`. */
   picturePath?: string | null;
+  // ⚠ Read-only: the photograph arrives through POST employee-documents/dependants/{id}/photo.
+  hasPhoto?: boolean;
+  photoFileName?: string | null;
+  photoMimeType?: string | null;
+  photoFileSizeBytes?: number | null;
   notes?: string | null;
 }
 
@@ -707,6 +713,12 @@ export interface EmployeeReferee {
   /** DateTime */
   contactedDate?: string | null;
   referenceNotes?: string | null;
+  // ⚠ Read-only: the written reference arrives through POST employee-documents/referees/{id}/letter
+  // and the gate fills these in. On the LIST projection since round 2 so the tab can show it.
+  hasLetter?: boolean;
+  letterFileName?: string | null;
+  letterMimeType?: string | null;
+  letterFileSizeBytes?: number | null;
 }
 
 export interface CreateEmployeeRefereeRequest {
@@ -765,12 +777,19 @@ export interface EmployeeGuarantor {
   amountGuaranteedCurrencyCode?: string | null;
   /** How the guarantor describes their gender, where gender is Other. */
   genderDescription?: string | null;
+  /** Free-text kind, for rows recorded before the catalogue link. Prefer `nationalIdTypeId`. */
   nationalIdType?: string | null;
+  /** The kind from the identification-type catalogue (round 2, E-13). On the list projection. */
+  nationalIdTypeId?: string | null;
+  nationalIdTypeName?: string | null;
+  /** How many documents pertain to this guarantor. On the list projection. */
+  documentCount?: number;
   /** The detail projection masks the ID number; writes use nationalIdNumber. */
   nationalIdNumberMasked?: string | null;
   nationalIdExpiryDate?: string | null;
   hasSignedGuarantorForm?: boolean;
   dateFormSigned?: string | null;
+  /** LEGACY, read-only. The signed form is now a guarantor document through the gate. */
   guarantorFormPath?: string | null;
   isVerified: boolean;
   /** DateTime */
@@ -809,17 +828,21 @@ export interface CreateEmployeeGuarantorRequest {
   /** How the guarantor describes their gender, where gender is Other. */
   genderDescription?: string | null;
   nationalIdType?: string | null;
+  /** The catalogue kind. Refused if unknown or inactive. */
+  nationalIdTypeId?: string | null;
   nationalIdNumber?: string | null;
   nationalIdExpiryDate?: string | null;
   hasSignedGuarantorForm: boolean;
   dateFormSigned?: string | null;
-  guarantorFormPath?: string | null;
+  // ⚠ No guarantorFormPath: removed in round 2. The signed form is uploaded as a document.
   notes?: string | null;
   isActive: boolean;
 }
 
 export interface UpdateEmployeeGuarantorRequest extends Partial<CreateEmployeeGuarantorRequest> {
   id: string;
+  /** A null id means "not supplied" on the update DTO, so unlinking has to say so explicitly. */
+  clearNationalIdType?: boolean;
 }
 
 /** Body for POST .../guarantors/{id}/verify. verifiedDate is a DateTime. */
@@ -869,4 +892,6 @@ export interface CreateEmployeeBankDetailRequest {
 export interface UpdateEmployeeBankDetailRequest extends Partial<CreateEmployeeBankDetailRequest> {
   id: string;
   isActive?: boolean;
+  /** Unlinks the catalogue bank and branch so typed names stand alone (null id = "not supplied"). */
+  clearBankLink?: boolean;
 }

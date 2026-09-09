@@ -1829,22 +1829,30 @@ public class EmployeeRefereeListDto
     public string? EmailAddress { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsActive { get; set; }
-}
 
-public class EmployeeRefereeDetailDto : EmployeeRefereeListDto
-{
+    /// <summary>
+    /// On the LIST projection, not only the detail: the tab renders a "Contacted" badge off the
+    /// list row, and until round 2 the flag was absent from it, so the badge never showed.
+    /// </summary>
     public bool IsContacted { get; set; }
-    public DateTime? ContactedDate { get; set; }
-    public string? ReferenceNotes { get; set; }
 
     // ── The written reference ─────────────────────────────────────────────────
     // ⚠ Read-side only. There is no way to SET these from a DTO: the letter arrives through the
     // upload endpoint and the gate fills them in. `hasLetter` exists so a screen can show the
     // download affordance without having to reason about which of three ids means "present".
+    //
+    // On the LIST projection since demo feedback round 2 (lane A-4): the tab lists referees from
+    // this shape and needs to show a paperclip per row without a detail read each.
     public bool HasLetter { get; set; }
     public string? LetterFileName { get; set; }
     public string? LetterMimeType { get; set; }
     public long? LetterFileSizeBytes { get; set; }
+}
+
+public class EmployeeRefereeDetailDto : EmployeeRefereeListDto
+{
+    public DateTime? ContactedDate { get; set; }
+    public string? ReferenceNotes { get; set; }
 }
 
 public class CreateEmployeeRefereeDto
@@ -1914,6 +1922,15 @@ public class EmployeeGuarantorListDto
     public string? EmailAddress { get; set; }
     public bool IsVerified { get; set; }
     public bool IsActive { get; set; }
+
+    // ── Round 2 (lane A-5/A-6): what the tab needs per ROW without a detail read each ────────
+    /// <summary>Whether a photograph is on the row. Read-side only; it arrives through the gate.</summary>
+    public bool HasPhoto { get; set; }
+    /// <summary>How many documents pertain to this guarantor.</summary>
+    public int DocumentCount { get; set; }
+    /// <summary>The national ID kind from the catalogue, where one was chosen.</summary>
+    public Guid? NationalIdTypeId { get; set; }
+    public string? NationalIdTypeName { get; set; }
 }
 
 public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
@@ -1942,18 +1959,20 @@ public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
     /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
     public string? GenderDescription { get; set; }
 
-    // The photograph. Read-side only; it arrives through the upload endpoint.
-    public bool HasPhoto { get; set; }
+    // The photograph. Read-side only; it arrives through the upload endpoint. `HasPhoto` itself
+    // sits on the list projection since round 2.
     public string? PhotoFileName { get; set; }
     public string? PhotoMimeType { get; set; }
     public long? PhotoFileSizeBytes { get; set; }
 
+    /// <summary>The free-text kind, for rows recorded before the catalogue link existed.</summary>
     public string? NationalIdType { get; set; }
     public string? NationalIdNumberMasked { get; set; }
     public DateOnly? NationalIdExpiryDate { get; set; }
 
     public bool HasSignedGuarantorForm { get; set; }
     public DateOnly? DateFormSigned { get; set; }
+    /// <summary>LEGACY, read-only. The signed form is now a guarantor document through the gate.</summary>
     public string? GuarantorFormPath { get; set; }
 
     public DateTime? VerificationDate { get; set; }
@@ -2023,8 +2042,12 @@ public class CreateEmployeeGuarantorDto
 
     public decimal? MonthlyIncome { get; set; }
 
+    /// <summary>Free-text kind — accepted for rows whose kind is not in the catalogue; prefer the id.</summary>
     [MaxLength(50)]
     public string? NationalIdType { get; set; }
+
+    /// <summary>The kind, from the tenant's identification-type catalogue. Refused if unknown or inactive.</summary>
+    public Guid? NationalIdTypeId { get; set; }
 
     [MaxLength(100)]
     public string? NationalIdNumber { get; set; }
@@ -2034,8 +2057,8 @@ public class CreateEmployeeGuarantorDto
     public bool HasSignedGuarantorForm { get; set; }
     public DateOnly? DateFormSigned { get; set; }
 
-    [MaxLength(500)]
-    public string? GuarantorFormPath { get; set; }
+    // ⚠ No GuarantorFormPath. Removed in round 2 (lane A-6): a caller-supplied file location on a
+    // JSON body. The signed form is uploaded as a guarantor document through the gate.
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -2091,11 +2114,18 @@ public class UpdateEmployeeGuarantorDto
     public string? EmployerPhone { get; set; }
     public decimal? MonthlyIncome { get; set; }
     public string? NationalIdType { get; set; }
+    /// <summary>The catalogue kind. Null means "not supplied"; send <see cref="ClearNationalIdType"/> to unlink.</summary>
+    public Guid? NationalIdTypeId { get; set; }
+    /// <summary>
+    /// Nullable-means-not-supplied is the house convention, so emptying the picker has to say so
+    /// explicitly or the save would succeed and change nothing — the `clearGeoArea` shape.
+    /// </summary>
+    public bool ClearNationalIdType { get; set; }
     public string? NationalIdNumber { get; set; }
     public DateOnly? NationalIdExpiryDate { get; set; }
     public bool? HasSignedGuarantorForm { get; set; }
     public DateOnly? DateFormSigned { get; set; }
-    public string? GuarantorFormPath { get; set; }
+    // ⚠ No GuarantorFormPath — see the create DTO.
     public bool? IsVerified { get; set; }
     public DateTime? VerificationDate { get; set; }
     public Guid? VerifiedByEmployeeId { get; set; }
@@ -2324,6 +2354,12 @@ public class UpdateEmployeeBankDetailDto
     public Guid? BankId { get; set; }
 
     public Guid? BranchId { get; set; }
+
+    /// <summary>
+    /// Unlinks the catalogue bank and branch so the typed names stand alone. Needed because a null
+    /// id means "not supplied" on this DTO, the house convention.
+    /// </summary>
+    public bool ClearBankLink { get; set; }
 
     [MaxLength(200)]
     public string? BankName { get; set; }

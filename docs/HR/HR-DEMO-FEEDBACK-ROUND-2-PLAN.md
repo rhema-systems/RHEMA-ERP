@@ -1,6 +1,6 @@
 # HR demo feedback, round 2 — findings, decisions and build plan
 
-> **Status: PLANNED 2026-09-08. Nothing in this document is built yet.** Source: the feedback
+> **Status: LANE A BUILT 2026-09-09** (88 assertions ×2, `hr-employee-docs/run-round2-laneA.mjs`; lane 3a and 3c re-run 47/47 each). Lanes B–F planned, not built. Source: the feedback
 > document *HR Demo Meetings — Changes and Additions* (4 pages; sections Organization Structure,
 > Job Position, Skills Setup, Employee Profile), brought by the user on 2026-09-08 after the HR
 > module demo. Every bullet of that document is accounted for below — as a bug, a build item, a
@@ -269,19 +269,34 @@ new migration is guarded and listed in `FastBuildMigrationMetadata` or it is ine
 build. Every reference-data screen goes into `frontend/src/config/hr-setup-nav.ts` under the
 group it belongs to, and the runbook path must name the group.
 
-### Lane A — Bugs and unreachable features · 1 slice · migration: one nullable FK
+### Lane A — Bugs and unreachable features · ✅ **DONE 2026-09-09** · 88 assertions ×2
 
-- [ ] A-1 `employeeFormMapper.ts`: send `genderDescription`, `hometown`, `hasDisability`, `disabilityDescription` (§ 3.1). Probe: submit the form with all four, read `/details`.
-- [ ] A-2 `DependentBenefitsDialog.tsx`: `policyName` + typed service (§ 3.2).
-- [ ] A-3 Gender description adjacent to Gender (§ 3.4).
-- [ ] A-4 Referee letter: upload + download on `RefereesTab.tsx`; `hasLetter`/`letterFileName` on the list DTO and TS type; `employee.service.ts` gains `uploadRefereeLetter`/`refereeLetterUrl` (§ 3.3).
-- [ ] A-5 Guarantor photo: same on `GuarantorsTab.tsx`; `hasPhoto` on the list DTO.
-- [ ] A-6 Guarantor documents: `EmployeeGuarantorDocument` (gate columns, `DocumentTypeId → EmployeeDocumentType`, `Title`, `UploadedById`), `POST/GET/DELETE api/hr/employee-documents/guarantors/{id}/documents`, a documents strip inside the guarantor row. Retire `GuarantorFormPath` from both write DTOs (keep the column, read-only, until the data pass). ⚠ This is a second migration item in the same slice — acceptable, one migration file.
-- [ ] A-7 Dependant photo and employee photo: upload controls on `DependentsTab.tsx` and the employee Overview header (§ 3.3).
-- [ ] A-8 Guarantor edit hydration via `loadForEdit` (§ 3.5).
-- [ ] A-9 Guarantor `NationalIdTypeId` (nullable FK → `IdentificationType`, Restrict) + dropdown; free text kept and shown when the FK is null; DTOs carry both; masking of the number unchanged.
-- [ ] A-10 Bank/branch dropdowns from `bank.service.ts`; branch ∈ bank validated in `AddBankDetailAsync`/`UpdateBankDetailAsync`; `Include(Bank).Include(Branch)` on both reads; free text remains for rows with no FK, and the form offers "Bank not in the list" that reveals the text boxes.
-- [ ] A-11 Harness `hr-employee-docs/run-round2-laneA.mjs`: the four mapper fields round-trip through the **screen payload shape**; dropdown label non-empty; each upload door reachable from its tab's service method; guarantor edit hydrates; branch-of-another-bank refused 400; national ID type FK round-trips.
+Migration `20260909004030_AddGuarantorIdTypeAndDocuments` (guarded, listed). Harness
+`hr-employee-docs/run-round2-laneA.mjs`; lane 3a (47) and 3c (47) re-run green. Three things the
+build turned up that the plan did not have:
+
+- **The referee LIST never carried `isContacted`**, so the tab's "Contacted" badge had never shown
+  for anyone. Added to the list projection with the letter fields.
+- **`hr-employee-docs/setup.mjs` still supplied a staff number** and the register (lane 3b) refuses
+  one for permanent staff with 400 — every suite in that folder had been un-runnable since the
+  register shipped. The minter now lets the register issue the number. ⚠ Nine other harness
+  minters still supply one (`grep -l employeeNumber dev-harness/*/setup.mjs`); each will fail the
+  same way the next time it is run and needs the same one-line fix.
+- **§1 of the harness reads the frontend source.** It asserts the mapper's keys, the dialog's field
+  name, and that each gated route has a caller — the exact shapes that were wrong. Cheap, static,
+  and it is the regression that got through lane 3a.
+
+- [x] A-1 `employeeFormMapper.ts`: send `genderDescription`, `hometown`, `hasDisability`, `disabilityDescription` (§ 3.1). Probe: submit the form with all four, read `/details`.
+- [x] A-2 `DependentBenefitsDialog.tsx`: `policyName` + typed service (§ 3.2).
+- [x] A-3 Gender description adjacent to Gender (§ 3.4).
+- [x] A-4 Referee letter: upload + download on `RefereesTab.tsx`; `hasLetter`/`letterFileName` on the list DTO and TS type; `employee.service.ts` gains `uploadRefereeLetter`/`refereeLetterUrl` (§ 3.3).
+- [x] A-5 Guarantor photo: same on `GuarantorsTab.tsx`; `hasPhoto` on the list DTO.
+- [x] A-6 Guarantor documents: `EmployeeGuarantorDocument` (gate columns, `DocumentTypeId → EmployeeDocumentType`, `Title`, `UploadedById`), `POST/GET/DELETE api/hr/employee-documents/guarantors/{id}/documents`, a documents strip inside the guarantor row. Retire `GuarantorFormPath` from both write DTOs (keep the column, read-only, until the data pass). ⚠ This is a second migration item in the same slice — acceptable, one migration file.
+- [x] A-7 Dependant photo and employee photo: upload controls on `DependentsTab.tsx` and the employee Overview header (§ 3.3).
+- [x] A-8 Guarantor edit hydration via `loadForEdit` (§ 3.5).
+- [x] A-9 Guarantor `NationalIdTypeId` (nullable FK → `IdentificationType`, Restrict) + dropdown; free text kept and shown when the FK is null; DTOs carry both; masking of the number unchanged.
+- [x] A-10 Bank/branch dropdowns from `bank.service.ts`; branch ∈ bank validated in `AddBankDetailAsync`/`UpdateBankDetailAsync`; `Include(Bank).Include(Branch)` on both reads; free text remains for rows with no FK, and the form offers "Bank not in the list" that reveals the text boxes.
+- [x] A-11 Harness `hr-employee-docs/run-round2-laneA.mjs`: the four mapper fields round-trip through the **screen payload shape**; dropdown label non-empty; each upload door reachable from its tab's service method; guarantor edit hydrates; branch-of-another-bank refused 400; national ID type FK round-trips.
 
 ### Lane B — Organization structure · 3 slices
 

@@ -2,8 +2,12 @@
 
 import { useState } from 'react';
 import { z } from 'zod';
+import { useQueryClient } from '@tanstack/react-query';
+import { Camera } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { PhotoDialog } from '@/components/hr/common/PhotoDialog';
 import { employeeService } from '@/services/hr/employee.service';
+import { employeeDocumentService } from '@/services/hr/employee-document.service';
 import { GENDER_OPTIONS } from '@/types/hr/employee';
 import {
   DEPENDENT_RELATIONSHIP_OPTIONS,
@@ -89,7 +93,9 @@ const age = (dob?: string | null) => {
 };
 
 export function DependentsTab({ employeeId }: { employeeId: string }) {
+  const qc = useQueryClient();
   const [benefitsFor, setBenefitsFor] = useState<EmployeeDependent | null>(null);
+  const [photoFor, setPhotoFor] = useState<EmployeeDependent | null>(null);
 
   return (
     <>
@@ -110,11 +116,21 @@ export function DependentsTab({ employeeId }: { employeeId: string }) {
             label: 'Benefits…',
             run: async (d) => setBenefitsFor(d),
           },
+          {
+            // The dependant photo route existed since lane 3a with no caller (round 2, lane A-7).
+            label: (d) => (d.hasPhoto ? 'Photograph…' : 'Add photograph…'),
+            run: async (d) => setPhotoFor(d),
+          },
         ]}
         columns={[
           {
             header: 'Name',
-            cell: (d) => [d.firstName, d.middleName, d.lastName].filter(Boolean).join(' '),
+            cell: (d) => (
+              <span className="inline-flex items-center gap-2">
+                {[d.firstName, d.middleName, d.lastName].filter(Boolean).join(' ')}
+                {d.hasPhoto && <Camera className="h-3.5 w-3.5 text-muted-foreground" aria-label="Photograph on file" />}
+              </span>
+            ),
           },
           { header: 'Relationship', cell: (d) => d.relationship },
           { header: 'Date of birth', cell: (d) => d.dateOfBirth?.slice(0, 10) || '—' },
@@ -222,6 +238,19 @@ export function DependentsTab({ employeeId }: { employeeId: string }) {
         open={benefitsFor !== null}
         onOpenChange={(open) => !open && setBenefitsFor(null)}
       />
+
+      {photoFor && (
+        <PhotoDialog
+          open
+          onOpenChange={(open) => !open && setPhotoFor(null)}
+          title={`Photograph — ${[photoFor.firstName, photoFor.lastName].filter(Boolean).join(' ')}`}
+          endpoint={employeeDocumentService.dependentPhotoUrl(photoFor.id)}
+          hasPhoto={!!photoFor.hasPhoto}
+          upload={(file) => employeeDocumentService.uploadDependentPhoto(photoFor.id, file)}
+          onUploaded={() => void qc.invalidateQueries({ queryKey: ['hr', 'employees', employeeId, 'dependents'] })}
+          subjectLabel={[photoFor.firstName, photoFor.lastName].filter(Boolean).join(' ')}
+        />
+      )}
     </>
   );
 }

@@ -444,6 +444,8 @@ public partial class ApplicationDbContext
     public DbSet<EmployeeDocumentType> EmployeeDocumentTypes { get; set; } = null!;
     public DbSet<EmployeeDocument> EmployeeDocuments { get; set; } = null!;
     public DbSet<PositionDocumentRequirement> PositionDocumentRequirements { get; set; } = null!;
+    // Files that belong to a guarantor rather than to the employee (demo feedback round 2, lane A-6).
+    public DbSet<EmployeeGuarantorDocument> EmployeeGuarantorDocuments { get; set; } = null!;
     public DbSet<ProbationConfirmingAuthority> ProbationConfirmingAuthorities { get; set; } = null!;
     public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
     public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
@@ -2134,6 +2136,37 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(e => e.Country)
                 .WithMany()
                 .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Demo feedback round 2, E-13: the national ID kind from the identification-type
+            // catalogue. Restrict, so a type in use cannot be deleted from under a guarantor —
+            // the same rule the identification-card FK already carries.
+            entity.HasIndex(e => e.NationalIdTypeId);
+            entity.HasOne(e => e.NationalIdTypeRef)
+                .WithMany()
+                .HasForeignKey(e => e.NationalIdTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeGuarantorDocument>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.GuarantorId });
+            e.HasIndex(x => new { x.TenantId, x.ExpiresOn });
+
+            e.HasOne(x => x.Guarantor)
+                .WithMany(g => g.Documents)
+                .HasForeignKey(x => x.GuarantorId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.DocumentType)
+                .WithMany()
+                .HasForeignKey(x => x.DocumentTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Paired explicitly — an unpaired navigation mints a duplicate shadow FK.
+            e.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

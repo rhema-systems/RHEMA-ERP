@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
-import { apiService } from '@/services/api.service';
+import { benefitPolicyService } from '@/services/hr/benefits.service';
 import {
   Dialog,
   DialogContent,
@@ -39,12 +39,6 @@ const empty: FormValues = {
   isActive: true,
 };
 
-/** Minimal shape needed for the policy picker; the Benefits area owns the full type. */
-interface BenefitPolicyOption {
-  id: string;
-  name: string;
-}
-
 /**
  * Benefit enrolments for a single dependent. This is a resource nested two levels deep
  * (employee → dependent → benefit), so it reuses EmployeeSubResourceTab with the
@@ -63,14 +57,20 @@ export function DependentBenefitsDialog({
 }) {
   const dependentId = dependent?.id ?? '';
 
-  // Read-only lookup from the Benefits area (api/hr/benefit-policies), which has no UI yet.
+  // ⚠ Through the TYPED service. This used to call the endpoint raw with a local `{ id; name }`
+  // interface — and the API field is `policyName`, so every option rendered with an empty label
+  // ("the name of the benefits is not showing in the dropdown, though the dropdown is populated",
+  // demo feedback round 2, E-4). TypeScript could not catch a type the file had invented.
   const { data: policies } = useQuery({
     queryKey: ['hr', 'benefit-policies', 'active'],
-    queryFn: () => apiService.get<BenefitPolicyOption[]>('/hr/benefit-policies/active'),
+    queryFn: () => benefitPolicyService.getActive(),
     enabled: open,
   });
 
-  const policyOptions = (policies ?? []).map((p) => ({ value: p.id, label: p.name }));
+  const policyOptions = (policies ?? []).map((p) => ({
+    value: p.id,
+    label: p.policyCode ? `${p.policyName} (${p.policyCode})` : p.policyName,
+  }));
 
   const toPayload = (v: FormValues) => ({
     employeeDependentId: dependentId,

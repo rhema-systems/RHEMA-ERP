@@ -708,6 +708,15 @@ class EmployeeService {
     return apiService.get<EmployeeGuarantor[]>(this.sub(employeeId, 'guarantors'));
   }
 
+  /**
+   * The full record. ⚠ The list is a SUMMARY — address, employer, national ID, surety and the
+   * photo metadata are absent from it — so the edit dialog must hydrate from this or a save
+   * silently blanks every optional field the list did not carry.
+   */
+  getGuarantor(employeeId: string, id: string): Promise<EmployeeGuarantor> {
+    return apiService.get<EmployeeGuarantor>(this.sub(employeeId, `guarantors/${id}`));
+  }
+
   addGuarantor(
     employeeId: string,
     data: CreateEmployeeGuarantorRequest,

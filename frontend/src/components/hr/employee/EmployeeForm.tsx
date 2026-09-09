@@ -477,6 +477,17 @@ export function EmployeeForm({
                 />
               </Field>
             </div>
+            {/* Only asked when it means something. The enum offered "Other" and then had nowhere
+                to say what other meant, which makes the option a dead end for whoever picks it.
+                Sits directly under Gender (demo feedback round 2, E-1) — it used to be two rows
+                away, beside Hometown, where nobody connected it with the dropdown. */}
+            {form.watch('gender') === 'Other' && (
+              <div className={GRID3}>
+                <Field label="Describe gender" htmlFor="genderDescription" className="lg:col-start-3">
+                  <Input id="genderDescription" {...form.register('genderDescription')} />
+                </Field>
+              </div>
+            )}
             <div className={GRID3}>
               <Field label="Date of Birth" htmlFor="dateOfBirth">
                 <Input id="dateOfBirth" type="date" {...form.register('dateOfBirth')} />
@@ -507,13 +518,6 @@ export function EmployeeForm({
               <Field label="Hometown" htmlFor="hometown">
                 <Input id="hometown" {...form.register('hometown')} />
               </Field>
-              {/* Only asked when it means something. The enum offered "Other" and then had nowhere
-                  to say what other meant, which makes the option a dead end for whoever picks it. */}
-              {form.watch('gender') === 'Other' && (
-                <Field label="Describe gender" htmlFor="genderDescription">
-                  <Input id="genderDescription" {...form.register('genderDescription')} />
-                </Field>
-              )}
             </div>
 
             {/* ⚠ The EMPLOYEE's own disability. The one on a dependant is a different fact about a

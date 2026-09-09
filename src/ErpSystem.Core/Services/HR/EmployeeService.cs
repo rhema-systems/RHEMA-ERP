@@ -2191,18 +2191,48 @@ public class EmployeeService : IEmployeeService
         return entity.ToDetailDto();
     }
 
+    // ⚠ Both guarantor reads INCLUDE the navigations the list DTO now renders — the national-ID
+    // kind and the document count. A repository FindAsync leaves them unloaded and every row would
+    // read "no type, no documents" while the detail beside it says otherwise.
+    private IQueryable<EmployeeGuarantor> QueryGuarantors() =>
+        _unitOfWork.Repository<EmployeeGuarantor>().GetQueryable()
+            .Include(g => g.NationalIdTypeRef)
+            .Include(g => g.Documents);
+
     public async Task<IEnumerable<EmployeeGuarantorListDto>> GetGuarantorsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var repo = _unitOfWork.Repository<EmployeeGuarantor>();
-        var items = await repo.FindAsync(x => x.EmployeeId == employeeId);
+        var items = await QueryGuarantors()
+            .AsNoTracking()
+            .Where(x => x.EmployeeId == employeeId && !x.IsDeleted)
+            .ToListAsync(cancellationToken);
         return items.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.LastName).Select(x => x.ToListDto());
     }
 
     public async Task<EmployeeGuarantorDetailDto?> GetGuarantorByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var repo = _unitOfWork.Repository<EmployeeGuarantor>();
-        var entity = await repo.GetByIdAsync(id);
+        var entity = await QueryGuarantors()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken);
         return entity?.ToDetailDto();
+    }
+
+    /// <summary>
+    /// The national-ID kind must be one of the tenant's identification types, and active.
+    /// </summary>
+    /// <remarks>
+    /// Checked here rather than left to the FK: SQL 547 surfaces as an unexplained 500 where
+    /// "that identification type was not found" is the answer the screen can show.
+    /// </remarks>
+    private async Task RequireIdentificationTypeAsync(Guid? id, CancellationToken cancellationToken)
+    {
+        if (id is not Guid typeId) return;
+        var tenantId = GetTenantId();
+        var type = await _unitOfWork.Repository<IdentificationType>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == typeId && t.TenantId == tenantId && !t.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Identification type '{typeId}' was not found.");
+        if (!type.IsActive)
+            throw new InvalidOperationException($"Identification type '{type.Name}' is inactive and cannot be chosen for a new record.");
     }
 
     public async Task<EmployeeGuarantorDetailDto> AddGuarantorAsync(CreateEmployeeGuarantorDto dto, CancellationToken cancellationToken = default)
@@ -2212,6 +2242,7 @@ public class EmployeeService : IEmployeeService
         // optional: a guarantor may be recorded with no amount, and then no currency either.
         await _currencies.RequireKnownCurrencyAsync(
             dto.AmountGuaranteedCurrencyCode, cancellationToken, optional: true);
+        await RequireIdentificationTypeAsync(dto.NationalIdTypeId, cancellationToken);
 
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = dto.ToEntity();
@@ -2231,7 +2262,9 @@ public class EmployeeService : IEmployeeService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDetailDto();
+        // Re-read rather than mapping the tracked instance: a just-added row has no navigation
+        // loaded, so the create response would carry a blank type name beside a list that has it.
+        return (await GetGuarantorByIdAsync(entity.Id, cancellationToken))!;
     }
 
     public async Task<EmployeeGuarantorDetailDto> UpdateGuarantorAsync(UpdateEmployeeGuarantorDto dto, CancellationToken cancellationToken = default)
@@ -2239,6 +2272,7 @@ public class EmployeeService : IEmployeeService
         ArgumentNullException.ThrowIfNull(dto);
         await _currencies.RequireKnownCurrencyAsync(
             dto.AmountGuaranteedCurrencyCode, cancellationToken, optional: true);
+        await RequireIdentificationTypeAsync(dto.NationalIdTypeId, cancellationToken);
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Guarantor not found.");
@@ -2256,7 +2290,7 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDetailDto();
+        return (await GetGuarantorByIdAsync(entity.Id, cancellationToken))!;
     }
 
     public async Task<bool> RemoveGuarantorAsync(Guid id, CancellationToken cancellationToken = default)
@@ -2350,18 +2384,76 @@ public class EmployeeService : IEmployeeService
 
     // ── Bank Details ─────────────────────────────────────────────────────────
 
+    // ⚠ Both bank reads INCLUDE the bank and branch. The mapper reads `e.Bank?.Name ?? e.BankName`,
+    // and with the navigations unloaded it fell through to the free-text column on every row —
+    // which is why linking a catalogue bank had no visible effect before round 2.
+    private IQueryable<EmployeeBankDetail> QueryBankDetails() =>
+        _unitOfWork.Repository<EmployeeBankDetail>().GetQueryable()
+            .Include(b => b.Bank)
+            .Include(b => b.Branch);
+
     public async Task<IEnumerable<EmployeeBankDetailDto>> GetBankDetailsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
-        var items = await repo.FindAsync(x => x.EmployeeId == employeeId);
-        return items.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.BankName).Select(x => x.ToDto());
+        var items = await QueryBankDetails()
+            .AsNoTracking()
+            .Where(x => x.EmployeeId == employeeId && !x.IsDeleted)
+            .ToListAsync(cancellationToken);
+        return items.OrderByDescending(x => x.IsPrimary).ThenBy(x => x.Bank != null ? x.Bank.Name : x.BankName).Select(x => x.ToDto());
     }
 
     public async Task<EmployeeBankDetailDto?> GetBankDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var repo = _unitOfWork.Repository<EmployeeBankDetail>();
-        var entity = await repo.GetByIdAsync(id);
+        var entity = await QueryBankDetails()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken);
         return entity?.ToDto();
+    }
+
+    /// <summary>
+    /// Resolves the catalogue bank and branch a bank-account row names, refusing a branch that is
+    /// not the bank's, and mirrors their names into the free-text columns.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ The branch-in-bank check is the one that matters (demo feedback round 2, E-14): the
+    /// columns were being copied straight through, so a caller could pair GCB with an Ecobank
+    /// branch and the row would say both. Mirroring the names means any read that forgets to
+    /// Include still prints the catalogue name rather than whatever was typed.</para>
+    /// <para>Either id may be absent — the free-text fallback stays for banks not in the list.
+    /// A branch without its bank is refused, since it cannot be checked against anything.</para>
+    /// </remarks>
+    private async Task ResolveBankLinksAsync(EmployeeBankDetail entity, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        if (entity.BranchId.HasValue && !entity.BankId.HasValue)
+            throw new ArgumentException("A branch was given without its bank. Choose the bank first.");
+
+        if (entity.BankId is Guid bankId)
+        {
+            var bank = await _unitOfWork.Repository<EmployeeBank>().GetQueryable()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(b => b.Id == bankId && b.TenantId == tenantId && !b.IsDeleted, cancellationToken)
+                ?? throw new ArgumentException($"Bank '{bankId}' was not found.");
+            if (!bank.IsActive)
+                throw new InvalidOperationException($"Bank '{bank.Name}' is inactive and cannot be chosen for a new account.");
+            entity.BankName = bank.Name;
+        }
+
+        if (entity.BranchId is Guid branchId)
+        {
+            var branch = await _unitOfWork.Repository<EmployeeBankBranch>().GetQueryable()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(b => b.Id == branchId && b.TenantId == tenantId && !b.IsDeleted, cancellationToken)
+                ?? throw new ArgumentException($"Bank branch '{branchId}' was not found.");
+            if (branch.BankId != entity.BankId)
+                throw new InvalidOperationException($"Branch '{branch.Name}' does not belong to the chosen bank.");
+            if (!branch.IsActive)
+                throw new InvalidOperationException($"Branch '{branch.Name}' is inactive and cannot be chosen for a new account.");
+            entity.BranchName = branch.Name;
+        }
+
+        if (string.IsNullOrWhiteSpace(entity.BankName))
+            throw new ArgumentException("Choose a bank from the list, or type its name.");
     }
 
     public async Task<EmployeeBankDetailDto> AddBankDetailAsync(CreateEmployeeBankDetailDto dto, CancellationToken cancellationToken = default)
@@ -2386,9 +2478,10 @@ public class EmployeeService : IEmployeeService
         // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
         entity.TenantId = GetTenantId();
+        await ResolveBankLinksAsync(entity, cancellationToken);
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return (await GetBankDetailByIdAsync(entity.Id, cancellationToken))!;
     }
 
     public async Task<EmployeeBankDetailDto> UpdateBankDetailAsync(UpdateEmployeeBankDetailDto dto, CancellationToken cancellationToken = default)
@@ -2410,9 +2503,12 @@ public class EmployeeService : IEmployeeService
         }
 
         dto.Apply(entity);
+        // A bank change without a branch change would leave the old branch under the new bank;
+        // resolving after Apply catches that pairing the same way it catches it on create.
+        await ResolveBankLinksAsync(entity, cancellationToken);
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return (await GetBankDetailByIdAsync(entity.Id, cancellationToken))!;
     }
 
     public async Task<bool> RemoveBankDetailAsync(Guid id, CancellationToken cancellationToken = default)

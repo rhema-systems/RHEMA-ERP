@@ -301,3 +301,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260904032437_AddSheHazardReporter")] partial class AddSheHazardReporter { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260905011117_MergeFinanceDimensionsAndProcurementTenderLifecycle")] partial class MergeFinanceDimensionsAndProcurementTenderLifecycle { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260907003611_AddSheChecklistBuilder")] partial class AddSheChecklistBuilder { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260909004030_AddGuarantorIdTypeAndDocuments")] partial class AddGuarantorIdTypeAndDocuments { }

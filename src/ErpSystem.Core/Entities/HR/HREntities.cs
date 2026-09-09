@@ -1783,8 +1783,27 @@ public class EmployeeGuarantor : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal? MonthlyIncome { get; set; }
 
+    /// <summary>
+    /// The kind of national ID, as free text — the ported column.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Kept alongside <see cref="NationalIdTypeId"/>, not replaced by it (the lane-3b idiom for
+    /// the certifying body): existing rows hold text nobody has mapped, and blanking it would lose
+    /// what was typed. The screen offers the lookup; this column is shown only where the FK is
+    /// null. Nothing new should write it.
+    /// </remarks>
     [MaxLength(50)]
     public string? NationalIdType { get; set; } // e.g. Ghana Card, Passport
+
+    /// <summary>
+    /// The kind of national ID, from the tenant's identification-type catalogue (demo feedback
+    /// round 2, E-13: "National ID type for the guarantor should be a dropdown populated with the
+    /// set up identification document types").
+    /// </summary>
+    public Guid? NationalIdTypeId { get; set; }
+
+    [ForeignKey(nameof(NationalIdTypeId))]
+    public virtual IdentificationType? NationalIdTypeRef { get; set; }
 
     [MaxLength(100)]
     public string? NationalIdNumber { get; set; }
@@ -1838,6 +1857,15 @@ public class EmployeeGuarantor : TenantEntity
 
     public DateOnly? DateFormSigned { get; set; }
 
+    /// <summary>
+    /// LEGACY caller-supplied location of the signed guarantor form.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Read-only since demo feedback round 2 (lane A-6). The write DTOs no longer carry it — a
+    /// path string on a JSON body is the sink D-10, D-14 and D-39 each had to remove — and the
+    /// signed form now goes on the row as an <see cref="EmployeeGuarantorDocument"/> through the
+    /// gate. The column stays so ported values are not lost; the detail read still returns it.
+    /// </remarks>
     [MaxLength(500)]
     public string? GuarantorFormPath { get; set; }
 
@@ -1862,6 +1890,9 @@ public class EmployeeGuarantor : TenantEntity
     
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
+
+    /// <summary>Documents pertaining to this guarantor — the signed form, an ID scan, a payslip.</summary>
+    public virtual ICollection<EmployeeGuarantorDocument> Documents { get; set; } = new List<EmployeeGuarantorDocument>();
 
     [NotMapped]
     public string FullName =>
