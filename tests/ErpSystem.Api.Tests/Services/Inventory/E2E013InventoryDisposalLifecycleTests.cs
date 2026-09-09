@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Inventory;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
@@ -39,6 +40,8 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         var completionId = Guid.NewGuid();
         var proceedsAccountId = Guid.NewGuid();
         var recoveryAccountId = Guid.NewGuid();
+        var inventoryControlAccountId = Guid.NewGuid();
+        var writeOffExpenseAccountId = Guid.NewGuid();
         var postingEventId = Guid.NewGuid();
         var journalEntryId = Guid.NewGuid();
 
@@ -111,10 +114,14 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         db.FinanceSettings.Add(new FinanceSettings
         {
             Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrency = "GHS",
+            ControlAccountInventoryId = inventoryControlAccountId,
+            WriteOffExpenseAccountId = writeOffExpenseAccountId,
             WriteOffRecoveryAccountId = recoveryAccountId
         });
         db.Accounts.AddRange(
             Account(proceedsAccountId, tenantId, "101-E2E-013", "Disposal proceeds", AccountType.Asset),
+            Account(inventoryControlAccountId, tenantId, "141-E2E-013", "Inventory control", AccountType.Asset),
+            Account(writeOffExpenseAccountId, tenantId, "611-E2E-013", "Disposal write-off", AccountType.Expense),
             Account(recoveryAccountId, tenantId, "409-E2E-013", "Disposal recovery", AccountType.Revenue));
         await db.SaveChangesAsync();
 
@@ -161,7 +168,16 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             {
                 Id = request.AdjustmentId, TenantId = tenantId, AdjustmentNumber = request.AdjustmentNumber,
                 AdjustmentDate = request.PostingDateUtc, WarehouseId = request.Create.WarehouseId,
-                ReasonCode = request.Create.ReasonCode, Status = "Draft"
+                ReasonCode = request.Create.ReasonCode, Status = "Draft",
+                Items = request.Create.Items.Select((line, index) => new StockAdjustmentItem
+                {
+                    Id = request.ItemIds[index], TenantId = tenantId, AdjustmentId = request.AdjustmentId,
+                    InventoryItemId = line.InventoryItemId, LocationId = line.LocationId,
+                    LotNumber = line.LotNumber, BatchNumber = line.BatchNumber, SerialNumber = line.SerialNumber,
+                    AdjustmentQuantity = line.AdjustmentQuantity, UnitCost = line.UnitCost ?? 0m,
+                    AdjustmentValue = decimal.Round(line.AdjustmentQuantity * (line.UnitCost ?? 0m), 4),
+                    CreatedAt = request.PostingDateUtc
+                }).ToList()
             });
         participant.Setup(value => value.StageApprovedAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((InventoryDisposalStockAdjustmentRequest request, CancellationToken _) =>
@@ -172,20 +188,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         participant.Setup(value => value.StagePostedAsync(It.IsAny<StockAdjustment>(), completionId,
                 adjustmentPostingEventId, adjustmentJournalId, It.IsAny<IReadOnlyDictionary<Guid, Guid>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        var valuation = new Mock<IStockAdjustmentValuationIntentBuilder>();
-        valuation.Setup(value => value.BuildAsync(It.IsAny<StockAdjustment>(), It.IsAny<ProducerOwnerEffectIdentityDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((StockAdjustment adjustment, ProducerOwnerEffectIdentityDto owner, CancellationToken _) => new ProducerAccountingIntentDto
-            {
-                AccountingEventId = valuationEventId, IdempotencyKey = "E2E-013-VALUATION", ParticipantIdentity = owner.ParticipantCode,
-                ExpectedOwnerEffect = owner, PostingRequest = new ProducerFinancePostingRequestDto
-                {
-                    SourceModule = "Inventory", OriginModuleCode = "Inventory", SourceDocumentType = "StockAdjustment",
-                    SourceDocumentId = adjustment.Id, SourceDocumentTenantId = tenantId, PostingAction = "PostStockAdjustment",
-                    SourceDocumentReference = adjustment.AdjustmentNumber, Description = "E2E valuation", PostingDate = adjustment.AdjustmentDate,
-                    JournalType = "System Generated", FunctionalCurrencyCode = "GHS", IdempotencyKey = "E2E-013-VALUATION",
-                    Lines = [new FinancePostingLineDto { AccountId = proceedsAccountId, DebitAmount = 1m, TransactionCurrency = "GHS", TransactionDebitAmount = 1m, ExchangeRate = 1m, ExchangeRateDate = adjustment.AdjustmentDate }, new FinancePostingLineDto { AccountId = recoveryAccountId, CreditAmount = 1m, TransactionCurrency = "GHS", TransactionCreditAmount = 1m, ExchangeRate = 1m, ExchangeRateDate = adjustment.AdjustmentDate }]
-                }
-            });
+        var valuation = new StockAdjustmentValuationIntentBuilder(db);
         var groups = new Mock<IFinanceProducerIntentGroupService>();
         ProducerIntentGroupRequestDto? preparedGroup = null;
         groups.Setup(value => value.PrepareAsync(It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<CancellationToken>()))
@@ -223,7 +226,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             .ReturnsAsync(new ProcurementControlEventDto { Id = Guid.NewGuid(), TenantId = tenantId });
 
         var service = new InventoryDisposalService(db, current, access.Object, sod.Object, workflow.Object,
-            participant.Object, valuation.Object, intents.Object, groups.Object, intentExecution.Object, groupExecution.Object,
+            participant.Object, valuation, intents.Object, groups.Object, intentExecution.Object, groupExecution.Object,
             Mock.Of<IInventoryTrackingControlService>(), controlEvents.Object);
         var identified = await service.CreateAsync(new CreateInventoryDisposalRequest
         {
