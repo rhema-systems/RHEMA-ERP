@@ -14,14 +14,14 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Status | `IN_PROGRESS` |
 | Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `39c2537dab9e2a02c0f5f3ee221525c052bc6592` |
-| Branch | `codex/inventory-accounting-event-cutover-c9` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-c9` |
+| Branch | `codex/inventory-accounting-event-cutover-c9b` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-inventory-accounting-event-c9b` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `39c2537dab9e2a02c0f5f3ee221525c052bc6592` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Inventory identity reconciliation complete; bounded deterministic Stock Adjustment item-ID correction active |
+| Review status | Fresh clean C9b worktree issued after tooling-only EOL drift; bounded Inventory implementation active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1097,6 +1097,13 @@ an in-place update beginning around 20:45, then installed host 9.0.20 and SDK 9.
 `dotnet --info` now resolves SDK 9.0.318 with .NET 8/9 runtimes, isolated restore passed, and the fresh Inventory
 base solution build passed with zero errors and 1,106 inherited warnings. Stage B2 is unblocked and implementation
 resumes from the same exact clean base; no database was accessed.
+
+The first post-C9 Inventory worktree acquired a tooling-only LF-to-CRLF conversion of
+`StockAdjustmentService.cs` before semantic edits. `git diff --ignore-space-at-eol` proves no content change, but
+the coordinator preserved that worktree intact rather than restoring or cleaning it. A second fresh worktree,
+`RHEMA-ERP-inventory-accounting-event-c9b`, and branch `codex/inventory-accounting-event-cutover-c9b` were created
+from the same exact base `39c2537d`; they are clean and now authoritative for B2 implementation. No source change,
+database access or destructive cleanup occurred.
 
 Inventory reconciliation found that C9 correctly binds each valuation source line and economic fingerprint to its
 `StockAdjustmentItem.Id`, while the public creation path assigns item IDs with `Guid.NewGuid()` only during entity
