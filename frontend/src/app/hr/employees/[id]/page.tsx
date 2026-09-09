@@ -25,6 +25,8 @@ import { EmergencyContactsTab } from '@/components/hr/employee/tabs/EmergencyCon
 import { DependentsTab } from '@/components/hr/employee/tabs/DependentsTab';
 import { QualificationsTab } from '@/components/hr/employee/tabs/QualificationsTab';
 import { SkillsTab } from '@/components/hr/employee/tabs/SkillsTab';
+import { CertificationsTab } from '@/components/hr/employee/tabs/CertificationsTab';
+import { CertificationComplianceCard } from '@/components/hr/employee/CertificationComplianceCard';
 import { IdentificationTab } from '@/components/hr/employee/tabs/IdentificationTab';
 import { WorkHistoryTab } from '@/components/hr/employee/tabs/WorkHistoryTab';
 import { ContractsTab } from '@/components/hr/employee/tabs/ContractsTab';
@@ -215,6 +217,7 @@ export default function EmployeeDetailPage() {
             <TabsTrigger value="dependents">Dependents</TabsTrigger>
             <TabsTrigger value="qualifications">Qualifications</TabsTrigger>
             <TabsTrigger value="skills">Skills</TabsTrigger>
+            <TabsTrigger value="certifications">Certifications</TabsTrigger>
             <TabsTrigger value="identification">Identification</TabsTrigger>
             <TabsTrigger value="work-history">Work History</TabsTrigger>
             <TabsTrigger value="contracts">Contracts</TabsTrigger>
@@ -233,6 +236,8 @@ export default function EmployeeDetailPage() {
         </div>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
+          {/* Required vs held vs expired — the strip the demo feedback asked for (round 2, lane C2). */}
+          <CertificationComplianceCard employeeId={id} compact />
           <InfoCard title="Personal">
             <InfoRow label="Title" value={e.title} />
             <InfoRow label="Full Name" value={e.fullName} />
@@ -348,6 +353,9 @@ export default function EmployeeDetailPage() {
         </TabsContent>
         <TabsContent value="skills" className="pt-4">
           <SkillsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="certifications" className="pt-4">
+          <CertificationsTab employeeId={id} />
         </TabsContent>
         <TabsContent value="identification" className="pt-4">
           <IdentificationTab employeeId={id} />

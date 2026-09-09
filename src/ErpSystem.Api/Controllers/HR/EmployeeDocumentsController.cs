@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.HR;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -34,6 +35,7 @@ namespace ErpSystem.Api.Controllers.HR;
 public class EmployeeDocumentsController : ControllerBase
 {
     private readonly IEmployeeDocumentService _service;
+    private readonly ICertificationService _certifications;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
@@ -43,6 +45,7 @@ public class EmployeeDocumentsController : ControllerBase
 
     public EmployeeDocumentsController(
         IEmployeeDocumentService service,
+        ICertificationService certifications,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
@@ -51,6 +54,7 @@ public class EmployeeDocumentsController : ControllerBase
         ILogger<EmployeeDocumentsController> logger)
     {
         _service = service;
+        _certifications = certifications;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
@@ -490,6 +494,57 @@ public class EmployeeDocumentsController : ControllerBase
         try { await _service.DeleteGuarantorDocumentAsync(id, ct); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         return NoContent();
+    }
+
+    // ── Evidence for a credential on the employee's certification tab (round 2, lane C2) ──────
+    //
+    // One file per credential — the certificate itself — through the same gate as every other HR
+    // attachment. The row lives with the certification model; only the file door is here, so the
+    // scan, the storage and the download stay in one place.
+
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("employee-certifications/{id:guid}/evidence")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadCertificationEvidence(Guid id, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        var credential = await _certifications.GetEmployeeCertificationEntityAsync(id, ct);
+        if (credential is null) return NotFound(new { message = $"Employee certification '{id}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.EmployeeCertification),
+            sourceRecordId: id,
+            sourceLabel: "Certification evidence",
+            documentType: "CertificationEvidence",
+            description: null,
+            persist: (_, document) => _certifications.AttachEvidenceAsync(
+                id, document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                document.OriginalFileName, document.ContentType, document.FileSize, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("employee-certifications/{id:guid}/evidence")]
+    public async Task<IActionResult> DownloadCertificationEvidence(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var credential = await _certifications.GetEmployeeCertificationEntityAsync(id, ct);
+        if (credential?.EvidenceFileUploadRecordId is null && credential?.EvidenceDocumentRecordId is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            credential.EvidenceDocumentRecordId, credential.EvidenceDocumentVersionId,
+            credential.EvidenceFileUploadRecordId,
+            legacyPath: null,
+            credential.EvidenceFileName ?? "certification-evidence",
+            fallbackContentType: credential.EvidenceMimeType,
+            inline: false, ct);
     }
 
     [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]

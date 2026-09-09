@@ -9771,3 +9771,28 @@ public enum CompanySealAssetKind
 }
 
 #endregion
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Demo feedback round 2, lane C2 — the certification model (plan § 6.3)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// <summary>What kind of credential a catalogue row is.</summary>
+public enum CertificationKind
+{
+    Certification = 0,
+    Licence = 1,
+    Permit = 2,
+    Registration = 3
+}
+
+/// <summary>
+/// The computed state of a credential a person holds. Only <c>Revoked</c> is stored; the rest fall
+/// out of the expiry date and the lead days at read time.
+/// </summary>
+public enum EmployeeCertificationStatus
+{
+    Valid = 0,
+    ExpiringSoon = 1,
+    Expired = 2,
+    Revoked = 3
+}

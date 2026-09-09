@@ -945,6 +945,20 @@ public class EmployeeSkillDto
     public bool IsVerified { get; set; }
     public bool IsCertificationExpired { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>The credential on the employee's certification tab that evidences this skill (round 2, lane C2).</summary>
+    public Guid? EmployeeCertificationId { get; set; }
+    public string? EmployeeCertificationName { get; set; }
+
+    /// <summary>Whether the skill itself requires certification.</summary>
+    public bool RequiresCertification { get; set; }
+
+    /// <summary>
+    /// False when the skill requires certification and nothing valid evidences it — a linked
+    /// credential that is valid or expiring, or the legacy per-skill certification still in date.
+    /// Recording is not gating: the row is allowed and flagged.
+    /// </summary>
+    public bool IsCompliant { get; set; }
 }
 
 /// <summary>
@@ -965,6 +979,9 @@ public class UpdateEmployeeSkillDto
 
     /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
     public Guid? CertifyingBodyId { get; set; }
+
+    /// <summary>Applied unconditionally, like the certifying body: null clears it.</summary>
+    public Guid? EmployeeCertificationId { get; set; }
 
     public string? Notes { get; set; }
     public bool? IsVerified { get; set; }
@@ -990,6 +1007,9 @@ public class CreateEmployeeSkillDto
 
     /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
     public Guid? CertifyingBodyId { get; set; }
+
+    /// <summary>A credential the employee already holds that evidences this skill.</summary>
+    public Guid? EmployeeCertificationId { get; set; }
 
     public string? Notes { get; set; }
 }
@@ -2518,6 +2538,9 @@ public class EmployeePositionDto
     public int EmployeeCount { get; set; }
     public List<PositionSkillRequirementDto> SkillRequirements { get; set; } = new();
     public List<EmployeePositionBenefitDto> PositionBenefits { get; set; } = new();
+
+    /// <summary>What the post must hold (round 2, lane C2). Filled on the single read and the write responses.</summary>
+    public List<PositionCertificationRequirementDto> CertificationRequirements { get; set; } = new();
 }
 
 /// <summary>
@@ -2580,6 +2603,12 @@ public class CreateEmployeePositionDto : IValidatableObject
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
     public ICollection<CreateEmployeePositionBenefitDto> PositionBenefits { get; set; } = new List<CreateEmployeePositionBenefitDto>();
+
+    /// <summary>
+    /// The required credentials, as the whole set (round 2, lane C2). With RequiresCertification or
+    /// RequiresLicense on, at least one — the switches say "some", these rows say which.
+    /// </summary>
+    public ICollection<CreatePositionCertificationRequirementDto> CertificationRequirements { get; set; } = new List<CreatePositionCertificationRequirementDto>();
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -2653,6 +2682,12 @@ public class UpdateEmployeePositionDto : IValidatableObject
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
     public ICollection<CreateEmployeePositionBenefitDto> PositionBenefits { get; set; } = new List<CreateEmployeePositionBenefitDto>();
 
+    /// <summary>
+    /// The required credentials, as the whole set (round 2, lane C2). With RequiresCertification or
+    /// RequiresLicense on, at least one — the switches say "some", these rows say which.
+    /// </summary>
+    public ICollection<CreatePositionCertificationRequirementDto> CertificationRequirements { get; set; } = new List<CreatePositionCertificationRequirementDto>();
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (MinimumAge.HasValue && MaximumAge.HasValue && MinimumAge.Value > MaximumAge.Value)
@@ -2725,6 +2760,9 @@ public class SkillDto
     public string? Category { get; set; }
     public bool RequiresCertification { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>The credentials that evidence this skill (round 2, lane C2). Filled on the single read.</summary>
+    public List<SkillCertificationDto> Certifications { get; set; } = new();
 }
 
 /// <summary>
@@ -2755,6 +2793,12 @@ public class CreateSkillDto
     public bool RequiresCertification { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// The accepted credentials, as the whole set. Null = the save did not carry them (leave as
+    /// stored); empty = none. A skill that requires certification must name at least one.
+    /// </summary>
+    public ICollection<SkillCertificationInputDto>? Certifications { get; set; }
 }
 
 /// <summary>

@@ -268,6 +268,14 @@ export const hrSetupGroups: HrSetupGroup[] = [
         description: 'Who certified a skill, as a catalogue rather than free text on every row.',
       },
       {
+        // Round 2, lane C2. A credential is a compliance object — it expires, is renewed, is
+        // revoked — so it is catalogued under the body that issues it, not as a qualification type.
+        title: 'Certifications',
+        href: '/administration/hr/certifications',
+        icon: BadgeCheck,
+        description: 'The credentials each certifying body issues — what skills, positions and people cite.',
+      },
+      {
         title: 'Identification Types',
         href: '/administration/hr/identification-types',
         icon: IdCard,

@@ -13,19 +13,29 @@ public class EmployeePositionService : IEmployeePositionService
 {
     private readonly IEmployeePositionRepository _positionRepository;
     private readonly IOrganizationUnitRepository _unitRepository;
+    private readonly ICertificationService _certifications;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeePositionService> _logger;
 
     public EmployeePositionService(
         IEmployeePositionRepository positionRepository,
         IOrganizationUnitRepository unitRepository,
+        ICertificationService certifications,
         ICurrentUserProvider currentUserProvider,
         ILogger<EmployeePositionService> logger)
     {
         _positionRepository = positionRepository;
         _unitRepository = unitRepository;
+        _certifications = certifications;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    /// <summary>The required credentials ride on the single read and the write responses, not the lists.</summary>
+    private async Task<EmployeePositionDto> WithCertificationRequirementsAsync(EmployeePositionDto dto)
+    {
+        dto.CertificationRequirements = (await _certifications.GetPositionRequirementsAsync(dto.Id)).ToList();
+        return dto;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
@@ -42,7 +52,7 @@ public class EmployeePositionService : IEmployeePositionService
     public async Task<EmployeePositionDto?> GetByIdAsync(Guid id)
     {
         var position = await _positionRepository.GetWithSkillRequirementsAsync(id);
-        return position == null ? null : MapToDto(position);
+        return position == null ? null : await WithCertificationRequirementsAsync(MapToDto(position));
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetAllAsync()
@@ -215,12 +225,16 @@ public class EmployeePositionService : IEmployeePositionService
                 .ToList();
         }
 
+        // Round 2, lane C2: the required credentials, and the rule that a switched-on position names
+        // at least one. Runs before the save, so a refusal stores nothing.
+        await _certifications.SyncPositionRequirementsAsync(position, createDto.CertificationRequirements);
+
         var created = await _positionRepository.AddAsync(position);
         await _positionRepository.SaveChangesAsync();
         _logger.LogInformation("Employee position created: {PositionId} ({Code})", created.Id, created.Code);
 
         var createdWithUnit = await _positionRepository.GetWithSkillRequirementsAsync(created.Id);
-        return createdWithUnit == null ? MapToDto(created) : MapToDto(createdWithUnit);
+        return await WithCertificationRequirementsAsync(createdWithUnit == null ? MapToDto(created) : MapToDto(createdWithUnit));
     }
 
     public async Task<EmployeePositionDto> UpdatePositionAsync(Guid id, UpdateEmployeePositionDto updateDto)
@@ -268,6 +282,8 @@ public class EmployeePositionService : IEmployeePositionService
 
         await SyncSkillRequirementsAsync(position, updateDto.SkillRequirements);
         await SyncPositionBenefitsAsync(position, updateDto.PositionBenefits);
+        // Round 2, lane C2. The switches above are already reassigned, so the rule sees the new intent.
+        await _certifications.SyncPositionRequirementsAsync(position, updateDto.CertificationRequirements);
 
         // Don't call UpdateAsync (which calls _dbSet.Update) — the entity graph is already
         // tracked by EF. Calling Update() forces all navigation entities (including newly
@@ -278,7 +294,7 @@ public class EmployeePositionService : IEmployeePositionService
         _logger.LogInformation("Employee position updated: {PositionId} ({Code})", position.Id, position.Code);
 
         var updatedWithUnit = await _positionRepository.GetWithSkillRequirementsAsync(position.Id);
-        return updatedWithUnit == null ? MapToDto(position) : MapToDto(updatedWithUnit);
+        return await WithCertificationRequirementsAsync(updatedWithUnit == null ? MapToDto(position) : MapToDto(updatedWithUnit));
     }
 
     public async Task<bool> DeletePositionAsync(Guid id)

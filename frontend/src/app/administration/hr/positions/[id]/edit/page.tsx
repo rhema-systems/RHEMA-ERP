@@ -114,6 +114,11 @@ export default function EditEmployeePositionPage() {
           isRequired: r.isRequired,
           priority: r.priority,
         })),
+        certificationRequirements: values.certificationRequirements.map((r) => ({
+          certificationId: r.certificationId,
+          isMandatory: r.isMandatory,
+          notes: r.notes || null,
+        })),
         positionBenefits: values.positionBenefits.map((b) => ({
           policyId: b.policyId,
           // '' means "no expiry" / "use the policy's own valuation" — both must go as null,
@@ -191,6 +196,11 @@ export default function EditEmployeePositionPage() {
             })),
             // Loading these back is not cosmetic: the server syncs entitlements to whatever the
             // save sends, so an edit that started blank would delete every one of them.
+            certificationRequirements: (position.certificationRequirements ?? []).map((r) => ({
+              certificationId: r.certificationId,
+              isMandatory: r.isMandatory,
+              notes: r.notes ?? '',
+            })),
             positionBenefits: (position.positionBenefits ?? []).map((b) => ({
               policyId: b.policyId,
               expiryDate: b.expiryDate ?? '',

@@ -132,6 +132,17 @@ class EmployeeDocumentService {
     return `${this.baseUrl}/guarantors/${guarantorId}/photo`;
   }
 
+  // ── evidence for a credential on the certification tab (round 2, lane C2) ──
+
+  uploadCertificationEvidence(employeeCertificationId: string, file: File) {
+    return hrDocumentService.upload<unknown>(
+      `${this.baseUrl}/employee-certifications/${employeeCertificationId}/evidence`, file);
+  }
+
+  certificationEvidenceUrl(employeeCertificationId: string) {
+    return `${this.baseUrl}/employee-certifications/${employeeCertificationId}/evidence`;
+  }
+
   uploadRefereeLetter(refereeId: string, file: File) {
     return hrDocumentService.upload<unknown>(`${this.baseUrl}/referees/${refereeId}/letter`, file);
   }

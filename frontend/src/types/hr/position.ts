@@ -1,3 +1,8 @@
+import type {
+  PositionCertificationRequirement,
+  PositionCertificationRequirementInput,
+} from './certification';
+
 // Enums serialize as strings (JsonStringEnumConverter is registered globally).
 export type WorkMode = 'OnSite' | 'Remote' | 'Hybrid';
 // Mirrors ErpSystem.Core.Enums.SkillLevel, which has five members — 'Master' was
@@ -95,6 +100,8 @@ export interface EmployeePosition {
   employeeCount: number;
   skillRequirements: PositionSkillRequirement[];
   positionBenefits: PositionBenefit[];
+  /** What the post must hold (round 2, lane C2). Filled on the single read and write responses. */
+  certificationRequirements: PositionCertificationRequirement[];
 }
 
 // Mirrors CreateEmployeePositionDto.
@@ -123,6 +130,11 @@ export interface CreateEmployeePositionRequest {
   requiresLicense: boolean;
   skillRequirements: PositionSkillRequirementInput[];
   positionBenefits: PositionBenefitInput[];
+  /**
+   * The required credentials, as the whole set (round 2, lane C2). With requiresCertification or
+   * requiresLicense on, at least one — or the server refuses the save.
+   */
+  certificationRequirements: PositionCertificationRequirementInput[];
 }
 
 // Mirrors UpdateEmployeePositionDto (adds isActive).

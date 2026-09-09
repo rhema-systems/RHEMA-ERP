@@ -1284,6 +1284,7 @@ public class EmployeeService : IEmployeeService
             // ⚠ The DTO reports the catalogued certifier's NAME, so every read that builds one has to
             // load it — including the re-reads after a write, or the response contradicts the list.
             .Include(s => s.CertifyingBodyRef)
+            .Include(s => s.EmployeeCertification).ThenInclude(c => c!.Certification)
             .Where(s => s.EmployeeId == employeeId)
             .OrderByDescending(s => s.IsVerified)
             .ThenByDescending(s => s.SkillLevel)
@@ -1302,6 +1303,8 @@ public class EmployeeService : IEmployeeService
         var exists = await repo.ExistsAsync(s => s.EmployeeId == dto.EmployeeId && s.SkillId == dto.SkillId);
         if (exists) throw new InvalidOperationException("Employee already has this skill assigned.");
 
+        await RequireOwnCredentialAsync(dto.EmployeeId, dto.EmployeeCertificationId, cancellationToken);
+
         var entity = dto.ToEntity();
         // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
@@ -1310,8 +1313,23 @@ public class EmployeeService : IEmployeeService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef)
+            .Include(s => s.EmployeeCertification).ThenInclude(c => c!.Certification)
+            .FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// A credential named on a skill row must be one the SAME employee holds (round 2, lane C2).
+    /// Recording a skill without one is allowed — the row is flagged, not refused.
+    /// </summary>
+    private async Task RequireOwnCredentialAsync(Guid employeeId, Guid? employeeCertificationId, CancellationToken cancellationToken)
+    {
+        if (!employeeCertificationId.HasValue) return;
+        var owned = await _unitOfWork.Repository<EmployeeCertification>().GetQueryable()
+            .AnyAsync(c => c.Id == employeeCertificationId.Value && c.EmployeeId == employeeId && !c.IsDeleted, cancellationToken);
+        if (!owned)
+            throw new ArgumentException("The credential named as evidence is not one this employee holds.");
     }
 
     public async Task<EmployeeSkillDto> UpdateSkillAsync(UpdateEmployeeSkillDto dto, CancellationToken cancellationToken = default)
@@ -1322,11 +1340,15 @@ public class EmployeeService : IEmployeeService
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Employee skill not found.");
 
+        await RequireOwnCredentialAsync(entity.EmployeeId, dto.EmployeeCertificationId, cancellationToken);
+
         dto.Apply(entity);
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef)
+            .Include(s => s.EmployeeCertification).ThenInclude(c => c!.Certification)
+            .FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 

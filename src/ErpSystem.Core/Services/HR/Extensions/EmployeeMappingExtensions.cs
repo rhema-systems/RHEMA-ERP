@@ -817,8 +817,29 @@ public static class EmployeeMappingExtensions
             CertifyingBodyName = s.CertifyingBodyRef?.Name,
             IsVerified = s.IsVerified,
             IsCertificationExpired = s.CertificationExpiryDate.HasValue && s.CertificationExpiryDate < DateOnly.FromDateTime(DateTime.UtcNow),
-            Notes = s.Notes
+            Notes = s.Notes,
+            // Round 2, lane C2. Resolved from the navigation, so every read Includes
+            // EmployeeCertification and its Certification.
+            EmployeeCertificationId = s.EmployeeCertificationId,
+            EmployeeCertificationName = s.EmployeeCertification?.Certification?.Name,
+            RequiresCertification = s.Skill?.RequiresCertification ?? false,
+            IsCompliant = SkillIsCompliant(s)
         };
+
+    /// <summary>
+    /// A skill that requires certification is compliant when a linked credential is not revoked
+    /// and not expired, or — for rows recorded before the catalogue — the per-skill certification
+    /// is still in date. Any other skill is compliant by definition.
+    /// </summary>
+    private static bool SkillIsCompliant(EmployeeSkill s)
+    {
+        if (s.Skill == null || !s.Skill.RequiresCertification) return true;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var c = s.EmployeeCertification;
+        if (c != null && !c.IsDeleted && !c.IsRevoked && (!c.ExpiresOn.HasValue || c.ExpiresOn.Value >= today))
+            return true;
+        return s.IsCertified && (!s.CertificationExpiryDate.HasValue || s.CertificationExpiryDate.Value >= today);
+    }
 
     public static EmployeeSkill ToEntity(this CreateEmployeeSkillDto dto)
         => new()
@@ -832,6 +853,7 @@ public static class EmployeeMappingExtensions
             CertificationNumber = dto.CertificationNumber,
             CertifyingBody = dto.CertifyingBody,
             CertifyingBodyId = dto.CertifyingBodyId,
+            EmployeeCertificationId = dto.EmployeeCertificationId,
             Notes = dto.Notes,
             IsCertified = dto.CertificationDate.HasValue
         };
@@ -851,6 +873,8 @@ public static class EmployeeMappingExtensions
         // certifying body once and there would be no way back to "none". The sole caller is the
         // skill form, which posts the whole record, so "absent" and "cleared" are the same intent.
         s.CertifyingBodyId = dto.CertifyingBodyId;
+        // Same reasoning, same unconditional application (round 2, lane C2).
+        s.EmployeeCertificationId = dto.EmployeeCertificationId;
         if (dto.Notes != null) s.Notes = dto.Notes;
         if (dto.IsVerified.HasValue) s.IsVerified = dto.IsVerified.Value;
     }

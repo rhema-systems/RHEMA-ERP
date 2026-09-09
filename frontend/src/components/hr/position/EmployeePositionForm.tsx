@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
+import { CertificationPicker } from '@/components/hr/common/CertificationPicker';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { SKILL_LEVEL_OPTIONS, type EmployeePosition } from '@/types/hr/position';
 import type { StaffLevelListItem } from '@/types/hr/staff-level';
@@ -83,6 +84,14 @@ export const employeePositionSchema = z.object({
       priority: z.coerce.number().int().min(1),
     }),
   ),
+  // What the post must hold (round 2, lane C2 — P-2). Sent as the whole set, like the two above.
+  certificationRequirements: z.array(
+    z.object({
+      certificationId: z.string().min(1, 'Choose the certification'),
+      isMandatory: z.boolean(),
+      notes: z.string().max(500).optional().or(z.literal('')),
+    }),
+  ),
   positionBenefits: z.array(
     z.object({
       policyId: z.string().min(1, 'Select a benefit policy'),
@@ -121,6 +130,7 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   isActive: true,
   skillRequirements: [],
   positionBenefits: [],
+  certificationRequirements: [],
 };
 
 interface EmployeePositionFormProps {
@@ -213,9 +223,33 @@ export function EmployeePositionForm({
     remove: removeBenefit,
   } = useFieldArray({ control: form.control, name: 'positionBenefits' });
 
+  const {
+    fields: certificationFields,
+    append: appendCertification,
+    remove: removeCertification,
+  } = useFieldArray({ control: form.control, name: 'certificationRequirements' });
+  const chosenCertificationIds = form
+    .watch('certificationRequirements')
+    .map((r) => r.certificationId)
+    .filter(Boolean);
+  const wantsCertifications = requiresCertification || requiresLicense;
+  const [certificationRuleError, setCertificationRuleError] = useState<string | null>(null);
+
+  // The server refuses a switched-on position that names nothing; saying it here saves the trip.
+  const submit = form.handleSubmit(async (values) => {
+    if ((values.requiresCertification || values.requiresLicense) && values.certificationRequirements.length === 0) {
+      setCertificationRuleError(
+        'This position requires a certification or licence, so say which one — add at least one required credential, or turn the switch off.',
+      );
+      return;
+    }
+    setCertificationRuleError(null);
+    await onSubmit(values);
+  });
+
   return (
     <Card>
-      <form onSubmit={form.handleSubmit(onSubmit)}>
+      <form onSubmit={submit}>
         <CardHeader>
           <CardTitle>Position Details</CardTitle>
           <CardDescription>
@@ -451,6 +485,72 @@ export function EmployeePositionForm({
               {...form.register('description')}
             />
           </div>
+
+          {wantsCertifications && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold">Required certifications and licences</h4>
+                  <p className="text-xs text-muted-foreground">
+                    The switches say the post needs one; these rows say which. Pick the certifying body,
+                    then the credential it issues.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => appendCertification({ certificationId: '', isMandatory: true, notes: '' })}
+                >
+                  <Plus className="mr-2 h-4 w-4" /> Add credential
+                </Button>
+              </div>
+
+              {certificationFields.length === 0 && (
+                <p className="text-sm text-destructive">Say which one — add at least one required credential.</p>
+              )}
+
+              {certificationFields.map((row, index) => (
+                <div key={row.id} className="space-y-3 rounded-md border bg-muted/30 p-3">
+                  <CertificationPicker
+                    idPrefix={`position-certification-${index}`}
+                    value={form.watch(`certificationRequirements.${index}.certificationId`)}
+                    onChange={(id) =>
+                      form.setValue(`certificationRequirements.${index}.certificationId`, id, {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      })
+                    }
+                    excludeIds={chosenCertificationIds.filter(
+                      (id) => id !== form.watch(`certificationRequirements.${index}.certificationId`),
+                    )}
+                    error={
+                      form.formState.errors.certificationRequirements?.[index]?.certificationId?.message as
+                        | string
+                        | undefined
+                    }
+                  />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+                    <label className="flex items-center gap-2 text-sm">
+                      <Switch
+                        checked={form.watch(`certificationRequirements.${index}.isMandatory`)}
+                        onCheckedChange={(v) => form.setValue(`certificationRequirements.${index}.isMandatory`, v)}
+                      />
+                      Mandatory
+                    </label>
+                    <Input
+                      placeholder="Notes (optional)"
+                      {...form.register(`certificationRequirements.${index}.notes`)}
+                    />
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeCertification(index)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {certificationRuleError && <p className="text-sm text-red-500">{certificationRuleError}</p>}
+            </div>
+          )}
 
           <div className="space-y-3 rounded-md border p-4">
             <div className="flex items-center justify-between">

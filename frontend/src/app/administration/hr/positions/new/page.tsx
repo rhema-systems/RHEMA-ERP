@@ -96,6 +96,11 @@ export default function NewEmployeePositionPage() {
           isRequired: r.isRequired,
           priority: r.priority,
         })),
+        certificationRequirements: values.certificationRequirements.map((r) => ({
+          certificationId: r.certificationId,
+          isMandatory: r.isMandatory,
+          notes: r.notes || null,
+        })),
         positionBenefits: values.positionBenefits.map((b) => ({
           policyId: b.policyId,
           // '' means "no expiry" / "use the policy's own valuation" — both must go as null,

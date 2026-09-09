@@ -27,6 +27,12 @@ export default function NewSkillPage() {
         category: values.category || null,
         description: values.description || null,
         requiresCertification: values.requiresCertification,
+        // The whole set (round 2, lane C2): the server replaces what is stored with this.
+        certifications: values.certifications.map((c) => ({
+          certificationId: c.certificationId,
+          isMandatory: c.isMandatory,
+          notes: c.notes || null,
+        })),
         isActive: values.isActive,
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'skills'] });

@@ -612,6 +612,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     /// <summary>Catalogued bodies that certify a skill, replacing free-text certifier names.</summary>
     public DbSet<CertifyingBody> CertifyingBodies { get; set; }
 
+    // Demo feedback round 2, lane C2 — the certification model.
+    public DbSet<Certification> Certifications { get; set; }
+    public DbSet<SkillCertification> SkillCertifications { get; set; }
+    public DbSet<PositionCertificationRequirement> PositionCertificationRequirements { get; set; }
+    public DbSet<EmployeeCertification> EmployeeCertifications { get; set; }
+    public DbSet<CertificationExpiryReminderRun> CertificationExpiryReminderRuns { get; set; }
+    public DbSet<CertificationExpiryDispatchLog> CertificationExpiryDispatchLogs { get; set; }
+
     /// <summary>Per-register staff-number formats. One row per employee register per tenant.</summary>
     public DbSet<StaffNumberFormat> StaffNumberFormats { get; set; }
     public DbSet<ExternalAssociate> ExternalAssociates { get; set; }

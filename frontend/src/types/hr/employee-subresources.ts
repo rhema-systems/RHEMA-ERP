@@ -333,6 +333,12 @@ export interface EmployeeSkill {
   isVerified: boolean;
   isCertificationExpired: boolean;
   notes?: string | null;
+  /** The credential on the certification tab that evidences this skill (round 2, lane C2). */
+  employeeCertificationId?: string | null;
+  employeeCertificationName?: string | null;
+  requiresCertification: boolean;
+  /** False when the skill requires certification and nothing valid evidences it. Flagged, not refused. */
+  isCompliant: boolean;
 }
 
 export interface CreateEmployeeSkillRequest {
@@ -345,6 +351,8 @@ export interface CreateEmployeeSkillRequest {
   certificationNumber?: string | null;
   certifyingBody?: string | null;
   certifyingBodyId?: string | null;
+  /** A credential the employee holds that evidences this skill. */
+  employeeCertificationId?: string | null;
   notes?: string | null;
 }
 
@@ -363,6 +371,8 @@ export interface UpdateEmployeeSkillRequest {
    * one is always sent and null genuinely means "no catalogued body".
    */
   certifyingBodyId?: string | null;
+  /** Same rule as certifyingBodyId: always sent, applied unconditionally, null clears it. */
+  employeeCertificationId?: string | null;
   notes?: string | null;
   isVerified?: boolean;
 }

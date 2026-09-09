@@ -1074,6 +1074,13 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IIdentificationExpiryReminderService,
                                ErpSystem.Core.Services.HR.IdentificationExpiryReminderService>();
 
+            // Demo feedback round 2, lane C2 — the certification model and its expiry sweep. The
+            // sweep's host is registered with the other hosted services below.
+            services.AddScoped<ErpSystem.Core.Services.HR.ICertificationService,
+                               ErpSystem.Core.Services.HR.CertificationService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.ICertificationExpiryReminderService,
+                               ErpSystem.Core.Services.HR.CertificationExpiryReminderService>();
+
             // Organization Structure Services
             services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
             services.AddScoped<IOrganizationLevelService, OrganizationLevelService>();
@@ -2429,6 +2436,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.ProbationReminderBackgroundService>();
             services.AddHostedService<ErpSystem.Api.Services.HR.IdentificationExpiryReminderBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.HR.CertificationExpiryReminderBackgroundService>();
 
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();

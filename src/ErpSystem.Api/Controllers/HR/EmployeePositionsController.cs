@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Shared;
@@ -12,11 +13,20 @@ namespace ErpSystem.Api.Controllers.HR;
 public class EmployeePositionsController : ControllerBase
 {
     private readonly IEmployeePositionService _service;
+    private readonly ICertificationService _certifications;
 
-    public EmployeePositionsController(IEmployeePositionService service)
+    public EmployeePositionsController(IEmployeePositionService service, ICertificationService certifications)
     {
         _service = service;
+        _certifications = certifications;
     }
+
+    /// <summary>What the post must hold (round 2, lane C2). The position save sends the whole set.</summary>
+    [HttpGet("{id:guid}/certification-requirements")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [ProducesResponseType(typeof(IEnumerable<PositionCertificationRequirementDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<PositionCertificationRequirementDto>>> GetCertificationRequirements(Guid id, CancellationToken ct)
+        => Ok(await _certifications.GetPositionRequirementsAsync(id, ct));
 
     #region CRUD
 

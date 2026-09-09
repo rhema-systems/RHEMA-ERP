@@ -2244,6 +2244,14 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(e => e.CertifyingBodyId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Round 2, lane C2: paired explicitly with EmployeeCertification.EvidencedSkills for
+            // the same shadow-FK reason as the certifying body above.
+            entity.HasIndex(e => e.EmployeeCertificationId);
+            entity.HasOne(e => e.EmployeeCertification)
+                .WithMany(c => c.EvidencedSkills)
+                .HasForeignKey(e => e.EmployeeCertificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(e => e.Employee)
                 .WithMany(e => e.Skills)
                 .HasForeignKey(e => e.EmployeeId)
@@ -3795,6 +3803,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 ReviewDueLeadDays              = 30,
                 ContractExpiryLeadDays         = 60,
                 ProbationEndLeadDays           = 30,
+                // Round 2, lane C2 — the certification sweep's default lead time.
+                CertificationExpiryLeadDays    = 60,
                 // Area 9c slice 7 — the employee-relations clocks.
                 //
                 // ⚠ These MUST be listed here. The seed is an ANONYMOUS TYPE, so EF matches it to
@@ -5702,6 +5712,13 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Qualification)
                 .WithMany()
                 .HasForeignKey(x => x.QualificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 2, lane C2: a job description may name a catalogued credential.
+            entity.HasIndex(x => x.CertificationId);
+            entity.HasOne(x => x.Certification)
+                .WithMany()
+                .HasForeignKey(x => x.CertificationId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -10459,6 +10476,120 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Country)
                 .WithMany()
                 .HasForeignKey(x => x.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ============================================================================
+        // CERTIFICATIONS — demo feedback round 2, lane C2 (plan § 6.3)
+        // ============================================================================
+        builder.Entity<Certification>(entity =>
+        {
+            entity.Property(x => x.Kind).HasConversion<int>();
+
+            entity.HasIndex(x => x.CertifyingBodyId);
+            entity.HasIndex(x => new { x.TenantId, x.IsActive });
+
+            // Name unique per body, code unique per body — both filtered so a retired (soft-deleted)
+            // row does not block its own replacement, and the code index ignores rows without one.
+            entity.HasIndex(x => new { x.TenantId, x.CertifyingBodyId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_Certification_Tenant_Body_Name");
+            entity.HasIndex(x => new { x.TenantId, x.CertifyingBodyId, x.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Code] IS NOT NULL")
+                .HasDatabaseName("UX_Certification_Tenant_Body_Code");
+
+            entity.HasOne(x => x.CertifyingBody)
+                .WithMany(b => b.Certifications)
+                .HasForeignKey(x => x.CertifyingBodyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SkillCertification>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.SkillId, x.CertificationId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SkillCertification_Tenant_Skill_Certification");
+            entity.HasIndex(x => x.CertificationId);
+
+            entity.HasOne(x => x.Skill)
+                .WithMany(sk => sk.Certifications)
+                .HasForeignKey(x => x.SkillId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Certification)
+                .WithMany(c => c.SkillLinks)
+                .HasForeignKey(x => x.CertificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PositionCertificationRequirement>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PositionId, x.CertificationId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_PositionCertificationRequirement_Tenant_Position_Certification");
+            entity.HasIndex(x => x.CertificationId);
+
+            entity.HasOne(x => x.Position)
+                .WithMany(pos => pos.CertificationRequirements)
+                .HasForeignKey(x => x.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Certification)
+                .WithMany(c => c.PositionRequirements)
+                .HasForeignKey(x => x.CertificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeCertification>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.EmployeeId });
+            entity.HasIndex(x => x.CertificationId);
+            entity.HasIndex(x => new { x.TenantId, x.ExpiresOn });
+            entity.HasIndex(x => x.VerifiedById);
+
+            // The same credential twice for one person is a renewal, and a renewal carries a new
+            // number; the same number twice is a duplicate entry.
+            entity.HasIndex(x => new { x.TenantId, x.EmployeeId, x.CertificationId, x.CertificateNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [CertificateNumber] IS NOT NULL")
+                .HasDatabaseName("UX_EmployeeCertification_Tenant_Employee_Certification_Number");
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Certification)
+                .WithMany(c => c.EmployeeCertifications)
+                .HasForeignKey(x => x.CertificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.VerifiedBy)
+                .WithMany()
+                .HasForeignKey(x => x.VerifiedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CertificationExpiryReminderRun>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.StartedAt })
+                .HasDatabaseName("IX_CertificationExpiryRun_Tenant_StartedAt");
+        });
+
+        builder.Entity<CertificationExpiryDispatchLog>(entity =>
+        {
+            entity.HasIndex(x => x.RunId).HasDatabaseName("IX_CertificationExpiryDispatch_RunId");
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_CertificationExpiryDispatch_EmployeeId");
+            entity.HasIndex(x => new { x.TenantId, x.DedupeKey })
+                .HasDatabaseName("IX_CertificationExpiryDispatch_Tenant_DedupeKey");
+
+            entity.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

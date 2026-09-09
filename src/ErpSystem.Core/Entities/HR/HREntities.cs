@@ -1003,6 +1003,12 @@ public class EmployeePosition : TenantEntity
     public virtual ICollection<Employee> Employees { get; set; } = new List<Employee>();
     public virtual ICollection<EmployeePositionHistory> PositionHistories { get; set; } = new List<EmployeePositionHistory>();
     public virtual ICollection<PositionSkillRequirement> SkillRequirements { get; set; } = new List<PositionSkillRequirement>();
+
+    /// <summary>
+    /// What the post must hold (round 2, lane C2 — register row P-2). <see cref="RequiresCertification"/>
+    /// and <see cref="RequiresLicense"/> stay as the switches; these rows are what they mean.
+    /// </summary>
+    public virtual ICollection<PositionCertificationRequirement> CertificationRequirements { get; set; } = new List<PositionCertificationRequirement>();
     public virtual List<EmployeePositionBenefit> PositionBenefits { get; set; } = new List<EmployeePositionBenefit>();
     public virtual ICollection<PositionOvertimePolicy> OvertimePolicies { get; set; } = new List<PositionOvertimePolicy>();
 }
@@ -2060,6 +2066,12 @@ public class Skill : TenantEntity
     public virtual ICollection<EmployeeSkill> EmployeeSkills { get; set; } = new List<EmployeeSkill>();
     public virtual ICollection<PositionSkillRequirement> PositionRequirements { get; set; } = new List<PositionSkillRequirement>();
     public virtual ICollection<CompetencySkillIndicator> CompetencyIndicators { get; set; } = new List<CompetencySkillIndicator>();
+
+    /// <summary>
+    /// The credential(s) that evidence this skill (round 2, lane C2 — register row S-1). A skill
+    /// with <see cref="RequiresCertification"/> carries at least one.
+    /// </summary>
+    public virtual ICollection<SkillCertification> Certifications { get; set; } = new List<SkillCertification>();
 }
 
 /// <summary>
@@ -2108,6 +2120,16 @@ public class EmployeeSkill : TenantEntity
     public string? Notes { get; set; }
 
     public bool IsVerified { get; set; } = false;
+
+    /// <summary>
+    /// The credential on the employee's certification tab that evidences this skill (round 2,
+    /// lane C2). The per-skill certification columns above stay, and are shown when this is null —
+    /// the lane-3b idiom for the free-text certifying body beside its FK.
+    /// </summary>
+    public Guid? EmployeeCertificationId { get; set; }
+
+    [ForeignKey(nameof(EmployeeCertificationId))]
+    public virtual EmployeeCertification? EmployeeCertification { get; set; }
 
     // Navigation Properties
     public virtual Employee Employee { get; set; } = null!;
@@ -2353,6 +2375,9 @@ public class CertifyingBody : TenantEntity
     public bool IsActive { get; set; } = true;
 
     public virtual ICollection<EmployeeSkill> EmployeeSkills { get; set; } = new List<EmployeeSkill>();
+
+    /// <summary>The credentials this body issues (round 2, lane C2 — register row S-2).</summary>
+    public virtual ICollection<Certification> Certifications { get; set; } = new List<Certification>();
 }
 
 /// <summary>

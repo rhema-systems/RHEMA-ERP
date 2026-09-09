@@ -257,6 +257,15 @@ public class JobQualification : TenantEntity
     public virtual Qualification? Qualification { get; set; }
 
     /// <summary>
+    /// A credential from the certification catalogue, where the requirement is one (round 2,
+    /// lane C2, § 6.3): one column, so the job description and the position name the same thing.
+    /// </summary>
+    public Guid? CertificationId { get; set; }
+
+    [ForeignKey(nameof(CertificationId))]
+    public virtual Certification? Certification { get; set; }
+
+    /// <summary>
     /// If QualificationId is set, this is auto-populated from qualification name
     /// If null, user entered custom title
     /// </summary>

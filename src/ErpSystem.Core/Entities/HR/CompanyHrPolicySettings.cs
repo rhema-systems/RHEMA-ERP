@@ -108,6 +108,14 @@ public class CompanyHrPolicySettings : TenantEntity
     [Range(0, 3650)]
     public int ProbationEndLeadDays { get; set; } = 30;
 
+    /// <summary>
+    /// How far ahead of a credential's expiry the certification sweep warns, when the catalogue
+    /// row sets no lead time of its own (round 2, lane C2).
+    /// </summary>
+    /// <remarks>⚠ Non-nullable: it is in the HasData seed AND the migration adds it with a real
+    /// DEFAULT, so no tenant's row is left at zero.</remarks>
+    public int CertificationExpiryLeadDays { get; set; } = 60;
+
     // ═══════════════════════════════════════════
     //  EMPLOYEE-RELATIONS CLOCKS (area 9c slice 7)
     // ═══════════════════════════════════════════

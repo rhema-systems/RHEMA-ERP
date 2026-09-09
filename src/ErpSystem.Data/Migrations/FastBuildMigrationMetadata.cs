@@ -303,3 +303,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260907003611_AddSheChecklistBuilder")] partial class AddSheChecklistBuilder { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909004030_AddGuarantorIdTypeAndDocuments")] partial class AddGuarantorIdTypeAndDocuments { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909013533_AddOrganizationUnitHistoryNotes")] partial class AddOrganizationUnitHistoryNotes { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260909071641_AddCertificationModel")] partial class AddCertificationModel { }
