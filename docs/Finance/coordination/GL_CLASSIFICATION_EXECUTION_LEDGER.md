@@ -1263,6 +1263,14 @@ recovery, synchronized two-context disposal replay and direct C10 substitution/z
 missing. Terra Medium remains assigned to those exact evidence gaps; integration stays blocked and no configured
 database or migration was touched.
 
+The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
+SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
+the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
+missing owner-level C7 Donation/Destruction rollback/recovery, malformed C10 zero-mutation, internal participant
+authority denial, disabled/default selector denial, public-path non-regression and synchronized two-context exact
+replay evidence. No production-contract blocker or user decision exists; integration and re-review remain blocked
+until that executable evidence is committed cleanly.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
