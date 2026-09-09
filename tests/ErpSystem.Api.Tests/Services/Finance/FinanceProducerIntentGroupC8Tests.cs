@@ -42,6 +42,14 @@ public sealed class FinanceProducerIntentGroupC8Tests
         execute.GetParameters().Should().ContainSingle(parameter => parameter.ParameterType == typeof(ProducerOwnerEffectReceiptDto));
         execute.GetParameters().Should().NotContain(parameter => typeof(Delegate).IsAssignableFrom(parameter.ParameterType)
             || parameter.ParameterType == typeof(ApplicationDbContext));
+        foreach (var name in new[] { nameof(ProducerIntentGroupsController.Approve), nameof(ProducerIntentGroupsController.Reject) })
+        {
+            var decisionParameter = typeof(ProducerIntentGroupsController).GetMethod(name)!.GetParameters()[1];
+            decisionParameter.ParameterType.Should().Be(typeof(DecideProducerAccountingIntentDto),
+                "an independent checker supplies decision evidence, never the economic group again");
+        }
+        typeof(DecideProducerAccountingIntentDto).GetProperties().Select(property => property.Name)
+            .Should().Equal(nameof(DecideProducerAccountingIntentDto.Reason));
     }
 
     [Fact]
@@ -132,6 +140,87 @@ public sealed class FinanceProducerIntentGroupC8Tests
             new DecideProducerIntentGroupRequestDto { Group = rejectedRequest, Reason = "Rejected complete group" }))
             .Status.Should().Be(ProducerIntentGroupStatuses.Rejected);
         rejectedHarness.Executor.Executed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DurableDecisionById_ReconstructsCompleteGroup_AndRetainsExactDecisionAuthority()
+    {
+        var harness = Harness();
+        var prepared = await harness.Service.PrepareAsync(Group());
+
+        await FluentActions.Awaiting(() => harness.Service.ApprovePreparedAsync(prepared.Id,
+            new DecideProducerAccountingIntentDto { Reason = "Reviewed durable evidence" })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("*checker must differ*");
+
+        harness.Actor = Guid.NewGuid();
+        var decision = new DecideProducerAccountingIntentDto { Reason = "Reviewed durable evidence" };
+        (await harness.Service.ApprovePreparedAsync(prepared.Id, decision)).Status
+            .Should().Be(ProducerIntentGroupStatuses.Approved);
+        (await harness.Service.ApprovePreparedAsync(prepared.Id, decision)).Status
+            .Should().Be(ProducerIntentGroupStatuses.Approved, "an exact retry is read-only");
+        harness.Executor.Executed.Should().BeEmpty("approval by durable identity cannot execute owner or GL effects");
+        harness.Audit.Verify(audit => audit.RecordAsync(It.Is<FinanceAuditEventDto>(item =>
+            item.EventType == FinanceAuditEvents.ProducerIntentGroupApproved
+            && item.SourceDocumentId == prepared.Id), It.IsAny<CancellationToken>()), Times.Once,
+            "the governed decision and its audit are durable once, while an exact retry appends nothing");
+
+        harness.Actor = Guid.NewGuid();
+        await FluentActions.Awaiting(() => harness.Service.ApprovePreparedAsync(prepared.Id, decision)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_DECISION_CONFLICT*");
+        await FluentActions.Awaiting(() => harness.Service.RejectPreparedAsync(prepared.Id,
+            new DecideProducerAccountingIntentDto { Reason = decision.Reason })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_DECISION_CONFLICT*");
+    }
+
+    [Fact]
+    public async Task DurableRejectionById_UsesFrozenMembersDespiteCurrentC5Failure()
+    {
+        var harness = Harness();
+        var prepared = await harness.Service.PrepareAsync(Group());
+        harness.Applicability.Reset();
+        harness.Applicability.Setup(service => service.ResolveAsync(
+                It.IsAny<ResolveAccountingBookApplicabilityDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("current C5 policy is blocked"));
+        harness.Actor = Guid.NewGuid();
+
+        var rejected = await harness.Service.RejectPreparedAsync(prepared.Id,
+            new DecideProducerAccountingIntentDto { Reason = "Rejected from frozen evidence" });
+
+        rejected.Status.Should().Be(ProducerIntentGroupStatuses.Rejected);
+        harness.Applicability.VerifyNoOtherCalls();
+        harness.Executor.Executed.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DurableGroupDecision_DeniesMissingOrTamperedSnapshotAndWrongTenant()
+    {
+        var missingHarness = Harness();
+        var missing = await missingHarness.Service.PrepareAsync(Group());
+        (await missingHarness.Db.ProducerIntentGroups.SingleAsync(item => item.Id == missing.Id)).RequestSnapshotJson = null;
+        await missingHarness.Db.SaveChangesAsync();
+        missingHarness.Actor = Guid.NewGuid();
+        await FluentActions.Awaiting(() => missingHarness.Service.ApprovePreparedAsync(missing.Id,
+            new DecideProducerAccountingIntentDto { Reason = "Cannot trust missing evidence" })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("PRODUCER_INTENT_GROUP_SNAPSHOT_INVALID*");
+
+        var tamperedHarness = Harness();
+        var tampered = await tamperedHarness.Service.PrepareAsync(Group());
+        var memberId = tampered.Members[0].AccountingEvent.Id;
+        (await tamperedHarness.Db.AccountingEvents.SingleAsync(item => item.Id == memberId))
+            .ProducerIntentSnapshotHash = Hash('D');
+        await tamperedHarness.Db.SaveChangesAsync();
+        tamperedHarness.Actor = Guid.NewGuid();
+        await FluentActions.Awaiting(() => tamperedHarness.Service.RejectPreparedAsync(tampered.Id,
+            new DecideProducerAccountingIntentDto { Reason = "Cannot trust member evidence" })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_SNAPSHOT_INVALID*");
+
+        var tenantHarness = Harness();
+        var foreign = await tenantHarness.Service.PrepareAsync(Group());
+        tenantHarness.TenantId = Guid.NewGuid();
+        tenantHarness.Actor = Guid.NewGuid();
+        await FluentActions.Awaiting(() => tenantHarness.Service.ApprovePreparedAsync(foreign.Id,
+            new DecideProducerAccountingIntentDto { Reason = "Wrong tenant" })).Should()
+            .ThrowAsync<KeyNotFoundException>();
     }
 
     [Fact]
@@ -634,7 +723,8 @@ public sealed class FinanceProducerIntentGroupC8Tests
                 ProducerParticipantIdentity = request.ProducerParticipantIdentity, ProducerIntentSnapshotJson = snapshot,
                 ProducerIntentSnapshotHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(snapshot))), SelectionFingerprint = request.ExpectedSelectionFingerprint,
                 RequestFingerprint = fingerprint, PreparedByUserId = actor(), PreparedAtUtc = DateTime.UtcNow,
-                RequestedAtUtc = DateTime.UtcNow, EventDate = request.PostingRequest.PostingDate, CreatedAt = DateTime.UtcNow };
+                RequestedByUserId = actor(), RequestedAtUtc = DateTime.UtcNow,
+                EventDate = request.PostingRequest.PostingDate, CreatedAt = DateTime.UtcNow };
             db.AccountingEvents.Add(item);
             return AccountingEventService.Map(item);
         }

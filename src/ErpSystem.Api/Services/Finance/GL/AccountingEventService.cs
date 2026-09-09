@@ -817,7 +817,7 @@ IF @result < 0 THROW 51000, 'ACCOUNTING_EVENT_LOCK_FAILED: event identity could 
             throw new InvalidOperationException("ACCOUNTING_EVENT_LINEAGE_IDENTITY_CONFLICT: successors must retain the target's canonical economic source identity.");
     }
 
-    private static string Fingerprint(CreateAccountingEventDto request, string key, int eventVersion, Guid rootAccountingEventId)
+    internal static string Fingerprint(CreateAccountingEventDto request, string key, int eventVersion, Guid rootAccountingEventId)
     {
         var posting = request.PostingRequest ?? throw new InvalidOperationException("A Finance posting request is required.");
         static string? S(string? value) => value?.Trim();

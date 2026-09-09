@@ -32,8 +32,17 @@ public sealed class FinanceProducerIntentC7Tests
         typeof(ProducerAccountingIntentsController).GetMethod(nameof(ProducerAccountingIntentsController.Prepare))!
             .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(FinancePermissions.PrepareAccountingEvents);
         foreach (var name in new[] { nameof(ProducerAccountingIntentsController.Approve), nameof(ProducerAccountingIntentsController.Reject) })
+        {
             typeof(ProducerAccountingIntentsController).GetMethod(name)!.GetCustomAttribute<AuthorizeAttribute>()!
                 .Policy.Should().Be(FinancePermissions.OrchestrateAccountingEvents);
+            typeof(ProducerAccountingIntentsController).GetMethod(name)!.GetParameters()[1].ParameterType
+                .Should().Be(typeof(DecideProducerAccountingIntentDto),
+                    "a checker supplies only durable identity plus decision evidence");
+        }
+        typeof(ProducerAccountingIntentsController).GetMethod(nameof(ProducerAccountingIntentsController.Get))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(FinancePermissions.ViewAccountingEvents);
+        typeof(DecideProducerAccountingIntentDto).GetProperties().Select(property => property.Name)
+            .Should().Equal(nameof(DecideProducerAccountingIntentDto.Reason));
     }
 
     [Fact]
@@ -47,6 +56,22 @@ public sealed class FinanceProducerIntentC7Tests
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("FINANCE_PRODUCER_INTENT_DISABLED*");
+        applicability.VerifyNoOtherCalls();
+        events.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DurableDecision_DisabledByDefault_DeniesBeforeStoredEvidenceLookup()
+    {
+        var applicability = new Mock<IAccountingBookApplicabilityService>(MockBehavior.Strict);
+        var events = new Mock<IAccountingEventService>(MockBehavior.Strict);
+        var harness = Harness(applicability, events, enabled: false);
+
+        await FluentActions.Awaiting(() => harness.Service.ApprovePreparedAsync(Guid.NewGuid(),
+            new DecideProducerAccountingIntentDto { Reason = "Reviewed" })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("FINANCE_PRODUCER_INTENT_DISABLED*");
+
+        harness.Db.ChangeTracker.Entries().Should().BeEmpty();
         applicability.VerifyNoOtherCalls();
         events.VerifyNoOtherCalls();
     }
@@ -171,6 +196,99 @@ public sealed class FinanceProducerIntentC7Tests
 
         applicability.Verify(x => x.ResolveAsync(It.IsAny<ResolveAccountingBookApplicabilityDto>(), It.IsAny<CancellationToken>()), Times.Never,
             "approval and rejection must survive current C5 drift or blockers by using prepared evidence");
+    }
+
+    [Fact]
+    public async Task DurableDecisionById_ReconstructsAndForwardsExactCanonicalRequestWithoutC5Resolution()
+    {
+        var applicability = Applicability();
+        ReleaseAccountingEventDto? capturedApproval = null;
+        ReleaseAccountingEventDto? capturedRejection = null;
+        var events = new Mock<IAccountingEventService>();
+        events.Setup(service => service.ApproveAsync(It.IsAny<Guid>(), It.IsAny<ReleaseAccountingEventDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, ReleaseAccountingEventDto, CancellationToken>((_, release, _) => capturedApproval = release)
+            .ReturnsAsync(new AccountingEventDto { ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved });
+        events.Setup(service => service.RejectAsync(It.IsAny<Guid>(), It.IsAny<ReleaseAccountingEventDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, ReleaseAccountingEventDto, CancellationToken>((_, release, _) => capturedRejection = release)
+            .ReturnsAsync(new AccountingEventDto { ProducerDecisionStatus = ProducerIntentDecisionStatuses.Rejected });
+        var harness = Harness(applicability, events);
+        var intent = Intent();
+        var (id, frozen) = await SeedPreparedEventAsync(harness, intent);
+        applicability.Reset();
+        applicability.Setup(service => service.ResolveAsync(It.IsAny<ResolveAccountingBookApplicabilityDto>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("current C5 policy is unavailable"));
+
+        (await harness.Service.ApprovePreparedAsync(id,
+            new DecideProducerAccountingIntentDto { Reason = "Reviewed durable intent" }))
+            .ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Approved);
+        (await harness.Service.RejectPreparedAsync(id,
+            new DecideProducerAccountingIntentDto { Reason = "Rejected durable intent" }))
+            .ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Rejected);
+
+        capturedApproval!.Request.Should().BeEquivalentTo(frozen);
+        capturedApproval.Reason.Should().Be("Reviewed durable intent");
+        capturedRejection!.Request.Should().BeEquivalentTo(frozen);
+        capturedRejection.Reason.Should().Be("Rejected durable intent");
+        applicability.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DurableDecisionById_UsesExistingMakerCheckerRetryConflictAndAuditAuthority()
+    {
+        var harness = RealDecisionHarness();
+        var (id, _) = await SeedPreparedEventAsync(harness.Service, harness.Db, harness.TenantId, Intent());
+        var makerEvidence = await harness.Db.AccountingEvents.SingleAsync(item => item.Id == id);
+        makerEvidence.RequestedByUserId = harness.Actor;
+        makerEvidence.PreparedByUserId = harness.Actor;
+        await harness.Db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => harness.Service.ApprovePreparedAsync(id,
+            new DecideProducerAccountingIntentDto { Reason = "Reviewed immutable request" })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("*checker must differ*");
+
+        harness.Actor = Guid.NewGuid();
+        var decision = new DecideProducerAccountingIntentDto { Reason = "Reviewed immutable request" };
+        (await harness.Service.ApprovePreparedAsync(id, decision)).ProducerDecisionStatus
+            .Should().Be(ProducerIntentDecisionStatuses.Approved);
+        (await harness.Service.ApprovePreparedAsync(id, decision)).ProducerDecisionStatus
+            .Should().Be(ProducerIntentDecisionStatuses.Approved, "the exact retry appends no new decision");
+        harness.Audit.Verify(audit => audit.RecordAsync(It.Is<FinanceAuditEventDto>(item =>
+            item.EventType == FinanceAuditEvents.ProducerAccountingIntentApproved
+            && item.ResourceId == id.ToString()), It.IsAny<CancellationToken>()), Times.Once);
+
+        harness.Actor = Guid.NewGuid();
+        await FluentActions.Awaiting(() => harness.Service.ApprovePreparedAsync(id, decision)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_DECISION_CHECKER_CONFLICT*");
+        await FluentActions.Awaiting(() => harness.Service.RejectPreparedAsync(id,
+            new DecideProducerAccountingIntentDto { Reason = decision.Reason })).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_DECISION_CONFLICT*");
+    }
+
+    [Fact]
+    public async Task DurableDecisionById_DeniesMissingTamperedAndSourceConflictingEvidence()
+    {
+        foreach (var mutate in new Action<AccountingEvent>[]
+        {
+            item => item.ProducerIntentSnapshotJson = null,
+            item => item.ProducerIntentSnapshotHash = Hash('D'),
+            item => item.SourceDocumentType = "UNTRUSTED_SOURCE"
+        })
+        {
+            var events = new Mock<IAccountingEventService>(MockBehavior.Strict);
+            var harness = Harness(Applicability(), events);
+            var (id, _) = await SeedPreparedEventAsync(harness, Intent());
+            var row = await harness.Db.AccountingEvents.SingleAsync(item => item.Id == id);
+            mutate(row);
+            await harness.Db.SaveChangesAsync();
+
+            await FluentActions.Awaiting(() => harness.Service.ApprovePreparedAsync(id,
+                new DecideProducerAccountingIntentDto { Reason = "Untrusted evidence" })).Should()
+                .ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_EVENT_SNAPSHOT_*");
+            events.VerifyNoOtherCalls();
+        }
     }
 
     [Fact]
@@ -389,6 +507,67 @@ public sealed class FinanceProducerIntentC7Tests
         return mock;
     }
 
+    private static Task<(Guid Id, CreateAccountingEventDto Frozen)> SeedPreparedEventAsync(
+        TestHarness harness, ProducerAccountingIntentDto intent) =>
+        SeedPreparedEventAsync(harness.Service, harness.Db, harness.TenantId, intent);
+
+    private static async Task<(Guid Id, CreateAccountingEventDto Frozen)> SeedPreparedEventAsync(
+        FinanceProducerIntentService service, ApplicationDbContext db, Guid tenantId,
+        ProducerAccountingIntentDto intent)
+    {
+        var frozen = await service.BuildRequestAsync(intent, CancellationToken.None);
+        var id = Guid.NewGuid();
+        frozen.AccountingEventId = id;
+        var key = frozen.SelectionIdempotencyKey.Trim().ToUpperInvariant();
+        var snapshot = JsonSerializer.Serialize(frozen, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var maker = Guid.NewGuid();
+        db.AccountingEvents.Add(new AccountingEvent
+        {
+            Id = id, TenantId = tenantId, RootAccountingEventId = id, Version = 1,
+            EventKind = frozen.EventKind, IdempotencyKey = key,
+            OriginatingModuleCode = frozen.PostingRequest.OriginModuleCode ?? frozen.PostingRequest.SourceModule,
+            SourceDocumentType = frozen.PostingRequest.SourceDocumentType,
+            SourceDocumentId = frozen.PostingRequest.SourceDocumentId,
+            PostingAction = frozen.PostingRequest.PostingAction,
+            EventDate = frozen.PostingRequest.PostingDate.Date,
+            Status = AccountingEventStatuses.PendingApproval,
+            SelectionFingerprint = frozen.ExpectedSelectionFingerprint,
+            RequestFingerprint = Fingerprint(frozen, id),
+            RequestedAtUtc = DateTime.UtcNow, RequestedByUserId = maker,
+            PreparedAtUtc = DateTime.UtcNow, PreparedByUserId = maker,
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Pending,
+            ProducerParticipantIdentity = frozen.ProducerParticipantIdentity,
+            ProducerIntentSnapshotJson = snapshot,
+            ProducerIntentSnapshotHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(snapshot))),
+            CreatedAt = DateTime.UtcNow, CreatedBy = "c11-test"
+        });
+        await db.SaveChangesAsync();
+        return (id, frozen);
+    }
+
+    private static RealDecisionHarnessState RealDecisionHarness()
+    {
+        var state = new RealDecisionHarnessState
+        {
+            TenantId = Guid.NewGuid(), Actor = Guid.NewGuid(),
+            Db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options)
+        };
+        state.User.SetupGet(user => user.TenantId).Returns(() => state.TenantId);
+        state.User.SetupGet(user => user.UserId).Returns(() => state.Actor.ToString());
+        state.User.SetupGet(user => user.UserName).Returns("c11-checker");
+        state.Audit.Setup(audit => audit.RecordAsync(It.IsAny<FinanceAuditEventDto>(),
+            It.IsAny<CancellationToken>())).ReturnsAsync(new ErpSystem.Core.Entities.AuditLog());
+        var accountingEvents = new AccountingEventService(state.Db, state.User.Object, state.Applicability.Object,
+            new FinancePostingEngine(state.Db, state.User.Object,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<FinancePostingEngine>.Instance),
+            state.Audit.Object, Options.Create(new AccountingEventOptions { Enabled = true }));
+        state.Service = new FinanceProducerIntentService(state.Applicability.Object, accountingEvents,
+            accountingEvents, state.Db, state.User.Object,
+            Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+        return state;
+    }
+
     private static ProducerAccountingIntentDto Intent() => new()
     {
         IdempotencyKey = "inventory-disposal-1", ParticipantIdentity = "inventory.disposal.v1",
@@ -425,7 +604,7 @@ public sealed class FinanceProducerIntentC7Tests
 
     private static string Fingerprint(CreateAccountingEventDto request, Guid root) => (string)typeof(AccountingEventService)
         .GetMethod("Fingerprint", BindingFlags.NonPublic | BindingFlags.Static)!
-        .Invoke(null, [request, request.SelectionIdempotencyKey, 1, root])!;
+        .Invoke(null, [request, request.SelectionIdempotencyKey.Trim().ToUpperInvariant(), 1, root])!;
 
     private static FinancePostingRequestV2Dto ToFinance(ProducerFinancePostingRequestDto source) => new()
     {
@@ -444,6 +623,18 @@ public sealed class FinanceProducerIntentC7Tests
 
     private sealed record TestHarness(FinanceProducerIntentService Service, ApplicationDbContext Db, Guid TenantId,
         StubExecutor Executor);
+
+    private sealed class RealDecisionHarnessState
+    {
+        public Guid TenantId { get; set; }
+        public Guid Actor { get; set; }
+        public ApplicationDbContext Db { get; set; } = null!;
+        public Mock<ICurrentUserService> User { get; } = new();
+        public Mock<IAccountingBookApplicabilityService> Applicability { get; } =
+            FinanceProducerIntentC7Tests.Applicability();
+        public Mock<IFinanceAuditService> Audit { get; } = new();
+        public FinanceProducerIntentService Service { get; set; } = null!;
+    }
 
     private sealed class StubExecutor : ITrustedAccountingEventExecutor
     {

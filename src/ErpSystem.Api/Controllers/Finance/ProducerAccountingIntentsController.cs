@@ -11,6 +11,10 @@ namespace ErpSystem.Api.Controllers.Finance;
 [Route("api/finance/producer-accounting-intents")]
 public sealed class ProducerAccountingIntentsController(IFinanceProducerIntentService service) : ControllerBase
 {
+    [HttpGet("{id:guid}")]
+    [Authorize(Policy = FinancePermissions.ViewAccountingEvents)]
+    public async Task<IActionResult> Get(Guid id, CancellationToken ct) => Ok(await service.GetAsync(id, ct));
+
     [HttpPost]
     [Authorize(Policy = FinancePermissions.PrepareAccountingEvents)]
     public async Task<IActionResult> Prepare([FromBody] ProducerAccountingIntentDto intent, CancellationToken ct) =>
@@ -18,17 +22,11 @@ public sealed class ProducerAccountingIntentsController(IFinanceProducerIntentSe
 
     [HttpPost("{id:guid}/approve")]
     [Authorize(Policy = FinancePermissions.OrchestrateAccountingEvents)]
-    public async Task<IActionResult> Approve(Guid id, [FromBody] DecideProducerIntentRequest request, CancellationToken ct) =>
-        Ok(await service.ApproveAsync(id, request.Intent, request.Decision, ct));
+    public async Task<IActionResult> Approve(Guid id, [FromBody] DecideProducerAccountingIntentDto decision, CancellationToken ct) =>
+        Ok(await service.ApprovePreparedAsync(id, decision, ct));
 
     [HttpPost("{id:guid}/reject")]
     [Authorize(Policy = FinancePermissions.OrchestrateAccountingEvents)]
-    public async Task<IActionResult> Reject(Guid id, [FromBody] DecideProducerIntentRequest request, CancellationToken ct) =>
-        Ok(await service.RejectAsync(id, request.Intent, request.Decision, ct));
-}
-
-public sealed class DecideProducerIntentRequest
-{
-    public ProducerAccountingIntentDto Intent { get; set; } = new();
-    public DecideProducerAccountingIntentDto Decision { get; set; } = new();
+    public async Task<IActionResult> Reject(Guid id, [FromBody] DecideProducerAccountingIntentDto decision, CancellationToken ct) =>
+        Ok(await service.RejectPreparedAsync(id, decision, ct));
 }

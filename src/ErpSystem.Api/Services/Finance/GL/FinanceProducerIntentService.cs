@@ -1,7 +1,10 @@
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -50,6 +53,33 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         ValidateIntent(intent);
         var request = await BuildRequestAsync(intent, cancellationToken);
         return await _events.CreateAsync(request, cancellationToken);
+    }
+
+    public async Task<AccountingEventDto> GetAsync(Guid accountingEventId, CancellationToken cancellationToken = default)
+    {
+        RequireEnabled();
+        _ = await ReconstructPreparedRequestAsync(accountingEventId, cancellationToken);
+        return await _events.GetAsync(accountingEventId, cancellationToken);
+    }
+
+    public Task<AccountingEventDto> ApprovePreparedAsync(Guid accountingEventId,
+        DecideProducerAccountingIntentDto decision, CancellationToken cancellationToken = default) =>
+        DecidePreparedAsync(accountingEventId, decision, approve: true, cancellationToken);
+
+    public Task<AccountingEventDto> RejectPreparedAsync(Guid accountingEventId,
+        DecideProducerAccountingIntentDto decision, CancellationToken cancellationToken = default) =>
+        DecidePreparedAsync(accountingEventId, decision, approve: false, cancellationToken);
+
+    private async Task<AccountingEventDto> DecidePreparedAsync(Guid accountingEventId,
+        DecideProducerAccountingIntentDto decision, bool approve, CancellationToken cancellationToken)
+    {
+        RequireEnabled();
+        RequireReason(decision);
+        var request = await ReconstructPreparedRequestAsync(accountingEventId, cancellationToken);
+        var release = new ReleaseAccountingEventDto { Request = request, Reason = decision.Reason };
+        return approve
+            ? await _events.ApproveAsync(accountingEventId, release, cancellationToken)
+            : await _events.RejectAsync(accountingEventId, release, cancellationToken);
     }
 
     public async Task<AccountingEventDto> ApproveAsync(Guid accountingEventId, ProducerAccountingIntentDto intent,
@@ -181,6 +211,108 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             PostingRequest = ToFinancePosting(intent.PostingRequest)
         };
     }
+
+    internal async Task<CreateAccountingEventDto> ReconstructPreparedRequestAsync(Guid accountingEventId,
+        CancellationToken cancellationToken)
+    {
+        // The checker deliberately supplies no economic payload. Finance reconstructs and rebinds the
+        // complete immutable maker snapshot so approval cannot substitute lines, source or lineage.
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var prepared = await _db.AccountingEvents.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("AccountingEvent was not found.");
+        if (string.IsNullOrWhiteSpace(prepared.ProducerParticipantIdentity)
+            || prepared.ProducerDecisionStatus == ProducerIntentDecisionStatuses.NotRequired
+            || prepared.PreparedByUserId == Guid.Empty || prepared.RequestedByUserId != prepared.PreparedByUserId)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_PREPARED_AUTHORITY_INVALID: durable producer maker or participant authority is incomplete.");
+        if (string.IsNullOrWhiteSpace(prepared.ProducerIntentSnapshotJson)
+            || prepared.ProducerIntentSnapshotHash?.Length != 64
+            || !string.Equals(prepared.ProducerIntentSnapshotHash,
+                Sha256(prepared.ProducerIntentSnapshotJson), StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_SNAPSHOT_INVALID: immutable producer intent evidence is missing or corrupted.");
+
+        CreateAccountingEventDto frozen;
+        try
+        {
+            frozen = JsonSerializer.Deserialize<CreateAccountingEventDto>(prepared.ProducerIntentSnapshotJson,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?? throw new JsonException("Snapshot deserialized to null.");
+        }
+        catch (JsonException error)
+        {
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_SNAPSHOT_INVALID: prepared producer evidence cannot be reconstructed.", error);
+        }
+
+        var posting = frozen.PostingRequest
+            ?? throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_INVALID: Finance posting evidence is missing.");
+        var identity = FinancePreparedIdentityNormalizer.Normalize(
+            posting.OriginModuleCode ?? posting.SourceModule, posting.SourceDocumentType, posting.PostingAction);
+        var key = frozen.SelectionIdempotencyKey?.Trim().ToUpperInvariant() ?? string.Empty;
+        var participant = CanonicalParticipant(frozen.ProducerParticipantIdentity);
+        _ = CanonicalOwnerEffect(frozen.ExpectedOwnerEffect, participant);
+        var fingerprint = AccountingEventService.Fingerprint(
+            frozen, key, prepared.Version, prepared.RootAccountingEventId);
+        if (frozen.AccountingEventId != prepared.Id
+            || !string.Equals(frozen.EventKind?.Trim(), prepared.EventKind, StringComparison.OrdinalIgnoreCase)
+            || frozen.SupersedesAccountingEventId != prepared.SupersedesAccountingEventId
+            || frozen.CorrectsAccountingEventId != prepared.CorrectsAccountingEventId
+            || frozen.ReversesAccountingEventId != prepared.ReversesAccountingEventId
+            || !string.Equals(key, prepared.IdempotencyKey, StringComparison.Ordinal)
+            || !string.Equals(participant, prepared.ProducerParticipantIdentity, StringComparison.Ordinal)
+            || !string.Equals(identity.OriginatingModuleCode, prepared.OriginatingModuleCode, StringComparison.Ordinal)
+            || !string.Equals(identity.SourceDocumentType, prepared.SourceDocumentType, StringComparison.Ordinal)
+            || posting.SourceDocumentId != prepared.SourceDocumentId
+            || !string.Equals(identity.PostingAction, prepared.PostingAction, StringComparison.Ordinal)
+            || posting.PostingDate.Date != prepared.EventDate.Date
+            || !string.Equals(frozen.ExpectedSelectionFingerprint, prepared.SelectionFingerprint, StringComparison.Ordinal)
+            || !string.Equals(fingerprint, prepared.RequestFingerprint, StringComparison.Ordinal)
+            || (posting.SourceDocumentTenantId.HasValue && posting.SourceDocumentTenantId != tenantId))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_SNAPSHOT_AUTHORITY_CONFLICT: durable source, tenant, lineage or fingerprint differs from the canonical snapshot.");
+        return frozen;
+    }
+
+    internal static ProducerAccountingIntentDto ToProducerIntent(CreateAccountingEventDto source) => new()
+    {
+        AccountingEventId = source.AccountingEventId, EventKind = source.EventKind,
+        SupersedesAccountingEventId = source.SupersedesAccountingEventId,
+        CorrectsAccountingEventId = source.CorrectsAccountingEventId,
+        ReversesAccountingEventId = source.ReversesAccountingEventId,
+        IdempotencyKey = source.SelectionIdempotencyKey,
+        ParticipantIdentity = source.ProducerParticipantIdentity,
+        ExpectedOwnerEffect = source.ExpectedOwnerEffect
+            ?? throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_INVALID: owner-effect authority is missing."),
+        PostingRequest = ToProducerPosting(source.PostingRequest)
+    };
+
+    private static ProducerFinancePostingRequestDto ToProducerPosting(FinancePostingRequestV2Dto source) => new()
+    {
+        SourceModule = source.SourceModule, OriginModuleCode = source.OriginModuleCode,
+        SourceDocumentType = source.SourceDocumentType, SourceDocumentId = source.SourceDocumentId,
+        SourceDocumentTenantId = source.SourceDocumentTenantId, ExistingJournalEntryId = source.ExistingJournalEntryId,
+        ReversalOfJournalEntryId = source.ReversalOfJournalEntryId, ReversalReason = source.ReversalReason,
+        ReversalType = source.ReversalType, PostingAction = source.PostingAction,
+        SourceDocumentReference = source.SourceDocumentReference, Description = source.Description,
+        PostingDate = source.PostingDate, FiscalPeriodId = source.FiscalPeriodId, JournalType = source.JournalType,
+        FunctionalCurrencyCode = source.FunctionalCurrencyCode, IdempotencyKey = source.IdempotencyKey,
+        ReturnExistingOnDuplicate = source.ReturnExistingOnDuplicate,
+        ExchangeRateTypeOverride = source.ExchangeRateTypeOverride,
+        ExchangeRateQuoteSideOverride = source.ExchangeRateQuoteSideOverride,
+        ExchangeRateOverrideReason = source.ExchangeRateOverrideReason,
+        ExchangeRateOverrideApprovedByUserId = source.ExchangeRateOverrideApprovedByUserId,
+        ExchangeRateOverrideApprovedAt = source.ExchangeRateOverrideApprovedAt,
+        PreserveHistoricalExchangeRateSnapshot = source.PreserveHistoricalExchangeRateSnapshot,
+        AllowPostingToClosedPeriod = source.AllowPostingToClosedPeriod,
+        BudgetReservationIds = source.BudgetReservationIds,
+        BudgetReservationSourceDocumentType = source.BudgetReservationSourceDocumentType,
+        Lines = source.Lines, TaxCalculationSnapshots = source.TaxCalculationSnapshots
+    };
+
+    private static string Sha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static FinancePostingRequestV2Dto ToFinancePosting(ProducerFinancePostingRequestDto source) => new()
     {

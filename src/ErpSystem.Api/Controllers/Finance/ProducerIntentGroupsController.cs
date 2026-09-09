@@ -22,11 +22,11 @@ public sealed class ProducerIntentGroupsController(IFinanceProducerIntentGroupSe
 
     [HttpPost("{id:guid}/approve")]
     [Authorize(Policy = FinancePermissions.OrchestrateAccountingEvents)]
-    public async Task<IActionResult> Approve(Guid id, [FromBody] DecideProducerIntentGroupRequestDto request, CancellationToken ct) =>
-        Ok(await service.ApproveAsync(id, request, ct));
+    public async Task<IActionResult> Approve(Guid id, [FromBody] DecideProducerAccountingIntentDto decision, CancellationToken ct) =>
+        Ok(await service.ApprovePreparedAsync(id, decision, ct));
 
     [HttpPost("{id:guid}/reject")]
     [Authorize(Policy = FinancePermissions.OrchestrateAccountingEvents)]
-    public async Task<IActionResult> Reject(Guid id, [FromBody] DecideProducerIntentGroupRequestDto request, CancellationToken ct) =>
-        Ok(await service.RejectAsync(id, request, ct));
+    public async Task<IActionResult> Reject(Guid id, [FromBody] DecideProducerAccountingIntentDto decision, CancellationToken ct) =>
+        Ok(await service.RejectPreparedAsync(id, decision, ct));
 }

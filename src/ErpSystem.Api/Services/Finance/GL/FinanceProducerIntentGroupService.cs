@@ -142,6 +142,26 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
     public Task<ProducerIntentGroupDto> RejectAsync(Guid groupId, DecideProducerIntentGroupRequestDto request,
         CancellationToken cancellationToken = default) => DecideAsync(groupId, request, approve: false, cancellationToken);
 
+    public Task<ProducerIntentGroupDto> ApprovePreparedAsync(Guid groupId,
+        DecideProducerAccountingIntentDto decision, CancellationToken cancellationToken = default) =>
+        DecidePreparedAsync(groupId, decision, approve: true, cancellationToken);
+
+    public Task<ProducerIntentGroupDto> RejectPreparedAsync(Guid groupId,
+        DecideProducerAccountingIntentDto decision, CancellationToken cancellationToken = default) =>
+        DecidePreparedAsync(groupId, decision, approve: false, cancellationToken);
+
+    private async Task<ProducerIntentGroupDto> DecidePreparedAsync(Guid groupId,
+        DecideProducerAccountingIntentDto decision, bool approve, CancellationToken cancellationToken)
+    {
+        RequireEnabled();
+        ArgumentNullException.ThrowIfNull(decision);
+        if (string.IsNullOrWhiteSpace(decision.Reason))
+            throw new InvalidOperationException("A governed group approval or rejection reason is required.");
+        var request = await ReconstructPreparedGroupRequestAsync(groupId, cancellationToken);
+        var governed = new DecideProducerIntentGroupRequestDto { Group = request, Reason = decision.Reason };
+        return await DecideAsync(groupId, governed, approve, cancellationToken);
+    }
+
     private async Task<ProducerIntentGroupDto> DecideAsync(Guid groupId, DecideProducerIntentGroupRequestDto decision,
         bool approve, CancellationToken cancellationToken)
     {
@@ -391,6 +411,69 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
             result.Add((durable[index], prepared, validated));
         }
         return result;
+    }
+
+    private async Task<ProducerIntentGroupRequestDto> ReconstructPreparedGroupRequestAsync(
+        Guid groupId, CancellationToken cancellationToken)
+    {
+        // Group decisions reload every ordered C7 member from Finance evidence; the checker cannot
+        // resubmit, reorder or silently omit economics while deciding the complete maker package.
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var group = await Query().SingleOrDefaultAsync(item => item.TenantId == tenantId
+            && item.Id == groupId && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("Producer intent group was not found.");
+        RequireSnapshotIntegrity(group);
+        if (group.PreparedByUserId == Guid.Empty || group.MemberCount != group.Members.Count
+            || string.IsNullOrWhiteSpace(group.ParticipantCode))
+            throw new InvalidOperationException(
+                "PRODUCER_INTENT_GROUP_PREPARED_AUTHORITY_INVALID: durable maker, participant or member authority is incomplete.");
+        await RequireDurableMemberLineageAsync(group, cancellationToken);
+
+        var orderedMembers = group.Members.OrderBy(item => item.MemberOrder).ToList();
+        var intents = new List<ProducerAccountingIntentDto>(orderedMembers.Count);
+        var memberEvents = new List<AccountingEventDto>(orderedMembers.Count);
+        for (var index = 0; index < orderedMembers.Count; index++)
+        {
+            var member = orderedMembers[index];
+            if (member.MemberOrder != index + 1
+                || member.AccountingEvent is null
+                || member.AccountingEvent.TenantId != tenantId
+                || member.AccountingEvent.PreparedByUserId != group.PreparedByUserId
+                || !string.Equals(member.MemberFingerprint,
+                    member.AccountingEvent.RequestFingerprint, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "PRODUCER_INTENT_GROUP_MEMBER_AUTHORITY: durable member order, tenant, maker or fingerprint is invalid.");
+            var frozen = await _producer.ReconstructPreparedRequestAsync(
+                member.AccountingEventId, cancellationToken);
+            if (!string.Equals(member.MemberFingerprint,
+                    AccountingEventService.Fingerprint(frozen,
+                        frozen.SelectionIdempotencyKey.Trim().ToUpperInvariant(),
+                        member.AccountingEvent.Version, member.AccountingEvent.RootAccountingEventId),
+                    StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "PRODUCER_INTENT_GROUP_MEMBER_AUTHORITY: member snapshot is not bound to the group fingerprint.");
+            intents.Add(FinanceProducerIntentService.ToProducerIntent(frozen));
+            memberEvents.Add(AccountingEventService.Map(member.AccountingEvent));
+        }
+
+        var request = new ProducerIntentGroupRequestDto
+        {
+            ProducerIntentGroupId = group.Id, GroupKind = group.GroupKind,
+            SupersedesProducerIntentGroupId = group.SupersedesProducerIntentGroupId,
+            CorrectsProducerIntentGroupId = group.CorrectsProducerIntentGroupId,
+            ReversesProducerIntentGroupId = group.ReversesProducerIntentGroupId,
+            IdempotencyKey = group.IdempotencyKey, ParticipantIdentity = group.ParticipantCode,
+            ExpectedOwnerEffect = new ProducerOwnerEffectIdentityDto
+            {
+                ParticipantCode = group.ParticipantCode, OwnerEntityType = group.OwnerEntityType,
+                OwnerEntityId = group.OwnerEntityId, OwnerAction = group.OwnerAction,
+                EffectFingerprint = group.ExpectedOwnerEffectFingerprint
+            },
+            Members = intents
+        };
+        ValidateRequest(request, tenantId);
+        RequireGroupMatch(group, request, memberEvents);
+        return request;
     }
 
     private async Task<List<AccountingEventDto>> ValidateMembersAsync(ProducerIntentGroupRequestDto request,
