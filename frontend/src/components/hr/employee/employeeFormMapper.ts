@@ -82,17 +82,13 @@ export function employeeFormToRequest(
     socialSecurityNumber: s(values.socialSecurityNumber),
     tinNumber: s(values.tinNumber),
     bloodType: (values.bloodType || null) as BloodType | null,
-    // Off payroll: no salary and every switch off, whatever the hidden fields still hold —
-    // the service refuses an off-payroll record that carries either.
+    // Membership only. ⚠ The salary and the five switches are deliberately NOT sent — not as
+    // null, not at all. On the update DTO they are nullable and "absent" means "untouched"; this
+    // mapper used to re-send all five on every edit, so an edit of somebody's phone number could
+    // re-assert switches the Salary tab had since changed. They are the tab's now (Q-3).
     isOnPayroll: values.isOnPayroll,
     offPayrollReason: values.isOnPayroll ? null : ((values.offPayrollReason || null) as OffPayrollReason | null),
     offPayrollNote: values.isOnPayroll ? null : s(values.offPayrollNote),
-    salary: values.isOnPayroll && values.salary && values.salary.trim() ? Number(values.salary) : null,
-    payTax: values.isOnPayroll && values.payTax,
-    ssFund: values.isOnPayroll && values.ssFund,
-    grossUp: values.isOnPayroll && values.grossUp,
-    tier2Only: values.isOnPayroll && values.tier2Only,
-    overtime: values.isOnPayroll && values.overtime,
     badgeNumber: s(values.badgeNumber),
     notes: s(values.notes),
     isExpatriate: values.isExpatriate,

@@ -2250,6 +2250,27 @@ public enum EmploymentType
 }
 
 /// <summary>
+/// How an employee's basic pay is arrived at: read off the salary scale, or agreed for the person.
+/// </summary>
+/// <remarks>
+/// <para>HR's fact, because the scale is HR's concept — <c>EmployeeSalaryAssignment</c> places a
+/// person on a <c>SalaryNotch</c> whose amount is the pay — while payroll is already amount-based
+/// and never reads the placement. Round-2 lane E1 (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5.2).</para>
+///
+/// <para>⚠ Independent of <c>EmploymentType</c> and of <c>IsOnPayroll</c>. A permanent employee can
+/// be negotiated (a retained specialist) and a contractor can be on the scale; the feedback's
+/// "distinguish contract from permanent" is answered by two axes, not one.</para>
+/// </remarks>
+public enum PayBasis
+{
+    /// <summary>Basic pay is the amount of the notch the person is placed on. Placement expected; its absence is reported, not blocked.</summary>
+    SalaryScale = 1,
+
+    /// <summary>Basic pay is an amount agreed for this person. Placement on the scale is REFUSED while this stands.</summary>
+    Negotiated = 2,
+}
+
+/// <summary>
 /// Why an employee is NOT paid through the payroll run. Recorded alongside
 /// <c>Employee.IsOnPayroll = false</c>, because a bare "off" cannot answer the question the payroll
 /// owner will ask of every active person missing from a run — and because the answer decides how

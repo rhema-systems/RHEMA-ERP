@@ -1,19 +1,13 @@
 'use client';
 
 import { z } from 'zod';
+import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { employeeService } from '@/services/hr/employee.service';
-import { useQuery } from '@tanstack/react-query';
 import { EMPLOYMENT_TYPE_OPTIONS } from '@/types/hr/employee';
-import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { contractTypeService } from '@/services/hr/contract-type.service';
 import type { EmploymentType } from '@/types/hr/employee';
-import {
-  CONTRACT_STATUS_OPTIONS,
-  PAY_FREQUENCY_OPTIONS,
-  TAX_TREATMENT_OPTIONS,
-  type EmployeeContract,
-} from '@/types/hr/employee-subresources';
+import { CONTRACT_STATUS_OPTIONS, type EmployeeContract } from '@/types/hr/employee-subresources';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
 import {
   DateField,
@@ -34,19 +28,12 @@ const schema = z
     effectiveDate: z.string().optional().or(z.literal('')),
     endDate: z.string().optional().or(z.literal('')),
     contractEndDate: z.string().optional().or(z.literal('')),
-    salary: z.coerce.number().min(0, 'Cannot be negative'),
-    payFrequency: z.enum(['Weekly', 'BiWeekly', 'Monthly', 'Quarterly', 'Annually', 'OneTime']),
-    taxTreatmentType: z.enum(['None', 'PAYE', 'WithholdingTax']),
-    withholdingTaxRate: z.string().optional().or(z.literal('')),
-    isPensionApplicable: z.boolean(),
-    isTaxExempt: z.boolean(),
     workingHoursPerWeek: z.coerce.number().int().min(0).max(168),
     annualLeaveEntitlementDays: z.coerce.number().int().min(0).max(365),
     vacationDaysPerYear: z.coerce.number().int().min(0),
     sickDaysPerYear: z.coerce.number().int().min(0),
     probationPeriodDays: z.string().optional().or(z.literal('')),
     confirmationDate: z.string().optional().or(z.literal('')),
-    currencyCode: z.string().optional().or(z.literal('')),
     workSchedule: z.enum(['FullTime', 'PartTime', 'Shift', 'Flexi', 'Remote', 'Hybrid']),
     contractStatus: z.enum(['Active', 'Expired', 'Terminated']),
     terms: z.string().max(4000).optional().or(z.literal('')),
@@ -78,19 +65,12 @@ const empty: FormValues = {
   effectiveDate: '',
   endDate: '',
   contractEndDate: '',
-  salary: 0,
-  payFrequency: 'Monthly',
-  taxTreatmentType: 'PAYE',
-  withholdingTaxRate: '',
-  isPensionApplicable: true,
-  isTaxExempt: false,
   workingHoursPerWeek: 40,
   annualLeaveEntitlementDays: 20,
   vacationDaysPerYear: 0,
   sickDaysPerYear: 0,
   probationPeriodDays: '',
   confirmationDate: '',
-  currencyCode: '',
   workSchedule: 'FullTime',
   contractStatus: 'Active',
   terms: '',
@@ -109,19 +89,12 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   effectiveDate: v.effectiveDate || null,
   endDate: v.endDate || null,
   contractEndDate: v.contractEndDate || null,
-  salary: v.salary,
-  payFrequency: v.payFrequency,
-  taxTreatmentType: v.taxTreatmentType,
-  withholdingTaxRate: v.withholdingTaxRate ? Number(v.withholdingTaxRate) : null,
-  isPensionApplicable: v.isPensionApplicable,
-  isTaxExempt: v.isTaxExempt,
   workingHoursPerWeek: v.workingHoursPerWeek,
   annualLeaveEntitlementDays: v.annualLeaveEntitlementDays,
   vacationDaysPerYear: v.vacationDaysPerYear,
   sickDaysPerYear: v.sickDaysPerYear,
   probationPeriodDays: v.probationPeriodDays ? Number(v.probationPeriodDays) : null,
   confirmationDate: v.confirmationDate || null,
-  currencyCode: v.currencyCode || 'GHS',
   workSchedule: v.workSchedule,
   contractStatus: v.contractStatus,
   terms: v.terms || null,
@@ -140,13 +113,6 @@ const WORK_SCHEDULE_OPTIONS = [
 ];
 
 export function ContractsTab({ employeeId }: { employeeId: string }) {
-  // Only currencies Finance actually holds — the server refuses anything else, so a free-text box
-  // would be offering a way to fail. ⚠ Read through hrCurrencyService, not Finance's own endpoint,
-  // which answers HR with a 403 and renders the picker empty.
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies'],
-    queryFn: () => hrCurrencyService.getActive(),
-  });
 
   // The tenant's own vocabulary, a different axis from the EmploymentType enum below it.
   const { data: contractTypes } = useQuery({
@@ -212,10 +178,12 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
             c.contractEndDate?.slice(0, 10) ?? c.endDate?.slice(0, 10) ?? 'Open-ended',
         },
         {
-          header: 'Salary',
+          // ⚠ History, not the pay. The Salary tab is where basic pay lives since lane E1; this
+          // column shows what a contract row recorded at the time and is no longer edited here.
+          header: 'Salary (as recorded)',
           cell: (c) =>
-            c.salary != null
-              ? `${c.salary.toLocaleString()}${c.payFrequencyType ? ` / ${c.payFrequencyType}` : ''}`
+            c.salary
+              ? `${c.currencyCode ?? 'GHS'} ${c.salary.toLocaleString()}${c.payFrequencyType ? ` / ${c.payFrequencyType}` : ''}`
               : '—',
         },
         {
@@ -247,12 +215,6 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
           : (c.effectiveDate?.slice(0, 10) ?? ''),
         endDate: c.endDate?.slice(0, 10) ?? '',
         contractEndDate: c.contractEndDate?.slice(0, 10) ?? '',
-        salary: c.salary ?? 0,
-        payFrequency: c.payFrequencyType ?? 'Monthly',
-        taxTreatmentType: c.taxTreatmentType ?? 'PAYE',
-        withholdingTaxRate: c.withholdingTaxRate != null ? String(c.withholdingTaxRate) : '',
-        isPensionApplicable: c.isPensionApplicable ?? true,
-        isTaxExempt: c.isTaxExempt ?? false,
         workingHoursPerWeek: c.workingHoursPerWeek ?? 40,
         annualLeaveEntitlementDays: c.annualLeaveEntitlementDays ?? 20,
         vacationDaysPerYear: c.vacationDaysPerYear ?? 0,
@@ -261,7 +223,6 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
         // and unreadable. Now bound, so an edit shows the probation term instead of hiding it.
         probationPeriodDays: c.probationPeriodDays != null ? String(c.probationPeriodDays) : '',
         confirmationDate: c.confirmationDate?.slice(0, 10) ?? '',
-        currencyCode: c.currencyCode ?? '',
         workSchedule: c.workSchedule ?? 'FullTime',
         contractStatus: c.contractStatus ?? 'Active',
         terms: c.terms ?? '',
@@ -310,27 +271,10 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
               label="Annual leave (days)"
             />
           </FieldRow>
+          {/* ⚠ No salary, currency, pay frequency, tax treatment, withholding, pension or
+              tax-exempt here since lane E1 (§ 6.5.4): basic pay and its treatment are payroll's,
+              hosted on the Salary tab. The columns stay on the entity for the rows that hold them. */}
           <FieldRow>
-            <NumberField form={form} name="salary" label="Salary" step="0.01" required />
-            {/* A salary with no currency was displayed as a bare number and assumed GHS. */}
-            <SelectField
-              form={form}
-              name="currencyCode"
-              label="Currency"
-              options={(currencies ?? []).map((c) => ({
-                value: c.code,
-                label: `${c.code} — ${c.name}`,
-              }))}
-            />
-          </FieldRow>
-          <FieldRow>
-            <SelectField
-              form={form}
-              name="payFrequency"
-              label="Pay frequency"
-              required
-              options={PAY_FREQUENCY_OPTIONS}
-            />
             {/* A different axis from employment type: permanent vs contract is one question,
                 full time vs shift vs remote is another. */}
             <SelectField
@@ -339,21 +283,6 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
               label="Work schedule"
               required
               options={WORK_SCHEDULE_OPTIONS}
-            />
-          </FieldRow>
-          <FieldRow>
-            <SelectField
-              form={form}
-              name="taxTreatmentType"
-              label="Tax treatment"
-              required
-              options={TAX_TREATMENT_OPTIONS}
-            />
-            <NumberField
-              form={form}
-              name="withholdingTaxRate"
-              label="Withholding tax rate (%)"
-              step="0.01"
             />
           </FieldRow>
           <FieldRow>
@@ -373,10 +302,6 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
               required
               options={CONTRACT_STATUS_OPTIONS}
             />
-          </FieldRow>
-          <FieldRow>
-            <SwitchField form={form} name="isPensionApplicable" label="Pension applicable" />
-            <SwitchField form={form} name="isTaxExempt" label="Tax exempt" />
           </FieldRow>
           <SwitchField form={form} name="isActive" label="Active" />
           <TextareaField form={form} name="terms" label="Terms" rows={4} />

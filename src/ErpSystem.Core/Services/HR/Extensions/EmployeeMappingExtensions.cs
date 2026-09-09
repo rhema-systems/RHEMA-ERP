@@ -145,6 +145,8 @@ public static class EmployeeMappingExtensions
             Overtime = e.Overtime,
             OffPayrollReason = e.OffPayrollReason,
             OffPayrollNote = e.OffPayrollNote,
+            PayBasis = e.PayBasis,
+            PayBasisNote = e.PayBasisNote,
             BadgeNumber = e.BadgeNumber,
             Notes = e.Notes,
             LastPromotionDate = e.LastPromotionDate,
@@ -268,6 +270,8 @@ public static class EmployeeMappingExtensions
         to.Overtime = from.Overtime;
         to.OffPayrollReason = from.OffPayrollReason;
         to.OffPayrollNote = from.OffPayrollNote;
+        to.PayBasis = from.PayBasis;
+        to.PayBasisNote = from.PayBasisNote;
         to.BadgeNumber = from.BadgeNumber;
         to.Notes = from.Notes;
         to.LastPromotionDate = from.LastPromotionDate;

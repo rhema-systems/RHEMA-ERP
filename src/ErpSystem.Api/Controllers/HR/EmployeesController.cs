@@ -1,4 +1,6 @@
 ﻿using ErpSystem.Core.DTOs.HR;
+// Payroll's profile DTO, read through HR's door (lane E1). HR reads payroll's types; it does not edit them.
+using ErpSystem.Core.DTOs.HR.Payroll;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -1882,6 +1884,55 @@ public class EmployeesController : ControllerBase
         try
         {
             return Ok(await _payrollMembership.GetStatusAsync(employeeId, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Payroll's employee profile for this person — the window the Salary tab hosts — read through
+    /// payroll's own service. 404 when payroll has no profile for them.
+    /// </summary>
+    /// <remarks>
+    /// Round-2 lane E1 (§ 6.5.1). Payroll exposes no by-employee read (§ 7.1, asked), so this is
+    /// HR's door: filter payroll's search to the exact employee. Gated on compensation, not on the
+    /// employee record — it shows what the person is paid and how it is split.
+    /// </remarks>
+    [HttpGet("{employeeId:guid}/payroll-profile")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
+    [ProducesResponseType(typeof(PayrollEmployeeProfileDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PayrollEmployeeProfileDto>> GetPayrollProfile(Guid employeeId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        try
+        {
+            var profile = await _payrollMembership.GetPayrollProfileAsync(employeeId, cancellationToken);
+            return profile == null
+                ? NotFound(new { message = "Payroll has no profile for this employee yet." })
+                : Ok(profile);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
+    /// <summary>Scale or negotiated, and why. Negotiated closes any open grade placement.</summary>
+    [HttpPut("{employeeId:guid}/pay-basis")]
+    [Authorize(Policy = HrPermissions.CompensationWritePolicy)]
+    [ProducesResponseType(typeof(EmployeeDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeeDetailDto>> SetPayBasis(Guid employeeId, [FromBody] SetEmployeePayBasisDto dto, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        try
+        {
+            return Ok(await _service.SetPayBasisAsync(employeeId, dto, cancellationToken));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {

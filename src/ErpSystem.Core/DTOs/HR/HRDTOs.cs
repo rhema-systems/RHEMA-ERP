@@ -144,6 +144,12 @@ public class EmployeeDetailDto : EmployeeDto
     // Payroll membership — IsOnPayroll itself is on the summary DTO.
     public OffPayrollReason? OffPayrollReason { get; set; }
     public string? OffPayrollNote { get; set; }
+
+    /// <summary>How basic pay is arrived at: the scale, or an amount agreed for this person.</summary>
+    /// <remarks>Written through <c>PUT api/hr/Employees/{id}/pay-basis</c> only — not through the create or the ordinary update.</remarks>
+    public PayBasis PayBasis { get; set; }
+    public string? PayBasisNote { get; set; }
+
     public string? BadgeNumber { get; set; }
     public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
@@ -1854,8 +1860,19 @@ public class EmployeePayrollStatusDto
     public OffPayrollReason? OffPayrollReason { get; set; }
     public string? OffPayrollNote { get; set; }
 
-    /// <summary>The HR-side pay basis: the flat salary, or the current grade/notch amount.</summary>
+    /// <summary>Scale or negotiated — decides which figure <see cref="HrMonthlyBasicPay"/> is.</summary>
+    public PayBasis PayBasis { get; set; }
+    public string? PayBasisNote { get; set; }
+
+    /// <summary>
+    /// The HR-side basic pay. On the scale: the notch amount, else the level mid-point, else the flat
+    /// figure on the record. Negotiated: payroll's active basis, else the flat figure.
+    /// </summary>
     public decimal? HrMonthlyBasicPay { get; set; }
+
+    /// <summary>Where <see cref="HrMonthlyBasicPay"/> came from, in words the tab can print beside it.</summary>
+    public string? HrBasicPaySource { get; set; }
+
     public bool HasActiveSalaryAssignment { get; set; }
 
     /// <summary>Payroll's side, read from its employee profile. Null fields = no profile.</summary>
@@ -1879,6 +1896,22 @@ public enum PayrollReconciliationIssue
     StillActiveInPayroll = 3,
     /// <summary>HR says on payroll but has neither a salary nor a graded notch — the run would skip them silently.</summary>
     NoPayBasis = 4,
+    /// <summary>
+    /// On the scale, placed on a notch, and payroll's active basis is a different amount. The run
+    /// pays payroll's figure; HR's placement says another. Not raised for negotiated pay, where
+    /// payroll's figure IS the basis.
+    /// </summary>
+    BasicPayMismatch = 5,
+}
+
+/// <summary>Body of <c>PUT api/hr/Employees/{id}/pay-basis</c>.</summary>
+public class SetEmployeePayBasisDto
+{
+    public PayBasis PayBasis { get; set; }
+
+    /// <summary>Required when negotiated: who agreed what, and when.</summary>
+    [MaxLength(500)]
+    public string? Note { get; set; }
 }
 
 public class PayrollReconciliationRowDto
@@ -1894,7 +1927,10 @@ public class PayrollReconciliationRowDto
     public OffPayrollReason? OffPayrollReason { get; set; }
     public bool HasPayrollProfile { get; set; }
     public bool? PayrollActive { get; set; }
+    public PayBasis PayBasis { get; set; }
     public decimal? HrMonthlyBasicPay { get; set; }
+    /// <summary>Payroll's active basis, so a <see cref="PayrollReconciliationIssue.BasicPayMismatch"/> row shows both figures.</summary>
+    public decimal? PayrollMonthlyBasicSalary { get; set; }
     public PayrollReconciliationIssue Issue { get; set; }
 }
 
@@ -1907,6 +1943,7 @@ public class PayrollReconciliationDto
     public int InactiveInPayroll { get; set; }
     public int StillActiveInPayroll { get; set; }
     public int NoPayBasis { get; set; }
+    public int BasicPayMismatch { get; set; }
     public List<PayrollReconciliationRowDto> Rows { get; set; } = new();
 }
 

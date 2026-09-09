@@ -1,7 +1,8 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.HR.Payroll;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Payroll;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
@@ -66,6 +67,7 @@ public class PayrollMembershipService : IPayrollMembershipService
         => _unitOfWork.Repository<EmployeeSalaryAssignment>().GetQueryable()
             .Include(a => a.Notch)
             .Include(a => a.Level)
+            .Include(a => a.Grade)
             .Where(a => a.TenantId == tenantId && !a.IsDeleted
                      && a.EffectiveDate <= asOf
                      && (a.EffectiveTo == null || a.EffectiveTo >= asOf));
@@ -86,8 +88,10 @@ public class PayrollMembershipService : IPayrollMembershipService
             .Include(p => p.SalaryBasis)
             .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
 
-        var hrBasic = employee.IsOnPayroll ? HrBasicPay(employee, assignment) : null;
         var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
+        var (hrBasic, source) = employee.IsOnPayroll
+            ? HrBasicPay(employee, assignment, payrollBasic)
+            : (null, "Not on payroll.");
 
         return new EmployeePayrollStatusDto
         {
@@ -96,14 +100,57 @@ public class PayrollMembershipService : IPayrollMembershipService
             IsOnPayroll = employee.IsOnPayroll,
             OffPayrollReason = employee.OffPayrollReason,
             OffPayrollNote = employee.OffPayrollNote,
+            PayBasis = employee.PayBasis,
+            PayBasisNote = employee.PayBasisNote,
             HrMonthlyBasicPay = hrBasic,
+            HrBasicPaySource = source,
             HasActiveSalaryAssignment = assignment != null,
             HasPayrollProfile = profile != null,
             PayrollActive = profile?.PayrollActive,
             PayrollMonthlyBasicSalary = payrollBasic,
             PayrollCurrencyCode = profile?.SalaryBasis?.CurrencyCode ?? profile?.CurrencyCode,
-            Issue = IssueFor(employee.IsOnPayroll, profile != null, profile?.PayrollActive, hrBasic, payrollBasic)?.ToString(),
+            Issue = IssueFor(employee, profile != null, profile?.PayrollActive, assignment, hrBasic, payrollBasic)?.ToString(),
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<PayrollEmployeeProfileDto?> GetPayrollProfileAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        // The staff number as the search term: payroll's filter is a Contains over number and
+        // name, so the term narrows the list to this person and whoever shares a substring of
+        // their number — then the id picks the one. Never the bare list, which stops at 250.
+        var matches = await _payroll.GetEmployeeProfilesAsync(tenantId, employee.EmployeeNumber, cancellationToken);
+        return matches.FirstOrDefault(p => p.EmployeeId == employeeId);
+    }
+
+    /// <inheritdoc />
+    public async Task<(decimal? MonthlyBasicPay, string Source)> ResolveMonthlyBasicPayAsync(
+        Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        if (!employee.IsOnPayroll)
+            return (null, "Not on payroll: no basic pay is on record in HR.");
+
+        var today = DateTime.UtcNow.Date;
+        var assignment = await ActiveAssignments(tenantId, today)
+            .Where(a => a.EmployeeId == employeeId)
+            .OrderByDescending(a => a.EffectiveDate)
+            .FirstOrDefaultAsync(cancellationToken);
+        var profile = await Profiles(tenantId)
+            .Include(p => p.SalaryBasis)
+            .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
+        var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
+
+        return HrBasicPay(employee, assignment, payrollBasic);
     }
 
     public async Task<PayrollReconciliationDto> GetReconciliationAsync(CancellationToken cancellationToken = default)
@@ -138,10 +185,10 @@ public class PayrollMembershipService : IPayrollMembershipService
 
             profileByEmployee.TryGetValue(e.Id, out var profile);
             assignmentByEmployee.TryGetValue(e.Id, out var assignment);
-            var hrBasic = e.IsOnPayroll ? HrBasicPay(e, assignment) : null;
             var payrollBasic = profile?.SalaryBasis is { IsActive: true } basis ? basis.MonthlyBasicSalary : (decimal?)null;
+            var hrBasic = e.IsOnPayroll ? HrBasicPay(e, assignment, payrollBasic).MonthlyBasicPay : null;
 
-            var issue = IssueFor(e.IsOnPayroll, profile != null, profile?.PayrollActive, hrBasic, payrollBasic);
+            var issue = IssueFor(e, profile != null, profile?.PayrollActive, assignment, hrBasic, payrollBasic);
             if (issue == null) continue;
 
             switch (issue.Value)
@@ -150,6 +197,7 @@ public class PayrollMembershipService : IPayrollMembershipService
                 case PayrollReconciliationIssue.InactiveInPayroll: result.InactiveInPayroll++; break;
                 case PayrollReconciliationIssue.StillActiveInPayroll: result.StillActiveInPayroll++; break;
                 case PayrollReconciliationIssue.NoPayBasis: result.NoPayBasis++; break;
+                case PayrollReconciliationIssue.BasicPayMismatch: result.BasicPayMismatch++; break;
             }
 
             result.Rows.Add(new PayrollReconciliationRowDto
@@ -165,7 +213,9 @@ public class PayrollMembershipService : IPayrollMembershipService
                 OffPayrollReason = e.OffPayrollReason,
                 HasPayrollProfile = profile != null,
                 PayrollActive = profile?.PayrollActive,
+                PayBasis = e.PayBasis,
                 HrMonthlyBasicPay = hrBasic,
+                PayrollMonthlyBasicSalary = payrollBasic,
                 Issue = issue.Value,
             });
         }
@@ -173,9 +223,12 @@ public class PayrollMembershipService : IPayrollMembershipService
         // The ones the payroll owner must act on first: people HR says are off payroll whom the run
         // will still pay, then people waiting to be set up, then the rest.
         result.Rows = result.Rows
+            // A mismatch pays somebody the wrong amount every month until it is seen, so it sits
+            // above "nothing to pay from", which at least pays nothing.
             .OrderBy(r => r.Issue == PayrollReconciliationIssue.StillActiveInPayroll ? 0
                         : r.Issue == PayrollReconciliationIssue.AwaitingPayrollSetup ? 1
-                        : r.Issue == PayrollReconciliationIssue.InactiveInPayroll ? 2 : 3)
+                        : r.Issue == PayrollReconciliationIssue.InactiveInPayroll ? 2
+                        : r.Issue == PayrollReconciliationIssue.BasicPayMismatch ? 3 : 4)
             .ThenBy(r => r.EmployeeNumber)
             .ToList();
         return result;
@@ -341,22 +394,57 @@ public class PayrollMembershipService : IPayrollMembershipService
     }
 
     /// <summary>
-    /// The HR-side basic pay, the same way EmolumentService resolves it: the current notch's amount,
-    /// else the level's mid-point, else the flat figure on the record.
+    /// The HR-side basic pay and where it came from, by pay basis.
     /// </summary>
-    private static decimal? HrBasicPay(Employee employee, EmployeeSalaryAssignment? assignment)
-        => assignment?.Notch?.SalaryAmount ?? assignment?.Level?.MidSalary ?? employee.Salary;
+    /// <remarks>
+    /// <para><b>On the scale</b> — the same chain EmolumentService resolves: the current notch's
+    /// amount, else the level's mid-point, else the flat figure on the record.</para>
+    /// <para><b>Negotiated</b> — the amount entered in payroll's window IS the negotiated salary
+    /// (round-2 plan § 6.5.2), so payroll's active basis comes first and the flat figure is the
+    /// fallback for somebody payroll has not set up yet. The placement is deliberately not consulted:
+    /// a negotiated person has none by rule, and a stale one left from before the switch must not
+    /// resurface as their pay.</para>
+    /// </remarks>
+    private static (decimal? MonthlyBasicPay, string Source) HrBasicPay(
+        Employee employee, EmployeeSalaryAssignment? assignment, decimal? payrollBasic)
+    {
+        if (employee.PayBasis == PayBasis.Negotiated)
+        {
+            if (payrollBasic is > 0m) return (payrollBasic, "Negotiated — the amount on payroll's salary basis.");
+            if (employee.Salary is > 0m) return (employee.Salary, "Negotiated — the flat figure on the employee record; payroll has no basis yet.");
+            return (null, "Negotiated, but no amount is on record: enter it on the payroll profile.");
+        }
+
+        if (assignment?.Notch?.SalaryAmount is { } notch)
+            return (notch, $"Salary scale — notch {assignment.Notch.NotchNumber} of {assignment.Grade?.Code ?? "the placed grade"}.");
+        if (assignment?.Level?.MidSalary is { } mid)
+            return (mid, $"Salary scale — mid-point of level {assignment.Level.Code ?? ""} (no notch chosen).");
+        if (employee.Salary is > 0m)
+            return (employee.Salary, "The flat figure on the employee record; not yet placed on the scale.");
+        return (null, "On the scale, but not placed on a grade and no flat figure is on record.");
+    }
 
     private static PayrollReconciliationIssue? IssueFor(
-        bool isOnPayroll, bool hasProfile, bool? payrollActive, decimal? hrBasic, decimal? payrollBasic)
+        Employee employee, bool hasProfile, bool? payrollActive,
+        EmployeeSalaryAssignment? assignment, decimal? hrBasic, decimal? payrollBasic)
     {
-        if (isOnPayroll)
+        if (employee.IsOnPayroll)
         {
             if (!hasProfile) return PayrollReconciliationIssue.AwaitingPayrollSetup;
             if (payrollActive == false) return PayrollReconciliationIssue.InactiveInPayroll;
             // A run skips a zero basis silently (PayrollService: "if (originalBasicSalary <= 0) continue"),
             // which is exactly the case nobody would notice until payday.
             if ((hrBasic ?? 0m) <= 0m && (payrollBasic ?? 0m) <= 0m) return PayrollReconciliationIssue.NoPayBasis;
+
+            // ⚠ Scale only, and only from a NOTCH. A level mid-point is an estimate, not a placed
+            // figure, and a flat record figure is what payroll was seeded from — neither is a claim
+            // that payroll is wrong. A notch is: somebody placed this person there on purpose.
+            if (employee.PayBasis == PayBasis.SalaryScale
+                && assignment?.Notch?.SalaryAmount is { } placed
+                && payrollBasic is > 0m
+                && placed != payrollBasic.Value)
+                return PayrollReconciliationIssue.BasicPayMismatch;
+
             return null;
         }
 

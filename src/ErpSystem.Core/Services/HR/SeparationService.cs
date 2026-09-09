@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
@@ -38,6 +38,10 @@ public class SeparationService : ISeparationService
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ICurrencyService _currencies;
     private readonly IEmployeeService _employeeService;
+
+    // What the person is paid, resolved the one way HR resolves it (lane E1) — not read off a
+    // contract row the Salary tab no longer maintains.
+    private readonly IPayrollMembershipService _payrollMembership;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
 
@@ -66,11 +70,13 @@ public class SeparationService : ISeparationService
         ICompanyHrPolicyProvider policyProvider,
         ICurrencyService currencies,
         IEmployeeService employeeService,
+        IPayrollMembershipService payrollMembership,
         IWorkflowIntegrationService workflow,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         AssetCustodyClearanceBridge assetCustody,
         ILogger<SeparationService> logger)
     {
+        _payrollMembership = payrollMembership;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _policyProvider = policyProvider;
@@ -1872,24 +1878,38 @@ public class SeparationService : ISeparationService
     private async Task<(decimal? Rate, string Basis)> DailyRateAsync(
         Guid tenantId, Guid employeeId, string currency, CancellationToken cancellationToken)
     {
-        var contract = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
-            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.EmployeeId == employeeId && c.Salary > 0)
-            .OrderByDescending(c => c.IsActive)
-            .ThenByDescending(c => c.StartDate)
-            .FirstOrDefaultAsync(cancellationToken);
+        // ⚠ E-8 (round-2 plan § 6.5.4). This read the salary off the newest contract row — a
+        // figure that stopped being maintained the day the Salary tab took the pay fields off the
+        // contract dialog. The pay basis is now resolved the one way every HR reader resolves it:
+        // notch, level, or record figure on the scale; payroll's basis when negotiated. The
+        // contract is the fallback for the rows that predate that, so an old settlement still
+        // computes rather than printing "no salary on record" for somebody who plainly has one.
+        var (monthly, source) = await _payrollMembership.ResolveMonthlyBasicPayAsync(employeeId, cancellationToken);
 
-        if (contract is null)
-            return (null, "No salary is on record for this employee, so amounts based on pay cannot be computed.");
+        if (monthly is not > 0m)
+        {
+            var contract = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+                .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.EmployeeId == employeeId && c.Salary > 0)
+                .OrderByDescending(c => c.IsCurrent)
+                .ThenByDescending(c => c.EffectiveDate)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (contract is null)
+                return (null, $"No salary is on record for this employee, so amounts based on pay cannot be computed. ({source})");
+
+            monthly = contract.Salary;
+            source = $"contract {contract.ContractNumber}";
+        }
 
         // ⚠ The divisor and the SENTENCE come from the same number, so the words on the settlement
         // can never describe a basis other than the one that produced the figure beside them.
         var policy = await _policyProvider.GetAsync(cancellationToken);
         decimal daysPerYear = policy.SettlementDaysPerYear;
 
-        var rate = Math.Round(contract.Salary * 12m / daysPerYear, 4, MidpointRounding.AwayFromZero);
+        var rate = Math.Round(monthly.Value * 12m / daysPerYear, 4, MidpointRounding.AwayFromZero);
         return (rate,
-            $"{currency} {contract.Salary:N2} per month × 12 ÷ {daysPerYear:N0} days = "
-            + $"{currency} {rate:N4} per day (contract {contract.ContractNumber}).");
+            $"{currency} {monthly.Value:N2} per month × 12 ÷ {daysPerYear:N0} days = "
+            + $"{currency} {rate:N4} per day ({source}).");
     }
 
     /// <inheritdoc />

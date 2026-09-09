@@ -248,6 +248,39 @@ export interface EmployeeDetail extends Employee {
   terminationReason?: string | null;
   terminationNotes?: string | null;
   isOnProbation: boolean;
+  /**
+   * How basic pay is arrived at — the scale, or an amount agreed for this person. Written only
+   * through `PUT {id}/pay-basis` (the Salary tab), never through the create or the ordinary edit.
+   */
+  payBasis: PayBasis;
+  payBasisNote?: string | null;
+}
+
+/**
+ * Scale or negotiated. HR's fact: the scale is HR's concept (a placement on a notch whose amount
+ * is the pay); payroll is amount-based and never reads the placement. Independent of
+ * employmentType and of isOnPayroll — a permanent employee can be negotiated, a contractor can be
+ * on the scale.
+ */
+export type PayBasis = 'SalaryScale' | 'Negotiated';
+
+export const PAY_BASIS_OPTIONS: { value: PayBasis; label: string; description: string }[] = [
+  {
+    value: 'SalaryScale',
+    label: 'Salary scale',
+    description: 'Basic pay is the amount of the notch the person is placed on.',
+  },
+  {
+    value: 'Negotiated',
+    label: 'Negotiated',
+    description: 'Basic pay is an amount agreed for this person. Placement on the scale is refused while this stands.',
+  },
+];
+
+export interface SetPayBasisRequest {
+  payBasis: PayBasis;
+  /** Required when negotiated: who agreed what, and when. */
+  note?: string | null;
 }
 
 /**
@@ -333,11 +366,12 @@ export interface CreateEmployeeRequest {
   tinNumber?: string | null;
   bloodType?: BloodType | null;
   salary?: number | null;
-  payTax: boolean;
-  ssFund: boolean;
-  grossUp: boolean;
-  tier2Only: boolean;
-  overtime: boolean;
+  /** Optional since lane E1: the form no longer sends them; absent means untouched on an update. */
+  payTax?: boolean;
+  ssFund?: boolean;
+  grossUp?: boolean;
+  tier2Only?: boolean;
+  overtime?: boolean;
   /**
    * Payroll membership. Off requires a reason and must not carry a salary or any switch above —
    * the service refuses rather than dropping them (EmployeeService.ValidatePayrollMembership).
@@ -369,13 +403,17 @@ export type PayrollReconciliationIssue =
   | 'AwaitingPayrollSetup'
   | 'InactiveInPayroll'
   | 'StillActiveInPayroll'
-  | 'NoPayBasis';
+  | 'NoPayBasis'
+  | 'BasicPayMismatch';
 
 export const PAYROLL_ISSUE_LABELS: Record<PayrollReconciliationIssue, string> = {
   AwaitingPayrollSetup: 'On payroll in HR, not yet set up in Payroll',
   InactiveInPayroll: 'On payroll in HR, switched off in Payroll',
   StillActiveInPayroll: 'Off payroll in HR, still active in Payroll',
   NoPayBasis: 'On payroll with no salary and no graded notch',
+  // Round-2 lane E1. Scale only, and only from a placed NOTCH: the run pays payroll's figure while
+  // HR's placement says another, every month until somebody sees it.
+  BasicPayMismatch: 'Placed on a notch whose amount differs from the payroll basis',
 };
 
 export interface EmployeePayrollStatus {
@@ -384,7 +422,12 @@ export interface EmployeePayrollStatus {
   isOnPayroll: boolean;
   offPayrollReason?: OffPayrollReason | null;
   offPayrollNote?: string | null;
+  /** Scale or negotiated — decides which figure `hrMonthlyBasicPay` is. */
+  payBasis: PayBasis;
+  payBasisNote?: string | null;
   hrMonthlyBasicPay?: number | null;
+  /** Where the figure came from, in words the tab prints beside it. */
+  hrBasicPaySource?: string | null;
   hasActiveSalaryAssignment: boolean;
   hasPayrollProfile: boolean;
   payrollActive?: boolean | null;
@@ -405,7 +448,10 @@ export interface PayrollReconciliationRow {
   offPayrollReason?: OffPayrollReason | null;
   hasPayrollProfile: boolean;
   payrollActive?: boolean | null;
+  payBasis: PayBasis;
   hrMonthlyBasicPay?: number | null;
+  /** Payroll's active basis, so a mismatch row shows both figures. */
+  payrollMonthlyBasicSalary?: number | null;
   issue: PayrollReconciliationIssue;
 }
 
@@ -417,5 +463,6 @@ export interface PayrollReconciliation {
   inactiveInPayroll: number;
   stillActiveInPayroll: number;
   noPayBasis: number;
+  basicPayMismatch: number;
   rows: PayrollReconciliationRow[];
 }

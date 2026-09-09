@@ -86,33 +86,20 @@ export const employeeSchema = z.object({
   /** The kind of engagement the first contract records. Optional. */
   contractTypeId: z.string().optional().or(z.literal('')),
   isFullTime: z.boolean(),
-  // Payroll membership gates the salary block below. The server enforces the same rule
-  // (EmployeeService.ValidatePayrollMembership); these refinements just say it before the round trip.
+  // Payroll MEMBERSHIP stays on the form: it is HR's fact and the create needs it to enrol the
+  // person. The amount and the five switches do not (round-2 plan Q-3) — all remuneration lives on
+  // the Salary tab, and a person is created with no pay basis; the reconciliation reports
+  // `NoPayBasis` until the tab is filled in.
   isOnPayroll: z.boolean(),
   offPayrollReason: opt,
   offPayrollNote: opt,
-  salary: opt,
   taxNumber: opt,
   socialSecurityNumber: opt,
   tinNumber: opt,
-  payTax: z.boolean(),
-  ssFund: z.boolean(),
-  grossUp: z.boolean(),
-  tier2Only: z.boolean(),
-  overtime: z.boolean(),
   badgeNumber: opt,
   notes: opt,
 }).superRefine((v, ctx) => {
-  if (v.isOnPayroll) {
-    const salary = v.salary?.trim() ? Number(v.salary) : null;
-    if (salary == null || !Number.isFinite(salary) || salary <= 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['salary'],
-        message: 'Enter the monthly basic salary, or take the employee off payroll.',
-      });
-    }
-  } else if (!v.offPayrollReason) {
+  if (!v.isOnPayroll && !v.offPayrollReason) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['offPayrollReason'],
@@ -163,15 +150,9 @@ export const emptyEmployee: EmployeeFormValues = {
   isOnPayroll: true,
   offPayrollReason: '',
   offPayrollNote: '',
-  salary: '',
   taxNumber: '',
   socialSecurityNumber: '',
   tinNumber: '',
-  payTax: false,
-  ssFund: false,
-  grossUp: false,
-  tier2Only: false,
-  overtime: false,
   badgeNumber: '',
   notes: '',
 };
@@ -935,10 +916,10 @@ export function EmployeeForm({
 
           {/* Compensation & Tax */}
           <Section title="Compensation & Tax">
-            {/* Payroll membership decides what the rest of this section captures. Off-payroll
-                staff (consultants on invoice, interns on an allowance, secondees) keep their tax
-                identifiers — those are facts about the person — but have no salary and no payroll
-                switches, and the server refuses them if sent. */}
+            {/* Membership only. Off-payroll staff (consultants on invoice, interns on an
+                allowance, secondees) keep their tax identifiers — those are facts about the person.
+                The amount, the switches and the grade placement are the Salary tab's (round 2,
+                lane E1): a person is created with no pay basis and the tab is where it is given. */}
             <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
               <div className="sm:col-span-2 lg:col-span-4">
                 <SwitchRow
@@ -950,13 +931,6 @@ export function EmployeeForm({
                     if (v) {
                       form.setValue('offPayrollReason', '');
                       form.setValue('offPayrollNote', '');
-                    } else {
-                      form.setValue('salary', '');
-                      form.setValue('payTax', false);
-                      form.setValue('ssFund', false);
-                      form.setValue('grossUp', false);
-                      form.setValue('tier2Only', false);
-                      form.setValue('overtime', false);
                     }
                   }}
                 />
@@ -987,14 +961,11 @@ export function EmployeeForm({
                 </>
               )}
               {isOnPayroll && (
-                <Field
-                  label="Monthly basic salary (GHS)"
-                  htmlFor="salary"
-                  error={form.formState.errors.salary?.message}
-                  hint="Placement on a grade and notch is recorded on the Salary tab after saving."
-                >
-                  <Input id="salary" type="number" step="0.01" min={0} {...form.register('salary')} />
-                </Field>
+                <p className="text-xs text-muted-foreground sm:col-span-2 lg:col-span-4">
+                  The basic salary, payroll switches and grade placement are recorded on the Salary
+                  tab after saving. Until then the payroll reconciliation lists this person as having
+                  no pay basis.
+                </p>
               )}
               <Field label="Tax Number" htmlFor="taxNumber">
                 <Input id="taxNumber" {...form.register('taxNumber')} />
@@ -1006,15 +977,6 @@ export function EmployeeForm({
                 <Input id="tinNumber" {...form.register('tinNumber')} />
               </Field>
             </div>
-            {isOnPayroll && (
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-                <SwitchRow id="payTax" label="Pay Tax" checked={form.watch('payTax')} onChange={(v) => form.setValue('payTax', v)} />
-                <SwitchRow id="ssFund" label="SS Fund" checked={form.watch('ssFund')} onChange={(v) => form.setValue('ssFund', v)} />
-                <SwitchRow id="grossUp" label="Gross Up" checked={form.watch('grossUp')} onChange={(v) => form.setValue('grossUp', v)} />
-                <SwitchRow id="tier2Only" label="Tier 2 Only" checked={form.watch('tier2Only')} onChange={(v) => form.setValue('tier2Only', v)} />
-                <SwitchRow id="overtime" label="Overtime" checked={form.watch('overtime')} onChange={(v) => form.setValue('overtime', v)} />
-              </div>
-            )}
             {!isOnPayroll && (
               <p className="text-xs text-muted-foreground">
                 Not on payroll: no salary, payroll switches or grade placement are recorded. Switching

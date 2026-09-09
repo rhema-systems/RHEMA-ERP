@@ -9,7 +9,10 @@ import type {
   TerminateEmployeeRequest,
   EmployeePayrollStatus,
   PayrollReconciliation,
+  SetPayBasisRequest,
 } from '@/types/hr/employee';
+// Payroll's own profile shape — read through HR's door, saved through payroll's.
+import type { PayrollEmployeeProfile } from '@/services/payrollService';
 import type {
   EmployeeContact,
   CreateEmployeeContactRequest,
@@ -119,6 +122,27 @@ class EmployeeService {
 
   getPayrollReconciliation(): Promise<PayrollReconciliation> {
     return apiService.get<PayrollReconciliation>(`${this.baseUrl}/payroll-reconciliation`);
+  }
+
+  /**
+   * Payroll's employee profile — the window the Salary tab hosts — through HR's own door.
+   *
+   * ⚠ Payroll exposes no by-employee read (its list is a search capped at 250), so this is the
+   * server filtering that search to the exact person. Null when payroll has no profile yet, which
+   * is the normal state for somebody just created: the tab then offers to make one.
+   */
+  async getPayrollProfile(id: string): Promise<PayrollEmployeeProfile | null> {
+    try {
+      return await apiService.get<PayrollEmployeeProfile>(`${this.baseUrl}/${id}/payroll-profile`);
+    } catch (error: any) {
+      if (error?.status === 404 || error?.response?.status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Scale or negotiated, and why. Negotiated closes any open grade placement server-side. */
+  setPayBasis(id: string, data: SetPayBasisRequest): Promise<EmployeeDetail> {
+    return apiService.put<EmployeeDetail>(`${this.baseUrl}/${id}/pay-basis`, data);
   }
 
   create(data: CreateEmployeeRequest): Promise<EmployeeDetail> {

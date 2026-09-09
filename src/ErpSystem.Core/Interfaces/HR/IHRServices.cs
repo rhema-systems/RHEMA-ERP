@@ -185,6 +185,18 @@ public interface IEmployeeService
     Task<IEnumerable<EmployeeSalaryAssignmentListDto>> GetSalaryAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeSalaryAssignmentDetailDto?> GetSalaryAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records how this person's basic pay is arrived at — the scale, or an amount agreed for them.
+    /// </summary>
+    /// <remarks>
+    /// Round-2 lane E1 (§ 6.5.2). Negotiated needs the note, because "negotiated" with nothing
+    /// behind it is a figure nobody can defend. Moving to negotiated CLOSES the open placement the
+    /// way going off payroll does — the notch stops being the pay from that day. Moving back to the
+    /// scale closes nothing and places nothing: placement is its own act, and until it happens the
+    /// reconciliation says <c>NoPayBasis</c>.
+    /// </remarks>
+    Task<EmployeeDetailDto> SetPayBasisAsync(Guid employeeId, SetEmployeePayBasisDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveSalaryAssignmentAsync(Guid id, CancellationToken cancellationToken = default);
 

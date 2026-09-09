@@ -2532,6 +2532,7 @@ public class EmployeeService : IEmployeeService
         ArgumentNullException.ThrowIfNull(dto);
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
         await RequireOnPayrollAsync(dto.EmployeeId, cancellationToken);
+        await RequireOnScaleAsync(dto.EmployeeId, cancellationToken);
 
         if (dto.EffectiveDate == default) throw new ArgumentException("EffectiveDate is required.");
 
@@ -2567,6 +2568,7 @@ public class EmployeeService : IEmployeeService
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Salary assignment not found.");
         await RequireOnPayrollAsync(entity.EmployeeId, cancellationToken);
+        await RequireOnScaleAsync(entity.EmployeeId, cancellationToken);
 
         dto.Apply(entity);
         await repo.UpdateAsync(entity);
@@ -3251,6 +3253,21 @@ public class EmployeeService : IEmployeeService
 
         if (!wasOnPayroll) return;
 
+        await CloseOpenSalaryAssignmentsAsync(employee, "taken off payroll", cancellationToken);
+    }
+
+    /// <summary>
+    /// Ends every open grade placement as of yesterday. Close, never delete: the row is the record
+    /// of where they were graded while that was their pay.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the off-payroll flip and the switch to negotiated pay (lane E1) — one rule for
+    /// "the notch is no longer this person's pay", whichever fact changed. A placement that starts
+    /// today or later is closed on its own start date so the window stays valid
+    /// (<c>EffectiveTo &gt;= EffectiveDate</c>) instead of going negative.
+    /// </remarks>
+    private async Task CloseOpenSalaryAssignmentsAsync(Employee employee, string because, CancellationToken cancellationToken)
+    {
         var today = DateTime.UtcNow.Date;
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
         var open = await repo.GetQueryable()
@@ -3259,9 +3276,6 @@ public class EmployeeService : IEmployeeService
             .ToListAsync(cancellationToken);
         foreach (var assignment in open)
         {
-            // Close, never delete: the row is the record of where they were graded while paid.
-            // A placement that starts today or later is closed on its own start date so the
-            // window stays valid (EffectiveTo >= EffectiveDate) instead of going negative.
             assignment.EffectiveTo = assignment.EffectiveDate > today.AddDays(-1)
                 ? assignment.EffectiveDate
                 : today.AddDays(-1);
@@ -3269,7 +3283,54 @@ public class EmployeeService : IEmployeeService
         }
         if (open.Count > 0)
             _logger.LogInformation(
-                "Closed {Count} open salary assignment(s) for {EmployeeId}: taken off payroll.", open.Count, employee.Id);
+                "Closed {Count} open salary assignment(s) for {EmployeeId}: {Because}.", open.Count, employee.Id, because);
+    }
+
+    /// <inheritdoc />
+    public async Task<EmployeeDetailDto> SetPayBasisAsync(Guid employeeId, SetEmployeePayBasisDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var employee = await _employeeRepository.GetByIdAsync(employeeId)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        var note = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim();
+        if (dto.PayBasis == PayBasis.Negotiated && note == null)
+            throw new InvalidOperationException(
+                "A negotiated salary needs a note saying who agreed what, and when — otherwise the figure "
+                + "has nothing behind it when it is questioned.");
+
+        var wasOnScale = employee.PayBasis == PayBasis.SalaryScale;
+
+        employee.PayBasis = dto.PayBasis;
+        // The note is the negotiation's; back on the scale it would describe a basis that no
+        // longer applies, so it goes with the basis it explains.
+        employee.PayBasisNote = dto.PayBasis == PayBasis.Negotiated ? note : null;
+
+        if (wasOnScale && dto.PayBasis == PayBasis.Negotiated)
+            await CloseOpenSalaryAssignmentsAsync(employee, "pay basis changed to negotiated", cancellationToken);
+
+        await _employeeRepository.UpdateAsync(employee);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var reloaded = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
+        return (reloaded ?? employee).ToDetailDto();
+    }
+
+    /// <summary>The scale gate: a placement on the grade structure contradicts a negotiated salary.</summary>
+    /// <remarks>
+    /// ⚠ 400, not the 409 the plan wrote (§ 6.5.2), and on purpose: the off-payroll refusal on the
+    /// SAME endpoint — the same shape of rule, "cannot be placed on a grade because X" — is a 400
+    /// through <c>ToClientError</c>. Two refusals of one kind at two codes on one door would be a
+    /// worse outcome than the plan's number. Recorded in the plan's lane E1 block.
+    /// </remarks>
+    private async Task RequireOnScaleAsync(Guid employeeId, CancellationToken cancellationToken)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+        if (employee.PayBasis == PayBasis.Negotiated)
+            throw new InvalidOperationException(
+                $"{employee.EmployeeNumber} is paid a negotiated amount, so they cannot be placed on a salary grade. "
+                + "Change their pay basis to the salary scale first.");
     }
 
     /// <summary>The grade/notch gate: a placement on the pay structure is meaningless for someone the run does not pay.</summary>

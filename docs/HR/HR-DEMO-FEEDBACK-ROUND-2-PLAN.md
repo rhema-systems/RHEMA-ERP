@@ -1,6 +1,6 @@
 # HR demo feedback, round 2 — findings, decisions and build plan
 
-> **Status: LANES A, B1, C1, C2 and D1 BUILT 2026-09-09** (A: 88 ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 ×2, `hr-organization/run-b1.mjs`; C1: 36 ×2, `hr-jobarch/run-c1.mjs`; C2: 143 ×2, `hr-jobarch/run-c2.mjs`; D1: 79 ×2, `hr-probation/run-d1.mjs`). Lanes B2, B3, C3, D2, E, F planned, not built. Source: the feedback
+> **Status: LANES A, B1, C1, C2, D1 and E1 BUILT 2026-09-09** (A: 88 ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 ×2, `hr-organization/run-b1.mjs`; C1: 36 ×2, `hr-jobarch/run-c1.mjs`; C2: 143 ×2, `hr-jobarch/run-c2.mjs`; D1: 79 ×2, `hr-probation/run-d1.mjs`; E1: 49 ×2, `hr-payroll-membership/run-e1.mjs`). Lanes B2, B3, C3, D2, E2, F planned, not built. Source: the feedback
 > document *HR Demo Meetings — Changes and Additions* (4 pages; sections Organization Structure,
 > Job Position, Skills Setup, Employee Profile), brought by the user on 2026-09-08 after the HR
 > module demo. Every bullet of that document is accounted for below — as a bug, a build item, a
@@ -403,14 +403,30 @@ Six tables, not the five the plan counted: the sweep needs its own run/dispatch 
 
 ### Lane E — Salary tab · 2 slices (§ 6.5)
 
-**E1 — The embed, the pay-basis flag, the contract tab trimmed.** Migration: `Employee.PayBasis`, `Employee.PayBasisNote`.
-- [ ] Extract `PayrollEmployeeProfileEditor.tsx` from `employee-profiles/page.tsx:659-932` into `frontend/src/components/hr/payroll/`, keyed by `employeeId`, owning its own lookups (base currency, bank branches, exchange rates via `payrollService`) and its own save; the payroll page hosts it unchanged in behaviour (the one permitted edit under § 1.2).
-- [ ] `GET api/hr/Employees/{id}/payroll-profile` on HR's side (through `IPayrollService.GetEmployeeProfilesAsync(employeeNumber)` filtered to the exact employee — the by-employee read payroll lacks), gated `HR.Compensation.Read`; the save goes to payroll's own `POST api/hr/payroll/employee-profiles` with the **complete** payment-method list.
-- [ ] `Employee.PayBasis { SalaryScale = 1, Negotiated = 2 }` default `SalaryScale`; `PayBasisNote`; on the Salary tab header, not the create form; `AssignSalaryAsync` refuses when `Negotiated` (`RequireOnScaleAsync`, next to `RequireOnPayrollAsync`); `PayrollMembershipService.IssueFor` gains `BasicPayMismatch` (scale amount ≠ payroll basis, `SalaryScale` only).
-- [ ] Salary tab layout (§ 6.5.3): Pay basis → Grade placement (scale only) → Payroll profile (the embed) → Payroll items (read-only loans/advances/exceptions by employee number).
-- [ ] `ContractsTab.tsx`: salary, currency, pay frequency, tax treatment, withholding, pension, tax-exempt removed; columns kept; `SeparationService.DailyRateAsync` reads the pay basis through a shared `HrBasicPay`-style helper (it already exists at `PayrollMembershipService.cs:347` — lift it).
-- [ ] Create form: salary amount + the five payroll flags move to the Salary tab; `isOnPayroll` + off-payroll reason stay (membership is HR's) — Q-3.
-- [ ] Harness `hr-payroll-membership/run-e1.mjs`: HR user reads the profile through HR's door; a save with a partial method list is **refused by HR's client-side guard** (the replace-set trap asserted, not just documented); `Negotiated` employee → grade placement 409; `SalaryScale` with notch 5,000 and basis 4,800 → `BasicPayMismatch`; contract create without salary still 201.
+**E1 — The embed, the pay-basis flag, the contract tab trimmed.** **BUILT 2026-09-09 — 49 ×2, `hr-payroll-membership/run-e1.mjs`.** Migration `20260909133438_AddEmployeePayBasis`.
+- [x] `PayrollEmployeeProfileEditor.tsx` extracted into `components/hr/payroll/`; payroll's page hosts it in its dialog (683 lines out of that page, its employee search kept). Own lookups through `payrollService`; own save through payroll's upsert; the replace-set guard inside it (every method with its id; re-read before save, abort on a changed row count).
+- [x] `GET api/hr/Employees/{id}/payroll-profile` (Compensation.Read) through `IPayrollMembershipService.GetPayrollProfileAsync` — payroll's search by staff number, filtered to the exact employee.
+- [x] `Employee.PayBasis` + `PayBasisNote`; `PUT {id}/pay-basis` (Compensation.Write) — its own door, not the create or the ordinary update; `RequireOnScaleAsync` on both placement writes; `BasicPayMismatch` in `IssueFor`, the reconciliation counter, the row (both figures) and the frontend tiles.
+- [x] `SalaryTab.tsx`: Pay basis → Grade placement (hidden while negotiated) → Payroll profile (the editor, read-only off payroll, save gated on Compensation.Write) → Payroll items.
+- [x] Contract dialog trimmed of the seven pay fields (the request type made them optional; the list keeps a "Salary (as recorded)" history column). `SeparationService.DailyRateAsync` reads `ResolveMonthlyBasicPayAsync`; the contract salary is the fallback for rows that predate this.
+- [x] Create form: the amount and the five switches removed; membership + reason stay (Q-3).
+- [x] Harness, 49 ×2. Membership suite re-run at its original 84; D1 at 79.
+
+**What the build changed from the design.**
+
+1. **Placement-while-negotiated refuses with 400, not the 409 written above.** The off-payroll refusal on the *same* endpoint — the same shape of rule — is a 400 through `ToClientError`. One door answering one kind of refusal with two codes seemed worse than the plan's number.
+2. **The editor's client-side guard is built but not harness-asserted.** An API harness cannot drive a React component. `run-e1.mjs` asserts the guard's precondition (HR's door returns every payment method with its id) and says the guard itself is read, not run.
+3. **`BasicPayMismatch` fires only from a placed NOTCH.** A level mid-point is an estimate and the record's flat figure is what payroll was seeded from; neither is a claim that payroll is wrong. A notch is — somebody put the person there on purpose.
+4. **`HrBasicPay` became pay-basis aware and returns its source in words** (`HrBasicPaySource` on the status DTO): notch / level mid-point / record figure on the scale; payroll's basis, else the record figure, when negotiated. A negotiated person's placement is deliberately never consulted — a stale one left from before the switch must not resurface as their pay.
+5. **The mapper stopped sending the five switches at all.** It used to re-send them on every employee edit, so an edit of a phone number could re-assert `PayTax`/`SSFund` values the Salary tab had since changed. Absent means untouched on the update DTO; the request type made them optional.
+6. **The flat `Employee.Salary` stays on the create DTO** for the import path, exactly as § 6.5.4 said; only the form stopped sending it. A person created from the form is on payroll with no basis and the reconciliation says `NoPayBasis` — asserted (D1–D3 of the harness).
+
+**What it found, beyond the plan.**
+
+- **The same-day placement edge.** Closing a placement runs "as of yesterday" and keeps the window non-negative, so a placement that starts TODAY is closed on its own start date and still reads as in force for the rest of today (`hasActiveSalaryAssignment` true; the reconciliation's as-of read includes it). The model cannot express "made and withdrawn the same day" without a negative window or a delete. Pre-existing — the off-payroll flip closes the same way — and now shared through `CloseOpenSalaryAssignmentsAsync`. Asserted as the limit it is (`run-e1.mjs` B18–B21), not hidden; the negotiated figure ignores the row regardless.
+- **EF scaffolded `defaultValue: 0` for `PayBasis`, and 0 is not an enum member** — the D1 `IsActive` trap again, from a different direction. Every existing employee would have carried a basis nothing names, and the mismatch rule (`== SalaryScale`) would have been false for all of them. `DEFAULT (1)` in the migration.
+- Tax reliefs and component exceptions have **no employee filter on payroll's routes** (loans and advances do). The tab filters those two client-side; recorded under § 7.1 as the by-employee reads payroll still owes.
+- Two stale fixtures repaired in `hr-payroll-membership`: `api.mjs`'s actor minter sent a staff number on the ordinary create (repointed to the import door); `run-payroll-membership.mjs`'s `base()` sent both a number and `probationPeriodDays: 90` against a six-month post — the latter refused by **D1's** rule, correctly.
 
 **E2 — Benefits, allowances, deductions inside HR.** Blocked on § 7.1 (payroll builds the per-employee components editor and a by-employee read). When it lands, host it as a fourth section of the same tab. Until then the read-only "Payroll items" section stands in.
 
@@ -855,7 +871,7 @@ plan and the ledger flip in the same commit as the fix.
 |---|---|---|---|
 | Q-1 | Offer every active Finance account in the unit's account picker, or only a subset (by `AccountType`/category)? | Every active account; Finance's chart decides | B2 |
 | Q-2 | Reports-to outside the unit's ancestry: soft (filter with "show all") or hard (server refuses)? | Soft — matrix and dotted lines exist | C1 |
-| Q-3 | Move the salary amount and payroll flags off the create form onto the Salary tab, leaving only the on-payroll switch and reason? | Yes — the PDF says all remuneration lives on the Salary tab; the profile is created with no basis and reports `NoPayBasis` until the tab is filled | E1 |
+| Q-3 | ~~Move the salary amount and payroll flags off the create form onto the Salary tab, leaving only the on-payroll switch and reason?~~ **DECIDED, BUILT E1**: the form sends neither; the create DTO keeps `Salary` for the import path; `NoPayBasis` is the posture until the tab is filled | Yes | E1 ✅ |
 | Q-4 | ~~Surface the dead `EmployeeContractType` lookup (seven TDC rows, with `Duration`) as the contract kind on the contract row, or delete the seed?~~ **DECIDED, BUILT D1**: surfaced, with full CRUD, a *People Reference Data → Contract Types* screen and an `IsActive` retire flag (there is no delete — contracts name their kind by FK). `Duration` defaults `ContractEndDate`. | Surface it; `Duration` gives `ContractEndDate` a default | D1 ✅ |
 | Q-5 | Set members with no per-position override (a position needing a different amount for one benefit uses an individual row and therefore not the set for that benefit) — acceptable? And: should editing a set's membership refuse when a position holds a redundant individual, or allow and mark? | No override; allow and mark | C3 |
 | Q-6 | Create `Certification` catalogue rows from existing `Qualification` rows of type Certification/Licence by a one-time data pass? | Look at the real rows first; do not automate blind | C2 |

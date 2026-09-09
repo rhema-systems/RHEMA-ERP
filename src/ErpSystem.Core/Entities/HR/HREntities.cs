@@ -294,6 +294,24 @@ public class Employee : TenantEntity
     [MaxLength(500)]
     public string? OffPayrollNote { get; set; }
 
+    // ── Pay basis ───────────────────────────────────────────────────────────────────────────
+    // A different question from membership. On payroll says the run pays them; this says how the
+    // figure it pays is arrived at — read off the scale, or agreed for the person.
+
+    /// <summary>Scale or negotiated. See <see cref="Core.Enums.PayBasis"/>.</summary>
+    /// <remarks>
+    /// Defaults to the scale, which is what every existing row was implicitly: a placement on a
+    /// grade was the only pay basis HR could record before lane E1.
+    /// </remarks>
+    public PayBasis PayBasis { get; set; } = PayBasis.SalaryScale;
+
+    /// <summary>
+    /// Why the pay is negotiated — "contract engagement, rate per agreement of 2026-07-01". Required
+    /// when <see cref="PayBasis"/> is <c>Negotiated</c>; cleared on return to the scale.
+    /// </summary>
+    [MaxLength(500)]
+    public string? PayBasisNote { get; set; }
+
     [MaxLength(50)]
     public string? BadgeNumber { get; set; }
 

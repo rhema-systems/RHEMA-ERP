@@ -32,7 +32,7 @@ import { WorkHistoryTab } from '@/components/hr/employee/tabs/WorkHistoryTab';
 import { ContractsTab } from '@/components/hr/employee/tabs/ContractsTab';
 import { ExpatriateTab } from '@/components/hr/employee/tabs/ExpatriateTab';
 import { PositionHistoryTab } from '@/components/hr/employee/tabs/PositionHistoryTab';
-import { SalaryAssignmentsTab } from '@/components/hr/employee/tabs/SalaryAssignmentsTab';
+import { SalaryTab } from '@/components/hr/employee/tabs/SalaryTab';
 import { RefereesTab } from '@/components/hr/employee/tabs/RefereesTab';
 import { RelieversTab } from '@/components/hr/employee/tabs/RelieversTab';
 import { TeamsTab } from '@/components/hr/employee/tabs/TeamsTab';
@@ -328,12 +328,19 @@ export default function EmployeeDetailPage() {
             )}
             {e.isOnPayroll ? (
               <>
-                <InfoRow label="Monthly basic salary" value={money(e.salary)} />
-                <InfoRow label="Pay Tax" value={yn(e.payTax)} />
-                <InfoRow label="SS Fund" value={yn(e.ssFund)} />
-                <InfoRow label="Gross Up" value={yn(e.grossUp)} />
-                <InfoRow label="Tier 2 Only" value={yn(e.tier2Only)} />
-                <InfoRow label="Overtime" value={yn(e.overtime)} />
+                {/* The figure HR would quote, resolved by pay basis (lane E1): the placed notch
+                    on the scale, payroll's basis when negotiated. The record's own flat figure is
+                    the fallback, not the source. */}
+                <InfoRow
+                  label="Monthly basic pay"
+                  value={
+                    payroll?.hrMonthlyBasicPay != null
+                      ? `${money(payroll.hrMonthlyBasicPay)}${e.payBasis === 'Negotiated' ? ' · Negotiated' : ''}`
+                      : e.payBasis === 'Negotiated'
+                        ? 'Negotiated — amount not yet entered'
+                        : money(e.salary)
+                  }
+                />
               </>
             ) : (
               <>
@@ -392,7 +399,7 @@ export default function EmployeeDetailPage() {
           <PositionHistoryTab employeeId={id} />
         </TabsContent>
         <TabsContent value="salary" className="pt-4">
-          <SalaryAssignmentsTab employeeId={id} isOnPayroll={e.isOnPayroll} />
+          <SalaryTab employee={e} />
         </TabsContent>
         <TabsContent value="teams" className="pt-4">
           <TeamsTab employeeId={id} />

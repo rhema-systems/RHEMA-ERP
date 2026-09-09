@@ -542,12 +542,17 @@ export interface CreateEmployeeContractRequest {
   endDate?: string | null;
   /** Defaults from the contract type's duration when a kind is named and no date is given. */
   contractEndDate?: string | null;
-  salary: number;
-  payFrequency: PayFrequency;
-  taxTreatmentType: TaxTreatmentType;
+  /**
+   * ⚠ Optional since lane E1 (§ 6.5.4): basic pay and its tax treatment are payroll's, hosted on
+   * the Salary tab, and the contract dialog no longer captures them. The columns stay on the
+   * entity for the rows that hold them; an omitted value leaves a row's figure untouched.
+   */
+  salary?: number;
+  payFrequency?: PayFrequency;
+  taxTreatmentType?: TaxTreatmentType;
   withholdingTaxRate?: number | null;
-  isPensionApplicable: boolean;
-  isTaxExempt: boolean;
+  isPensionApplicable?: boolean;
+  isTaxExempt?: boolean;
   workingHoursPerWeek: number;
   annualLeaveEntitlementDays?: number | null;
   vacationDaysPerYear: number;
