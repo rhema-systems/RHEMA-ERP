@@ -1270,6 +1270,14 @@ repository mutation. A shared-machine build/test process remained active beyond 
 commit is not yet review-ready and its focused result must be reconciled before handoff. Remaining evidence is
 being completed in smaller bounded families, beginning with C10 compatibility substitution and zero mutation.
 
+Inventory compatibility evidence commit `822f463cd7f33402ddd1907879474059fcd4270f` adds table-driven Auction
+C10 denials for wrong group identity/fingerprint, missing/duplicate/swapped members, wrong event/member/request
+fingerprints and empty Finance evidence, asserting pending disposal/action/adjustment state remains unchanged
+before valid retry. C9 is real, but this fixture still substitutes the participant and Finance executor, so it
+does not close the durable stock/Finance zero-mutation or C7 Donation/Destruction cases. The focused build was
+also blocked by orphaned shared MSBuild children and produced no fresh test result; the task stopped only its own
+process tree. The clean evidence chain continues in bounded families before review.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
