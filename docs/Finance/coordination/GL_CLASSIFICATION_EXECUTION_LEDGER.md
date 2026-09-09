@@ -1114,6 +1114,17 @@ ID deterministically from the exact tenant, adjustment identity and canonical or
 duplicates, reordering ambiguity and any existing mismatched graph; preserve public random-ID behavior for every
 other caller. Implementation resumes on the same exact base with no schema, migration or database change.
 
+The bounded B2 design reconciliation exposed one material accounting boundary before completing the owner
+conversion. Sale and Auction disposals retain two real events (disposal proceeds/recovery plus Stock Adjustment
+valuation) and fit C8 exactly. Donation and Destruction retain only the Stock Adjustment valuation event because
+their governed proceeds amount is zero; manufacturing a second zero-value proceeds event would change existing
+accounting evidence and C8 rejects an empty posting member. The safe recommendation is therefore C8 for
+Sale/Auction and the already-approved C7 single-event ambient boundary for Donation/Destruction. A second narrow
+Finance contract correction is also required so C8 returns Finance-selected compatibility posting/journal IDs;
+Inventory must never select a book merely to populate its legacy owner evidence fields. Implementation remains at
+the verified CRLF-preserved preassigned-line-ID hunk pending this explicit accounting/product decision. No database
+was accessed or mutated and no migration or remote action occurred.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
