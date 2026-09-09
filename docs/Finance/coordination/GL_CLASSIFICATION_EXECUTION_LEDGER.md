@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage B3 — Sales credit-note accounting-event cutover |
+| Phase | Stage C13 — exact producer reversal preparation |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/sales_cutover` reissued after C12 |
-| Exact base | `50c41f97a45eddd9e046cbd52fadd75e863b26a2` |
-| Branch | `codex/sales-accounting-event-cutover-c12` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c12` |
+| Implementing task | Coordinator subagent `/root/finance_reversal_prep_c13` |
+| Exact base | `b79e5da7e1eeb73ff9ff88cde0965accf117598f` |
+| Branch | `codex/finance-producer-reversal-preparation-c13` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-producer-reversal-preparation-c13` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `50c41f97a45eddd9e046cbd52fadd75e863b26a2` |
+| Primary HEAD at activation | `b79e5da7e1eeb73ff9ff88cde0965accf117598f` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C12 approved and integrated; fresh exact-base Sales implementation active |
+| Review status | Sales reversal reconciliation found a missing Finance historical-intent preparer; bounded precursor active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1054,6 +1054,17 @@ handoff, caller-owned Serializable atomic completion using C10 compatibility ide
 failure, exact retry/conflict authority and reversal lineage preserving the original frozen C5 book set. Sales
 may not enumerate/select books, auto-approve, use V1/V2 posting leaves, enable defaults, alter Finance schema or
 access the configured database. Independent Sol High review and clean integration remain required.
+
+The C12 Sales reissue confirmed ordinary credit-note posting is now implementable, but exact reversal remains
+gated before owner edits. C7 preparation accepts complete neutral lines, while the only Finance-owned historical
+line reconstruction is still behind the legacy posting engine; Sales is prohibited from calling that engine or
+rebuilding immutable Finance history. Stage C13 is therefore active on GPT-5.6 Sol Medium from exact base
+`b79e5da7e1eeb73ff9ff88cde0965accf117598f` in clean worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-producer-reversal-preparation-c13`. It is limited
+to a Core-facing Finance exact-C7-reversal preparer that accepts original event identity plus bounded reversal
+evidence, reconstructs opposite neutral economics and original frozen C5 authority internally, preserves
+maker-checker and exact retry/conflict lineage, and exposes no book selector or automatic execution. Sales will
+restart from a fresh exact base after approval/integration. No owner file, database or migration was touched.
 
 Stage B2 Inventory is activated from fresh exact base `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` in clean worktree
 `RHEMA-ERP-inventory-accounting-event-c8` on branch `codex/inventory-accounting-event-cutover-c8`. The authorized
