@@ -1213,6 +1213,17 @@ stopped after prolonged compiler contention because it provided no additional ca
 database or migration mutation resulted. C11 is complete and Inventory can now be reissued from a fresh exact
 base using the durable independent-checker handoff.
 
+Stage B2 Inventory is reissued on GPT-5.6 Terra Medium from fresh exact base
+`27767d225855dd180524ff0f170ec06fb5eb4cb8` in clean branch
+`codex/inventory-accounting-event-cutover-c11` and worktree `RHEMA-ERP-inventory-accounting-event-c11`.
+The packet retains the approved event split: Sale/Auction use one two-member C8 group for distinct proceeds and
+Stock Adjustment valuation events, while Donation/Destruction use one C7 valuation event. Inventory must use
+C9 deterministic valuation, C10 Finance-selected compatibility identities and C11 durable independent-checker
+handoff; prepare before mutation; stage deterministic adjustment/item identities and owner effects in the shared
+Serializable context; execute and commit only on complete success; and roll back before separate durable failure
+evidence. Public Stock Adjustment behavior and all C1-C11 authority remain unchanged. No book selection, C5
+derivation, leaf fan-out, auto-approval, default enablement, migration or database access is authorized.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
