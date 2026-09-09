@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage B3 — Sales credit-note accounting-event cutover |
+| Phase | Stage C12 — Core-facing governed producer execution boundary |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator-issued fresh Sales owner task |
+| Implementing task | Coordinator subagent `/root/finance_core_execution_c12` |
 | Exact base | `60dc366597b1d8ef75fe58308e2652bce8b2f91c` |
-| Branch | `codex/sales-accounting-event-cutover-c11` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c11` |
+| Branch | `codex/finance-core-producer-execution-c12` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-core-producer-execution-c12` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `60dc366597b1d8ef75fe58308e2652bce8b2f91c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Inventory B2 approved and integrated; fresh exact-base Sales reconciliation active |
+| Review status | Sales reconciliation found a missing Core-consumable execution handoff; bounded Finance precursor active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1000,6 +1000,18 @@ handoff, and preserve original frozen selection on reversal. Sales must not enum
 call posting leaves per book, auto-approve, enable default-disabled C6-C8, alter Finance schema/migrations, or
 access the configured database. Restore-point, exact ancestry and clean-worktree gates passed; implementation
 reconciliation is active before any owner edit.
+
+Sales reconciliation stopped cleanly before owner edits because the approved ambient C7 execution and C10
+compatibility-result boundary is API-internal, while `ReturnOrderService` is compiled in Core. Core currently
+exposes preparation and decision contracts but cannot execute an approved event, receive Finance-selected
+compatibility identities, or persist exact durable failure evidence after owner rollback. Falling back to
+`IFinancePostingEngine` would bypass C7/C11 maker-checker authority. Stage C12 is therefore active from exact
+base `60dc366597b1d8ef75fe58308e2652bce8b2f91c` in clean worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-core-producer-execution-c12` on branch
+`codex/finance-core-producer-execution-c12`. It is limited to a Finance-owned Core-facing closed execution,
+compatibility-result and after-rollback-failure contract with no book selector, schema change, HTTP execution
+surface or default enablement. Sales will be reissued from a fresh exact base after independent approval and
+local integration. No database or migration was touched.
 
 Stage B2 Inventory is activated from fresh exact base `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` in clean worktree
 `RHEMA-ERP-inventory-accounting-event-c8` on branch `codex/inventory-accounting-event-cutover-c8`. The authorized
