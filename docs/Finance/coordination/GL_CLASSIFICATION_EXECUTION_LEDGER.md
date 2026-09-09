@@ -1171,6 +1171,18 @@ before durable Finance failure evidence. Public Stock Adjustment behavior remain
 select/enumerate books, derive C5 evidence, invoke posting leaves, auto-approve or enable C6-C8. The prior c9/c9b
 worktrees remain preserved and non-authoritative; no database or migration action is authorized.
 
+Inventory C10 reconciliation stopped cleanly before edits at exact base `510ecc31b` on a concrete maker-checker
+handoff gap. C7/C8 preparation persists immutable canonical request snapshots, but their approval APIs require
+the caller to resubmit the complete original request; the existing read APIs do not return reconstructible
+approval input. Inventory cannot retain that request without owner schema work and cannot auto-approve without
+bypassing the independent checker. Stage C11 is therefore activated as a Finance-only durable prepared-intent
+decision boundary for both C7 and C8: a checker supplies only the durable event/group identity and decision
+evidence, while Finance reloads and validates the immutable stored snapshot/fingerprint before approving or
+rejecting. C11 must preserve maker-checker separation, tenant/source authority and exact decision idempotency,
+expose no execution endpoint or book selector, keep all producer execution defaults disabled, and make no owner
+or schema/migration change. Inventory will be reissued from a fresh exact base only after independent approval
+and local integration of C11. No database was accessed or mutated.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
