@@ -1,5 +1,7 @@
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Inventory;
+using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Inventory;
@@ -93,5 +95,34 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
                 Mock.Of<IWorkflowIntegrationService>(), Mock.Of<IProcurementControlEventService>(),
                 Mock.Of<IInventoryAdjustmentFinancePostingService>(), Mock.Of<IInventoryValuationService>(),
                 NullLogger<StockAdjustmentService>.Instance));
+    }
+
+    /// <summary>Owner-test seam: it writes Finance-shaped evidence into the owner's ambient context.
+    /// A requested fault is thrown before the owner commits, so SQLite verifies rollback of both sides.</summary>
+    private sealed class AmbientC7Execution(ApplicationDbContext db) : IFinanceProducerApprovedExecution
+    {
+        public bool FailAfterStage { get; set; }
+        public int Calls { get; private set; }
+
+        public async Task<FinanceProducerApprovedExecutionResult> ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+            Guid accountingEventId, ProducerAccountingIntentDto request, ProducerOwnerEffectReceiptDto receipt,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            if (db.Database.CurrentTransaction is null)
+                throw new InvalidOperationException("C7 owner execution requires the disposal ambient transaction.");
+            var marker = new Tenant { Id = Guid.NewGuid(), Code = $"C7-{Calls:D8}", Name = "C7 owner marker" };
+            db.Tenants.Add(marker);
+            await db.SaveChangesAsync(cancellationToken);
+            if (FailAfterStage) throw new InvalidOperationException("Injected C7 leaf failure");
+            return new FinanceProducerApprovedExecutionResult(accountingEventId, "C7-TEST", "Posted", Guid.NewGuid(), Guid.NewGuid());
+        }
+
+        public Task<AccountingEventDto> ExecuteInAmbientTransactionAsync(Guid accountingEventId,
+            ProducerAccountingIntentDto request, ProducerOwnerEffectReceiptDto receipt, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task RecordFailureAfterRollbackAsync(Guid accountingEventId, ProducerAccountingIntentDto request,
+            ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }
