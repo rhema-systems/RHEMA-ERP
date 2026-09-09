@@ -1013,6 +1013,16 @@ compatibility-result and after-rollback-failure contract with no book selector, 
 surface or default enablement. Sales will be reissued from a fresh exact base after independent approval and
 local integration. No database or migration was touched.
 
+C12 implementation is committed cleanly as `81abcfac0b7e20f8d76fbf5c6e56accdcd272225` from exact base
+`60dc366597b1d8ef75fe58308e2652bce8b2f91c`. The additive Core-facing Finance contract delegates approved
+C7 execution and compatibility selection to the existing scoped Finance service, returns event/request
+fingerprint plus posting/journal identities without book metadata, and delegates durable failure recording to
+the established post-rollback boundary. No owner, schema, migration, HTTP execution surface or default changed.
+Focused Core/C7 tests passed 21/21, widened C6-C11 authority tests passed 83 with 17 guarded SQL skips, the
+solution build and EF/model/migration/script/scope gates passed, and configured `RHEMAERP` was not accessed.
+Independent Sol High accounting/security/concurrency review is active; integration and Sales reissue remain
+gated on approval.
+
 Stage B2 Inventory is activated from fresh exact base `2c23da16fa8287e2022ee6aa9e5f9791cd12a7fb` in clean worktree
 `RHEMA-ERP-inventory-accounting-event-c8` on branch `codex/inventory-accounting-event-cutover-c8`. The authorized
 bounded conversion must preserve the disposal-proceeds/recovery and Stock Adjustment valuation postings as two
