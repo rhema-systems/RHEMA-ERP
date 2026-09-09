@@ -1183,6 +1183,16 @@ expose no execution endpoint or book selector, keep all producer execution defau
 or schema/migration change. Inventory will be reissued from a fresh exact base only after independent approval
 and local integration of C11. No database was accessed or mutated.
 
+The C11 implementer completed one clean commit, `92915d2969359bb32f7d29fac475474285b8a5fe`, from exact
+base and merge-base `552123f94fc03059695eabd6fb286500ce8f5465`. C7 and C8 now provide durable-ID-only governed
+approve/reject paths: Finance reloads the tenant-scoped immutable snapshot, verifies its hash and complete
+event/group/member fingerprint, source, lineage, ordered membership, participant/owner and maker evidence,
+reconstructs the exact request internally, and delegates to the existing decision authority. Checker HTTP
+bodies contain decision evidence only; no execution endpoint or book selector was introduced and all defaults
+remain disabled. Focused C7/C8 tests passed 34/34, widened non-database C6-C10 tests passed 79/79, solution and
+test-project builds had zero errors, EF model parity passed and migration discovery remains 456 ending at C8.
+The clean candidate is handed to independent GPT-5.6 Sol High review; no database or migration action occurred.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
