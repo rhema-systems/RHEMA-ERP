@@ -31,8 +31,11 @@ public sealed class InventoryOpeningStockGovernanceTests
         var tenantId = Guid.NewGuid();
         var makerId = Guid.NewGuid();
         var currentUser = new Mock<ICurrentUserProvider>(MockBehavior.Strict);
+        currentUser.SetupGet(value => value.IsAuthenticated).Returns(true);
         currentUser.SetupGet(value => value.UserId).Returns(makerId);
         currentUser.SetupGet(value => value.TenantId).Returns(tenantId);
+        currentUser.SetupGet(value => value.Username).Returns("inventory.disposal.maker@tenant.test");
+        currentUser.SetupGet(value => value.FullName).Returns("Inventory Disposal Maker");
         var service = CreateService(currentUser.Object);
         var valid = DisposalRequest(tenantId, makerId);
 
@@ -44,7 +47,7 @@ public sealed class InventoryOpeningStockGovernanceTests
                      valid with { PreparedOwnerEffectFingerprint = string.Empty },
                      valid with { RequestedById = Guid.Empty },
                      valid with { AdjustmentId = Guid.NewGuid() },
-                     valid with { ItemIds = [Guid.NewGuid()] },
+                     valid with { ItemIds = [Guid.Empty] },
                      PositiveDisposalRequest(valid)
                  })
         {

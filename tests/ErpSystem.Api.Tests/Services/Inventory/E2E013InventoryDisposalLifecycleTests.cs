@@ -310,7 +310,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             Comment = "Independent delegated authority approval."
         });
         current.UserId = executorId;
-        var staged = await service.StageExecutionAsync(identified.Id, new StageInventoryDisposalExecutionRequest
+        var stageRequest = new StageInventoryDisposalExecutionRequest
         {
             ProceedsAmount = 40m,
             ProceedsAccountId = proceedsAccountId,
@@ -326,7 +326,18 @@ public sealed class E2E013InventoryDisposalLifecycleTests
                     EvidenceReference = "Auction award and settlement evidence"
                 }
             ]
-        });
+        };
+        var staged = await service.StageExecutionAsync(identified.Id, stageRequest);
+        var stagedReplay = await service.StageExecutionAsync(identified.Id, stageRequest);
+        stagedReplay.Should().BeEquivalentTo(staged);
+        var conflictingStageReplay = new StageInventoryDisposalExecutionRequest
+        {
+            IdempotencyKey = stageRequest.IdempotencyKey,
+            RowVersion = staged.RowVersion,
+            ProceedsAmount = 41m
+        };
+        (await FluentActions.Awaiting(() => service.StageExecutionAsync(identified.Id, conflictingStageReplay)).Should()
+            .ThrowAsync<InventoryDisposalException>()).Which.Code.Should().Be("INV_DISPOSAL_IDEMPOTENCY_CONFLICT");
         current.UserId = completionId;
         var completionRequest = new CompleteInventoryDisposalRequest
         {
@@ -341,7 +352,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             value => value with { GroupFingerprint = "WRONG" },
             value => value with { Members = [value.Members[0]] },
             value => value with { Members = [value.Members[0], value.Members[0]] },
-            value => value with { Members = [value.Members[1], value.Members[0]] },
+            value => value with { Members = [value.Members[1] with { MemberOrder = 1 }, value.Members[0] with { MemberOrder = 2 }] },
             value => value with { Members = [value.Members[0] with { AccountingEventId = Guid.NewGuid() }, value.Members[1]] },
             value => value with { Members = [value.Members[0] with { MemberFingerprint = "WRONG" }, value.Members[1]] },
             value => value with { Members = [value.Members[0] with { AccountingEventRequestFingerprint = "WRONG" }, value.Members[1]] },
@@ -352,8 +363,9 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         foreach (var corrupt in corruptions)
         {
             compatibilityDecorator = corrupt;
-            await FluentActions.Awaiting(() => service.CompleteAsync(identified.Id, completionRequest)).Should()
-                .ThrowAsync<InvalidOperationException>().WithMessage("INV_DISPOSAL_FINANCE_COMPATIBILITY_INVALID*");
+            (await FluentActions.Awaiting(() => service.CompleteAsync(identified.Id, completionRequest)).Should()
+                .ThrowAsync<InventoryDisposalException>()).Which.Code.Should()
+                .Be("INV_DISPOSAL_FINANCE_COMPATIBILITY_INVALID");
             var unchanged = await service.GetByIdAsync(identified.Id);
             unchanged.Status.Should().Be(InventoryDisposalStatus.AdjustmentPending);
             unchanged.Actions.Should().HaveCount(stagedActionCount);
@@ -361,6 +373,8 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         }
         compatibilityDecorator = value => value;
         var completed = await service.CompleteAsync(identified.Id, completionRequest);
+        var completedStageReplay = await service.StageExecutionAsync(identified.Id, stageRequest);
+        completedStageReplay.Should().BeEquivalentTo(completed);
 
         completed.Status.Should().Be(InventoryDisposalStatus.Completed);
         completed.StockAdjustmentId.Should().NotBeNull();
@@ -388,8 +402,10 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         adjustmentRequest.Create.Items.Should().ContainSingle(value =>
             value.InventoryItemId == item.Id && value.LocationId == location.Id && value.AdjustmentQuantity == -4m);
         adjustmentRequest.Create.Evidence.Should().HaveCount(2);
-        participant.Verify(value => value.PreviewAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
-        participant.Verify(value => value.StageApprovedAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        participant.Verify(value => value.PreviewAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3 + corruptions.Length * 2));
+        participant.Verify(value => value.StageApprovedAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(corruptions.Length + 1));
 
         sodRequest.Should().NotBeNull();
         sodRequest!.ProhibitedActorUserIds.Should().BeEquivalentTo(new[] { requesterId, auditorId }.Concat(committeeIds));
@@ -398,7 +414,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             group.Members[1].PostingRequest.SourceDocumentType == "StockAdjustment"), It.IsAny<CancellationToken>()), Times.Once);
         groupExecution.Verify(value => value.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
             It.IsAny<Guid>(), It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<ProducerOwnerEffectReceiptDto>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Exactly(corruptions.Length + 1));
         controlEventRequests.Should().HaveCount(completed.Actions.Count);
         controlEventRequests.Should().OnlyContain(value =>
             value.RuleCode == "INV-020" && value.DecisionKeys.Count == 14 &&

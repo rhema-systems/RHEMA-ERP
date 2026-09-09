@@ -23,6 +23,25 @@ namespace ErpSystem.Api.Tests.Services.Inventory;
 public sealed class InventoryDisposalServiceTests
 {
     [Fact, Trait("Batch", "TDC-0615")]
+    public void SqlServer_disposal_completion_lock_captures_and_rejects_negative_application_lock_results()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+            directory = directory.Parent;
+        var root = directory?.FullName ?? throw new InvalidOperationException("Repository root was not found.");
+        var source = File.ReadAllText(Path.Combine(root,
+            "src", "ErpSystem.Api", "Services", "Inventory", "InventoryDisposalService.cs"));
+        var start = source.IndexOf("private async Task AcquireDisposalLockAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private sealed record DisposalFinancePlan", start, StringComparison.Ordinal);
+        var lockBody = source[start..end];
+
+        lockBody.Should().Contain("DECLARE @result int;")
+            .And.Contain("EXEC @result = sp_getapplock")
+            .And.Contain("IF @result < 0 THROW 51000")
+            .And.Contain("INV_DISPOSAL_LOCK_FAILED");
+    }
+
+    [Fact, Trait("Batch", "TDC-0615")]
     public async Task Identify_derives_exact_location_value_links_current_clean_dms_and_replays_idempotently()
     {
         await using var fixture = await Fixture.CreateAsync();

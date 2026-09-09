@@ -433,10 +433,11 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         if (replay is not null)
         {
             EnsurePayload(replay.PayloadHash, payloadHash);
-            if (replay.ActionType == InventoryDisposalActionType.Completed && item.Status == InventoryDisposalStatus.Completed)
+            if (replay.ActionType == InventoryDisposalActionType.AdjustmentStaged &&
+                item.Status is InventoryDisposalStatus.AdjustmentPending or InventoryDisposalStatus.Completed)
                 return Map(item);
-            throw Error("INV_DISPOSAL_COMPLETION_REPLAY_CONFLICT",
-                "The completion idempotency key is already bound to a non-completed disposal action.");
+            throw Error("INV_DISPOSAL_EXECUTION_REPLAY_CONFLICT",
+                "The execution idempotency key is already bound to a different disposal action or state.");
         }
         EnsureRowVersion(item.RowVersion, request.RowVersion);
         if (item.Status != InventoryDisposalStatus.Approved && item.Status != InventoryDisposalStatus.AdjustmentPending)
@@ -925,8 +926,9 @@ internal sealed class InventoryDisposalService : IInventoryDisposalService, IInv
         // SQLite's serializable writer lock is sufficient for its relational test path.
         if (!_db.Database.IsSqlServer()) return;
         var resource = $"RHEMA:INV_DISPOSAL:C11:{_currentUser.TenantId:N}:{disposalCaseId:N}";
-        await _db.Database.ExecuteSqlInterpolatedAsync(
-            $"EXEC sp_getapplock @Resource = {resource}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000",
+        await _db.Database.ExecuteSqlInterpolatedAsync($@"DECLARE @result int;
+EXEC @result = sp_getapplock @Resource = {resource}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000;
+IF @result < 0 THROW 51000, 'INV_DISPOSAL_LOCK_FAILED: disposal completion could not be serialized.', 1;",
             cancellationToken);
     }
 
