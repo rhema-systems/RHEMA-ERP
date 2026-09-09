@@ -1,6 +1,6 @@
 # HR demo feedback, round 2 — findings, decisions and build plan
 
-> **Status: LANES A and B1 BUILT 2026-09-09** (A: 88 assertions ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 assertions ×2, `hr-organization/run-b1.mjs`). Lanes B2, B3, C–F planned, not built. Source: the feedback
+> **Status: LANES A, B1 and C1 BUILT 2026-09-09** (A: 88 ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 ×2, `hr-organization/run-b1.mjs`; C1: 36 ×2, `hr-jobarch/run-c1.mjs`). Lanes B2, B3, C2, C3, D–F planned, not built. Source: the feedback
 > document *HR Demo Meetings — Changes and Additions* (4 pages; sections Organization Structure,
 > Job Position, Skills Setup, Employee Profile), brought by the user on 2026-09-08 after the HR
 > module demo. Every bullet of that document is accounted for below — as a bug, a build item, a
@@ -329,10 +329,12 @@ What the build changed from the plan, and what it found:
 
 ### Lane C — Positions, certifications, sets · 3 slices
 
-**C1 — Reports-to filtered and validated.** No migration.
-- [ ] Form: reports-to options = positions in the chosen unit **or any ancestor unit** (walk `Path`), labelled `title · unit · code`; a "Show all positions" toggle for matrix cases; disabled until a unit is chosen (§ 6.1.4).
-- [ ] Service: `ReportsToPositionId` must exist, ≠ self, and must not create a cycle (walk `ReportsToPositionId` upwards, bounded); on both create and update. Unit mismatch is **allowed** (soft rule) — Q-2.
-- [ ] Harness `hr-jobarch/run-c1.mjs`: self refused; A→B→A refused; cross-unit accepted; unknown id 404/400.
+**C1 — Reports-to filtered and validated.** No migration. · ✅ **DONE 2026-09-09** · 36 assertions ×2 · harness `hr-jobarch/run-c1.mjs`.
+
+Notes from the build: the ancestry is walked over `ParentUnitId` on the server (`GetAncestorsAsync`), **not** read off `Path` as § 6.1.4 proposed — B1 measured every seeded unit's path empty. The position controller now answers refusals with the rule's own sentence (it had let the global middleware collapse every `InvalidOperationException` into a canned one). The cycle refusal names the chain; an existing loop above the target is reported rather than walked forever. The stored reports-to is always offered on edit, even outside the ancestry, so an edit never silently clears it.
+- [x] Form: reports-to options = positions in the chosen unit **or any ancestor unit** (walk `Path`), labelled `title · unit · code`; a "Show all positions" toggle for matrix cases; disabled until a unit is chosen (§ 6.1.4).
+- [x] Service: `ReportsToPositionId` must exist, ≠ self, and must not create a cycle (walk `ReportsToPositionId` upwards, bounded); on both create and update. Unit mismatch is **allowed** (soft rule) — Q-2.
+- [x] Harness `hr-jobarch/run-c1.mjs`: self refused; A→B→A refused; cross-unit accepted; unknown id 404/400.
 
 **C2 — Certification catalogue, skill cascade, position requirements, employee credentials, expiry sweep** (§ 6.3). Migration: five tables + columns.
 - [ ] `Certification`, `SkillCertification`, `PositionCertificationRequirement`, `EmployeeCertification` (+ `EmployeeSkill.EmployeeCertificationId`).

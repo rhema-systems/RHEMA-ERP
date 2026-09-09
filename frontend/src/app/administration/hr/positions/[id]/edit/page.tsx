@@ -153,6 +153,7 @@ export default function EditEmployeePositionPage() {
       ) : (
         <EmployeePositionForm
           positions={reportsToOptions}
+          excludeId={id}
           staffLevels={staffLevels ?? []}
           salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}

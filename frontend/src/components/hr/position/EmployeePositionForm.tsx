@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -25,6 +27,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
+import { employeePositionService } from '@/services/hr/employee-position.service';
 import { SKILL_LEVEL_OPTIONS, type EmployeePosition } from '@/types/hr/position';
 import type { StaffLevelListItem } from '@/types/hr/staff-level';
 import type { SalaryGrade } from '@/types/hr/salary';
@@ -121,7 +124,10 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
 };
 
 interface EmployeePositionFormProps {
+  /** Every position in the tenant — the "show all positions" set for matrix / dotted-line cases. */
   positions: EmployeePosition[];
+  /** The position being edited; it is never offered as its own reports-to. */
+  excludeId?: string;
   staffLevels: StaffLevelListItem[];
   /** Defined in Payroll and mirrored into HR — read-only here. */
   salaryGrades: SalaryGrade[];
@@ -143,6 +149,7 @@ interface EmployeePositionFormProps {
 
 export function EmployeePositionForm({
   positions,
+  excludeId,
   staffLevels,
   salaryGrades,
   skills,
@@ -161,6 +168,32 @@ export function EmployeePositionForm({
 
   const unitId = form.watch('organizationUnitId');
   const reportsTo = form.watch('reportsToPositionId') || NONE;
+  const [showAllPositions, setShowAllPositions] = useState(false);
+
+  // Reports-to, narrowed to the chosen unit and everything above it (round 2, C1 / § 6.1.4). The
+  // server walks the parent chain; a matrix or dotted-line case widens to the whole tenant.
+  const { data: scopedPositions = [], isLoading: scopedLoading } = useQuery({
+    queryKey: ['hr', 'employee-positions', 'organization-unit', unitId, 'ancestors'],
+    queryFn: () => employeePositionService.getByOrganizationUnit(unitId, true),
+    enabled: !!unitId,
+    staleTime: 60 * 1000,
+  });
+
+  const reportsToOptions = useMemo(() => {
+    const source = showAllPositions ? positions : scopedPositions;
+    const current = form.getValues('reportsToPositionId');
+    const list = source.filter((p) => p.id !== excludeId && (p.isActive || p.id === current));
+    // The stored value is always offered, even when it sits outside the unit's ancestry — an edit
+    // form must show what is stored, and hiding it would silently clear the reporting line on save.
+    if (current && !list.some((p) => p.id === current)) {
+      const stored = positions.find((p) => p.id === current);
+      if (stored) list.push(stored);
+    }
+    return list.sort(
+      (a, b) => a.organizationUnitName.localeCompare(b.organizationUnitName) || a.title.localeCompare(b.title),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAllPositions, positions, scopedPositions, excludeId, reportsTo]);
   const workMode = form.watch('workMode');
   const requiresCertification = form.watch('requiresCertification');
   const requiresGuarantor = form.watch('requiresGuarantor');
@@ -235,22 +268,54 @@ export function EmployeePositionForm({
               <Label htmlFor="reportsToPositionId">Reports To</Label>
               <Select
                 value={reportsTo}
+                disabled={!unitId && !showAllPositions}
                 onValueChange={(value) =>
                   form.setValue('reportsToPositionId', value === NONE ? '' : value)
                 }
               >
                 <SelectTrigger id="reportsToPositionId">
-                  <SelectValue placeholder="None" />
+                  <SelectValue
+                    placeholder={
+                      !unitId && !showAllPositions
+                        ? 'Choose the unit first'
+                        : scopedLoading && !showAllPositions
+                          ? 'Loading…'
+                          : 'None'
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>None</SelectItem>
-                  {positions.map((p) => (
+                  {reportsToOptions.length === 0 && (unitId || showAllPositions) && !scopedLoading && (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                      {showAllPositions
+                        ? 'No other positions.'
+                        : 'No positions in this unit or above it — show all positions to pick one elsewhere.'}
+                    </div>
+                  )}
+                  {reportsToOptions.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.title}
+                      {p.title} · {p.organizationUnitName}
+                      {p.code ? ` · ${p.code}` : ''}
+                      {p.isActive ? '' : ' (inactive)'}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5"
+                  checked={showAllPositions}
+                  onChange={(e) => setShowAllPositions(e.target.checked)}
+                />
+                Show all positions (matrix or dotted-line reporting)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                {showAllPositions
+                  ? 'Every position in the organisation.'
+                  : 'Positions in the chosen unit and the units above it.'}
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="staffLevelId">Staff Level</Label>

@@ -57,8 +57,21 @@ public class EmployeePositionsController : ControllerBase
     public async Task<ActionResult<EmployeePositionDto>> Create([FromBody] CreateEmployeePositionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var created = await _service.CreatePositionAsync(dto);
-        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        try
+        {
+            var created = await _service.CreatePositionAsync(dto);
+            return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A business rule, not a fault. The global middleware would answer 400 with a canned
+            // sentence; the reports-to rules (C1) exist to explain themselves.
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPut("{id:guid}")]
@@ -68,8 +81,19 @@ public class EmployeePositionsController : ControllerBase
     public async Task<ActionResult<EmployeePositionDto>> Update(Guid id, [FromBody] UpdateEmployeePositionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var updated = await _service.UpdatePositionAsync(id, dto);
-        return Ok(updated);
+        try
+        {
+            var updated = await _service.UpdatePositionAsync(id, dto);
+            return Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id:guid}")]
@@ -83,11 +107,15 @@ public class EmployeePositionsController : ControllerBase
 
     #endregion
 
+    /// <summary>
+    /// Positions in a unit; with <c>includeAncestors=true</c>, in every unit above it as well —
+    /// the reports-to option source (demo feedback round 2, C1). Had no caller before that slice.
+    /// </summary>
     [HttpGet("organization-unit/{organizationUnitId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<EmployeePositionDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<EmployeePositionDto>>> GetByOrganizationUnit(Guid organizationUnitId)
+    public async Task<ActionResult<IEnumerable<EmployeePositionDto>>> GetByOrganizationUnit(Guid organizationUnitId, [FromQuery] bool includeAncestors = false)
     {
-        return Ok(await _service.GetByOrganizationUnitAsync(organizationUnitId));
+        return Ok(await _service.GetByOrganizationUnitAsync(organizationUnitId, includeAncestors));
     }
 
     [HttpGet("department/{departmentId:guid}")]

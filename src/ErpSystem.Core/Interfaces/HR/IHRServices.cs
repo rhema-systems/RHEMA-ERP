@@ -331,7 +331,11 @@ public interface IEmployeePositionService
     Task<EmployeePositionDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<EmployeePositionDto>> GetAllAsync();
     Task<IEnumerable<EmployeePositionDto>> GetActivePositionsAsync();
-    Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId);
+    /// <summary>
+    /// Positions in a unit — and, with <paramref name="includeAncestors"/>, in every unit above it.
+    /// The reports-to option source (demo feedback round 2, C1 / § 6.1.4).
+    /// </summary>
+    Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, bool includeAncestors = false);
     Task<IEnumerable<EmployeePositionDto>> GetByDepartmentAsync(Guid departmentId);
     Task<EmployeePositionDto?> GetByCodeAsync(string code);
     Task<EmployeePositionDto> CreatePositionAsync(CreateEmployeePositionDto createDto);

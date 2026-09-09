@@ -12,15 +12,18 @@ namespace ErpSystem.Core.Services.HR;
 public class EmployeePositionService : IEmployeePositionService
 {
     private readonly IEmployeePositionRepository _positionRepository;
+    private readonly IOrganizationUnitRepository _unitRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeePositionService> _logger;
 
     public EmployeePositionService(
         IEmployeePositionRepository positionRepository,
+        IOrganizationUnitRepository unitRepository,
         ICurrentUserProvider currentUserProvider,
         ILogger<EmployeePositionService> logger)
     {
         _positionRepository = positionRepository;
+        _unitRepository = unitRepository;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -57,10 +60,80 @@ public class EmployeePositionService : IEmployeePositionService
         return positions.Where(p => p.TenantId == tenantId).OrderBy(p => p.Title).Select(MapToDto);
     }
 
-    public async Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId)
+    /// <inheritdoc />
+    /// <remarks>
+    /// The ancestry is walked over <c>ParentUnitId</c> (<c>GetAncestorsAsync</c>), NOT read off the
+    /// unit's <c>Path</c> as § 6.1.4 first proposed — lane B1 measured every seeded unit's path
+    /// EMPTY, so a path read would have offered nothing above the unit for the whole live tree.
+    /// </remarks>
+    public async Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, bool includeAncestors = false)
     {
-        var positions = await _positionRepository.GetByOrganizationUnitAsync(organizationUnitId);
-        return positions.Select(MapToDto);
+        var tenantId = GetTenantId();
+        if (!includeAncestors)
+        {
+            var positions = await _positionRepository.GetByOrganizationUnitAsync(organizationUnitId);
+            return positions.Where(p => p.TenantId == tenantId).Select(MapToDto);
+        }
+
+        var unitIds = new List<Guid> { organizationUnitId };
+        unitIds.AddRange((await _unitRepository.GetAncestorsAsync(organizationUnitId)).Select(u => u.Id));
+        var scoped = await _positionRepository.GetByOrganizationUnitsAsync(unitIds);
+        return scoped.Where(p => p.TenantId == tenantId).Select(MapToDto);
+    }
+
+    /// <summary>
+    /// The reports-to rules: the target exists in this tenant, is not the position itself, and
+    /// reporting to it would not close a loop. Existence is an <see cref="ArgumentException"/>
+    /// (the not-found idiom); the other two are <see cref="InvalidOperationException"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Demo feedback round 2, C1 (P-1). Until this slice the server checked NOTHING about
+    /// <c>ReportsToPositionId</c> — a position could report to itself, to a position that did
+    /// not exist, or to its own subordinate, and the organogram's position view would then loop.
+    /// The only guard was the edit page dropping the position from its own dropdown.</para>
+    /// <para>The unit is deliberately NOT enforced (Q-2, soft): matrix and dotted-line reporting
+    /// exist, so the form narrows the offer to the unit's ancestry and lets the user widen it.</para>
+    /// <para>The walk is bounded. A loop that already exists in the data (written before this
+    /// rule) must not hang a save; after the bound it is reported as a cycle, which it is.</para>
+    /// </remarks>
+    private async Task ValidateReportsToAsync(Guid? reportsToPositionId, Guid? selfId, string selfTitle)
+    {
+        if (!reportsToPositionId.HasValue)
+            return;
+
+        var tenantId = GetTenantId();
+
+        if (selfId.HasValue && reportsToPositionId.Value == selfId.Value)
+            throw new InvalidOperationException("A position cannot report to itself.");
+
+        var target = await _positionRepository.GetByIdAsync(reportsToPositionId.Value);
+        if (target == null || target.TenantId != tenantId)
+            throw new ArgumentException($"Reports-to position '{reportsToPositionId}' was not found.");
+
+        if (!selfId.HasValue)
+            return; // A position that does not exist yet cannot be on anyone's chain.
+
+        var chain = new List<string> { selfTitle, target.Title };
+        var visited = new HashSet<Guid> { target.Id };
+        var current = target;
+        const int bound = 100;
+        for (var hops = 0; current.ReportsToPositionId.HasValue; hops++)
+        {
+            var nextId = current.ReportsToPositionId.Value;
+            if (nextId == selfId.Value)
+                throw new InvalidOperationException(
+                    $"That would create a reporting cycle: {string.Join(" → ", chain)} → {selfTitle}.");
+
+            if (!visited.Add(nextId) || hops >= bound)
+                throw new InvalidOperationException(
+                    $"The reporting line above '{target.Title}' already loops; it must be corrected before anything can report into it.");
+
+            var next = await _positionRepository.GetByIdAsync(nextId);
+            if (next == null)
+                break; // A dangling link above the target is not this save's fault.
+            chain.Add(next.Title);
+            current = next;
+        }
     }
 
     public async Task<IEnumerable<EmployeePositionDto>> GetByDepartmentAsync(Guid departmentId)
@@ -81,6 +154,8 @@ public class EmployeePositionService : IEmployeePositionService
         {
             throw new InvalidOperationException($"Position code '{createDto.Code}' already exists.");
         }
+
+        await ValidateReportsToAsync(createDto.ReportsToPositionId, selfId: null, createDto.Title);
 
         var position = new EmployeePosition
         {
@@ -164,6 +239,10 @@ public class EmployeePositionService : IEmployeePositionService
             }
             position.Code = updateDto.Code;
         }
+
+        // Validated against the stored graph BEFORE the reassignment below, so a refused save leaves
+        // the tracked entity as it was.
+        await ValidateReportsToAsync(updateDto.ReportsToPositionId, selfId: position.Id, updateDto.Title);
 
         position.Title = updateDto.Title;
         position.Description = updateDto.Description;
