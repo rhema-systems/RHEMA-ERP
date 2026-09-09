@@ -1278,6 +1278,12 @@ does not close the durable stock/Finance zero-mutation or C7 Donation/Destructio
 also blocked by orphaned shared MSBuild children and produced no fresh test result; the task stopped only its own
 process tree. The clean evidence chain continues in bounded families before review.
 
+Evidence inspection confirmed E2E013 is EF InMemory with transaction warnings suppressed, not a relational
+fixture, so it cannot host the real participant's required ambient transaction or prove rollback. The coordinator
+explicitly authorized a new minimal shared-connection SQLite fixture as directly affected B2 test work, reusing
+the existing C8/C9 relational service and seed helpers. This is a test-infrastructure gap rather than a production
+contract or accounting decision; the task remains active and integration remains blocked.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
