@@ -1290,6 +1290,12 @@ initial 72-line form does not yet invoke the real owner, Stock Adjustment, C7 or
 uncompiled. Terra Medium is extending the same fixture into the required real success/failure/recovery/retry
 evidence before any review handoff.
 
+Fixture factory commit `ea35cf37c456afdbe2e8bb3deb6b49b70ca90a95` now constructs the real C9 valuation
+builder and the real StockAdjustmentService-backed internal disposal participant against the shared SQLite
+ApplicationDbContext. It remains intentionally uncompiled and has not yet constructed the owner/C7 service graph
+or executed rollback evidence. The fixture is being extended incrementally to avoid losing implementation time
+to the current long-running local compiler.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
