@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | .NET 9.0.318 toolchain restored and clean build passed; bounded Inventory implementation active |
+| Review status | Inventory identity reconciliation complete; bounded deterministic Stock Adjustment item-ID correction active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1097,6 +1097,15 @@ an in-place update beginning around 20:45, then installed host 9.0.20 and SDK 9.
 `dotnet --info` now resolves SDK 9.0.318 with .NET 8/9 runtimes, isolated restore passed, and the fresh Inventory
 base solution build passed with zero errors and 1,106 inherited warnings. Stage B2 is unblocked and implementation
 resumes from the same exact clean base; no database was accessed.
+
+Inventory reconciliation found that C9 correctly binds each valuation source line and economic fingerprint to its
+`StockAdjustmentItem.Id`, while the public creation path assigns item IDs with `Guid.NewGuid()` only during entity
+construction. The already authorized preassigned adjustment identity must therefore include stable preassigned
+item identities on the disposal-scoped ambient path so the pre-prepare C9 evidence and later tracked owner graph
+are byte-for-byte identical. This is a bounded identity correction, not a new accounting policy: derive each item
+ID deterministically from the exact tenant, adjustment identity and canonical ordered source-line identity; reject
+duplicates, reordering ambiguity and any existing mismatched graph; preserve public random-ID behavior for every
+other caller. Implementation resumes on the same exact base with no schema, migration or database change.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
