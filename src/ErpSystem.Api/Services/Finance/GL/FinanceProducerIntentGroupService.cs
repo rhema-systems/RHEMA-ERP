@@ -288,6 +288,17 @@ public sealed partial class FinanceProducerIntentGroupService : IFinanceProducer
         return Map(group);
     }
 
+    async Task<FinanceProducerIntentGroupApprovedExecutionResult>
+        IFinanceProducerIntentGroupApprovedExecution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+            Guid groupId, ProducerIntentGroupRequestDto request, ProducerOwnerEffectReceiptDto receipt,
+            CancellationToken cancellationToken)
+    {
+        var group = await ((IFinanceProducerIntentGroupApprovedExecution)this)
+            .ExecuteInAmbientTransactionAsync(groupId, request, receipt, cancellationToken);
+        return await FinanceProducerCompatibilityAuthority.ResolveGroupAsync(
+            _db, _currentUser.GetRequiredFinanceTenantId(), group, cancellationToken);
+    }
+
     async Task IFinanceProducerIntentGroupApprovedExecution.RecordFailureAfterRollbackAsync(Guid groupId,
         ProducerIntentGroupRequestDto request, ProducerOwnerEffectReceiptDto receipt, Exception failure,
         CancellationToken cancellationToken)

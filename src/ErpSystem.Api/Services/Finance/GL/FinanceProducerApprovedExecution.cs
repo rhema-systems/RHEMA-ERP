@@ -12,6 +12,10 @@ internal interface IFinanceProducerApprovedExecution
         ProducerAccountingIntentDto intent, ProducerOwnerEffectReceiptDto receipt,
         CancellationToken cancellationToken = default);
 
+    Task<FinanceProducerApprovedExecutionResult> ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+        Guid accountingEventId, ProducerAccountingIntentDto intent, ProducerOwnerEffectReceiptDto receipt,
+        CancellationToken cancellationToken = default);
+
     Task RecordFailureAfterRollbackAsync(Guid accountingEventId, ProducerAccountingIntentDto intent,
         ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default);
 }

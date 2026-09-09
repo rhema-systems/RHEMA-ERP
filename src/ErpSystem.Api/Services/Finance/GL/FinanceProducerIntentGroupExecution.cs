@@ -9,6 +9,10 @@ internal interface IFinanceProducerIntentGroupApprovedExecution
         ProducerIntentGroupRequestDto request, ProducerOwnerEffectReceiptDto receipt,
         CancellationToken cancellationToken = default);
 
+    Task<FinanceProducerIntentGroupApprovedExecutionResult> ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+        Guid groupId, ProducerIntentGroupRequestDto request, ProducerOwnerEffectReceiptDto receipt,
+        CancellationToken cancellationToken = default);
+
     Task RecordFailureAfterRollbackAsync(Guid groupId, ProducerIntentGroupRequestDto request,
         ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default);
 }

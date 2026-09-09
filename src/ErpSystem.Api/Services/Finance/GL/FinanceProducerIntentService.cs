@@ -84,6 +84,16 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             new ReleaseAccountingEventDto { Request = request, Reason = approved.ProducerDecisionReason ?? string.Empty }, receipt, cancellationToken);
     }
 
+    async Task<FinanceProducerApprovedExecutionResult> IFinanceProducerApprovedExecution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+        Guid accountingEventId, ProducerAccountingIntentDto intent, ProducerOwnerEffectReceiptDto receipt,
+        CancellationToken cancellationToken)
+    {
+        var accountingEvent = await ((IFinanceProducerApprovedExecution)this)
+            .ExecuteInAmbientTransactionAsync(accountingEventId, intent, receipt, cancellationToken);
+        return await FinanceProducerCompatibilityAuthority.ResolveAsync(
+            _db, _currentUser.GetRequiredFinanceTenantId(), accountingEvent, cancellationToken);
+    }
+
     async Task IFinanceProducerApprovedExecution.RecordFailureAfterRollbackAsync(Guid accountingEventId,
         ProducerAccountingIntentDto intent, ProducerOwnerEffectReceiptDto receipt, Exception failure,
         CancellationToken cancellationToken)

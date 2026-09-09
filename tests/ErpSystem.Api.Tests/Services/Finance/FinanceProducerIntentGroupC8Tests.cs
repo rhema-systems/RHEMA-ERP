@@ -57,6 +57,22 @@ public sealed class FinanceProducerIntentGroupC8Tests
     }
 
     [Fact]
+    public async Task CompatibilityExecution_DisabledByDefault_DeniesBeforeC5OrC6()
+    {
+        var harness = Harness(groupEnabled: false);
+        var request = Group();
+
+        var action = () => ((IFinanceProducerIntentGroupApprovedExecution)harness.Service)
+            .ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+                Guid.NewGuid(), request, Receipt(harness.TenantId, request));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FINANCE_PRODUCER_INTENT_GROUP_DISABLED*");
+        harness.Applicability.VerifyNoOtherCalls();
+        harness.Executor.Executed.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Prepare_BindsCompleteOrderedMembers_AndExactRetryRejectsOrderCollision()
     {
         var harness = Harness();

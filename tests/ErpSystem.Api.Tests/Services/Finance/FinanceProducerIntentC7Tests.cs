@@ -52,6 +52,22 @@ public sealed class FinanceProducerIntentC7Tests
     }
 
     [Fact]
+    public async Task CompatibilityExecution_DisabledByDefault_DeniesBeforeC6()
+    {
+        var applicability = new Mock<IAccountingBookApplicabilityService>(MockBehavior.Strict);
+        var events = new Mock<IAccountingEventService>(MockBehavior.Strict);
+        var harness = Harness(applicability, events, enabled: false);
+
+        var action = () => ((IFinanceProducerApprovedExecution)harness.Service)
+            .ExecuteWithCompatibilityResultInAmbientTransactionAsync(Guid.NewGuid(), Intent(), new ProducerOwnerEffectReceiptDto());
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FINANCE_PRODUCER_INTENT_DISABLED*");
+        events.VerifyNoOtherCalls();
+        harness.Executor.Receipt.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Prepare_ResolvesInsideFinance_AndPassesOneBookNeutralC6Command()
     {
         var applicability = Applicability();
@@ -176,6 +192,64 @@ public sealed class FinanceProducerIntentC7Tests
             .ExecuteInAmbientTransactionAsync(Guid.NewGuid(), intent, receipt)).Status.Should().Be("Posted");
 
         harness.Executor.Receipt.Should().BeSameAs(receipt);
+    }
+
+    [Fact]
+    public async Task CompatibilityExecution_ReturnsDefaultRepresentation_AndExactRetryIsStable()
+    {
+        var applicability = Applicability();
+        var events = new Mock<IAccountingEventService>();
+        var intent = Intent();
+        events.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            ProducerDecisionStatus = "Approved", Status = "PendingApproval", ProducerDecisionReason = "Reviewed",
+            ProducerParticipantIdentity = "INVENTORY.DISPOSAL.V1", ProducerIntentSnapshotJson = Prepared(intent).ProducerIntentSnapshotJson
+        });
+        var harness = Harness(applicability, events);
+        var primaryBook = new AccountingBook
+        {
+            TenantId = harness.TenantId, Code = "IFRS", Name = "IFRS", IsDefault = true,
+            IsActive = true, AllowsPosting = true, FunctionalCurrencyCode = "GHS"
+        };
+        var secondaryBook = new AccountingBook
+        {
+            TenantId = harness.TenantId, Code = "LOCAL", Name = "Local", IsDefault = false,
+            BookType = ErpSystem.Core.Enums.AccountingBookType.ParallelFull,
+            IsActive = true, AllowsPosting = true, FunctionalCurrencyCode = "GHS"
+        };
+        harness.Db.AccountingBooks.AddRange(primaryBook, secondaryBook);
+        await harness.Db.SaveChangesAsync();
+        var primaryPosting = new AccountingEventPostingDto
+        {
+            AccountingBookId = primaryBook.Id, AccountingBookCode = primaryBook.Code, SelectionOrder = 2,
+            Status = AccountingEventStatuses.Posted, FinancePostingEventId = Guid.NewGuid(), JournalEntryId = Guid.NewGuid()
+        };
+        harness.Executor.Result = new AccountingEventDto
+        {
+            Id = Guid.NewGuid(), Status = AccountingEventStatuses.Posted, RequestFingerprint = Hash('C'),
+            Postings =
+            [
+                new AccountingEventPostingDto
+                {
+                    AccountingBookId = secondaryBook.Id, AccountingBookCode = secondaryBook.Code, SelectionOrder = 1,
+                    Status = AccountingEventStatuses.Posted, FinancePostingEventId = Guid.NewGuid(), JournalEntryId = Guid.NewGuid()
+                },
+                primaryPosting
+            ]
+        };
+        var receipt = Receipt(harness.TenantId, intent);
+        var execution = (IFinanceProducerApprovedExecution)harness.Service;
+
+        var first = await execution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+            harness.Executor.Result.Id, intent, receipt);
+        var retry = await execution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+            harness.Executor.Result.Id, intent, receipt);
+
+        first.AccountingEventId.Should().Be(harness.Executor.Result.Id);
+        first.AccountingEventRequestFingerprint.Should().Be(harness.Executor.Result.RequestFingerprint);
+        first.FinancePostingEventId.Should().Be(primaryPosting.FinancePostingEventId!.Value);
+        first.JournalEntryId.Should().Be(primaryPosting.JournalEntryId!.Value);
+        retry.Should().Be(first);
     }
 
     [Fact]

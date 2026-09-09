@@ -245,6 +245,9 @@
     <Compile Include="Services\Finance\FinanceProducerIntentC7Tests.cs" />
     <Compile Include="Services\Finance\FinanceProducerIntentC7MigrationTests.cs" />
     <Compile Include="Services\Finance\FinanceProducerIntentGroupC8Tests.cs" />
+    <!-- C10 returns one Finance-resolved legacy compatibility representation without exposing
+         book selection to owner producers; this project disables implicit compile items. -->
+    <Compile Include="Services\Finance\FinanceProducerCompatibilityC10Tests.cs" />
     <Compile Include="Services\Finance\BookBalanceConsumerAuthorityC2Tests.cs" />
     <Compile Include="Services\Finance\GeneralLedgerPrimaryBalanceCompatibilityC2Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />
