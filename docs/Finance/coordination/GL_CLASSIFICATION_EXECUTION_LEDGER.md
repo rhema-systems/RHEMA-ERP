@@ -1255,6 +1255,14 @@ not yet review-ready because the required real-service multi-context/second-memb
 recovery matrix was not added. GPT-5.6 Terra Medium remains assigned to finish that executable evidence before
 Sol High re-review; no database or migration operation occurred.
 
+Inventory added evidence commit `3d8d1d82b4705f167ba9680fb728d048967434e4`, replacing the mocked auction
+valuation preview with the real C9 builder over relational SQLite authority. The real preview E2E passed, the
+focused disposal suite remains 15/15, and existing shared C7-C9 boundary tests passed 41/41 including relational
+C8 member failure/recovery. The candidate is still not review-ready: owner-level Donation/Destruction C7
+recovery, synchronized two-context disposal replay and direct C10 substitution/zero-mutation cases remain
+missing. Terra Medium remains assigned to those exact evidence gaps; integration stays blocked and no configured
+database or migration was touched.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
