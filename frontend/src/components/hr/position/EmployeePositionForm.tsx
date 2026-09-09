@@ -101,9 +101,100 @@ export const employeePositionSchema = z.object({
       positionAmount: z.string().optional().or(z.literal('')),
     }),
   ),
+  // Named sets attached to the post (round 2, lane C3). Ids only: what each set contains is
+  // maintained on its own master screen, and the post follows it. Sent as the whole set.
+  benefitGroupIds: z.array(z.string()),
+  skillSetIds: z.array(z.string()),
+  certificationSetIds: z.array(z.string()),
 });
 
 export type EmployeePositionFormValues = z.infer<typeof employeePositionSchema>;
+
+/**
+ * A named set on offer, with what it contains (round 2, lane C3). The member ids are what lets the
+ * form grey out an item a set already provides, so the user never composes a save the server will
+ * refuse — the same courtesy `takenIds` already did for a policy chosen twice.
+ */
+export interface NamedSetOption {
+  id: string;
+  name: string;
+  code?: string | null;
+  isActive: boolean;
+  memberIds: string[];
+  memberCount: number;
+}
+
+/**
+ * The attach/detach strip that sits above each individual list (round 2, lane C3, plan § 6.4.3:
+ * "sets above individuals"). Deliberately a row of toggles rather than a dialog: the whole point of
+ * a set is that attaching it is one click, and seeing what is attached is the same glance.
+ */
+function SetAttachPanel({
+  label,
+  hint,
+  sets,
+  attachedIds,
+  memberNoun,
+  onToggle,
+}: {
+  label: string;
+  hint: string;
+  sets: NamedSetOption[];
+  attachedIds: string[];
+  memberNoun: string;
+  onToggle: (setId: string) => void;
+}) {
+  // A retired set already attached still shows, so it can be seen and detached; a retired set that
+  // is NOT attached is not offered, because the server refuses to attach one.
+  const offered = sets.filter((s) => s.isActive || attachedIds.includes(s.id));
+  if (offered.length === 0) return null;
+
+  return (
+    <div className="space-y-2 rounded-md border border-dashed p-3">
+      <div>
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</h5>
+        <p className="text-xs text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {offered.map((s) => {
+          const attached = attachedIds.includes(s.id);
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => onToggle(s.id)}
+              aria-pressed={attached}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                attached
+                  ? 'border-primary bg-primary/10 font-medium text-primary'
+                  : 'border-input text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              {s.name}
+              <span className="ml-1 opacity-70">
+                ({s.memberCount} {memberNoun}
+                {s.memberCount === 1 ? '' : 's'})
+              </span>
+              {!s.isActive && <span className="ml-1 opacity-70">· retired</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Every item id the attached sets provide, and which set provides each. */
+function coverageOf(sets: NamedSetOption[], attachedIds: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const set of sets) {
+    if (!attachedIds.includes(set.id)) continue;
+    for (const memberId of set.memberIds) {
+      if (!map.has(memberId)) map.set(memberId, set.name);
+    }
+  }
+  return map;
+}
 
 export const emptyEmployeePosition: EmployeePositionFormValues = {
   title: '',
@@ -131,6 +222,9 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
   skillRequirements: [],
   positionBenefits: [],
   certificationRequirements: [],
+  benefitGroupIds: [],
+  skillSetIds: [],
+  certificationSetIds: [],
 };
 
 interface EmployeePositionFormProps {
@@ -144,6 +238,13 @@ interface EmployeePositionFormProps {
   skills: Skill[];
   /** Active benefit policies an entitlement can point at. */
   benefitPolicies: BenefitPolicySummary[];
+  /**
+   * The named sets on offer (round 2, lane C3). Attaching one is equivalent to attaching every
+   * item in it, so the individual pickers below exclude whatever an attached set already provides.
+   */
+  benefitGroups?: NamedSetOption[];
+  skillSets?: NamedSetOption[];
+  certificationSets?: NamedSetOption[];
   /**
    * Currencies FINANCE holds, for the guarantor requirement.
    * ⚠ A prop rather than a fetch, like every other list here: this form is presentational and its
@@ -164,6 +265,9 @@ export function EmployeePositionForm({
   salaryGrades,
   skills,
   benefitPolicies,
+  benefitGroups = [],
+  skillSets = [],
+  certificationSets = [],
   currencies,
   defaultValues,
   onSubmit,
@@ -175,6 +279,24 @@ export function EmployeePositionForm({
     resolver: zodResolver(employeePositionSchema) as any,
     defaultValues,
   });
+
+  // Round 2, lane C3 — what the attached sets already provide, recomputed as they are attached.
+  const attachedBenefitGroupIds = form.watch('benefitGroupIds') ?? [];
+  const attachedSkillSetIds = form.watch('skillSetIds') ?? [];
+  const attachedCertificationSetIds = form.watch('certificationSetIds') ?? [];
+  const benefitCoverage = coverageOf(benefitGroups, attachedBenefitGroupIds);
+  const skillCoverage = coverageOf(skillSets, attachedSkillSetIds);
+  const certificationCoverage = coverageOf(certificationSets, attachedCertificationSetIds);
+
+  /** Attach or detach one set, keeping the field a plain id array. */
+  const toggleSet = (
+    field: 'benefitGroupIds' | 'skillSetIds' | 'certificationSetIds',
+    setId: string,
+  ) => {
+    const current: string[] = form.getValues(field) ?? [];
+    const next = current.includes(setId) ? current.filter((x) => x !== setId) : [...current, setId];
+    form.setValue(field, next, { shouldDirty: true, shouldValidate: true });
+  };
 
   const unitId = form.watch('organizationUnitId');
   const reportsTo = form.watch('reportsToPositionId') || NONE;
@@ -488,6 +610,14 @@ export function EmployeePositionForm({
 
           {wantsCertifications && (
             <div className="space-y-3 rounded-md border p-4">
+              <SetAttachPanel
+                label="Certification sets"
+                hint="Attach a set and the post requires every credential in it — the regulator's bundle, maintained in one place."
+                sets={certificationSets}
+                attachedIds={attachedCertificationSetIds}
+                memberNoun="credential"
+                onToggle={(id) => toggleSet('certificationSetIds', id)}
+              />
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-semibold">Required certifications and licences</h4>
@@ -521,7 +651,8 @@ export function EmployeePositionForm({
                         shouldDirty: true,
                       })
                     }
-                    excludeIds={chosenCertificationIds.filter(
+                    // Lane C3: what a set provides is excluded as well as what another row holds.
+                    excludeIds={[...chosenCertificationIds, ...certificationCoverage.keys()].filter(
                       (id) => id !== form.watch(`certificationRequirements.${index}.certificationId`),
                     )}
                     error={
@@ -553,6 +684,14 @@ export function EmployeePositionForm({
           )}
 
           <div className="space-y-3 rounded-md border p-4">
+            <SetAttachPanel
+              label="Skill sets"
+              hint="Attach a set and the post requires everything in it. Anything a set provides cannot also be listed individually below."
+              sets={skillSets}
+              attachedIds={attachedSkillSetIds}
+              memberNoun="skill"
+              onToggle={(id) => toggleSet('skillSetIds', id)}
+            />
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-semibold">Skill Requirements</h4>
@@ -591,12 +730,24 @@ export function EmployeePositionForm({
                           <SelectValue placeholder="Select a skill" />
                         </SelectTrigger>
                         <SelectContent>
-                          {skills.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.name}
-                              {s.category ? ` · ${s.category}` : ''}
-                            </SelectItem>
-                          ))}
+                          {skills
+                            .filter((s) => {
+                              // Already on another row (X-1 — the server used to keep the first
+                              // silently), or already provided by an attached set (lane C3's rule,
+                              // which the server now refuses). The row's own value always stays.
+                              const own = form.watch(`skillRequirements.${index}.skillId`);
+                              if (s.id === own) return true;
+                              const onAnotherRow = (form.watch('skillRequirements') ?? []).some(
+                                (r, i) => i !== index && r.skillId === s.id,
+                              );
+                              return !onAnotherRow && !skillCoverage.has(s.id);
+                            })
+                            .map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.name}
+                                {s.category ? ` · ${s.category}` : ''}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       {form.formState.errors.skillRequirements?.[index]?.skillId && (
@@ -657,6 +808,14 @@ export function EmployeePositionForm({
           </div>
 
           <div className="space-y-3 rounded-md border p-4">
+            <SetAttachPanel
+              label="Benefit groups"
+              hint="Attach a group and the post carries every benefit in it. A benefit needing its own amount is listed individually instead — not both."
+              sets={benefitGroups}
+              attachedIds={attachedBenefitGroupIds}
+              memberNoun="benefit"
+              onToggle={(id) => toggleSet('benefitGroupIds', id)}
+            />
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-semibold">Benefit Entitlements</h4>
@@ -713,7 +872,9 @@ export function EmployeePositionForm({
                           </SelectTrigger>
                           <SelectContent>
                             {benefitPolicies
-                              .filter((p) => !takenIds.has(p.id))
+                              // ⚠ Lane C3 widened this: a policy an attached GROUP already provides
+                              // is excluded too, because the server refuses to hold it both ways.
+                              .filter((p) => !takenIds.has(p.id) && !benefitCoverage.has(p.id))
                               .map((p) => (
                                 <SelectItem key={p.id} value={p.id}>
                                   {p.policyName}

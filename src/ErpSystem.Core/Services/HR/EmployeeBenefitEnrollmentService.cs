@@ -26,6 +26,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     private readonly IGenericRepository<BenefitUtilization> _utilizationRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IEmolumentService _emolumentService;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EmployeeBenefitEnrollmentService> _logger;
@@ -41,6 +42,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         IGenericRepository<BenefitUtilization> utilizationRepository,
         IGenericRepository<Employee> employeeRepository,
         IEmolumentService emolumentService,
+        IPositionNamedSetService namedSets,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EmployeeBenefitEnrollmentService> logger)
@@ -55,6 +57,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         _utilizationRepository = utilizationRepository ?? throw new ArgumentNullException(nameof(utilizationRepository));
         _employeeRepository = employeeRepository ?? throw new ArgumentNullException(nameof(employeeRepository));
         _emolumentService = emolumentService ?? throw new ArgumentNullException(nameof(emolumentService));
+        _namedSets = namedSets ?? throw new ArgumentNullException(nameof(namedSets));
         _currentUserProvider = currentUserProvider ?? throw new ArgumentNullException(nameof(currentUserProvider));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -319,10 +322,20 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
             .FirstOrDefaultAsync()
             ?? throw new ArgumentException($"Employee '{employeeId}' not found.");
 
-        var positionBenefits = await _positionBenefitRepository
-            .GetQueryable(pb => pb.TenantId == tenantId && pb.PositionId == employee.PositionId)
-            .Include(pb => pb.BenefitPolicy)
-            .ToListAsync();
+        // ⚠ ROUND 2, LANE C3 — THE EFFECTIVE READ, NOT THE TABLE. This used to query
+        // EmployeePositionBenefit directly. Once a post could hold a BENEFIT GROUP, that query saw
+        // only the individually-attached rows, so every benefit a post got through a group would
+        // have enrolled nobody — the feature would have looked finished and paid out nothing.
+        var effective = employee.PositionId == Guid.Empty
+            ? new List<EffectiveBenefitDto>()
+            : (await _namedSets.GetEffectiveBenefitsAsync(employee.PositionId, tenantId)).ToList();
+
+        // The policies themselves, for eligibility, valuation and currency. The effective read
+        // names them; it does not carry the entity.
+        var policyIds = effective.Select(x => x.PolicyId).Distinct().ToList();
+        var policies = await _unitOfWork.Repository<BenefitPolicy>().GetQueryable()
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted && policyIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id);
 
         var existing = await _enrollmentRepository
             .GetQueryable(e => e.TenantId == tenantId && e.EmployeeId == employeeId)
@@ -332,10 +345,9 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
 
         var todayForExpiry = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        foreach (var positionBenefit in positionBenefits)
+        foreach (var positionBenefit in effective)
         {
-            var policy = positionBenefit.BenefitPolicy;
-            if (policy is null || !policy.IsActive || policy.TenantId != tenantId)
+            if (!policies.TryGetValue(positionBenefit.PolicyId, out var policy) || !policy.IsActive || policy.TenantId != tenantId)
             {
                 continue;
             }
@@ -390,7 +402,13 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
                 CurrentPeriodStart = DateTime.UtcNow,
                 Status = policy.IsMandatory ? EmployeeBenefitEnrollmentStatus.Active : EmployeeBenefitEnrollmentStatus.PendingApproval,
                 Source = policy.IsMandatory ? BenefitEnrollmentSource.Mandatory : BenefitEnrollmentSource.Position,
-                SourcePositionBenefitId = positionBenefit.Id,
+                // Exactly one of these two is set. A group-provided benefit has no individual row
+                // to cite, so it cites the group instead rather than claiming a row that does not
+                // exist (§ 6.4 — the enrollment is matched on the policy either way).
+                SourcePositionBenefitId = positionBenefit.PositionBenefitId,
+                SourceBenefitGroupId = positionBenefit.PositionBenefitId is null
+                    ? positionBenefit.Sources.FirstOrDefault(s => s.SetId.HasValue)?.SetId
+                    : null,
                 AssessedValue = valuation.AssessedValue,
                 TaxableValue = valuation.TaxableValue,
                 EmployerContribution = employer,

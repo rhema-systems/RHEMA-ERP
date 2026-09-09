@@ -29,6 +29,7 @@ public class JobOfferService : IJobOfferService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ILogger<JobOfferService> _logger;
     private readonly IEmailService _email;
     private readonly ITemplatedEmailService _templatedEmail;
@@ -44,6 +45,7 @@ public class JobOfferService : IJobOfferService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IPositionNamedSetService namedSets,
         ILogger<JobOfferService> logger,
         IEmailService email,
         ITemplatedEmailService templatedEmail,
@@ -58,6 +60,7 @@ public class JobOfferService : IJobOfferService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider     = currentUserProvider;
         _unitOfWork              = unitOfWork;
+        _namedSets               = namedSets;
         _logger                  = logger;
         _email                   = email;
         _templatedEmail          = templatedEmail;
@@ -260,18 +263,27 @@ public class JobOfferService : IJobOfferService
 
         await _offerRepository.AddAsync(entity);
 
-        // --- Seed JobOfferBenefit records from position benefits ---
-        if (position?.PositionBenefits != null)
+        // --- Seed JobOfferBenefit records from the position's EFFECTIVE benefits ---
+        // ⚠ Round 2, lane C3. This read the position's individual rows directly, so an offer for a
+        // post whose benefits came through a BENEFIT GROUP would have listed none of them — the
+        // candidate would have been sent an offer letter missing most of the package.
+        if (position != null)
         {
             var order = 1;
-            var seededBenefits = position.PositionBenefits
-                .Where(pb => !pb.IsDeleted && pb.BenefitPolicy != null)
+            var effective = await _namedSets.GetEffectiveBenefitsAsync(position.Id, current, cancellationToken);
+            var descriptions = await _unitOfWork.Repository<BenefitPolicy>().GetQueryable()
+                .Where(p => p.TenantId == current && !p.IsDeleted)
+                .Select(p => new { p.Id, p.Description })
+                .ToDictionaryAsync(p => p.Id, p => p.Description, cancellationToken);
+
+            var seededBenefits = effective
+                .Where(pb => pb.PolicyIsActive)
                 .Select(pb => new JobOfferBenefit
                 {
                     TenantId      = current,
                     JobOfferId    = entity.Id,
-                    BenefitName   = pb.BenefitPolicy.PolicyName,
-                    Description   = pb.BenefitPolicy.Description,
+                    BenefitName   = pb.PolicyName,
+                    Description   = descriptions.TryGetValue(pb.PolicyId, out var d) ? d : null,
                     MonetaryValue = pb.PositionAmount,
                     CurrencyCode  = entity.CurrencyCode,
                     IsMonetary    = pb.PositionAmount.HasValue,

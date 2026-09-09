@@ -2725,6 +2725,14 @@ public class EmployeePositionDto
 
     /// <summary>What the post must hold (round 2, lane C2). Filled on the single read and the write responses.</summary>
     public List<PositionCertificationRequirementDto> CertificationRequirements { get; set; } = new();
+
+    // ── Named sets (round 2, lane C3) ───────────────────────────────────────────────────────
+    // What is ATTACHED. What the post actually requires is the union of these with the individual
+    // collections above — the three effective reads, which is what every consumer now uses.
+    public List<AttachedSetDto> BenefitGroups { get; set; } = new();
+    public List<AttachedSetDto> SkillSets { get; set; } = new();
+    public List<AttachedSetDto> CertificationSets { get; set; } = new();
+
 }
 
 /// <summary>
@@ -2793,6 +2801,16 @@ public class CreateEmployeePositionDto : IValidatableObject
     /// RequiresLicense on, at least one — the switches say "some", these rows say which.
     /// </summary>
     public ICollection<CreatePositionCertificationRequirementDto> CertificationRequirements { get; set; } = new List<CreatePositionCertificationRequirementDto>();
+
+    /// <summary>
+    /// Named sets attached to this post (round 2, lane C3). ⚠ Sent as the COMPLETE set on every
+    /// save, like the collections above: an omitted id is a detachment. Null means "leave as they
+    /// are", which is how a caller that predates this lane keeps working.
+    /// </summary>
+    public ICollection<Guid>? BenefitGroupIds { get; set; }
+    public ICollection<Guid>? SkillSetIds { get; set; }
+    public ICollection<Guid>? CertificationSetIds { get; set; }
+
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -2872,6 +2890,16 @@ public class UpdateEmployeePositionDto : IValidatableObject
     /// </summary>
     public ICollection<CreatePositionCertificationRequirementDto> CertificationRequirements { get; set; } = new List<CreatePositionCertificationRequirementDto>();
 
+    /// <summary>
+    /// Named sets attached to this post (round 2, lane C3). ⚠ Sent as the COMPLETE set on every
+    /// save, like the collections above: an omitted id is a detachment. Null means "leave as they
+    /// are", which is how a caller that predates this lane keeps working.
+    /// </summary>
+    public ICollection<Guid>? BenefitGroupIds { get; set; }
+    public ICollection<Guid>? SkillSetIds { get; set; }
+    public ICollection<Guid>? CertificationSetIds { get; set; }
+
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (MinimumAge.HasValue && MaximumAge.HasValue && MinimumAge.Value > MaximumAge.Value)
@@ -2901,6 +2929,22 @@ public class EmployeePositionLookupDto
 /// <summary>
 /// Employee position benefit assignment (read model).
 /// </summary>
+/// <summary>
+/// A named set attached to a position — enough to name it and link to it, no members. Round 2,
+/// lane C3.
+/// </summary>
+public class AttachedSetDto
+{
+    /// <summary>The attachment row's own id, so a screen can detach exactly this one.</summary>
+    public Guid Id { get; set; }
+
+    public Guid SetId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Code { get; set; }
+    public bool IsActive { get; set; }
+    public int MemberCount { get; set; }
+}
+
 public class EmployeePositionBenefitDto
 {
     public Guid Id { get; set; }
@@ -2912,7 +2956,12 @@ public class EmployeePositionBenefitDto
     [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal? PositionAmount { get; set; }
 
-    public bool IsActive { get; set; } = true;
+    // ⚠ X-3 CLOSED (round 2, lane C3): there was an `IsActive` here with NO column behind it.
+    // `EmployeePositionBenefit` has no such property; the mapper hard-coded `true` on every read,
+    // so the field said "active" about rows that had no such state and about soft-deleted ones
+    // alike. A screen that believed it would have shown a switch nothing could turn off. Removed
+    // rather than backed with a column: the row's presence IS its activeness, and its absence is
+    // the soft delete.
 }
 
 /// <summary>

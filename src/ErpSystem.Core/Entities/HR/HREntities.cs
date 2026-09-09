@@ -873,6 +873,9 @@ public class BenefitPolicy : TenantEntity
 
     /// <summary>Direct, in-force employee enrollments in this policy.</summary>
     public virtual List<EmployeeBenefitEnrollment> Enrollments { get; set; } = new List<EmployeeBenefitEnrollment>();
+
+    /// <summary>The benefit groups this policy belongs to (round 2, lane C3 — register row P-3).</summary>
+    public virtual ICollection<BenefitGroupMember> GroupMemberships { get; set; } = new List<BenefitGroupMember>();
 }
 
 public class BenefitPolicyRelation : TenantEntity
@@ -1051,6 +1054,15 @@ public class EmployeePosition : TenantEntity
     public virtual ICollection<PositionCertificationRequirement> CertificationRequirements { get; set; } = new List<PositionCertificationRequirement>();
     public virtual List<EmployeePositionBenefit> PositionBenefits { get; set; } = new List<EmployeePositionBenefit>();
     public virtual ICollection<PositionOvertimePolicy> OvertimePolicies { get; set; } = new List<PositionOvertimePolicy>();
+
+    // ── Named sets (round 2, lane C3 — register rows P-3, S-3; plan § 6.4) ──────────────────
+    // Attachments, not rows: what the post actually requires is the UNION of these sets' members
+    // with the individual collections above, which is what IPositionEffectiveSets computes. Every
+    // consumer of the individual rows reads the union instead — a set whose members nothing acts
+    // on is the dead path this lane exists to avoid.
+    public virtual ICollection<EmployeePositionBenefitGroup> BenefitGroups { get; set; } = new List<EmployeePositionBenefitGroup>();
+    public virtual ICollection<PositionSkillSet> SkillSets { get; set; } = new List<PositionSkillSet>();
+    public virtual ICollection<PositionCertificationSet> CertificationSets { get; set; } = new List<PositionCertificationSet>();
 }
 
 public class EmployeePositionBenefit : TenantEntity
@@ -2227,6 +2239,9 @@ public class Skill : TenantEntity
     /// with <see cref="RequiresCertification"/> carries at least one.
     /// </summary>
     public virtual ICollection<SkillCertification> Certifications { get; set; } = new List<SkillCertification>();
+
+    /// <summary>The skill sets this skill belongs to (round 2, lane C3 — register row S-3).</summary>
+    public virtual ICollection<SkillSetMember> SetMemberships { get; set; } = new List<SkillSetMember>();
 }
 
 /// <summary>

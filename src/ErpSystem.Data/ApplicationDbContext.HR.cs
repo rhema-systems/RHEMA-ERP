@@ -10597,6 +10597,171 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ═══════════════════════════════════════════════════════════════════════════════════════
+        // NAMED SETS — round 2, lane C3 (plan § 6.4)
+        //
+        // ⚠ Every unique index here carries HasFilter("[IsDeleted] = 0"), following C2 and NOT the
+        // older PositionSkillRequirement / EmployeePositionBenefit indexes, which lack the filter
+        // and are the reason those two syncs have to revive a soft-deleted row instead of adding
+        // one. New tables get the filter so re-attaching a detached set is an ordinary insert.
+        // ═══════════════════════════════════════════════════════════════════════════════════════
+
+        builder.Entity<BenefitGroup>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_BenefitGroup_Tenant_Name");
+            entity.HasIndex(x => new { x.TenantId, x.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Code] IS NOT NULL")
+                .HasDatabaseName("UX_BenefitGroup_Tenant_Code");
+        });
+
+        builder.Entity<BenefitGroupMember>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.BenefitGroupId, x.PolicyId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_BenefitGroupMember_Tenant_Group_Policy");
+            entity.HasIndex(x => x.PolicyId);
+
+            entity.HasOne(x => x.BenefitGroup)
+                .WithMany(g => g.Members)
+                .HasForeignKey(x => x.BenefitGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Policy)
+                .WithMany(p => p.GroupMemberships)
+                .HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SkillSet>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SkillSet_Tenant_Name");
+            entity.HasIndex(x => new { x.TenantId, x.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Code] IS NOT NULL")
+                .HasDatabaseName("UX_SkillSet_Tenant_Code");
+        });
+
+        builder.Entity<SkillSetMember>(entity =>
+        {
+            entity.Property(x => x.RequiredLevel).HasConversion<int>();
+
+            entity.HasIndex(x => new { x.TenantId, x.SkillSetId, x.SkillId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SkillSetMember_Tenant_Set_Skill");
+            entity.HasIndex(x => x.SkillId);
+
+            entity.HasOne(x => x.SkillSet)
+                .WithMany(s => s.Members)
+                .HasForeignKey(x => x.SkillSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Skill)
+                .WithMany(sk => sk.SetMemberships)
+                .HasForeignKey(x => x.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CertificationSet>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_CertificationSet_Tenant_Name");
+            entity.HasIndex(x => new { x.TenantId, x.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Code] IS NOT NULL")
+                .HasDatabaseName("UX_CertificationSet_Tenant_Code");
+        });
+
+        builder.Entity<CertificationSetMember>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.CertificationSetId, x.CertificationId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_CertificationSetMember_Tenant_Set_Certification");
+            entity.HasIndex(x => x.CertificationId);
+
+            entity.HasOne(x => x.CertificationSet)
+                .WithMany(s => s.Members)
+                .HasForeignKey(x => x.CertificationSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Certification)
+                .WithMany(c => c.SetMemberships)
+                .HasForeignKey(x => x.CertificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── Position attachments ────────────────────────────────────────────────────────────
+        // Position → Cascade (the post's attachments die with the post), set → Restrict (a set
+        // cited by a post cannot be deleted out from under it; the service refuses and says who).
+
+        builder.Entity<EmployeePositionBenefitGroup>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PositionId, x.BenefitGroupId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_EmployeePositionBenefitGroup_Tenant_Position_Group");
+            entity.HasIndex(x => x.BenefitGroupId);
+
+            entity.HasOne(x => x.Position)
+                .WithMany(p => p.BenefitGroups)
+                .HasForeignKey(x => x.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.BenefitGroup)
+                .WithMany(g => g.Positions)
+                .HasForeignKey(x => x.BenefitGroupId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PositionSkillSet>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PositionId, x.SkillSetId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_PositionSkillSet_Tenant_Position_Set");
+            entity.HasIndex(x => x.SkillSetId);
+
+            entity.HasOne(x => x.Position)
+                .WithMany(p => p.SkillSets)
+                .HasForeignKey(x => x.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.SkillSet)
+                .WithMany(s => s.Positions)
+                .HasForeignKey(x => x.SkillSetId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PositionCertificationSet>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PositionId, x.CertificationSetId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_PositionCertificationSet_Tenant_Position_Set");
+            entity.HasIndex(x => x.CertificationSetId);
+
+            entity.HasOne(x => x.Position)
+                .WithMany(p => p.CertificationSets)
+                .HasForeignKey(x => x.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.CertificationSet)
+                .WithMany(s => s.Positions)
+                .HasForeignKey(x => x.CertificationSetId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<OrganizationChartNode>(entity =>
         {
             entity.HasIndex(x => x.PositionId);

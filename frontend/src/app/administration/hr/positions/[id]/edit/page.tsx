@@ -18,6 +18,7 @@ import { staffLevelService } from '@/services/hr/staff-level.service';
 import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { skillService } from '@/services/hr/skill.service';
 import { benefitPolicyService } from '@/services/hr/benefits.service';
+import { namedSetService } from '@/services/hr/named-set.service';
 
 const toIntOrNull = (v: string) => (v && v.trim() ? Number(v) : null);
 const toStr = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v));
@@ -65,6 +66,60 @@ export default function EditEmployeePositionPage() {
     queryKey: ['hr', 'benefit-policies', 'active'],
     queryFn: () => benefitPolicyService.getActive(),
   });
+
+
+  // Round 2, lane C3 — the named sets on offer. Their members come with them so the form can grey
+  // out an item an attached set already provides, rather than letting the user compose a save the
+  // server will refuse.
+  const { data: benefitGroups } = useQuery({
+    queryKey: ['hr', 'benefit-groups'],
+    queryFn: () => namedSetService.getBenefitGroups(),
+  });
+  const { data: skillSets } = useQuery({
+    queryKey: ['hr', 'skill-sets'],
+    queryFn: () => namedSetService.getSkillSets(),
+  });
+  const { data: certificationSets } = useQuery({
+    queryKey: ['hr', 'certification-sets'],
+    queryFn: () => namedSetService.getCertificationSets(),
+  });
+
+  const benefitGroupOptions = useMemo(
+    () =>
+      (benefitGroups ?? []).map((g) => ({
+        id: g.id,
+        name: g.name,
+        code: g.code,
+        isActive: g.isActive,
+        memberCount: g.memberCount,
+        memberIds: (g.members ?? []).map((m) => m.policyId),
+      })),
+    [benefitGroups],
+  );
+  const skillSetOptions = useMemo(
+    () =>
+      (skillSets ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        code: s.code,
+        isActive: s.isActive,
+        memberCount: s.memberCount,
+        memberIds: (s.members ?? []).map((m) => m.skillId),
+      })),
+    [skillSets],
+  );
+  const certificationSetOptions = useMemo(
+    () =>
+      (certificationSets ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        code: s.code,
+        isActive: s.isActive,
+        memberCount: s.memberCount,
+        memberIds: (s.members ?? []).map((m) => m.certificationId),
+      })),
+    [certificationSets],
+  );
 
   // Finance owns the currency list; the server refuses a code it does not hold, so a free-text
   // box would be offering a way to fail.
@@ -126,6 +181,10 @@ export default function EditEmployeePositionPage() {
           expiryDate: b.expiryDate ? b.expiryDate : null,
           positionAmount: b.positionAmount ? Number(b.positionAmount) : null,
         })),
+        // Round 2, lane C3 — attached sets, as the complete set of ids.
+        benefitGroupIds: values.benefitGroupIds,
+        skillSetIds: values.skillSetIds,
+        certificationSetIds: values.certificationSetIds,
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'employee-positions'] });
       toast({ title: 'Success', description: 'Position updated.' });
@@ -163,6 +222,9 @@ export default function EditEmployeePositionPage() {
           salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}
           benefitPolicies={benefitPolicies ?? []}
+          benefitGroups={benefitGroupOptions}
+          skillSets={skillSetOptions}
+          certificationSets={certificationSetOptions}
           currencies={currencies ?? []}
           defaultValues={{
             title: position.title,
@@ -208,6 +270,11 @@ export default function EditEmployeePositionPage() {
                 ? ''
                 : String(b.positionAmount),
             })),
+            // Round 2, lane C3 — and the note above applies with equal force: the save replaces
+            // the attached sets with whatever it carries, so starting blank would detach them all.
+            benefitGroupIds: (position.benefitGroups ?? []).map((a) => a.setId),
+            skillSetIds: (position.skillSets ?? []).map((a) => a.setId),
+            certificationSetIds: (position.certificationSets ?? []).map((a) => a.setId),
           }}
           onSubmit={handleSubmit}
           submitting={submitting}

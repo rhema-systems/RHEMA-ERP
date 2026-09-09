@@ -61,6 +61,9 @@ public class Certification : TenantEntity
     public virtual ICollection<SkillCertification> SkillLinks { get; set; } = new List<SkillCertification>();
     public virtual ICollection<PositionCertificationRequirement> PositionRequirements { get; set; } = new List<PositionCertificationRequirement>();
     public virtual ICollection<EmployeeCertification> EmployeeCertifications { get; set; } = new List<EmployeeCertification>();
+
+    /// <summary>The certification sets this credential belongs to (round 2, lane C3 — plan § 1.5).</summary>
+    public virtual ICollection<CertificationSetMember> SetMemberships { get; set; } = new List<CertificationSetMember>();
 }
 
 /// <summary>

@@ -256,9 +256,9 @@ Both are wiring, not schema, except the guarantor needs one nullable FK column.
 
 | # | Finding | Where | Lane |
 |---|---|---|---|
-| X-1 | Position form allows the same skill on two rows; server keeps the first silently | `EmployeePositionForm.tsx:439-541` (no `takenIds`), `EmployeePositionService.cs:114-116` | C3 — the refuse rule covers it |
-| X-2 | Duplicate benefits/skills are collapsed, never refused (no DTO validation) | `EmployeePositionService.cs:130-132`, `:344` | C3 |
-| X-3 | `EmployeePositionBenefitDto.IsActive` exists with no column behind it | `HRDTOs.cs:2660` | C3 — drop the DTO field or add the column; recommend drop |
+| X-1 | ~~Position form allows the same skill on two rows; server keeps the first silently~~ **FIXED C3a** — refused, not collapsed; the skills picker gained the `takenIds` guard the benefits picker always had, widened to cover what an attached set provides | `EmployeePositionForm.tsx`, `EmployeePositionService.cs` | C3a ✅ |
+| X-2 | ~~Duplicate benefits/skills are collapsed, never refused~~ **FIXED C3a.** ⚠ The `GroupBy(...).First()` idiom appears **ten** times, not two: six in the position service, four in the certification service. Only the **desired-side** ones were removed — the four on the **stored** side defend against duplicate rows already in the table, which the unfiltered unique indexes make possible, and deleting those would have been a different bug | `EmployeePositionService.cs`, `CertificationService.cs` | C3a ✅ |
+| X-3 | ~~`EmployeePositionBenefitDto.IsActive` exists with no column behind it~~ **FIXED C3a** — dropped, not backed by a column: the row's presence IS its activeness and its absence is the soft delete. The mapper had hard-coded `true` on every read. ⚠ The line number in this table had drifted by ~250 lines by the time the lane ran; resolve these by NAME | `HRDTOs.cs` (by name, not line) | C3a ✅ |
 | X-4 | ~~`AddContractAsync` inserts `EffectiveDate = 0001-01-01`, `IsCurrent = true` always; nothing closes the previous current contract~~ **FIXED D1** — one `FileContractAsync` helper every door goes through, plus a migration that repairs the `IsCurrent` every existing row wrongly claims | `EmployeeService.cs:1552-1604` | D1 ✅ |
 | X-5 | Work-history zod max (300) exceeds the column (200) | `WorkHistoryTab.tsx:20` vs `HREntities.cs:1351` | D2 |
 | X-6 | ~~`EmployeeContractType` lookup is seeded with seven TDC rows and has no DTO, service, controller or screen~~ **FIXED D1** — surfaced as the contract kind, with its own master screen | `HREntities.cs:1028-1039`, `TdcDemoLegacyOrgSeeder.cs:99-140` | D1 ✅ |
@@ -285,7 +285,11 @@ the sets need the certification catalogue; B3 (the forty-screen sweep) last beca
 mechanical and long.
 
 Lane G (salary structure tiers and source, § 1.6) was added on 2026-09-09 between E1b and C3; it
-is independent of the rest.
+is independent of the rest. **C3 was split into C3a and C3b** the same day (see the lane block);
+C3a is built, C3b follows next. **Lane H** (a movement changes the pay but not the placement) was
+added the same day out of lane G's closing note, and is deferred with a trigger rather than a
+position in the order: **before the next demo**, because Staff Movements is session 14 of the
+demo walk. Everything else keeps the order below.
 
 Harness folders under `D:\Rhema\TDC ERPS\dev-harness\` (outside the repo, per the demo-pack
 boundary): existing `hr-employee-docs`, `hr-jobarch`, `hr-payroll-membership`; new
@@ -382,13 +386,48 @@ Six tables, not the five the plan counted: the sweep needs its own run/dispatch 
 - [x] Setup nav: *People Reference Data → Certifications*; employee-tab and permission gates on `HR.Employee.*` / `HR.Competency.*` (the skill side).
 - [x] Harness `hr-jobarch/run-c2.mjs`: a certification must belong to the chosen body (mismatch 400); a skill with `requiresCertification` and no accepted credential refused on save; an `EmployeeSkill` added against such a skill without an `EmployeeCertification` is **allowed but flagged** (`isCompliant = false`) — recording is not gating, the position compliance read does the reporting; expiry computed from `ValidityMonths` when `ExpiresOn` omitted; the sweep emits for a credential inside lead days (log-checked, not harness-inferred — the lane-1 lesson).
 
-**C3 — Benefit groups, skill sets, certification sets, the duplicate rule, employee skills from the position** (§ 6.4). Migration: six tables + three link tables.
-- [ ] `BenefitGroup`/`BenefitGroupMember`, `SkillSet`/`SkillSetMember`, `CertificationSet`/`CertificationSetMember`; `EmployeePositionBenefitGroup`, `PositionSkillSet`, `PositionCertificationSet`.
-- [ ] Effective reads: `GET api/EmployeePositions/{id}/effective-{benefits|skills|certifications}` → union with `source: "Individual" | "Set:<name>"`.
-- [ ] The refuse rule in the position service, once, for all three (§ 6.4.2); X-1/X-2/X-3 closed by it.
-- [ ] `SkillsTab.tsx` leads with the position's effective skills as tick-boxes (held / not held / add), then "other skills" (§ 6.4.4).
-- [ ] Screens: three masters under setup nav (*Pay & Benefits → Benefit Groups*; *Competencies → Skill Sets*; *People Reference Data → Certification Sets*); three panels on the position form, each with "sets" above "individual".
-- [ ] Harness `hr-jobarch/run-c3.mjs`: individual already in an attached set → 400 naming the set; attaching a set that contains an attached individual → 400 naming the row; two sets sharing a member → allowed (union); effective read shows the source; employee skills tab payload shape probed.
+**C3 — Benefit groups, skill sets, certification sets, the duplicate rule, employee skills from the position** (§ 6.4).
+
+⚠ **Split in two on 2026-09-09.** As written this was nine tables, three master screens, three
+position panels, the employee skills tab and a harness — two builds in one commit. **C3a** is the
+sets end to end; **C3b** is the skills tab, which consumes C3a's effective-skills read and cannot
+precede it.
+
+**C3a — the sets, the rule, the effective reads.** ✅ **BUILT 2026-09-09 — 74 ×2, `hr-jobarch/run-c3.mjs`.** Migration `20260909225805_AddNamedSets` (nine tables + one column). Regression after it: C1 36, C2 143, E1 73, membership 86, D1 79, lane G 69.
+- [x] `BenefitGroup`/`BenefitGroupMember`, `SkillSet`/`SkillSetMember`, `CertificationSet`/`CertificationSetMember`; `EmployeePositionBenefitGroup`, `PositionSkillSet`, `PositionCertificationSet`. Three parallel classes, not a base class — a shared base would be a TPH hierarchy in EF, and the member rows point at three unrelated catalogues.
+- [x] Effective reads: `GET api/EmployeePositions/{id}/effective-{benefits|skills|certifications}` → the union, each line carrying every `source`.
+- [x] The rule of § 6.4.2 stated once in `PositionNamedSetService.ValidateAsync`, for all three kinds, before anything is written. X-1, X-2 and X-3 closed.
+- [x] Screens: three masters under one shared shell (`components/hr/named-sets/NamedSetPage.tsx`), a list of sets beside the selected set's members; nav under *Jobs & Establishment → Skill Sets*, *People Reference Data → Certification Sets*, *Pay & Benefits → Benefit Groups*. The position form gained an attach strip above each of its three individual lists.
+- [x] Demo data: scenario `146-named-sets.mjs` builds three TDC sets and attaches them, and all nine tables are listed `required` in `demo-coverage-manifest.csv`. ⚠ **C2 added neither**, for its own six tables; recorded in § 8 rather than fixed blind, because a `required` row without seeding fails the UAT rebuild.
+
+**⚠ WHAT THE PLAN GOT WRONG, AND IT IS THE WHOLE LANE.** § 6.4.3 describes the effective reads as
+a new endpoint for the position form. They are not an extra — they are the feature. Attaching a set
+writes an attachment row and **nothing else**; no benefit row, no skill requirement, no
+certification requirement is materialised. So every existing consumer that read the individual
+table directly would have gone on seeing only the individual rows:
+
+| Consumer | What it read | What would have happened |
+|---|---|---|
+| `EmployeeBenefitEnrollmentService.ReconcilePositionEnrollmentsAsync` | `EmployeePositionBenefit` | a benefit reaching a post through a group **enrols nobody** |
+| `SuccessionCandidateSearchService` | `PositionSkillRequirement` | candidates scored against a shorter list than the post has |
+| `CertificationService.GetEmployeeComplianceAsync` | `PositionCertificationRequirement` | a person reads compliant while missing everything a set asks |
+| `JobOfferService` (offer benefit seeding) | `position.PositionBenefits` | the offer letter lists none of the package |
+
+All four now read the union. **A green effective-read test with a dead consumer is a feature that
+looks finished and does nothing** — which is why the harness's § 5 asserts an actual enrolment row,
+not just the read.
+
+**What else the build changed or found.**
+
+1. **A tenth change: `EmployeeBenefitEnrollment.SourceBenefitGroupId`.** The existing provenance link points at an individual position-benefit row; a group-provided benefit has none, so without this the link would silently have gone null. A bare nullable id with **no** FK and no navigation — provenance, not a live reference, so retiring a group or changing its membership cannot be blocked by an enrolment already made.
+2. **⚠ Lane C2's switch rule counted the wrong thing.** "A post whose certification/licence switch is on must name at least one credential" counted the INDIVIDUAL rows only, so a post whose whole regulatory bundle arrived through a set was refused for naming nothing. Same shape as the four consumers above, in a rule rather than a read. `SyncPositionRequirementsAsync` now takes the count the attached sets provide. **Found by running the demo scenario, not by the harness** — the harness had only ever attached credential sets to posts with the switch off. Asserted now (3.9–3.11).
+3. **The tier refusal comes before the band rules** — as in lane G. The two-tier lesson generalised: when a rule says "this cannot exist here", check it before rules about its shape.
+4. **The duplicate rule is one check, not two.** § 6.4.2 asks for separate messages for "individual already in a set" and "set contains an attached individual". At save time both arrive together and there is no way to tell which the user added, so there is one refusal naming the row AND the set and saying which to remove.
+5. **Strongest-wins is a decision the plan did not state.** Two sets can require the same skill differently. The union takes the highest level, required over preferred, highest priority; mandatory anywhere is mandatory. A post cannot need a skill *less* because a second set asked for less.
+6. **A retired set stays where it is and cannot be newly attached.** Retiring stops it being offered; it does not strip entitlements from posts already on it.
+7. **New tables get `HasFilter("[IsDeleted] = 0")` on every unique index**, following C2. The older `PositionSkillRequirements` and `EmployeePositionBenefits` indexes lack it, which is exactly why those two syncs must find a soft-deleted row and revive it instead of inserting.
+
+**C3b — the employee skills tab** (§ 6.4.4). Reads C3a's `effective-skills` and leads with it as a checklist: held (level, certified, verified), not held (a tick opens the add row pre-filled). "Other skills" stays below as the free add. A skill whose catalogue row requires certification shows the accepted credentials and whether the person holds one; recording without one stays allowed and flagged.
 
 ### Lane D — Employee profile · 2 slices
 
@@ -529,16 +568,68 @@ the third time this round). Regression after it: `run-e1.mjs` 73, membership 86,
 
 **Recorded, not built.**
 
-- **Hire and movement placement writes do not go through the level resolver.** They write
-  `EmployeeSalaryAssignment` rows directly and carry the level from their own DTOs; a two-tier
-  tenant reaching them without a level gets a placement with no level, as before. The movement
-  call site is unasserted (see D1's note). Route them when those screens are next touched.
+- **The hire-from-offer placement write does not go through the level resolver.**
+  `JobOfferHireService.cs:1584` builds the `EmployeeSalaryAssignment` by hand and copies the
+  offer's level and notch straight across, so a two-tier offer naming a notch and no level
+  produces a placement with an empty level, and nothing checks the notch belongs to the grade
+  (which is the offer's level's grade, else the position's default — the two need not agree).
+  Pay is unaffected: the notch amount is what `HrBasicPay` quotes either way. **Lane H.**
+  ⚠ An earlier note here said "hire *and movement*". The movement half was wrong and is
+  corrected in lane H — movements never write a placement at all, which is the larger finding.
 - **Switching the source back from HR to Payroll** re-enables the projection, which adopts by
-  code: an HR-authored amount on a code payroll also has is overwritten on the next read, and a
-  grade only HR knows is left as the projection has always left rows it does not recognise. The
+  code: an HR-authored amount on a code that payroll also has is overwritten on the next read,
+  and a grade only HR knows is left alone, as the projection has always left rows it does not
+  recognise. The
   harness only asserts the restore path. A client that has authored in HR should not switch back
   without reading that sentence; the policy screen's help text says so.
 - **Option (a)** — payroll grows a level tier — stands as § 7.1 item 6 for the user to raise.
+
+---
+
+### Lane H — A movement changes the pay but not the placement · 1 slice · **DEFERRED 2026-09-09, before the next demo**
+
+Found while explaining lane G's level-resolver note to the user, and it is not what that note
+said. **`StaffMovementService` never writes an `EmployeeSalaryAssignment` at all.** It resolves
+four repositories — `Employee`, `EmployeeCareerPath`, `EmployeePosition`,
+`EmployeePositionHistory` — and borrows `IEmployeeService` for one thing only,
+`SupersedeCurrentContractAsync` (the contract seam D1 built, `:833` and `:1049`). The movement's
+`NewSalaryGradeId` / `NewSalaryLevelId` / `NewSalaryNotchId` land in the career-path history row
+and nowhere else, and no pay resolver reads that table.
+
+**So a promotion moves the position, the unit, the manager, `Employee.Salary` and the contract,
+and leaves the grade placement saying the old grade.** For anyone whose pay basis is the salary
+scale, `HrBasicPay.Resolve` reads the placement's notch first, so the stale notch is quoted and
+it *shadows* the new figure the movement just wrote onto the employee record. The person reads as
+promoted everywhere except in what they are paid.
+
+**Why it is not urgent enough to interrupt lane C3, and not comfortable enough to leave open.**
+Pre-existing, and untouched by lane G — deferring makes nothing worse. But **Staff Movements is
+session 14 of the demo walk** (`HR-UAT-DEMO-PRESENTATION-PLAN.md:277`, 30 minutes, promotion and
+transfer and secondment), and round-2's feedback came from an audience watching exactly that
+closely. Open the Salary tab after the demonstrated promotion and the old grade is on screen.
+**Trigger: before the next demo, not after lane E2.**
+
+**Not yet investigated, and the slice starts here.** Whether the process expects HR to correct the
+placement by hand on the Salary tab after a movement. If it does, the gap is a missing prompt, not
+a missing write. Nothing has been run; the finding is from reading the service's dependencies.
+
+**The decision the slice needs** (user's, and the two answers build different things):
+
+1. **A movement's pay change writes the placement itself**, through `AssignSalaryAsync` so it
+   inherits lane G's level resolver, lane E1b's withdrawal rule and the payroll-membership gate.
+   Symmetrical with the contract seam D1 already built, and the temporary-assignment reversal has
+   to unwind it the same way the contract does.
+2. **The movement refuses to implement a pay change until the placement is updated**, naming the
+   Salary tab. Safer, and it makes an HR officer look at the notch rather than having one chosen
+   for them; worse as a demo, because implement now has a wall in it.
+
+Recommendation: **(1)**, with the movement's notch as the source and a refusal only where the
+movement names a notch that does not belong to the grade it names. Then hire-from-offer
+(lane G's remaining bullet) is routed through the same door in the same slice, and every placement
+in the system is written by one method.
+
+Harness: `hr-movements/` exists. Assert the promotion end to end — placement withdrawn and
+reopened, `HrBasicPay` quoting the new notch, the reversal unwinding both rows.
 
 ---
 
@@ -969,6 +1060,8 @@ needs). Items, in priority order:
 | `docs/HR/README.md` | index | This document added (done with this commit). |
 | `docs/HR-FINISH-PLAN.md` § "Where to start next" | — | Point at this document's § 5 for the round-2 lanes. |
 
+| `dev-harness/hr-demo-smoke/demo-coverage-manifest.csv` | — | ⚠ **Lane C2's six tables are absent** (`Certifications`, `SkillCertifications`, `PositionCertificationRequirements`, `EmployeeCertifications`, and the two expiry log tables), and so is any entry in `scenarios/005-employee-master.mjs`'s coverage array. The rule agreed 2026-09-04 (`AGENT-BRIEF.md:8-18`) says every entity a user can create carries at least one seeded row. **Not fixed by C3a on purpose**: a `required` row with no seeding fails `Invoke-UatDemoScenarios.ps1:245` and takes the whole UAT rebuild down, and it could not be confirmed from a dev database whether a fresh rebuild seeds them. Confirm against a rebuilt UAT database, then add the rows and the seeding together. C3a's own nine tables were added WITH their scenario (`146-named-sets.mjs`). |
+
 The first four are corrections to **claims**, not to code; make them when lane A lands so the
 plan and the ledger flip in the same commit as the fix.
 
@@ -982,7 +1075,7 @@ plan and the ledger flip in the same commit as the fix.
 | Q-2 | Reports-to outside the unit's ancestry: soft (filter with "show all") or hard (server refuses)? | Soft — matrix and dotted lines exist | C1 |
 | Q-3 | ~~Move the salary amount and payroll flags off the create form onto the Salary tab, leaving only the on-payroll switch and reason?~~ **DECIDED, BUILT E1**: the form sends neither; the create DTO keeps `Salary` for the import path; `NoPayBasis` is the posture until the tab is filled | Yes | E1 ✅ |
 | Q-4 | ~~Surface the dead `EmployeeContractType` lookup (seven TDC rows, with `Duration`) as the contract kind on the contract row, or delete the seed?~~ **DECIDED, BUILT D1**: surfaced, with full CRUD, a *People Reference Data → Contract Types* screen and an `IsActive` retire flag (there is no delete — contracts name their kind by FK). `Duration` defaults `ContractEndDate`. | Surface it; `Duration` gives `ContractEndDate` a default | D1 ✅ |
-| Q-5 | Set members with no per-position override (a position needing a different amount for one benefit uses an individual row and therefore not the set for that benefit) — acceptable? And: should editing a set's membership refuse when a position holds a redundant individual, or allow and mark? | No override; allow and mark | C3 |
+| Q-5 | ~~Set members with no per-position override … and should editing a set's membership refuse when a position holds a redundant individual?~~ **DECIDED, BUILT C3a**: both defaults taken. A benefit group member carries no amount and no expiry, so a post needing its own figure takes that benefit individually; and a set's membership can be edited freely afterwards — the post is not broken, its next save trips the duplicate rule and the effective read marks the row meanwhile | No override; allow and mark | C3a ✅ |
 | Q-6 | Create `Certification` catalogue rows from existing `Qualification` rows of type Certification/Licence by a one-time data pass? | Look at the real rows first; do not automate blind | C2 |
 | Q-7 | A generic checklist-template engine shared by teams, SHE, procurement and maintenance? | **No.** Four module-bound checklists already exist; a fifth generic one would be a migration project across other owners' modules. Team tasks get a flat tick list. Revisit if a second HR consumer appears | F1 |
 | Q-8 | Team objective and terms-of-reference approvals — who is the default approver in the shipped workflow definition (unit head of the owning unit? HR?) | Owning unit's head, falling back to HR | F3 |

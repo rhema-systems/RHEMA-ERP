@@ -2,6 +2,9 @@ import type {
   PositionCertificationRequirement,
   PositionCertificationRequirementInput,
 } from './certification';
+// Type-only, and circular with named-sets.ts (which imports SkillLevel from here).
+// TypeScript erases both, so the cycle never reaches the bundle.
+import type { AttachedSet } from './named-sets';
 
 // Enums serialize as strings (JsonStringEnumConverter is registered globally).
 export type WorkMode = 'OnSite' | 'Remote' | 'Hybrid';
@@ -102,6 +105,14 @@ export interface EmployeePosition {
   positionBenefits: PositionBenefit[];
   /** What the post must hold (round 2, lane C2). Filled on the single read and write responses. */
   certificationRequirements: PositionCertificationRequirement[];
+  /**
+   * Named sets ATTACHED to the post (round 2, lane C3). What the post actually requires is these
+   * unioned with the individual collections above — read that from the position's
+   * `effective-benefits` / `effective-skills` / `effective-certifications` endpoints.
+   */
+  benefitGroups: AttachedSet[];
+  skillSets: AttachedSet[];
+  certificationSets: AttachedSet[];
 }
 
 // Mirrors CreateEmployeePositionDto.
@@ -135,6 +146,14 @@ export interface CreateEmployeePositionRequest {
    * requiresLicense on, at least one — or the server refuses the save.
    */
   certificationRequirements: PositionCertificationRequirementInput[];
+  /**
+   * Named sets attached to the post (round 2, lane C3), as ids. ⚠ Sent as the COMPLETE set, like
+   * the three collections above: an omitted id detaches that set. Leave the property out entirely
+   * to say "do not touch the sets on this save".
+   */
+  benefitGroupIds?: string[];
+  skillSetIds?: string[];
+  certificationSetIds?: string[];
 }
 
 // Mirrors UpdateEmployeePositionDto (adds isActive).

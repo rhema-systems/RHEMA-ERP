@@ -38,7 +38,12 @@ public interface ICertificationService
     /// like its skills and benefits). Enforces the rule: a position with either switch on names at
     /// least one credential.
     /// </summary>
-    Task SyncPositionRequirementsAsync(EmployeePosition position, ICollection<CreatePositionCertificationRequirementDto>? desired, CancellationToken ct = default);
+    /// <param name="setProvidedCount">
+    /// How many credentials the post's attached certification SETS provide (round 2, lane C3a).
+    /// ⚠ The "a switched-on post must name a credential" rule below counts these too: a post whose
+    /// whole regulatory bundle arrives through a set names plenty, just not row by row.
+    /// </param>
+    Task SyncPositionRequirementsAsync(EmployeePosition position, ICollection<CreatePositionCertificationRequirementDto>? desired, CancellationToken ct = default, int setProvidedCount = 0);
 
     // ── Employee credentials ─────────────────────────────────────────────────
     Task<IEnumerable<EmployeeCertificationDto>> GetEmployeeCertificationsAsync(Guid employeeId, CancellationToken ct = default);
@@ -60,15 +65,18 @@ public interface ICertificationService
 public class CertificationService : ICertificationService
 {
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<CertificationService> _logger;
 
     public CertificationService(
         IUnitOfWork unitOfWork,
+        IPositionNamedSetService namedSets,
         ICurrentUserProvider currentUserProvider,
         ILogger<CertificationService> logger)
     {
         _unitOfWork = unitOfWork;
+        _namedSets = namedSets;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -426,7 +434,7 @@ public class CertificationService : ICertificationService
     }
 
     /// <inheritdoc />
-    public async Task SyncPositionRequirementsAsync(EmployeePosition position, ICollection<CreatePositionCertificationRequirementDto>? desired, CancellationToken ct = default)
+    public async Task SyncPositionRequirementsAsync(EmployeePosition position, ICollection<CreatePositionCertificationRequirementDto>? desired, CancellationToken ct = default, int setProvidedCount = 0)
     {
         var tenantId = GetTenantId();
         var repo = _unitOfWork.Repository<PositionCertificationRequirement>();
@@ -436,7 +444,7 @@ public class CertificationService : ICertificationService
         {
             var existingLive = await repo.GetQueryable()
                 .CountAsync(x => x.TenantId == tenantId && !x.IsDeleted && x.PositionId == position.Id, ct);
-            if (switchedOn && existingLive == 0)
+            if (switchedOn && existingLive == 0 && setProvidedCount == 0)
                 throw new InvalidOperationException(
                     $"'{position.Title}' requires a certification or licence, so say which one — add at least one required credential, or turn the switch off.");
             return;
@@ -451,7 +459,7 @@ public class CertificationService : ICertificationService
         // ⚠ The switches were bare bools with no consumer (register row P-2). They stay as the
         // user's statement of intent; these rows are what the statement means, and a statement
         // with nothing behind it is refused rather than stored.
-        if (switchedOn && desiredDistinct.Count == 0)
+        if (switchedOn && desiredDistinct.Count == 0 && setProvidedCount == 0)
             throw new InvalidOperationException(
                 $"'{position.Title}' requires a certification or licence, so say which one — add at least one required credential, or turn the switch off.");
 
@@ -804,12 +812,19 @@ public class CertificationService : ICertificationService
             return result;
         }
 
-        var requirements = await _unitOfWork.Repository<PositionCertificationRequirement>().GetQueryable()
+        // ⚠ Round 2, lane C3 — the EFFECTIVE requirement, not the individual table. A credential
+        // the post requires through an attached certification set is as required as one listed
+        // individually; reading the table directly would have reported a person compliant while
+        // they were missing everything a set asked of them.
+        var requirements = (await _namedSets.GetEffectiveCertificationsAsync(employee.PositionId, tenantId, ct))
+            .OrderByDescending(r => r.IsMandatory).ThenBy(r => r.CertificationName)
+            .ToList();
+
+        var requiredIds = requirements.Select(r => r.CertificationId).ToList();
+        var kinds = await _unitOfWork.Repository<Certification>().GetQueryable()
             .AsNoTracking()
-            .Include(r => r.Certification).ThenInclude(c => c.CertifyingBody)
-            .Where(r => r.TenantId == tenantId && !r.IsDeleted && r.PositionId == employee.PositionId)
-            .OrderByDescending(r => r.IsMandatory).ThenBy(r => r.Certification.Name)
-            .ToListAsync(ct);
+            .Where(c => c.TenantId == tenantId && requiredIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.Kind, ct);
 
         foreach (var r in requirements)
         {
@@ -824,9 +839,9 @@ public class CertificationService : ICertificationService
             var line = new EmployeeCertificationComplianceLineDto
             {
                 CertificationId = r.CertificationId,
-                CertificationName = r.Certification.Name,
-                CertifyingBodyName = r.Certification.CertifyingBody.Name,
-                Kind = r.Certification.Kind,
+                CertificationName = r.CertificationName,
+                CertifyingBodyName = r.CertifyingBodyName,
+                Kind = kinds.TryGetValue(r.CertificationId, out var k) ? k : default,
                 IsMandatory = r.IsMandatory,
             };
 

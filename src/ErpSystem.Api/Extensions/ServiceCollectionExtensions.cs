@@ -1081,6 +1081,20 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.ICertificationExpiryReminderService,
                                ErpSystem.Core.Services.HR.CertificationExpiryReminderService>();
 
+            // Demo feedback round 2, lane C3 — named sets. The three masters, and the one service
+            // that unions a position's attached sets with its individual rows. ⚠ Several existing
+            // services now depend on IPositionNamedSetService for their EFFECTIVE reads (benefit
+            // enrolment, succession matching, certification compliance, offer benefit seeding), so
+            // it must be registered even where no set has been created yet.
+            services.AddScoped<ErpSystem.Core.Services.HR.IPositionNamedSetService,
+                               ErpSystem.Core.Services.HR.PositionNamedSetService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.IBenefitGroupService,
+                               ErpSystem.Core.Services.HR.BenefitGroupService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.ISkillSetService,
+                               ErpSystem.Core.Services.HR.SkillSetService>();
+            services.AddScoped<ErpSystem.Core.Services.HR.ICertificationSetService,
+                               ErpSystem.Core.Services.HR.CertificationSetService>();
+
             // Organization Structure Services
             services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
             services.AddScoped<IOrganizationLevelService, OrganizationLevelService>();

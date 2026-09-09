@@ -496,6 +496,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EmployeePositionBenefit> EmployeePositionBenefits { get; set; }
     public DbSet<Skill> Skills { get; set; }
     public DbSet<PositionSkillRequirement> PositionSkillRequirements { get; set; }
+
+    // Named sets — round 2, lane C3 (plan § 6.4). Three masters, three member tables, three
+    // position attachments; one shape each.
+    public DbSet<BenefitGroup> BenefitGroups { get; set; }
+    public DbSet<BenefitGroupMember> BenefitGroupMembers { get; set; }
+    public DbSet<SkillSet> SkillSets { get; set; }
+    public DbSet<SkillSetMember> SkillSetMembers { get; set; }
+    public DbSet<CertificationSet> CertificationSets { get; set; }
+    public DbSet<CertificationSetMember> CertificationSetMembers { get; set; }
+    public DbSet<EmployeePositionBenefitGroup> EmployeePositionBenefitGroups { get; set; }
+    public DbSet<PositionSkillSet> PositionSkillSets { get; set; }
+    public DbSet<PositionCertificationSet> PositionCertificationSets { get; set; }
     public DbSet<StaffLevel> StaffLevels { get; set; }
     public DbSet<WorkStation> WorkStations { get; set; }
     public DbSet<EmployeeContractType> EmployeeContractTypes { get; set; }

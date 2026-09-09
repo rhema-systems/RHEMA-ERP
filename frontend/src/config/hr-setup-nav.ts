@@ -230,6 +230,15 @@ export const hrSetupGroups: HrSetupGroup[] = [
         description: 'Skills positions require and employees hold.',
       },
       {
+        // Round 2, lane C3. A bundle of skills a post needs, maintained in one place: attaching the
+        // set is exactly the same as attaching its skills one at a time, and the post may not then
+        // list one of them individually as well.
+        title: 'Skill Sets',
+        href: '/administration/hr/skill-sets',
+        icon: Layers,
+        description: 'Named bundles of skills, attached to a position in one move.',
+      },
+      {
         // Renamed from the bare "Establishment": an operational screen of that exact name already
         // exists at /hr/recruitment/establishment, showing headcount against the establishment and
         // the gaps. Two identically-named screens in two menus doing opposite jobs is what made
@@ -275,6 +284,14 @@ export const hrSetupGroups: HrSetupGroup[] = [
         href: '/administration/hr/certifications',
         icon: BadgeCheck,
         description: 'The credentials each certifying body issues — what skills, positions and people cite.',
+      },
+      {
+        // Round 2, lane C3. The regulatory bundle a post must hold — "driver: licence class C,
+        // defensive driving, first aid" — so that when the regulator changes it, it changes once.
+        title: 'Certification Sets',
+        href: '/administration/hr/certification-sets',
+        icon: ListChecks,
+        description: 'Named bundles of credentials a position must hold.',
       },
       {
         // Round 2, lane D1 (Q-4). Seeded with TDC's seven kinds in 2026 and reachable from nowhere
@@ -467,6 +484,14 @@ export const hrSetupGroups: HrSetupGroup[] = [
         href: '/administration/hr/compensation/benefit-policies',
         icon: ShieldPlus,
         description: 'Who qualifies for which benefit, and on what terms.',
+      },
+      {
+        // Round 2, lane C3. ⚠ Members carry no amount and no expiry: a post needing its own figure
+        // for a benefit takes that benefit individually instead (plan Q-5).
+        title: 'Benefit Groups',
+        href: '/administration/hr/compensation/benefit-groups',
+        icon: Boxes,
+        description: 'Named bundles of benefits, attached to a position in one move.',
       },
       {
         title: 'Payroll Setup',
