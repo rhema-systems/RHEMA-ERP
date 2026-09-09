@@ -1234,6 +1234,18 @@ The API build passed with zero errors, focused InventoryDisposal tests passed 15
 clean. No migration or configured database access occurred. Independent GPT-5.6 Sol High accounting/security/
 concurrency review is active before any integration.
 
+Independent GPT-5.6 Sol High review returned `CHANGES_REQUIRED` at exact clean Inventory commit `ea93e4a5`.
+Four P1 gates remain: the new publicly registered Stock Adjustment participant accepts forgeable maker/checker and
+Finance identifiers without exact disposal/C7-C8 authority and even permits positive quantities; completion does
+not lock and transactionally revalidate status, action, rowversion/payload and exact replay before re-entering
+Finance; C10 results are consumed by member order without binding group/member/event/request fingerprints and
+deterministic identities; and the critical cutover path is covered only by mocks rather than real relational
+same-context rollback/recovery/concurrency/disabled/attack evidence. Positive review confirmed the intended event
+split, deterministic identities/date and absence of Inventory book/C5/leaf/V1/schema/default changes. The fresh
+build and 56 focused tests passed; the widened slice passed 186 with five guarded SQL skips and only two inherited
+inventory-valuation NRE baselines. A bounded owner correction was returned to GPT-5.6 Terra Medium; no database
+was accessed or mutated and integration remains blocked pending approval.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
