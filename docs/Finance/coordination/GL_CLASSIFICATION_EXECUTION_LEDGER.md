@@ -1224,6 +1224,16 @@ Serializable context; execute and commit only on complete success; and roll back
 evidence. Public Stock Adjustment behavior and all C1-C11 authority remain unchanged. No book selection, C5
 derivation, leaf fan-out, auto-approval, default enablement, migration or database access is authorized.
 
+The Inventory implementer completed one clean direct-child commit,
+`ea93e4a57cea56273ec8fb3c908040063c3b1a00`, from exact base `27767d225855dd180524ff0f170ec06fb5eb4cb8`.
+The candidate implements the approved Sale/Auction C8 two-member and Donation/Destruction C7 single-member
+split, C11 durable independent approval, deterministic Stock Adjustment/item identities and stable posting
+date, ambient Serializable owner mutation, C10 compatibility evidence, and rollback-before-durable-failure.
+It removes active Inventory V1/book/C5/leaf construction while retaining the public Stock Adjustment workflow.
+The API build passed with zero errors, focused InventoryDisposal tests passed 15/15, and diff/EOL/scope gates are
+clean. No migration or configured database access occurred. Independent GPT-5.6 Sol High accounting/security/
+concurrency review is active before any integration.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
