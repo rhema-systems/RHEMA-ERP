@@ -1296,6 +1296,12 @@ ApplicationDbContext. It remains intentionally uncompiled and has not yet constr
 or executed rollback evidence. The fixture is being extended incrementally to avoid losing implementation time
 to the current long-running local compiler.
 
+Commit `56289d96dd70463da47b27de08b060ec893a93a6` adds the test-only ambient C7 execution seam to the
+SQLite fixture. It writes Finance-shaped marker evidence into the same DbContext transaction and can inject a
+pre-commit failure, enabling owner/Finance rollback proof without weakening production seams. The fixture still
+needs complete owner construction, authority seeding and executable assertions; those are the next bounded
+commit and compilation remains deferred.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
