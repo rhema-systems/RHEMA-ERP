@@ -1204,6 +1204,15 @@ skips, EF parity passed and 456 migrations were discovered no-connect. Two known
 remain inherited in byte-unchanged files. No configured database was accessed or mutated. C11 is approved for
 ordered local integration.
 
+C11 integration completed locally as `d2f594f1`. Every candidate-owned blob is byte-identical to approved
+commit `92915d29`, and the integrated range passes diff checks while all unrelated primary dirty work remains
+preserved. The candidate and independent-review builds both passed with zero errors, including 73/73 focused
+C6-C11/C9/C10 and 269 widened C1-C11 tests with five guarded SQL skips. A redundant primary Debug build was
+blocked only by an already-running local API process holding output assemblies; an isolated Release rebuild was
+stopped after prolonged compiler contention because it provided no additional candidate evidence. No source,
+database or migration mutation resulted. C11 is complete and Inventory can now be reissued from a fresh exact
+base using the durable independent-checker handoff.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
