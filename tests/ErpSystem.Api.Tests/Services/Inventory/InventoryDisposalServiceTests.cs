@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Inventory;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -356,7 +357,9 @@ public sealed class InventoryDisposalServiceTests
                 .Returns(Task.CompletedTask);
             var service = new InventoryDisposalService(db, current, access.Object,
                 Mock.Of<IProcurementSodGuardService>(), Mock.Of<IWorkflowIntegrationService>(),
-                Mock.Of<IStockAdjustmentService>(), Mock.Of<IFinancePostingEngine>(),
+                Mock.Of<IInventoryDisposalStockAdjustmentParticipant>(), Mock.Of<IStockAdjustmentValuationIntentBuilder>(),
+                Mock.Of<IFinanceProducerIntentService>(), Mock.Of<IFinanceProducerIntentGroupService>(),
+                Mock.Of<IFinanceProducerApprovedExecution>(), Mock.Of<IFinanceProducerIntentGroupApprovedExecution>(),
                 trackingControls.Object, events.Object);
             return new Fixture(db, service, current, events, trackingControls, warehouse, location, item, version, upload,
                 auditorId, memberIds);

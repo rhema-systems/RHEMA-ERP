@@ -16,12 +16,13 @@ using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.DocumentManagement;
 using ErpSystem.Core.Services.Inventory;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Inventory;
 
-public sealed class InventoryDisposalService : IInventoryDisposalService, IInventoryDisposalReportSource
+internal sealed class InventoryDisposalService : IInventoryDisposalService, IInventoryDisposalReportSource
 {
     private const string EntityType = "InventoryDisposal";
     private const string CommitteeMemberRole = "TDC_DISPOSAL_COMMITTEE_MEMBER";
@@ -32,8 +33,12 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
     private readonly IProcurementAccessControlService _access;
     private readonly IProcurementSodGuardService _sod;
     private readonly IWorkflowIntegrationService _workflow;
-    private readonly IStockAdjustmentService _adjustments;
-    private readonly IFinancePostingEngine _finance;
+    private readonly IInventoryDisposalStockAdjustmentParticipant _disposalAdjustments;
+    private readonly IStockAdjustmentValuationIntentBuilder _valuationIntent;
+    private readonly IFinanceProducerIntentService _producerIntents;
+    private readonly IFinanceProducerIntentGroupService _producerGroups;
+    private readonly IFinanceProducerApprovedExecution _producerExecution;
+    private readonly IFinanceProducerIntentGroupApprovedExecution _producerGroupExecution;
     private readonly IInventoryTrackingControlService _trackingControls;
     private readonly IProcurementControlEventService _controlEvents;
 
@@ -43,8 +48,12 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
         IProcurementAccessControlService access,
         IProcurementSodGuardService sod,
         IWorkflowIntegrationService workflow,
-        IStockAdjustmentService adjustments,
-        IFinancePostingEngine finance,
+        IInventoryDisposalStockAdjustmentParticipant disposalAdjustments,
+        IStockAdjustmentValuationIntentBuilder valuationIntent,
+        IFinanceProducerIntentService producerIntents,
+        IFinanceProducerIntentGroupService producerGroups,
+        IFinanceProducerApprovedExecution producerExecution,
+        IFinanceProducerIntentGroupApprovedExecution producerGroupExecution,
         IInventoryTrackingControlService trackingControls,
         IProcurementControlEventService controlEvents)
     {
@@ -53,8 +62,12 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
         _access = access;
         _sod = sod;
         _workflow = workflow;
-        _adjustments = adjustments;
-        _finance = finance;
+        _disposalAdjustments = disposalAdjustments;
+        _valuationIntent = valuationIntent;
+        _producerIntents = producerIntents;
+        _producerGroups = producerGroups;
+        _producerExecution = producerExecution;
+        _producerGroupExecution = producerGroupExecution;
         _trackingControls = trackingControls;
         _controlEvents = controlEvents;
     }
@@ -429,64 +442,26 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
             throw Error("INV_DISPOSAL_EXECUTION_SOD", "The disposal requester cannot stage execution of the same case.");
         await RequireAccessAsync("procurement.inventory.disposal.approve", item, cancellationToken);
         ValidateExecution(item.Method, request);
+        var executionReference = Required(request.ExecutionReference, 200, "Execution reference");
+        var plan = await BuildFinancePlanAsync(item, decimal.Round(request.ProceedsAmount, 2),
+            request.ProceedsAccountId, executionReference, request.Evidence, _currentUser.UserId, cancellationToken);
+        // Preparation is deliberately first. C7/C8 persist only Finance-owned evidence; no disposal,
+        // stock-adjustment, evidence or inventory row is tracked until this succeeds.
+        await PreparePlanAsync(plan, cancellationToken);
+
         await AddEvidenceAsync(item, request.Evidence, "Execution", required: true, cancellationToken);
         await RevalidateEvidenceAsync(item, cancellationToken);
         item.ProceedsAmount = decimal.Round(request.ProceedsAmount, 2);
         item.ProceedsAccountId = request.ProceedsAccountId;
         item.BuyerOrRecipient = Normalize(request.BuyerOrRecipient, 200);
-        item.ExecutionReference = Required(request.ExecutionReference, 200, "Execution reference");
-        await _db.SaveChangesAsync(cancellationToken);
-
-        var reasonCode = item.Method switch
-        {
-            InventoryDisposalMethod.Donation => StockAdjustmentReasonCodes.Donation,
-            InventoryDisposalMethod.Destruction => StockAdjustmentReasonCodes.WriteOff,
-            InventoryDisposalMethod.Auction or InventoryDisposalMethod.Sale => StockAdjustmentReasonCodes.WriteOff,
-            _ => StockAdjustmentReasonCodes.WriteOff
-        };
-        var adjustment = await _adjustments.CreateAsync(new CreateStockAdjustmentDto
-        {
-            WarehouseId = item.WarehouseId,
-            AdjustmentDate = DateTime.UtcNow,
-            ReasonCode = reasonCode,
-            Description = $"Inventory disposal {item.DisposalNumber}: {item.Reason}",
-            Reference = item.DisposalNumber,
-            IdempotencyKey = $"disposal:{item.Id:N}:adjustment",
-            CorrelationId = item.CorrelationId,
-            Evidence = item.Evidence.Select(value => new InventoryControlEvidenceRequest
-            {
-                CentralDocumentVersionId = value.CentralDocumentVersionId,
-                EvidenceReference = value.EvidenceReference
-            }).ToList(),
-            Items = item.Lines.Select(value => new CreateStockAdjustmentItemDto
-            {
-                InventoryItemId = value.InventoryItemId,
-                LocationId = value.LocationId,
-                AdjustmentQuantity = -value.Quantity,
-                LotNumber = value.LotNumber,
-                BatchNumber = value.BatchNumber,
-                SerialNumber = value.SerialNumber,
-                Reason = item.Reason,
-                Notes = $"{item.Method}: {item.ExecutionReference}"
-            }).ToList()
-        }, _currentUser.UserId);
-        if (adjustment.Status == "Draft")
-        {
-            adjustment = await _adjustments.SubmitAsync(adjustment.Id, _currentUser.UserId, new StockAdjustmentActionRequest
-            {
-                RowVersion = adjustment.RowVersion,
-                IdempotencyKey = $"disposal:{item.Id:N}:adjustment:submit",
-                Comment = $"Governed execution for {item.DisposalNumber}."
-            });
-        }
-        item = await FullQuery().SingleAsync(value => value.TenantId == _currentUser.TenantId && value.Id == id, cancellationToken);
-        item.StockAdjustmentId = adjustment.Id;
+        item.ExecutionReference = executionReference;
+        item.StockAdjustmentId = plan.AdjustmentId;
         item.Status = InventoryDisposalStatus.AdjustmentPending;
         item.UpdatedAt = DateTime.UtcNow;
         item.LastModifiedById = _currentUser.UserId;
         item.IntegrityHash = CaseHash(item);
         AddAction(item, InventoryDisposalActionType.AdjustmentStaged, key, payloadHash,
-            $"Controlled stock adjustment {adjustment.AdjustmentNumber} is {adjustment.Status}.");
+            $"Finance producer intent {plan.ApprovalId:D} is pending an independent checker; controlled stock adjustment {plan.AdjustmentNumber} is not yet persisted.");
         AddAudit(item, "AdjustmentStaged", null, Snapshot(item));
         await _db.SaveChangesAsync(cancellationToken);
         await RecordControlEventAsync(item, "StageExecution", ProcurementControlEventResult.Allowed, cancellationToken);
@@ -518,70 +493,94 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
             throw Error("INV_DISPOSAL_COMPLETION_SOD", "The requester and disposal committee members cannot approve/post final stock execution.");
         await RequireAccessAsync("procurement.inventory.adjust.approve", item, cancellationToken);
         await RevalidateEvidenceAsync(item, cancellationToken);
-        var adjustment = await _adjustments.GetByIdAsync(item.StockAdjustmentId.Value)
-            ?? throw Error("INV_DISPOSAL_ADJUSTMENT_MISSING", "The linked controlled stock adjustment no longer exists.");
-        if (adjustment.Status == "PendingApproval")
-        {
-            adjustment = await _adjustments.DecideAsync(adjustment.Id, _currentUser.UserId, new DecideStockAdjustmentRequest
-            {
-                Approved = true,
-                RowVersion = adjustment.RowVersion,
-                IdempotencyKey = $"{key}:adjustment-approve",
-                Comment = $"Independent stock execution approval for {item.DisposalNumber}."
-            });
-        }
-        if (adjustment.Status == "PendingApproval") return Map(item);
-        if (adjustment.Status != "Approved" && adjustment.Status != "Posted")
-            throw Error("INV_DISPOSAL_ADJUSTMENT_NOT_APPROVED", $"The linked stock adjustment is {adjustment.Status}.");
-        if (adjustment.Status == "Approved")
-        {
-            var mappedOverrides = adjustment.Items.ToDictionary(
-                line => line.Id,
-                line =>
-                {
-                    var sources = item.Lines.Where(source =>
-                            source.InventoryItemId == line.InventoryItemId &&
-                            source.LocationId == line.LocationId &&
-                            TrackingKey(source.LotNumber) == TrackingKey(line.LotNumber) &&
-                            TrackingKey(source.BatchNumber) == TrackingKey(line.BatchNumber) &&
-                            TrackingKey(source.SerialNumber) == TrackingKey(line.SerialNumber))
-                        .ToList();
-                    if (sources.Count != 1)
-                        throw Error("INV_DISPOSAL_ADJUSTMENT_LINEAGE_INVALID",
-                            "Every staged adjustment line must map to exactly one disposal item/location/lot/batch/serial line.");
-                    return request.NegativeStockOverrideIds.GetValueOrDefault(sources[0].Id);
-                });
-            adjustment = await _adjustments.PostAsync(adjustment.Id, _currentUser.UserId, new StockAdjustmentActionRequest
-            {
-                RowVersion = adjustment.RowVersion,
-                IdempotencyKey = $"{key}:adjustment-post",
-                Comment = $"Final stock write-off for {item.DisposalNumber}.",
-                NegativeStockOverrideIds = mappedOverrides.Where(value => value.Value != Guid.Empty)
-                    .ToDictionary(value => value.Key, value => value.Value)
-            });
-        }
-        if (adjustment.Status != "Posted")
-            throw Error("INV_DISPOSAL_ADJUSTMENT_NOT_POSTED", "The controlled stock adjustment has not posted.");
+        var plan = await BuildFinancePlanAsync(item, item.ProceedsAmount, item.ProceedsAccountId,
+            Required(item.ExecutionReference, 200, "Execution reference"), [], StagingMaker(item), cancellationToken);
+        var decision = await GetApprovedDecisionAsync(plan, cancellationToken);
+        if (!string.Equals(decision.Status, "Approved", StringComparison.Ordinal) &&
+            !string.Equals(decision.Status, "Failed", StringComparison.Ordinal) &&
+            !string.Equals(decision.Status, "Posted", StringComparison.Ordinal))
+            throw Error("INV_DISPOSAL_FINANCE_APPROVAL_REQUIRED",
+                "The prepared neutral Finance intent requires an independent checker decision before completion.");
+        if (!decision.DecidedByUserId.HasValue || !decision.DecidedAtUtc.HasValue)
+            throw Error("INV_DISPOSAL_FINANCE_APPROVAL_REQUIRED",
+                "The prepared neutral Finance intent does not retain complete independent-checker evidence.");
 
-        if (item.ProceedsAmount > 0m && !item.ProceedsPostingEventId.HasValue)
+        try
         {
-            var posting = await PostProceedsAsync(item, cancellationToken);
-            item.ProceedsPostingEventId = posting.PostingEventId;
-            item.ProceedsJournalEntryId = posting.JournalEntryId;
+            var strategy = _db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    item = await FullQuery().SingleAsync(value => value.TenantId == _currentUser.TenantId && value.Id == id && !value.IsDeleted,
+                        cancellationToken);
+                    var stagedPlan = await BuildFinancePlanAsync(item, item.ProceedsAmount, item.ProceedsAccountId,
+                        Required(item.ExecutionReference, 200, "Execution reference"), [], StagingMaker(item), cancellationToken);
+                    var participantRequest = stagedPlan.StockAdjustmentRequest with
+                    {
+                        ApprovedById = decision.DecidedByUserId.Value,
+                        ApprovedAtUtc = decision.DecidedAtUtc
+                    };
+                    var adjustment = await _disposalAdjustments.StageApprovedDisposalAsync(participantRequest, cancellationToken);
+                    var receipt = ReceiptFor(stagedPlan);
+                    var compatibility = stagedPlan.IsGroup
+                        ? await _producerGroupExecution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+                            stagedPlan.ApprovalId, stagedPlan.Group!, receipt, cancellationToken)
+                        : null;
+                    var single = stagedPlan.IsGroup
+                        ? null
+                        : await _producerExecution.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+                            stagedPlan.ApprovalId, stagedPlan.ValuationIntent, receipt, cancellationToken);
+                    var valuation = stagedPlan.IsGroup
+                        ? compatibility!.Members.Single(member => member.MemberOrder == 2)
+                        : new FinanceProducerIntentGroupMemberExecutionResult(1, string.Empty,
+                            single!.AccountingEventId, single.AccountingEventRequestFingerprint,
+                            single.FinancePostingEventId, single.JournalEntryId);
+                    await _disposalAdjustments.StagePostedDisposalAsync(adjustment, _currentUser.UserId,
+                        valuation.FinancePostingEventId, valuation.JournalEntryId,
+                        NegativeOverrides(item, stagedPlan, request), cancellationToken);
+                    if (stagedPlan.IsGroup)
+                    {
+                        var proceeds = compatibility!.Members.Single(member => member.MemberOrder == 1);
+                        item.ProceedsPostingEventId = proceeds.FinancePostingEventId;
+                        item.ProceedsJournalEntryId = proceeds.JournalEntryId;
+                    }
+                    item.Status = InventoryDisposalStatus.Completed;
+                    item.CompletedById = _currentUser.UserId;
+                    item.CompletedAtUtc = DateTime.UtcNow;
+                    item.UpdatedAt = DateTime.UtcNow;
+                    item.LastModifiedById = _currentUser.UserId;
+                    item.IntegrityHash = CaseHash(item);
+                    AddAction(item, InventoryDisposalActionType.Completed, key, payloadHash,
+                        $"Stock adjustment {stagedPlan.AdjustmentNumber} and approved neutral Finance intent completed atomically.");
+                    AddAudit(item, "Completed", null, Snapshot(item));
+                    await RecordControlEventAsync(item, "Complete", ProcurementControlEventResult.Allowed, cancellationToken);
+                    await _db.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return Map(await FullQuery().AsNoTracking().SingleAsync(value => value.Id == id, cancellationToken));
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _db.ChangeTracker.Clear();
+                    throw;
+                }
+            });
         }
-        item.Status = InventoryDisposalStatus.Completed;
-        item.CompletedById = _currentUser.UserId;
-        item.CompletedAtUtc = DateTime.UtcNow;
-        item.UpdatedAt = DateTime.UtcNow;
-        item.LastModifiedById = _currentUser.UserId;
-        item.IntegrityHash = CaseHash(item);
-        AddAction(item, InventoryDisposalActionType.Completed, key, payloadHash,
-            $"Stock adjustment {adjustment.AdjustmentNumber} posted; proceeds {item.ProceedsAmount:N2}.");
-        AddAudit(item, "Completed", null, Snapshot(item));
-        await _db.SaveChangesAsync(cancellationToken);
-        await RecordControlEventAsync(item, "Complete", ProcurementControlEventResult.Allowed, cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
-        return Map(await FullQuery().AsNoTracking().SingleAsync(value => value.Id == id, cancellationToken));
+        catch (Exception failure)
+        {
+            // C7/C8 explicitly reject durable failure evidence while an owner transaction remains open.
+            if (_db.Database.CurrentTransaction is not null)
+                throw Error("INV_DISPOSAL_ROLLBACK_REQUIRED", "The owner transaction did not end before Finance failure evidence.");
+            _db.ChangeTracker.Clear();
+            var receipt = ReceiptFor(plan);
+            if (plan.IsGroup)
+                await _producerGroupExecution.RecordFailureAfterRollbackAsync(plan.ApprovalId, plan.Group!, receipt, failure, cancellationToken);
+            else
+                await _producerExecution.RecordFailureAfterRollbackAsync(plan.ApprovalId, plan.ValuationIntent, receipt, failure, cancellationToken);
+            throw;
+        }
     }
 
     private async Task<InventoryDisposalDto> MutateAsync<TRequest>(
@@ -625,50 +624,225 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
         });
     }
 
-    private async Task<FinancePostingResultDto> PostProceedsAsync(InventoryDisposalCase item, CancellationToken cancellationToken)
+    private async Task<DisposalFinancePlan> BuildFinancePlanAsync(InventoryDisposalCase item, decimal proceeds,
+        Guid? proceedsAccountId, string executionReference, IReadOnlyCollection<InventoryControlEvidenceRequest> additionalEvidence,
+        Guid makerId, CancellationToken cancellationToken)
     {
-        if (!item.ProceedsAccountId.HasValue)
-            throw Error("INV_DISPOSAL_PROCEEDS_ACCOUNT_REQUIRED", "A tenant Finance proceeds account is required for auction or sale proceeds.");
-        var settings = await _db.FinanceSettings.AsNoTracking().SingleOrDefaultAsync(value => value.TenantId == item.TenantId && !value.IsDeleted, cancellationToken)
+        var isSaleOrAuction = item.Method is InventoryDisposalMethod.Sale or InventoryDisposalMethod.Auction;
+        if (isSaleOrAuction && (proceeds <= 0m || !proceedsAccountId.HasValue || proceedsAccountId == Guid.Empty))
+            throw Error("INV_DISPOSAL_PROCEEDS_ACCOUNT_REQUIRED", "A positive tenant Finance proceeds account is required for auction or sale proceeds.");
+        if (!isSaleOrAuction && proceeds != 0m)
+            throw Error("INV_DISPOSAL_PROCEEDS_NOT_ALLOWED", "Donation and destruction disposal methods cannot prepare proceeds.");
+
+        var postingDate = StablePostingDate(item);
+        var adjustmentId = item.StockAdjustmentId ?? DeterministicGuid(
+            $"RHEMA:INV_DISPOSAL:ADJUSTMENT:V1:{item.TenantId:N}:{item.Id:N}");
+        var sources = item.Lines.Where(line => !line.IsDeleted).OrderBy(line => line.Id).ToList();
+        if (sources.Count == 0 || sources.Select(SourceIdentity).Distinct(StringComparer.Ordinal).Count() != sources.Count)
+            throw Error("INV_DISPOSAL_ADJUSTMENT_LINEAGE_INVALID",
+                "Every disposal item/location/lot/batch/serial source line must be unique before Finance preparation.");
+        var itemIds = sources.Select(line => DeterministicGuid(
+                $"RHEMA:INV_DISPOSAL:ADJUSTMENT_LINE:V1:{item.TenantId:N}:{adjustmentId:N}:{line.Id:N}:{SourceIdentity(line)}"))
+            .ToList();
+        if (itemIds.Distinct().Count() != itemIds.Count)
+            throw Error("INV_DISPOSAL_ADJUSTMENT_ID_COLLISION", "The deterministic disposal adjustment line identity collides; preparation is denied.");
+        var evidence = item.Evidence.Select(value => new InventoryControlEvidenceRequest
+            {
+                CentralDocumentVersionId = value.CentralDocumentVersionId,
+                EvidenceReference = value.EvidenceReference
+            })
+            .Concat(additionalEvidence)
+            .GroupBy(value => value.CentralDocumentVersionId)
+            .Select(group => group.First())
+            .OrderBy(value => value.CentralDocumentVersionId)
+            .ToList();
+        var create = new CreateStockAdjustmentDto
+        {
+            WarehouseId = item.WarehouseId,
+            AdjustmentDate = postingDate,
+            ReasonCode = item.Method == InventoryDisposalMethod.Donation
+                ? StockAdjustmentReasonCodes.Donation : StockAdjustmentReasonCodes.WriteOff,
+            Description = $"Inventory disposal {item.DisposalNumber}: {item.Reason}",
+            Reference = item.DisposalNumber,
+            IdempotencyKey = $"disposal:{item.Id:N}:adjustment",
+            CorrelationId = item.CorrelationId,
+            Evidence = evidence,
+            Items = sources.Select(source => new CreateStockAdjustmentItemDto
+            {
+                InventoryItemId = source.InventoryItemId, LocationId = source.LocationId,
+                AdjustmentQuantity = -source.Quantity, LotNumber = source.LotNumber, BatchNumber = source.BatchNumber,
+                SerialNumber = source.SerialNumber, UnitCost = source.UnitCost, Reason = item.Reason,
+                Notes = $"{item.Method}: {executionReference}"
+            }).ToList()
+        };
+        var participantRequest = new InventoryDisposalStockAdjustmentRequest
+        {
+            AdjustmentId = adjustmentId, ItemIds = itemIds,
+            AdjustmentNumber = $"IDP-SA-{item.Id:N}"[..23].ToUpperInvariant(), PostingDateUtc = postingDate,
+            RequestedById = makerId, Create = create
+        };
+        var preview = await _disposalAdjustments.PreviewDisposalAsync(participantRequest, cancellationToken);
+        var owner = OwnerEffect(item, adjustmentId, itemIds, proceeds, proceedsAccountId, executionReference, postingDate);
+        var valuation = await _valuationIntent.BuildAsync(preview, owner, cancellationToken);
+        if (!isSaleOrAuction)
+            return new DisposalFinancePlan(item.TenantId, adjustmentId, participantRequest.AdjustmentNumber,
+                participantRequest, owner, valuation, null, null);
+
+        var proceedsIntent = await BuildProceedsIntentAsync(item, proceeds, proceedsAccountId!.Value, executionReference,
+            postingDate, owner, cancellationToken);
+        var group = new ProducerIntentGroupRequestDto
+        {
+            ProducerIntentGroupId = DeterministicGuid($"RHEMA:INV_DISPOSAL:C8:V1:{item.TenantId:N}:{item.Id:N}"),
+            GroupKind = "Original", IdempotencyKey = $"INVENTORY_DISPOSAL:{item.TenantId:N}:{item.Id:N}:COMPLETE",
+            ParticipantIdentity = owner.ParticipantCode, ExpectedOwnerEffect = owner,
+            Members = [proceedsIntent, valuation]
+        };
+        return new DisposalFinancePlan(item.TenantId, adjustmentId, participantRequest.AdjustmentNumber,
+            participantRequest, owner, valuation, group, proceedsIntent);
+    }
+
+    private async Task<ProducerAccountingIntentDto> BuildProceedsIntentAsync(InventoryDisposalCase item, decimal proceeds,
+        Guid proceedsAccountId, string executionReference, DateTime postingDate, ProducerOwnerEffectIdentityDto owner,
+        CancellationToken cancellationToken)
+    {
+        var settings = await _db.FinanceSettings.AsNoTracking().SingleOrDefaultAsync(value =>
+                value.TenantId == item.TenantId && !value.IsDeleted, cancellationToken)
             ?? throw Error("INV_DISPOSAL_FINANCE_SETTINGS_MISSING", "Finance settings are not configured for this tenant.");
         var recovery = settings.WriteOffRecoveryAccountId
             ?? throw Error("INV_DISPOSAL_RECOVERY_ACCOUNT_MISSING", "Write-off Recovery Account is not configured in Finance Settings.");
         var accounts = await _db.Accounts.AsNoTracking().Where(value => value.TenantId == item.TenantId && !value.IsDeleted &&
-            (value.Id == item.ProceedsAccountId || value.Id == recovery)).Select(value => value.Id).ToListAsync(cancellationToken);
+                (value.Id == proceedsAccountId || value.Id == recovery)).Select(value => value.Id).ToListAsync(cancellationToken);
         if (accounts.Count != 2) throw Error("INV_DISPOSAL_ACCOUNT_INVALID", "A configured disposal proceeds/recovery account is outside the current tenant.");
         var currency = string.IsNullOrWhiteSpace(settings.BaseCurrency) ? "GHS" : settings.BaseCurrency.Trim().ToUpperInvariant();
-        var description = $"Inventory disposal proceeds {item.DisposalNumber} - {item.ExecutionReference}";
-        return await _finance.PostAsync(new FinancePostingRequestDto
+        var description = $"Inventory disposal proceeds {item.DisposalNumber} - {executionReference}";
+        var posting = new ProducerFinancePostingRequestDto
         {
-            SourceModule = "Inventory",
-            OriginModuleCode = FinanceModuleLockCatalog.Inventory,
-            SourceDocumentType = "InventoryDisposal",
-            SourceDocumentId = item.Id,
-            SourceDocumentTenantId = item.TenantId,
-            PostingAction = "PostDisposalProceeds",
-            SourceDocumentReference = item.DisposalNumber,
-            Description = description,
-            PostingDate = DateTime.UtcNow,
-            JournalType = "System Generated",
-            BookClassification = "IFRS",
+            SourceModule = "Inventory", OriginModuleCode = FinanceModuleLockCatalog.Inventory,
+            SourceDocumentType = "InventoryDisposal", SourceDocumentId = item.Id, SourceDocumentTenantId = item.TenantId,
+            PostingAction = "PostDisposalProceeds", SourceDocumentReference = item.DisposalNumber,
+            Description = description, PostingDate = postingDate, JournalType = "System Generated",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryDisposal:{item.TenantId:N}:{item.Id:N}:Proceeds",
             Lines =
             [
-                FinanceLine(item.ProceedsAccountId.Value, description, item.ProceedsAmount, 0m, currency, 1, item.DisposalNumber, "INV-DISPOSAL-PROCEEDS"),
-                FinanceLine(recovery, description, 0m, item.ProceedsAmount, currency, 2, item.DisposalNumber, "INV-DISPOSAL-RECOVERY")
+                FinanceLine(proceedsAccountId, description, proceeds, 0m, currency, 1, item.DisposalNumber,
+                    "INV-DISPOSAL-PROCEEDS", postingDate, item.Id),
+                FinanceLine(recovery, description, 0m, proceeds, currency, 2, item.DisposalNumber,
+                    "INV-DISPOSAL-RECOVERY", postingDate, item.Id)
             ]
-        }, cancellationToken);
+        };
+        return new ProducerAccountingIntentDto
+        {
+            AccountingEventId = DeterministicGuid($"RHEMA:INV_DISPOSAL:PROCEEDS_EVENT:V1:{item.TenantId:N}:{item.Id:N}"),
+            EventKind = "Original", IdempotencyKey = $"INVENTORY_DISPOSAL:{item.TenantId:N}:{item.Id:N}:PROCEEDS",
+            ParticipantIdentity = owner.ParticipantCode, ExpectedOwnerEffect = owner, PostingRequest = posting
+        };
     }
 
     private static FinancePostingLineDto FinanceLine(Guid accountId, string description, decimal debit, decimal credit,
-        string currency, int lineNumber, string reference, string tag) => new()
+        string currency, int lineNumber, string reference, string tag, DateTime postingDate, Guid sourceDocumentId) => new()
     {
-        AccountId = accountId, Description = description, DebitAmount = debit, CreditAmount = credit,
-        TransactionCurrency = currency, TransactionDebitAmount = debit, TransactionCreditAmount = credit,
-        ExchangeRate = 1m, ExchangeRateSource = "Functional currency", ExchangeRateDate = DateTime.UtcNow,
+        AccountId = accountId, SourceDocumentLineId = DeterministicGuid($"RHEMA:INV_DISPOSAL:PROCEEDS_LINE:V1:{sourceDocumentId:N}:{tag}"),
+        Description = description, DebitAmount = debit, CreditAmount = credit, TransactionCurrency = currency,
+        TransactionDebitAmount = debit, TransactionCreditAmount = credit, ExchangeRate = 1m,
+        ExchangeRateSource = "Functional currency", ExchangeRateDate = postingDate,
         SourceReferenceNumber = reference, LineNumber = lineNumber, TransactionTag = tag
     };
+
+    private async Task PreparePlanAsync(DisposalFinancePlan plan, CancellationToken cancellationToken)
+    {
+        if (plan.IsGroup)
+            await _producerGroups.PrepareAsync(plan.Group!, cancellationToken);
+        else
+            await _producerIntents.PrepareAsync(plan.ValuationIntent, cancellationToken);
+    }
+
+    private async Task<DisposalFinanceDecision> GetApprovedDecisionAsync(DisposalFinancePlan plan,
+        CancellationToken cancellationToken)
+    {
+        if (plan.IsGroup)
+        {
+            var group = await _producerGroups.GetAsync(plan.ApprovalId, cancellationToken);
+            return new DisposalFinanceDecision(group.Status, group.DecidedByUserId, group.DecidedAtUtc);
+        }
+        var intent = await _producerIntents.GetAsync(plan.ApprovalId, cancellationToken);
+        return new DisposalFinanceDecision(intent.ProducerDecisionStatus, intent.ProducerDecidedByUserId,
+            intent.ProducerDecidedAtUtc);
+    }
+
+    private static ProducerOwnerEffectReceiptDto ReceiptFor(DisposalFinancePlan plan) => new()
+    {
+        TenantId = plan.TenantId, ParticipantCode = plan.Owner.ParticipantCode,
+        OwnerEntityType = plan.Owner.OwnerEntityType, OwnerEntityId = plan.Owner.OwnerEntityId,
+        OwnerAction = plan.Owner.OwnerAction, EffectFingerprint = plan.Owner.EffectFingerprint
+    };
+
+    private static IReadOnlyDictionary<Guid, Guid> NegativeOverrides(InventoryDisposalCase item,
+        DisposalFinancePlan plan, CompleteInventoryDisposalRequest request)
+    {
+        var sources = item.Lines.Where(line => !line.IsDeleted).OrderBy(line => line.Id).ToList();
+        if (sources.Count != plan.StockAdjustmentRequest.ItemIds.Count)
+            throw Error("INV_DISPOSAL_ADJUSTMENT_LINEAGE_INVALID", "The staged disposal source lines no longer match the prepared adjustment graph.");
+        var sourceIds = sources.Select(line => line.Id).ToHashSet();
+        if (request.NegativeStockOverrideIds.Keys.Any(key => !sourceIds.Contains(key)))
+            throw Error("INV_DISPOSAL_ADJUSTMENT_LINEAGE_INVALID", "A negative-stock override does not belong to the prepared disposal source graph.");
+        return sources.Select((source, index) => new { ItemId = plan.StockAdjustmentRequest.ItemIds[index],
+                OverrideId = request.NegativeStockOverrideIds.GetValueOrDefault(source.Id) })
+            .Where(value => value.OverrideId != Guid.Empty)
+            .ToDictionary(value => value.ItemId, value => value.OverrideId);
+    }
+
+    private static ProducerOwnerEffectIdentityDto OwnerEffect(InventoryDisposalCase item, Guid adjustmentId,
+        IReadOnlyList<Guid> itemIds, decimal proceeds, Guid? proceedsAccountId, string executionReference, DateTime postingDate)
+    {
+        var fingerprint = Hash(new
+        {
+            Contract = "RHEMA:INV_DISPOSAL:C11:OWNER_EFFECT:V1", item.TenantId, item.Id, adjustmentId,
+            ItemIds = itemIds.Select(id => id.ToString("N")).ToArray(), item.Method, Proceeds = decimal.Round(proceeds, 2),
+            ProceedsAccountId = proceedsAccountId, ExecutionReference = executionReference.Trim().ToUpperInvariant(), PostingDate = postingDate
+        });
+        return new ProducerOwnerEffectIdentityDto
+        {
+            ParticipantCode = "INVENTORY.DISPOSAL.V1", OwnerEntityType = "INVENTORY_DISPOSAL",
+            OwnerEntityId = item.Id, OwnerAction = "COMPLETE", EffectFingerprint = fingerprint
+        };
+    }
+
+    private static DateTime StablePostingDate(InventoryDisposalCase item)
+    {
+        var durable = item.ApprovedAtUtc ?? item.RequestedAtUtc;
+        return DateTime.SpecifyKind(durable.Date, DateTimeKind.Utc);
+    }
+
+    private static string SourceIdentity(InventoryDisposalLine line) => string.Join('|',
+        line.InventoryItemId.ToString("N"), line.LocationId.ToString("N"), TrackingKey(line.LotNumber),
+        TrackingKey(line.BatchNumber), TrackingKey(line.SerialNumber));
+
+    private static Guid StagingMaker(InventoryDisposalCase item) => item.Actions
+        .Where(action => action.ActionType == InventoryDisposalActionType.AdjustmentStaged)
+        .OrderByDescending(action => action.Sequence).Select(action => action.ActorUserId).FirstOrDefault()
+        is var maker && maker != Guid.Empty
+            ? maker
+            : throw Error("INV_DISPOSAL_FINANCE_MAKER_MISSING",
+                "The prepared disposal Finance intent has no durable staging-maker evidence.");
+
+    private static Guid DeterministicGuid(string canonical)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return new Guid(bytes.AsSpan(0, 16));
+    }
+
+    private sealed record DisposalFinancePlan(Guid TenantId, Guid AdjustmentId, string AdjustmentNumber,
+        InventoryDisposalStockAdjustmentRequest StockAdjustmentRequest, ProducerOwnerEffectIdentityDto Owner,
+        ProducerAccountingIntentDto ValuationIntent, ProducerIntentGroupRequestDto? Group,
+        ProducerAccountingIntentDto? ProceedsIntent)
+    {
+        public bool IsGroup => Group is not null;
+        public Guid ApprovalId => Group?.ProducerIntentGroupId ?? ValuationIntent.AccountingEventId
+            ?? throw new InvalidOperationException("INV_DISPOSAL_FINANCE_IDENTITY_REQUIRED: prepared Finance identity is required.");
+    }
+
+    private sealed record DisposalFinanceDecision(string Status, Guid? DecidedByUserId, DateTime? DecidedAtUtc);
 
     private async Task AddEvidenceAsync(InventoryDisposalCase item, IEnumerable<InventoryControlEvidenceRequest> requests,
         string stage, bool required, CancellationToken cancellationToken)
@@ -855,6 +1029,8 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
         ProceedsAmount = item.ProceedsAmount, BuyerOrRecipient = item.BuyerOrRecipient,
         ExecutionReference = item.ExecutionReference, ProceedsPostingEventId = item.ProceedsPostingEventId,
         ProceedsJournalEntryId = item.ProceedsJournalEntryId, CompletedAtUtc = item.CompletedAtUtc,
+        FinanceProducerApprovalId = item.StockAdjustmentId.HasValue ? FinanceApprovalId(item) : null,
+        FinanceProducerApprovalIsGroup = item.Method is InventoryDisposalMethod.Sale or InventoryDisposalMethod.Auction,
         TotalQuantity = item.TotalQuantity, TotalValue = item.TotalValue, RowVersion = Convert.ToBase64String(item.RowVersion),
         Lines = item.Lines.OrderBy(value => value.CreatedAt).Select(value => new InventoryDisposalLineDto
         {
@@ -935,6 +1111,14 @@ public sealed class InventoryDisposalService : IInventoryDisposalService, IInven
 
     private static string TrackingKey(string? value) =>
         string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToUpperInvariant();
+    private static Guid FinanceApprovalId(InventoryDisposalCase item)
+    {
+        if (item.Method is InventoryDisposalMethod.Sale or InventoryDisposalMethod.Auction)
+            return DeterministicGuid($"RHEMA:INV_DISPOSAL:C8:V1:{item.TenantId:N}:{item.Id:N}");
+        var adjustmentId = item.StockAdjustmentId ?? throw Error("INV_DISPOSAL_FINANCE_IDENTITY_REQUIRED",
+            "A staged stock adjustment identity is required for Finance approval.");
+        return DeterministicGuid($"FIN:C9:STOCK_ADJUSTMENT_EVENT:V1:{item.TenantId:N}:{adjustmentId:N}:POST");
+    }
     private static string Hash(object value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOptions))));
     private static InventoryDisposalException Error(string code, string message) => new(code, message);
     private static InventoryDisposalException State(InventoryDisposalCase item, string message) =>
