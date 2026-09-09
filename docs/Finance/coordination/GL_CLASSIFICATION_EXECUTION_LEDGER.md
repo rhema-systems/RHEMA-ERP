@@ -1312,6 +1312,15 @@ Donation/Destruction no-proceeds shape. This is layered rollback evidence rather
 separate real C7/C8 authority suites; final Sol High review must assess the combined proof before integration.
 No migration or configured database was accessed.
 
+Final Inventory Sol High review returned `CHANGES_REQUIRED` at exact clean `3d94ebec`. The new SQLite rollback
+proof is accepted as valid layered evidence, but StageExecution exact replay incorrectly expects a Completed
+action instead of its durable AdjustmentStaged action; the SQL Server disposal applock ignores negative return
+codes; and two candidate test gates are red because the C10 corruption matrix expects the wrong exception type
+and the strict forged-authority fixture omits authenticated-current-user setup. Debug build and 58 non-red
+focused API cases passed; widened results were 188 passed, 5 guarded SQL skips and 3 failures, of which two are
+the established untouched Inventory valuation baselines. A bounded Terra Medium correction is active for the
+four exact findings. Integration remains blocked; no migration or configured database was accessed.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
