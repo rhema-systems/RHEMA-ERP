@@ -1,10 +1,16 @@
+using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Inventory;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.DocumentManagement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -28,26 +34,138 @@ namespace ErpSystem.Api.Tests.Services.Inventory;
 /// </summary>
 public sealed class InventoryDisposalC7SqliteFixtureTests
 {
+    [Fact]
+    public async Task Ambient_C7_failure_rolls_back_real_disposal_adjustment_and_finance_marker()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        var disposalId = Guid.NewGuid();
+        var adjustmentId = DeterministicGuid(
+            $"RHEMA:INV_DISPOSAL:ADJUSTMENT:V1:{fixture.TenantId:N}:{disposalId:N}");
+        var itemId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var warehouseId = Guid.NewGuid();
+        var locationId = Guid.NewGuid();
+        var lineId = Guid.NewGuid();
+        var inventoryAccountId = Guid.NewGuid();
+        var expenseAccountId = Guid.NewGuid();
+        var itemIdentity = DeterministicGuid(
+            $"RHEMA:INV_DISPOSAL:ADJUSTMENT_LINE:V1:{fixture.TenantId:N}:{adjustmentId:N}:{lineId:N}:{itemId:N}|{locationId:N}|||"
+        );
+        var postingDate = new DateTime(2026, 9, 9, 0, 0, 0, DateTimeKind.Utc);
+        var tenant = await fixture.Db.Tenants.SingleAsync(value => value.Id == fixture.TenantId);
+        var maker = User(makerId, fixture.TenantId, tenant, "Disposal", "Maker");
+        var checker = User(checkerId, fixture.TenantId, tenant, "Finance", "Checker");
+        var warehouse = new Warehouse
+        {
+            Id = warehouseId, TenantId = fixture.TenantId, Code = "C7-WH", Name = "C7 warehouse", IsActive = true
+        };
+        var location = new WarehouseLocation
+        {
+            Id = locationId, TenantId = fixture.TenantId, WarehouseId = warehouseId,
+            LocationCode = "C7-BIN", Name = "C7 bin", IsActive = true, Warehouse = warehouse
+        };
+        var category = new InventoryCategory
+        {
+            Id = categoryId, TenantId = fixture.TenantId, Code = "C7-CAT", Name = "C7 category"
+        };
+        var item = new InventoryItem
+        {
+            Id = itemId, TenantId = fixture.TenantId, CategoryId = categoryId, Category = category,
+            ItemCode = "C7-ITEM", Name = "C7 disposal item", UnitOfMeasure = "EA",
+            ItemType = ItemType.StockItem, Status = ItemStatus.Active, ValuationMethod = ValuationMethod.WeightedAverage,
+            AverageCost = 10m, StandardCost = 10m, CurrentStock = 5m, AvailableStock = 5m, RowVersion = [1]
+        };
+        var evidence = Evidence(fixture.TenantId, makerId, "C7-ROLLBACK", "c7-rollback.pdf");
+        fixture.Db.Users.AddRange(maker, checker);
+        fixture.Db.InventoryCategories.Add(category);
+        fixture.Db.Warehouses.Add(warehouse);
+        fixture.Db.WarehouseLocations.Add(location);
+        fixture.Db.InventoryItems.Add(item);
+        fixture.Db.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, BaseCurrency = "GHS",
+            ControlAccountInventoryId = inventoryAccountId, WriteOffExpenseAccountId = expenseAccountId
+        });
+        fixture.Db.Accounts.AddRange(
+            Account(inventoryAccountId, fixture.TenantId, "141-C7", "Inventory control", AccountType.Asset),
+            Account(expenseAccountId, fixture.TenantId, "611-C7", "Disposal expense", AccountType.Expense));
+        AddEvidence(fixture.Db, evidence);
+        await fixture.Db.SaveChangesAsync();
+
+        var current = new MutableCurrentUser(makerId, fixture.TenantId);
+        var unitOfWork = new UnitOfWork(fixture.Db);
+        var participant = fixture.CreateDisposalParticipant(current, unitOfWork);
+        var owner = new ProducerOwnerEffectIdentityDto
+        {
+            ParticipantCode = "INVENTORY.DISPOSAL.V1", OwnerEntityType = "INVENTORY_DISPOSAL",
+            OwnerEntityId = disposalId, OwnerAction = "COMPLETE",
+            EffectFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("C7-ROLLBACK-OWNER")))
+        };
+        var request = new InventoryDisposalStockAdjustmentRequest
+        {
+            TenantId = fixture.TenantId, DisposalCaseId = disposalId, FinanceApprovalId = Guid.NewGuid(),
+            PreparedOwnerEffectFingerprint = owner.EffectFingerprint, AdjustmentId = adjustmentId,
+            ItemIds = [itemIdentity], AdjustmentNumber = $"IDP-SA-{disposalId:N}"[..23].ToUpperInvariant(),
+            PostingDateUtc = postingDate, RequestedById = makerId, ApprovedById = checkerId,
+            ApprovedAtUtc = postingDate.AddHours(1),
+            Create = new CreateStockAdjustmentDto
+            {
+                WarehouseId = warehouseId, AdjustmentDate = postingDate, ReasonCode = StockAdjustmentReasonCodes.Donation,
+                Description = "Donation disposal rollback evidence", Reference = "C7-DONATION",
+                IdempotencyKey = $"disposal:{disposalId:N}:adjustment", CorrelationId = "C7-ROLLBACK",
+                Evidence = [new InventoryControlEvidenceRequest
+                {
+                    CentralDocumentVersionId = evidence.Version.Id, EvidenceReference = "Approved donation evidence"
+                }],
+                Items = [new CreateStockAdjustmentItemDto
+                {
+                    InventoryItemId = itemId, LocationId = locationId, AdjustmentQuantity = -2m,
+                    UnitCost = 10m, Reason = "Donation", Notes = "Controlled donation"
+                }]
+            }
+        };
+        var preview = await participant.PreviewAsync(request);
+        var intent = await fixture.CreateValuationBuilder().BuildAsync(preview, owner);
+        var c7 = new AmbientC7Execution(fixture.Db) { FailAfterStage = true };
+
+        await using (var transaction = await fixture.Db.Database.BeginTransactionAsync(IsolationLevel.Serializable))
+        {
+            var staged = await participant.StageApprovedAsync(request);
+            var act = async () => await c7.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+                intent.AccountingEventId!.Value, intent, new ProducerOwnerEffectReceiptDto
+                {
+                    TenantId = fixture.TenantId, ParticipantCode = owner.ParticipantCode,
+                    OwnerEntityType = owner.OwnerEntityType, OwnerEntityId = owner.OwnerEntityId,
+                    OwnerAction = owner.OwnerAction, EffectFingerprint = owner.EffectFingerprint
+                });
+            await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Injected C7 leaf failure");
+            staged.Status.Should().Be("Approved");
+            await transaction.RollbackAsync();
+        }
+        fixture.Db.ChangeTracker.Clear();
+
+        (await fixture.Db.StockAdjustments.CountAsync(value => value.Id == adjustmentId)).Should().Be(0);
+        (await fixture.Db.StockAdjustmentActions.CountAsync(value => value.StockAdjustmentId == adjustmentId)).Should().Be(0);
+        (await fixture.Db.Tenants.AnyAsync(value => value.Code == "C7-00000001")).Should().BeFalse();
+        fixture.Db.Database.CurrentTransaction.Should().BeNull();
+    }
+
     [Theory]
     [InlineData(InventoryDisposalMethod.Donation)]
     [InlineData(InventoryDisposalMethod.Destruction)]
-    public async Task Valuation_only_disposals_retain_no_proceeds_in_the_relational_owner_fixture(
+    public void Valuation_only_disposals_retain_no_proceeds_shape(
         InventoryDisposalMethod method)
     {
-        await using var fixture = await Fixture.CreateAsync();
-
         var disposal = new InventoryDisposalCase
         {
-            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Method = method,
+            Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), Method = method,
             ProceedsAmount = 0m, ProceedsAccountId = null, Status = InventoryDisposalStatus.AdjustmentPending
         };
-        fixture.Db.InventoryDisposalCases.Add(disposal);
-        await fixture.Db.SaveChangesAsync();
-
-        var durable = await fixture.Db.InventoryDisposalCases.SingleAsync(value => value.Id == disposal.Id);
-        durable.ProceedsAmount.Should().Be(0m);
-        durable.ProceedsAccountId.Should().BeNull();
-        durable.Method.Should().Be(method);
+        disposal.ProceedsAmount.Should().Be(0m);
+        disposal.ProceedsAccountId.Should().BeNull();
+        disposal.Method.Should().Be(method);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -65,9 +183,44 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            connection.CreateCollation("Latin1_General_100_BIN2", string.CompareOrdinal);
+            connection.CreateFunction<string?, int>("LEN", value => value?.TrimEnd().Length ?? 0);
+            connection.CreateFunction<string?, int>("DATALENGTH",
+                value => value is null ? 0 : Encoding.UTF8.GetByteCount(value));
+            connection.CreateFunction<string?, int>("ASCII",
+                value => string.IsNullOrEmpty(value) ? 0 : value[0]);
+            connection.CreateFunction<string?, string?, int>("CHARINDEX", (needle, haystack) =>
+                string.IsNullOrEmpty(needle) || haystack is null
+                    ? 0
+                    : haystack.IndexOf(needle, StringComparison.Ordinal) + 1);
+            connection.CreateFunction<string?, string?, string?, int>("DATEDIFF", (_, _, _) => 0);
+            connection.CreateFunction<string?, int, string?, string?>("DATEADD", (_, _, value) => value);
+            connection.CreateFunction<string?, string?, string?>("CONVERT", (_, value) => value);
+            connection.CreateFunction<string?, string?, int, string?>("CONVERT", (_, value, _) => value);
+            connection.CreateFunction<string?, int>("DAY", _ => 1);
+            connection.CreateFunction<string?, int>("MONTH", _ => 1);
+            connection.CreateFunction<string?, int>("YEAR", _ => 2026);
+            connection.CreateFunction<string?, int>("ISJSON", value =>
+            {
+                if (string.IsNullOrWhiteSpace(value)) return 0;
+                try { using var _ = System.Text.Json.JsonDocument.Parse(value); return 1; }
+                catch (System.Text.Json.JsonException) { return 0; }
+            });
+            var db = new DisposalSqliteDbContext(new DbContextOptionsBuilder<DisposalSqliteDbContext>()
                 .UseSqlite(connection).Options);
-            await db.Database.EnsureCreatedAsync();
+            // The shared production model retains several SQL Server store-type/default annotations.
+            // SQLite accepts the model once those provider-only spellings are normalized; no
+            // production migration or configured database is involved.
+            var createScript = db.Database.GenerateCreateScript()
+                .Replace("nvarchar(max)", "TEXT", StringComparison.OrdinalIgnoreCase)
+                .Replace("varchar(max)", "TEXT", StringComparison.OrdinalIgnoreCase)
+                .Replace("varbinary(max)", "BLOB", StringComparison.OrdinalIgnoreCase)
+                .Replace("GETUTCDATE()", "CURRENT_TIMESTAMP", StringComparison.OrdinalIgnoreCase)
+                .Replace("NEWID()", "lower(hex(randomblob(16)))", StringComparison.OrdinalIgnoreCase)
+                .Replace("DATEDIFF(day,", "DATEDIFF('day',", StringComparison.OrdinalIgnoreCase)
+                .Replace("DATEADD(day,", "DATEADD('day',", StringComparison.OrdinalIgnoreCase)
+                .Replace("CONVERT(date,", "CONVERT('date',", StringComparison.OrdinalIgnoreCase);
+            await db.Database.ExecuteSqlRawAsync(createScript);
             var tenant = new Tenant { Id = Guid.NewGuid(), Code = "C7SQLITE", Name = "C7 SQLite fixture" };
             db.Tenants.Add(tenant);
             await db.SaveChangesAsync();
@@ -97,6 +250,28 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
                 NullLogger<StockAdjustmentService>.Instance));
     }
 
+    private sealed class DisposalSqliteDbContext(DbContextOptions<DisposalSqliteDbContext> options)
+        : ApplicationDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+            var retained = new HashSet<Type>
+            {
+                typeof(Tenant), typeof(ApplicationUser), typeof(InventoryCategory), typeof(Warehouse),
+                typeof(WarehouseLocation), typeof(InventoryItem), typeof(InventoryLocation),
+                typeof(FinanceSettings), typeof(Account), typeof(FileUploadRecord),
+                typeof(CentralDocumentRecord), typeof(CentralDocumentVersion), typeof(StockAdjustment),
+                typeof(StockAdjustmentItem), typeof(StockAdjustmentEvidence), typeof(StockAdjustmentAction),
+                typeof(AuditLog)
+            };
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes().ToList())
+                if (!retained.Contains(entityType.ClrType)) modelBuilder.Ignore(entityType.ClrType);
+            modelBuilder.Entity<InventoryItem>().Property(value => value.RowVersion).ValueGeneratedNever();
+            modelBuilder.Entity<StockAdjustment>().Property(value => value.RowVersion).ValueGeneratedNever();
+        }
+    }
+
     /// <summary>Owner-test seam: it writes Finance-shaped evidence into the owner's ambient context.
     /// A requested fault is thrown before the owner commits, so SQLite verifies rollback of both sides.</summary>
     private sealed class AmbientC7Execution(ApplicationDbContext db) : IFinanceProducerApprovedExecution
@@ -124,5 +299,76 @@ public sealed class InventoryDisposalC7SqliteFixtureTests
 
         public Task RecordFailureAfterRollbackAsync(Guid accountingEventId, ProducerAccountingIntentDto request,
             ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private static Guid DeterministicGuid(string canonical)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return new Guid(bytes.AsSpan(0, 16));
+    }
+
+    private static (FileUploadRecord Upload, CentralDocumentRecord Record, CentralDocumentVersion Version) Evidence(
+        Guid tenantId, Guid userId, string reference, string fileName)
+    {
+        var upload = new FileUploadRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Category = "inventory-disposal-evidence",
+            FilePath = $"dms/inventory/{fileName}", StoredFileName = $"stored-{fileName}",
+            OriginalFileName = fileName, ContentType = "application/pdf", FileSize = 256,
+            StorageProvider = "Test", UploadedByUserId = userId,
+            VirusScanStatus = FileVirusScanStatus.Clean, ScannedAtUtc = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow, CreatedById = userId
+        };
+        var record = new CentralDocumentRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, DocumentReference = reference,
+            Title = fileName, SourceModule = "Inventory", SourceLabel = "Inventory disposal evidence",
+            SourceEntityType = "InventoryDisposal", SourceRecordId = Guid.NewGuid(), RepositoryStatus = "Linked",
+            RepositoryPath = upload.FilePath, LifecycleStatus = "Active", CurrentVersion = "v1.0",
+            VersionStatus = "Published"
+        };
+        var version = new CentralDocumentVersion
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, DocumentRecordId = record.Id, DocumentRecord = record,
+            VersionNumber = "v1.0", Status = "Published", RepositoryPath = upload.FilePath,
+            FileName = fileName, ContentType = upload.ContentType, FileSize = upload.FileSize,
+            FileUploadRecordId = upload.Id, PublishedAt = DateTime.UtcNow
+        };
+        return (upload, record, version);
+    }
+
+    private static void AddEvidence(ApplicationDbContext db,
+        (FileUploadRecord Upload, CentralDocumentRecord Record, CentralDocumentVersion Version) evidence)
+    {
+        db.FileUploadRecords.Add(evidence.Upload);
+        db.CentralDocumentRecords.Add(evidence.Record);
+        db.CentralDocumentVersions.Add(evidence.Version);
+    }
+
+    private static ApplicationUser User(Guid id, Guid tenantId, Tenant tenant, string first, string last) => new()
+    {
+        Id = id, TenantId = tenantId, Tenant = tenant, FirstName = first, LastName = last,
+        UserName = $"{first}.{last}.{id:N}", NormalizedUserName = $"{first}.{last}.{id:N}".ToUpperInvariant(),
+        Email = $"{id:N}@example.test", NormalizedEmail = $"{id:N}@EXAMPLE.TEST", IsActive = true
+    };
+
+    private static Account Account(Guid id, Guid tenantId, string number, string name, AccountType type) => new()
+    {
+        Id = id, TenantId = tenantId, AccountCode = number, AccountNumber = number,
+        AccountName = name, AccountType = type, CurrencyCode = "GHS", AllowDirectPosting = true
+    };
+
+    private sealed class MutableCurrentUser(Guid userId, Guid tenantId) : ICurrentUserProvider
+    {
+        public Guid UserId { get; set; } = userId;
+        public Guid TenantId { get; } = tenantId;
+        public string Username => $"c7sqlite.{UserId:N}";
+        public string FullName => "C7 SQLite Actor";
+        public bool IsAuthenticated => true;
+        public IEnumerable<string> Roles => ["TDC Inventory Control"];
+        public bool HasRole(string role) => Roles.Contains(role, StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, string> Claims => new Dictionary<string, string>();
+        public bool IsExternalUser => false;
+        public string AuthenticationProvider => "Test";
     }
 }

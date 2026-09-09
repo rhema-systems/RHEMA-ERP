@@ -191,6 +191,7 @@
     <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalServiceTests.cs" />
     <Compile Include="Services\Inventory\E2E013InventoryDisposalLifecycleTests.cs" />
+    <Compile Include="Services\Inventory\InventoryDisposalC7SqliteFixtureTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />
     <Compile Include="Services\Finance\VendorInvoiceMatchExceptionServiceTests.cs" />
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
