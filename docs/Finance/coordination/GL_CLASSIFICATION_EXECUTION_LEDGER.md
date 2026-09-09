@@ -1321,6 +1321,16 @@ focused API cases passed; widened results were 188 passed, 5 guarded SQL skips a
 the established untouched Inventory valuation baselines. A bounded Terra Medium correction is active for the
 four exact findings. Integration remains blocked; no migration or configured database was accessed.
 
+The bounded Inventory correction is committed cleanly as
+`23c8f69d8e0e3caba0f17e8b25222412943f3425` directly atop `3d94ebec`. StageExecution now replays only its
+exact durable AdjustmentStaged authority in pending or later completed state, with conflicts denied; the SQL
+Server disposal applock captures its result and throws on negative acquisition; the C10 corruption matrix now
+expects the owner exception and executes all cases; and the strict forged-authority fixture supplies an
+authenticated actor. Debug builds passed with zero errors, focused API replay/compatibility tests passed 9/9,
+Core opening-stock governance passed 15/15, and diff/status gates are clean. SQL Server contention remains a
+guarded static fail-closed test because no disposable SQL environment is configured. Final Sol High re-review
+is active; integration remains blocked and no configured database or migration was touched.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
