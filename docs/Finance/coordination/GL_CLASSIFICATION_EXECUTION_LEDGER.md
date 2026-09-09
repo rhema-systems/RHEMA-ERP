@@ -11,7 +11,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Field | Value |
 |---|---|
 | Phase | Stage B2 — Inventory atomic accounting-event group cutover |
-| Status | `BLOCKED` |
+| Status | `IN_PROGRESS` |
 | Implementing task | Coordinator subagent `/root/inventory_cutover`; source task `01a0648a-99d2-7320-aced-b2b22d160334` remains the inspected parent task |
 | Exact base | `39c2537dab9e2a02c0f5f3ee221525c052bc6592` |
 | Branch | `codex/inventory-accounting-event-cutover-c9` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C9 complete; fresh Inventory worktree ready, but implementation blocked until the .NET 9 SDK/host is restored |
+| Review status | .NET 9.0.318 toolchain restored and clean build passed; bounded Inventory implementation active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1090,6 +1090,13 @@ creation using the approved C9 valuation builder. No implementation edits have b
 host/SDK was removed externally: `dotnet.exe`, `host/fxr` and the SDK payload are absent from the shared install,
 and Visual Studio provides only a runtime/test runner. A usable SDK must be restored before safe compile/test-driven
 owner conversion can resume. The worktree is clean and no database was accessed.
+
+Windows Installer evidence confirms Visual Studio removed .NET SDK 9.0.317 and related runtime components during
+an in-place update beginning around 20:45, then installed host 9.0.20 and SDK 9.0.318 successfully around
+21:20-21:23. The transient missing-host state was the replacement interval, not repository or agent deletion.
+`dotnet --info` now resolves SDK 9.0.318 with .NET 8/9 runtimes, isolated restore passed, and the fresh Inventory
+base solution build passed with zero errors and 1,106 inherited warnings. Stage B2 is unblocked and implementation
+resumes from the same exact clean base; no database was accessed.
 
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
