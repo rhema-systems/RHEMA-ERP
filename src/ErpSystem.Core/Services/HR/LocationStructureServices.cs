@@ -484,8 +484,16 @@ public class LocationService : ILocationService
     public async Task<IEnumerable<LocationSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _repository.GetAllAsync();
-        return entities.Where(e => e.TenantId == tenantId).OrderBy(e => e.Name).ToSummaryDtoList();
+        // ⚠ Was the bare GetAllAsync, so `LevelName` was null and — once lane B1 of demo feedback
+        // round 2 put `LevelNumber` on this DTO — every location ranked at tier 0. The level and
+        // the country are what the summary maps; load them.
+        var entities = await _repository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .Include(e => e.LocationLevel)
+            .Include(e => e.Country)
+            .OrderBy(e => e.Name)
+            .ToListAsync(cancellationToken);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<LocationDto>> GetByLevelIdAsync(Guid levelId, CancellationToken cancellationToken = default)

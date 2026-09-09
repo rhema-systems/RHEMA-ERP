@@ -14,6 +14,8 @@ import {
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
 
+const blank = (v?: string | null) => (v && v.trim() ? v.trim() : null);
+
 export default function NewOrganizationUnitPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -23,11 +25,6 @@ export default function NewOrganizationUnitPage() {
   const { data: levels, isLoading: levelsLoading } = useQuery({
     queryKey: ['hr', 'organization-levels', 'all'],
     queryFn: () => organizationLevelService.getAll(),
-  });
-
-  const { data: units, isLoading: unitsLoading } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
   });
 
   const handleSubmit = async (values: OrganizationUnitFormValues) => {
@@ -43,9 +40,15 @@ export default function NewOrganizationUnitPage() {
         headEmployeeId: values.headEmployeeId || null,
         sequence: values.sequence,
         isActive: values.isActive,
+        // The initial placement's history row (round 2, O-3a/O-3b).
+        effectiveFrom: values.effectiveFrom || null,
+        effectiveTo: values.effectiveTo || null,
+        changeReason: blank(values.changeReason),
+        notes: blank(values.notes),
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'organization-units'] });
-      toast({ title: 'Success', description: 'Organization unit created.' });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'organization-unit-history'] });
+      toast({ title: 'Success', description: 'Organization unit created and its initial placement recorded.' });
       router.push('/administration/hr/organization/units');
     } catch (error: any) {
       toast({
@@ -66,14 +69,13 @@ export default function NewOrganizationUnitPage() {
         backHref="/administration/hr/organization/units"
       />
 
-      {levelsLoading || unitsLoading ? (
+      {levelsLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : (
         <OrganizationUnitForm
           levels={levels ?? []}
-          units={units ?? []}
           defaultValues={emptyOrganizationUnit}
           onSubmit={handleSubmit}
           submitting={submitting}

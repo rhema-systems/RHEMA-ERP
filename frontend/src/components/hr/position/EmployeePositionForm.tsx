@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type { OrganizationLevel, OrganizationUnitSummary } from '@/types/hr/organization';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 import { SKILL_LEVEL_OPTIONS, type EmployeePosition } from '@/types/hr/position';
 import type { StaffLevelListItem } from '@/types/hr/staff-level';
 import type { SalaryGrade } from '@/types/hr/salary';
@@ -121,8 +121,6 @@ export const emptyEmployeePosition: EmployeePositionFormValues = {
 };
 
 interface EmployeePositionFormProps {
-  levels: OrganizationLevel[];
-  units: OrganizationUnitSummary[];
   positions: EmployeePosition[];
   staffLevels: StaffLevelListItem[];
   /** Defined in Payroll and mirrored into HR — read-only here. */
@@ -144,8 +142,6 @@ interface EmployeePositionFormProps {
 }
 
 export function EmployeePositionForm({
-  levels,
-  units,
   positions,
   staffLevels,
   salaryGrades,
@@ -163,7 +159,6 @@ export function EmployeePositionForm({
     defaultValues,
   });
 
-  const levelId = form.watch('organizationLevelId');
   const unitId = form.watch('organizationUnitId');
   const reportsTo = form.watch('reportsToPositionId') || NONE;
   const workMode = form.watch('workMode');
@@ -184,18 +179,6 @@ export function EmployeePositionForm({
     append: appendBenefit,
     remove: removeBenefit,
   } = useFieldArray({ control: form.control, name: 'positionBenefits' });
-
-  // Cascading selection: units are filtered to the chosen level.
-  const unitsForLevel = units.filter((u) => u.organizationLevelId === levelId);
-
-  const handleLevelChange = (value: string) => {
-    form.setValue('organizationLevelId', value, { shouldValidate: true });
-    // Clear the unit if it no longer belongs to the newly-selected level.
-    const stillValid = units.some((u) => u.id === unitId && u.organizationLevelId === value);
-    if (!stillValid) {
-      form.setValue('organizationUnitId', '', { shouldValidate: true });
-    }
-  };
 
   return (
     <Card>
@@ -224,60 +207,28 @@ export function EmployeePositionForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="organizationLevelId">Organization Level</Label>
-              <Select value={levelId || undefined} onValueChange={handleLevelChange}>
-                <SelectTrigger id="organizationLevelId">
-                  <SelectValue placeholder="Select a level" />
-                </SelectTrigger>
-                <SelectContent>
-                  {levels.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.name} (L{l.levelNumber})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.organizationLevelId && (
-                <p className="text-sm text-red-500">
-                  {form.formState.errors.organizationLevelId.message}
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="organizationUnitId">Organization Unit</Label>
-              <Select
-                value={unitId || undefined}
-                disabled={!levelId}
-                onValueChange={(value) =>
-                  form.setValue('organizationUnitId', value, { shouldValidate: true })
-                }
-              >
-                <SelectTrigger id="organizationUnitId">
-                  <SelectValue placeholder={levelId ? 'Select a unit' : 'Select a level first'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {unitsForLevel.length === 0 ? (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                      No units at this level.
-                    </div>
-                  ) : (
-                    unitsForLevel.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.organizationUnitId && (
-                <p className="text-sm text-red-500">
-                  {form.formState.errors.organizationUnitId.message}
-                </p>
-              )}
-            </div>
-          </div>
+          {/*
+            The level → unit cascade this form always had, now the shared picker (demo feedback
+            round 2, O-6). The position stores BOTH ids, so the level the user picks is captured
+            too; on edit the picker derives the level from the stored unit.
+          */}
+          <OrganizationUnitPicker
+            idPrefix="position-unit"
+            value={unitId || ''}
+            onChange={(id, unit) => {
+              form.setValue('organizationUnitId', id, { shouldValidate: true, shouldDirty: true });
+              if (unit) form.setValue('organizationLevelId', unit.organizationLevelId, { shouldValidate: true });
+            }}
+            onLevelChange={(levelId) =>
+              form.setValue('organizationLevelId', levelId, { shouldValidate: true, shouldDirty: true })
+            }
+            levelLabel="Organization Level"
+            unitLabel="Organization Unit"
+            error={
+              (form.formState.errors.organizationUnitId?.message as string | undefined) ??
+              (form.formState.errors.organizationLevelId?.message as string | undefined)
+            }
+          />
 
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">

@@ -91,8 +91,15 @@ export interface OrganizationUnitSummary {
   code: string;
   organizationLevelId: string;
   levelName?: string | null;
+  /**
+   * The level's tier number and structure, and the unit's `/ancestor/…/self` path — what the
+   * cascading picker needs to rank units and exclude a subtree without a second read (round 2, X-10).
+   */
+  levelNumber: number;
+  structureId: string;
   parentUnitId?: string | null;
   parentUnitName?: string | null;
+  path: string;
   isActive: boolean;
 }
 
@@ -107,6 +114,15 @@ export interface CreateOrganizationUnitRequest {
   headEmployeeId?: string | null;
   sequence: number;
   isActive: boolean;
+  /**
+   * The initial placement's history row (round 2, O-3a/O-3b). Creating a unit now writes one —
+   * two, when a head is named — and these are the user's dates, reason and notes for it.
+   * `effectiveFrom` defaults to today on the server.
+   */
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  changeReason?: string | null;
+  notes?: string | null;
 }
 
 // Mirrors UpdateOrganizationUnitDto (adds Id; level is immutable server-side).
@@ -123,12 +139,19 @@ export interface CreateOrganizationUnitRequest {
 export interface MoveUnitRequest {
   newParentId?: string | null;
   changeReason: string;
+  /** When the move took effect (today if omitted), when it ended if already known, and notes. */
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  notes?: string | null;
 }
 
 /** Appoints, replaces or (where the level permits) removes a unit's head. */
 export interface ChangeUnitHeadRequest {
   newHeadEmployeeId?: string | null;
   changeReason: string;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  notes?: string | null;
 }
 
 export interface UpdateOrganizationUnitRequest extends CreateOrganizationUnitRequest {
@@ -140,6 +163,9 @@ export interface UpdateOrganizationUnitRequest extends CreateOrganizationUnitReq
    * only working write path produced carried `changeReason: null` — an audit trail able to record
    * what changed and when, but never why. It is ignored on a plain rename, because the server does
    * not write a history row for one.
+   *
+   * `effectiveFrom`, `effectiveTo` and `notes` are inherited from the create request and mean the
+   * same here: the dates and notes for the history row(s) this update writes.
    */
   changeReason?: string | null;
 }
@@ -171,7 +197,30 @@ export interface OrganizationUnitHistoryEntry extends AuditFields {
   /** The day a later change of the SAME kind superseded it; null while it still stands. */
   effectiveTo?: string | null;
   changeReason?: string | null;
+  /** Anything beyond the reason: the memo reference, the board minute, who approved it. */
+  notes?: string | null;
   changeType: OrganizationUnitChangeType;
+}
+
+/**
+ * An entry recorded by hand (round 2, O-3b). Moves no parent and appoints no head, so it
+ * classifies as `Other`; the reason is required for exactly that reason. Admin-tier.
+ */
+export interface CreateOrganizationUnitHistoryRequest {
+  organizationUnitId: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  changeReason: string;
+  notes?: string | null;
+}
+
+/** Corrects a row's dates, reason and notes. What the row says changed is not editable. */
+export interface UpdateOrganizationUnitHistoryRequest {
+  id: string;
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  changeReason?: string | null;
+  notes?: string | null;
 }
 
 // Query for GET api/OrganizationUnitHistory/paged. An unrecognised changeType is refused with a

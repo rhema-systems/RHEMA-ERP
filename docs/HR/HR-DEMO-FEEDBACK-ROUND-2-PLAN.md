@@ -1,6 +1,6 @@
 # HR demo feedback, round 2 — findings, decisions and build plan
 
-> **Status: LANE A BUILT 2026-09-09** (88 assertions ×2, `hr-employee-docs/run-round2-laneA.mjs`; lane 3a and 3c re-run 47/47 each). Lanes B–F planned, not built. Source: the feedback
+> **Status: LANES A and B1 BUILT 2026-09-09** (A: 88 assertions ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 assertions ×2, `hr-organization/run-b1.mjs`). Lanes B2, B3, C–F planned, not built. Source: the feedback
 > document *HR Demo Meetings — Changes and Additions* (4 pages; sections Organization Structure,
 > Job Position, Skills Setup, Employee Profile), brought by the user on 2026-09-08 after the HR
 > module demo. Every bullet of that document is accounted for below — as a bug, a build item, a
@@ -300,14 +300,22 @@ build turned up that the plan did not have:
 
 ### Lane B — Organization structure · 3 slices
 
-**B1 — The cascading picker, history dates, the initial history row.** Migration: `Notes` on `OrganizationUnitHistory`, nothing else.
-- [ ] `OrganizationUnitSummaryDto` gains `LevelNumber`, `StructureId` (X-10); `LocationSummary` likewise if absent.
-- [ ] `frontend/src/components/hr/common/OrganizationUnitPicker.tsx` (§ 6.1.1) and `LocationPicker.tsx` (§ 6.1.2).
-- [ ] `OrganizationUnitForm.tsx`: parent via the picker with `maxLevelNumber = chosenLevel − 1`; `LocationForm.tsx`: parent via the picker with `exactLevelNumber = chosenLevel − 1`; `UnitRestructureDialogs.tsx` move dialog same; `TeamForm.tsx` owning unit; `EmployeePositionForm.tsx` unit (already cascaded inline — swap to the shared component).
-- [ ] `CreateAsync` writes the initial history row (`PreviousParentId = null`, `NewParentId = parent`, head likewise, `EffectiveFrom` from the DTO or today, reason from the DTO).
-- [ ] `EffectiveFrom`, `EffectiveTo`, `ChangeReason`, `Notes` on create/update DTOs and both dialogs; `RecordHistoryAsync` takes them instead of `UtcNow`; validation `EffectiveTo ≥ EffectiveFrom`; a row's `EffectiveTo` is still auto-closed by the next row in its series **unless** the user set it.
-- [ ] `OrganizationUnitHistoryController`: `POST` (manual entry, `ChangeType = Other`, requires reason) and `PUT {id}` (dates, reason, notes only), both `EmployeeAdminPolicy`; `UnitChangeLog.tsx` gains an edit action and a "Record an entry" button.
-- [ ] Harness `hr-organization/run-b1.mjs`: create → one history row with the given dates; parent at a lower level refused; level skipped accepted; location parent two levels up refused; manual entry; date edit; `EffectiveTo < EffectiveFrom` refused.
+**B1 — The cascading picker, history dates, the initial history row.** · ✅ **DONE 2026-09-09** · 140 assertions ×2 · migration `20260909013533_AddOrganizationUnitHistoryNotes` (guarded, listed) · harness `hr-organization/run-b1.mjs` (new folder, README inside).
+
+What the build changed from the plan, and what it found:
+
+- **One history row per SERIES on create, not one row carrying parent and head together.** The per-series closing rule (a reparent closes the open parent row, a change of head closes the open head row) only stays true if no row belongs to both series. So a unit created with a head gets two rows; a root unit's placement row carries no ids and classifies as `Other`, and the change-log sentence for `Other` now says so. The plan's "PreviousParentId = null, NewParentId = parent, head likewise" is what each row carries, split.
+- **A backdated change is refused when it would start before the open row in its series** (400, naming the date and the remedy: correct that row through the new PUT first). The alternative — closing the open row at a date before its own start — would state two arrangements for one day in the wrong order.
+- **One `CascadingPicker` implementation, two thin wrappers** (`OrganizationUnitPicker`, `LocationPicker`), plus `HistoryStampFields` shared by the move dialog, the change-of-head dialog and the new `UnitHistoryEntryDialog`. The register's unit filter uses the picker too.
+- **Three pre-existing defects the first run exposed, all fixed here:** (1) `OrganizationLevel.IsRootLevel` is computed from the structure's sibling levels and was **false on every read** — `GET api/OrganizationLevel` reported no root in any structure and **no root unit could be created through the API at all** ("Root units must be created under a root level" on every parentless create; the live roots are seeded). The level repository's bare reads now load the sibling levels and the unit service's three root branches ask the repository for the structure's root. (2) The location summary never loaded the level (level name null, tier 0). (3) **Every seeded unit (40 of 41) and location (11 of 11) has an EMPTY `Path`** — the seeders never wrote one — so any path-based descendant test offers a unit its own children. The picker walks `parentUnitId` instead; `Path` is asserted only on API-created rows. ⚠ The seeders still write no path; a backfill (recursive CTE over `ParentUnitId`) belongs with B3 or the next data pass, and the organogram's `Depth` is wrong for seeded rows until then.
+- **Not browser-walked.** The forms type-check clean under `tsconfig.hr-slice.json` and the harness reads their source for the shapes that matter, but nobody has clicked through the new picker yet.
+- [x] `OrganizationUnitSummaryDto` gains `LevelNumber`, `StructureId` (X-10); `LocationSummary` likewise if absent.
+- [x] `frontend/src/components/hr/common/OrganizationUnitPicker.tsx` (§ 6.1.1) and `LocationPicker.tsx` (§ 6.1.2).
+- [x] `OrganizationUnitForm.tsx`: parent via the picker with `maxLevelNumber = chosenLevel − 1`; `LocationForm.tsx`: parent via the picker with `exactLevelNumber = chosenLevel − 1`; `UnitRestructureDialogs.tsx` move dialog same; `TeamForm.tsx` owning unit; `EmployeePositionForm.tsx` unit (already cascaded inline — swap to the shared component).
+- [x] `CreateAsync` writes the initial history row (`PreviousParentId = null`, `NewParentId = parent`, head likewise, `EffectiveFrom` from the DTO or today, reason from the DTO).
+- [x] `EffectiveFrom`, `EffectiveTo`, `ChangeReason`, `Notes` on create/update DTOs and both dialogs; `RecordHistoryAsync` takes them instead of `UtcNow`; validation `EffectiveTo ≥ EffectiveFrom`; a row's `EffectiveTo` is still auto-closed by the next row in its series **unless** the user set it.
+- [x] `OrganizationUnitHistoryController`: `POST` (manual entry, `ChangeType = Other`, requires reason) and `PUT {id}` (dates, reason, notes only), both `EmployeeAdminPolicy`; `UnitChangeLog.tsx` gains an edit action and a "Record an entry" button.
+- [x] Harness `hr-organization/run-b1.mjs`: create → one history row with the given dates; parent at a lower level refused; level skipped accepted; location parent two levels up refused; manual entry; date edit; `EffectiveTo < EffectiveFrom` refused.
 
 **B2 — Account code from the chart of accounts** (§ 6.2). Migration: `FinanceAccountId` on `OrganizationUnit` and `Team`.
 - [ ] `HrFinanceAccountsController` (`GET api/hr/finance-accounts?search=&take=`), read-only projection `{id, accountCode, accountNumber, accountName, accountType, isActive}` — the `HrCurrenciesController` precedent, same justification comment.

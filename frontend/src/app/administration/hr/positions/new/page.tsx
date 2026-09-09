@@ -13,8 +13,6 @@ import {
   type EmployeePositionFormValues,
 } from '@/components/hr/position/EmployeePositionForm';
 import { employeePositionService } from '@/services/hr/employee-position.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
-import { organizationLevelService } from '@/services/hr/organization-level.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { skillService } from '@/services/hr/skill.service';
@@ -27,16 +25,6 @@ export default function NewEmployeePositionPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
-
-  const { data: levels, isLoading: levelsLoading } = useQuery({
-    queryKey: ['hr', 'organization-levels', 'all'],
-    queryFn: () => organizationLevelService.getAll(),
-  });
-
-  const { data: units, isLoading: unitsLoading } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
 
   const { data: positions, isLoading: positionsLoading } = useQuery({
     queryKey: ['hr', 'employee-positions'],
@@ -138,14 +126,12 @@ export default function NewEmployeePositionPage() {
         backHref="/administration/hr/positions"
       />
 
-      {levelsLoading || unitsLoading || positionsLoading ? (
+      {positionsLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : (
         <EmployeePositionForm
-          levels={levels ?? []}
-          units={units ?? []}
           positions={positions ?? []}
           staffLevels={staffLevels ?? []}
           salaryGrades={salaryGrades ?? []}

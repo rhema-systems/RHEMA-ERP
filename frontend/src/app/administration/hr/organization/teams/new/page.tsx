@@ -13,18 +13,12 @@ import {
   type TeamFormValues,
 } from '@/components/hr/organization/TeamForm';
 import { teamService } from '@/services/hr/team.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 
 export default function NewTeamPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
-
-  const { data: units, isLoading: unitsLoading } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
 
   const { data: teams, isLoading: teamsLoading } = useQuery({
     queryKey: ['hr', 'teams', 'summary'],
@@ -59,13 +53,12 @@ export default function NewTeamPage() {
         backHref="/administration/hr/organization/teams"
       />
 
-      {unitsLoading || teamsLoading ? (
+      {teamsLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
         </div>
       ) : (
         <TeamForm
-          units={units ?? []}
           parentCandidates={teams ?? []}
           defaultValues={emptyTeam}
           onSubmit={handleSubmit}

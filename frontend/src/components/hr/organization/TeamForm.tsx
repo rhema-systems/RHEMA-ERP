@@ -33,7 +33,7 @@ import {
   type TeamSummary,
   type TeamType,
 } from '@/types/hr/team';
-import type { OrganizationUnitSummary } from '@/types/hr/organization';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 /** Selects cannot hold an empty string as a value, so absence needs a sentinel. */
 const NONE = 'none';
@@ -109,7 +109,6 @@ export const emptyTeam: TeamFormInput = {
 };
 
 interface TeamFormProps {
-  units: OrganizationUnitSummary[];
   /** Candidate parents. On edit, the team itself must already be filtered out by the caller. */
   parentCandidates: TeamSummary[];
   defaultValues: TeamFormInput;
@@ -121,7 +120,6 @@ interface TeamFormProps {
 }
 
 export function TeamForm({
-  units,
   parentCandidates,
   defaultValues,
   onSubmit,
@@ -218,24 +216,16 @@ export function TeamForm({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Owning unit</Label>
-            <Select
-              value={watch('organizationUnitId') || NONE}
-              onValueChange={(v) => setValue('organizationUnitId', v === NONE ? '' : v)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="None" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>None — cross-functional</SelectItem>
-                {units.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-2 md:col-span-2">
+            {/* Level-first, like every unit choice since demo feedback round 2 (O-6). */}
+            <OrganizationUnitPicker
+              idPrefix="owning-unit"
+              value={watch('organizationUnitId') || ''}
+              onChange={(id) => setValue('organizationUnitId', id, { shouldDirty: true })}
+              allowNone="None — cross-functional"
+              levelLabel="Owning unit's level"
+              unitLabel="Owning unit"
+            />
           </div>
 
           <div className="space-y-2">

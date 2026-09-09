@@ -38,7 +38,6 @@ import {
 import { AddTeamMemberDialog } from '@/components/hr/organization/AddTeamMemberDialog';
 import { EditTeamMemberDialog } from '@/components/hr/organization/EditTeamMemberDialog';
 import { teamService } from '@/services/hr/team.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import {
   type TeamMember,
   teamMemberRoleLabel,
@@ -68,11 +67,6 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
   const teamQuery = useQuery({
     queryKey: ['hr', 'teams', id, 'detail'],
     queryFn: () => teamService.getDetail(id),
-  });
-
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
   });
 
   const { data: allTeams } = useQuery({
@@ -258,7 +252,6 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
 
         <TabsContent value="details" className="pt-4">
           <TeamForm
-            units={units ?? []}
             parentCandidates={parentCandidates}
             defaultValues={toFormValues(team)}
             onSubmit={handleSave}

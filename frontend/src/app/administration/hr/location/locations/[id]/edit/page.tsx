@@ -42,11 +42,6 @@ export default function EditLocationPage() {
     queryFn: () => locationLevelService.getAll(),
   });
 
-  const { data: locations } = useQuery({
-    queryKey: ['hr', 'locations'],
-    queryFn: () => locationService.getAll(),
-  });
-
   const { data: countries } = useQuery({
     queryKey: ['hr', 'countries', 'active'],
     queryFn: () => countryService.getActive(),
@@ -117,7 +112,6 @@ export default function EditLocationPage() {
         <LocationForm
           structures={structures ?? []}
           levels={levels ?? []}
-          locations={locations ?? []}
           countries={countries ?? []}
           zones={zones ?? []}
           excludeId={id}

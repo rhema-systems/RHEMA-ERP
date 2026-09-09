@@ -564,7 +564,7 @@ public class OrganizationUnitService : IOrganizationUnitService
         }
         else
         {
-            if (!level.IsRootLevel)
+            if (!await IsRootLevelAsync(level))
                 throw new InvalidOperationException("Root units must be created under a root level.");
 
             var rootCount = await _repository.GetRootUnitCountByStructureAsync(_currentUserProvider.TenantId, level.StructureId);
@@ -598,6 +598,32 @@ public class OrganizationUnitService : IOrganizationUnitService
         }
 
         await _repository.AddAsync(entity);
+
+        // ⚠ The initial placement is history too (demo feedback round 2, O-3a). Until this slice the
+        // log began with a unit's first restructure and said nothing about where it started: the
+        // register read "Moved from A to B" for a unit whose creation under A was never recorded,
+        // and a unit that had never moved had no log at all.
+        //
+        // One row per SERIES, like every other writer here. The placement row carries only the
+        // parent ids and the head row (when a head is named at creation) only the head ids, so that
+        // a later reparent closes the placement without ending the headship, and vice versa. A root
+        // unit's placement row carries no ids at all and classifies as Other — "created at the top
+        // of the structure" — which is the honest description of that event.
+        await RecordHistoryAsync(
+            entity.Id,
+            previousParentId: null, newParentId: entity.ParentUnitId,
+            previousHeadEmployeeId: null, newHeadEmployeeId: null,
+            changeReason: createDto.ChangeReason,
+            effectiveFrom: createDto.EffectiveFrom, effectiveTo: createDto.EffectiveTo, notes: createDto.Notes);
+
+        if (entity.HeadEmployeeId.HasValue)
+            await RecordHistoryAsync(
+                entity.Id,
+                previousParentId: null, newParentId: null,
+                previousHeadEmployeeId: null, newHeadEmployeeId: entity.HeadEmployeeId,
+                changeReason: createDto.ChangeReason,
+                effectiveFrom: createDto.EffectiveFrom, effectiveTo: createDto.EffectiveTo, notes: createDto.Notes);
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Organization unit created: {Id}", entity.Id);
@@ -654,7 +680,7 @@ public class OrganizationUnitService : IOrganizationUnitService
             }
             else
             {
-                if (!entity.OrganizationLevel.IsRootLevel)
+                if (!await IsRootLevelAsync(entity.OrganizationLevel))
                     throw new InvalidOperationException("Only units at a root level can be moved to the root.");
 
                 var rootCount = await _repository.GetRootUnitCountByStructureAsync(_currentUserProvider.TenantId, entity.OrganizationLevel.StructureId, entity.Id);
@@ -711,14 +737,16 @@ public class OrganizationUnitService : IOrganizationUnitService
                 entity.Id,
                 previousParentId: previousParentId, newParentId: entity.ParentUnitId,
                 previousHeadEmployeeId: null, newHeadEmployeeId: null,
-                changeReason: updateDto.ChangeReason);
+                changeReason: updateDto.ChangeReason,
+                effectiveFrom: updateDto.EffectiveFrom, effectiveTo: updateDto.EffectiveTo, notes: updateDto.Notes);
 
         if (headChanged)
             await RecordHistoryAsync(
                 entity.Id,
                 previousParentId: null, newParentId: null,
                 previousHeadEmployeeId: previousHeadEmployeeId, newHeadEmployeeId: entity.HeadEmployeeId,
-                changeReason: updateDto.ChangeReason);
+                changeReason: updateDto.ChangeReason,
+                effectiveFrom: updateDto.EffectiveFrom, effectiveTo: updateDto.EffectiveTo, notes: updateDto.Notes);
 
         await _repository.UpdateAsync(entity);
 
@@ -757,7 +785,7 @@ public class OrganizationUnitService : IOrganizationUnitService
         return true;
     }
 
-    public async Task<bool> MoveUnitAsync(Guid unitId, Guid? newParentId, string changeReason, CancellationToken cancellationToken = default)
+    public async Task<bool> MoveUnitAsync(Guid unitId, Guid? newParentId, string changeReason, OrganizationUnitHistoryStampDto? stamp = null, CancellationToken cancellationToken = default)
     {
         var unit = await _repository.GetWithDetailsAsync(unitId);
 
@@ -794,7 +822,7 @@ public class OrganizationUnitService : IOrganizationUnitService
         }
         else
         {
-            if (!unit.OrganizationLevel.IsRootLevel)
+            if (!await IsRootLevelAsync(unit.OrganizationLevel))
                 throw new InvalidOperationException("Only units at a root level can be moved to the root.");
 
             var rootCount = await _repository.GetRootUnitCountByStructureAsync(_currentUserProvider.TenantId, unit.OrganizationLevel.StructureId, unit.Id);
@@ -825,7 +853,8 @@ public class OrganizationUnitService : IOrganizationUnitService
             unitId,
             previousParentId: oldParentId, newParentId: newParentId,
             previousHeadEmployeeId: null, newHeadEmployeeId: null,
-            changeReason: changeReason);
+            changeReason: changeReason,
+            effectiveFrom: stamp?.EffectiveFrom, effectiveTo: stamp?.EffectiveTo, notes: stamp?.Notes);
 
         // Update unit
         unit.ParentUnitId = newParentId;
@@ -853,7 +882,7 @@ public class OrganizationUnitService : IOrganizationUnitService
         return true;
     }
 
-    public async Task<bool> ChangeHeadEmployeeAsync(Guid unitId, Guid? newHeadEmployeeId, string changeReason, CancellationToken cancellationToken = default)
+    public async Task<bool> ChangeHeadEmployeeAsync(Guid unitId, Guid? newHeadEmployeeId, string changeReason, OrganizationUnitHistoryStampDto? stamp = null, CancellationToken cancellationToken = default)
     {
         var unit = await _repository.GetWithDetailsAsync(unitId);
 
@@ -878,7 +907,8 @@ public class OrganizationUnitService : IOrganizationUnitService
             unitId,
             previousParentId: null, newParentId: null,
             previousHeadEmployeeId: oldHeadEmployeeId, newHeadEmployeeId: newHeadEmployeeId,
-            changeReason: changeReason);
+            changeReason: changeReason,
+            effectiveFrom: stamp?.EffectiveFrom, effectiveTo: stamp?.EffectiveTo, notes: stamp?.Notes);
 
         // Update unit
         unit.HeadEmployeeId = newHeadEmployeeId;
@@ -889,6 +919,22 @@ public class OrganizationUnitService : IOrganizationUnitService
         _logger.LogInformation("Organization unit head changed: {UnitId} from {OldHead} to {NewHead}", unitId, oldHeadEmployeeId, newHeadEmployeeId);
 
         return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="level"/> is the lowest-numbered active level of its structure.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Asked of the repository rather than read off <c>level.IsRootLevel</c>, because that
+    /// property is computed from the structure's sibling levels and is FALSE whenever they are
+    /// not loaded — which, for the unit read paths (<c>GetWithDetailsAsync</c> includes the level
+    /// and its structure, not the structure's levels), was always. Lane B1 of demo feedback
+    /// round 2 found the three root branches below unreachable for that reason.
+    /// </remarks>
+    private async Task<bool> IsRootLevelAsync(OrganizationLevel level)
+    {
+        var root = await _levelRepository.GetRootLevelAsync(level.StructureId);
+        return root != null && root.Id == level.Id;
     }
 
     /// <summary>
@@ -904,6 +950,12 @@ public class OrganizationUnitService : IOrganizationUnitService
     ///
     /// <para>Three call sites write history now rather than two. Building the row in one place is
     /// what stops them drifting apart again.</para>
+    ///
+    /// <para><b>Demo feedback round 2, O-3b:</b> the dates are the caller's. <paramref name="effectiveFrom"/>
+    /// used to be hard-coded to today, so a restructure minuted last month and entered this morning
+    /// was dated this morning; <paramref name="effectiveTo"/> was only ever written by the next row
+    /// in the series. Now: from defaults to today, to is stored when given, and the series rule
+    /// below still closes the open row when the caller leaves it open.</para>
     /// </remarks>
     private async Task RecordHistoryAsync(
         Guid unitId,
@@ -911,13 +963,17 @@ public class OrganizationUnitService : IOrganizationUnitService
         Guid? newParentId,
         Guid? previousHeadEmployeeId,
         Guid? newHeadEmployeeId,
-        string? changeReason)
+        string? changeReason,
+        DateOnly? effectiveFrom = null,
+        DateOnly? effectiveTo = null,
+        string? notes = null)
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
             throw new InvalidOperationException("No tenant is associated with the current user.");
 
-        var effectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow);
+        var from = effectiveFrom ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        OrganizationUnitChangeTypes.EnsurePeriod(from, effectiveTo);
 
         // A parent row leaves both head ids null and a head row leaves both parent ids null, so which
         // series this change belongs to is readable off the arguments.
@@ -946,7 +1002,16 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         if (previous != null)
         {
-            previous.EffectiveTo = effectiveFrom;
+            // ⚠ A change cannot take effect before the arrangement it replaces did. Closing the open
+            // row at a date earlier than its own start would leave it "in force" for a negative
+            // period, and the log would then state two arrangements for the same day in the wrong
+            // order. Refused with the date and the remedy: the open row's dates can be corrected
+            // through the history PUT, after which the backdated change goes through.
+            if (from < previous.EffectiveFrom)
+                throw new InvalidOperationException(
+                    $"The {(isParentChange ? "reporting-line" : "leadership")} record currently in force for this unit took effect on {previous.EffectiveFrom:yyyy-MM-dd}; a later change cannot take effect before that. Correct that record's dates first, or use a later date.");
+
+            previous.EffectiveTo = from;
             await _historyRepository.UpdateAsync(previous);
         }
 
@@ -958,8 +1023,10 @@ public class OrganizationUnitService : IOrganizationUnitService
             NewParentId = newParentId,
             PreviousHeadEmployeeId = previousHeadEmployeeId,
             NewHeadEmployeeId = newHeadEmployeeId,
-            EffectiveFrom = effectiveFrom,
+            EffectiveFrom = from,
+            EffectiveTo = effectiveTo,
             ChangeReason = string.IsNullOrWhiteSpace(changeReason) ? null : changeReason.Trim(),
+            Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(),
             // ⚠ Nothing stamps CreatedBy in this codebase — there is no global auditing
             // interceptor, each service does it. This was slice 3's inline fix and slice 11 found
             // out what an inline fix is worth: the same hole was still open in every other store
@@ -1042,6 +1109,7 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
     private readonly IOrganizationUnitHistoryRepository _repository;
     private readonly IGenericRepository<OrganizationUnit> _units;
     private readonly IGenericRepository<Employee> _employees;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<OrganizationUnitHistoryService> _logger;
 
@@ -1049,12 +1117,14 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
         IOrganizationUnitHistoryRepository repository,
         IGenericRepository<OrganizationUnit> units,
         IGenericRepository<Employee> employees,
+        IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<OrganizationUnitHistoryService> logger)
     {
         _repository = repository;
         _units = units;
         _employees = employees;
+        _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -1180,6 +1250,87 @@ public class OrganizationUnitHistoryService : IOrganizationUnitHistoryService
             Page = pageNumber,
             PageSize = pageSize
         };
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ This service was read-only until demo feedback round 2, and the reason it stayed so is
+    /// still on the controller: an audit trail somebody can author by hand is not one. What changed
+    /// is the ask — the user records restructures after the fact, with the dates they really took
+    /// effect, and some of what they need to record (a merger minuted before the units were rebuilt,
+    /// a renaming) moves no parent and appoints no head. A hand-written row therefore carries no
+    /// ids at all, classifies as <c>Other</c>, and MUST carry a reason — the two things that keep
+    /// it distinguishable from the system's own rows.
+    /// </remarks>
+    public async Task<OrganizationUnitHistoryDto> CreateManualEntryAsync(CreateOrganizationUnitHistoryDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        if (string.IsNullOrWhiteSpace(dto.ChangeReason))
+            throw new InvalidOperationException("An entry recorded by hand must carry a reason.");
+
+        OrganizationUnitChangeTypes.EnsurePeriod(dto.EffectiveFrom, dto.EffectiveTo);
+
+        // The unit must exist NOW — the ordinary read, soft delete honoured. Recording history
+        // against a dissolved unit is the system's job (its rows survive), not something to author.
+        var unitExists = await _units.GetQueryable()
+            .AnyAsync(u => u.TenantId == tenantId && u.Id == dto.OrganizationUnitId, cancellationToken);
+        if (!unitExists)
+            throw new ArgumentException($"Organization unit with ID '{dto.OrganizationUnitId}' not found.");
+
+        var entity = new OrganizationUnitHistory
+        {
+            TenantId = tenantId,
+            OrganizationUnitId = dto.OrganizationUnitId,
+            EffectiveFrom = dto.EffectiveFrom,
+            EffectiveTo = dto.EffectiveTo,
+            ChangeReason = dto.ChangeReason.Trim(),
+            Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim(),
+        }.StampCreated(_currentUserProvider);
+
+        await _repository.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Organization unit history entry recorded by hand: {Id} for unit {UnitId}", entity.Id, dto.OrganizationUnitId);
+
+        return (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Dates, reason and notes only. The four ids are not on the DTO, so a row that says something
+    /// different from what happened is corrected by recording what happened, not by rewriting it.
+    /// ⚠ The neighbouring row in the same series is NOT re-derived: moving this row's start does
+    /// not move the previous row's end. Correct both when both are wrong — the alternative, a
+    /// cascade that silently rewrites a row the user did not open, is worse than a visible gap.
+    /// </remarks>
+    public async Task<OrganizationUnitHistoryDto> UpdateEntryAsync(UpdateOrganizationUnitHistoryDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await Scoped(tenantId).FirstOrDefaultAsync(h => h.Id == dto.Id, cancellationToken);
+
+        if (entity == null)
+            throw new ArgumentException($"Organization unit history with ID '{dto.Id}' not found.");
+
+        OrganizationUnitChangeTypes.EnsurePeriod(dto.EffectiveFrom, dto.EffectiveTo);
+
+        // A row with no ids has nothing but its reason to say what it is.
+        if (OrganizationUnitChangeTypes.Classify(entity) == OrganizationUnitChangeTypes.Other
+            && string.IsNullOrWhiteSpace(dto.ChangeReason))
+            throw new InvalidOperationException("An entry that records no reporting-line or leadership change must carry a reason.");
+
+        entity.EffectiveFrom = dto.EffectiveFrom;
+        entity.EffectiveTo = dto.EffectiveTo;
+        entity.ChangeReason = string.IsNullOrWhiteSpace(dto.ChangeReason) ? null : dto.ChangeReason.Trim();
+        entity.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        entity.StampUpdated(_currentUserProvider);
+
+        await _repository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Organization unit history entry corrected: {Id}", entity.Id);
+
+        return (await ResolveNamesAsync(new[] { entity }, tenantId, cancellationToken)).Single();
     }
 
     /// <summary>

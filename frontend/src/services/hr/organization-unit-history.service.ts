@@ -1,21 +1,25 @@
 import { apiService } from '../api.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
+  CreateOrganizationUnitHistoryRequest,
   OrganizationUnitHistoryEntry,
   OrganizationUnitHistoryQuery,
+  UpdateOrganizationUnitHistoryRequest,
 } from '@/types/hr/organization';
 
 /**
  * The organisation-unit change log. Backend route: `api/OrganizationUnitHistory`.
  *
- * **Read-only, and deliberately so.** There is no create, no update and no delete: rows are written
- * by `OrganizationUnitService` as a side effect of a restructure or a change of head, because an
- * audit trail somebody can author by hand is not one. That also means nothing here can be undone —
- * a wrong entry is corrected by making the correcting change, not by editing the log.
+ * Rows are written by `OrganizationUnitService` as a side effect of a creation, a restructure or a
+ * change of head. Two admin-tier writes exist beside those since demo feedback round 2 (O-3b):
+ * {@link createManual} records an entry by hand (it moves nothing and appoints nobody, so it
+ * classifies as `Other` and must give a reason), and {@link update} corrects a row's dates, reason
+ * and notes. Neither can rewrite WHAT a row says changed, and there is still no delete — an audit
+ * trail somebody can author freely is not one.
  *
- * ⚠ Gated on SuperAdmin / TenantAdmin / HR. The log names the employees who have led each unit, so
- * it is org-structure information about identifiable people, not the public noticeboard the
- * organogram's unit view is.
+ * ⚠ Reads are gated on HR.Employee.Read; the two writes on HR.Employee.Admin. The log names the
+ * employees who have led each unit, so it is org-structure information about identifiable people,
+ * not the public noticeboard the organogram's unit view is.
  */
 class OrganizationUnitHistoryService {
   private readonly baseUrl = '/OrganizationUnitHistory';
@@ -55,6 +59,21 @@ class OrganizationUnitHistoryService {
       startDate,
       endDate,
     });
+  }
+
+  /** Records an entry by hand. Admin-tier; the server refuses one without a reason. */
+  createManual(data: CreateOrganizationUnitHistoryRequest): Promise<OrganizationUnitHistoryEntry> {
+    return apiService.post<OrganizationUnitHistoryEntry>(this.baseUrl, data);
+  }
+
+  /**
+   * Corrects a row's dates, reason and notes. Admin-tier.
+   *
+   * ⚠ The neighbouring row in the same series is not re-derived: moving this row's start does not
+   * move the previous row's end. Correct both when both are wrong.
+   */
+  update(id: string, data: UpdateOrganizationUnitHistoryRequest): Promise<OrganizationUnitHistoryEntry> {
+    return apiService.put<OrganizationUnitHistoryEntry>(`${this.baseUrl}/${id}`, data);
   }
 
   // ⚠ `getLatestForUnit` and an `active` variant were deleted in slice 12 with the two endpoints

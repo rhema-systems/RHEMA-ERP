@@ -14,8 +14,6 @@ import {
 } from '@/components/hr/position/EmployeePositionForm';
 import { PositionDocumentRequirementsPanel } from '@/components/hr/position/PositionDocumentRequirementsPanel';
 import { employeePositionService } from '@/services/hr/employee-position.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
-import { organizationLevelService } from '@/services/hr/organization-level.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import { salaryGradeService } from '@/services/hr/salary-grade.service';
 import { skillService } from '@/services/hr/skill.service';
@@ -36,16 +34,6 @@ export default function EditEmployeePositionPage() {
     queryKey: ['hr', 'employee-positions', id],
     queryFn: () => employeePositionService.getById(id),
     enabled: !!id,
-  });
-
-  const { data: levels } = useQuery({
-    queryKey: ['hr', 'organization-levels', 'all'],
-    queryFn: () => organizationLevelService.getAll(),
-  });
-
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
   });
 
   const { data: positions } = useQuery({
@@ -164,8 +152,6 @@ export default function EditEmployeePositionPage() {
         <EmptyState title="Position not found" description="This position may have been deleted." />
       ) : (
         <EmployeePositionForm
-          levels={levels ?? []}
-          units={units ?? []}
           positions={reportsToOptions}
           staffLevels={staffLevels ?? []}
           salaryGrades={salaryGrades ?? []}

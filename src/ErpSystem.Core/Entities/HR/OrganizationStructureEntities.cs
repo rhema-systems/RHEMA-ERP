@@ -187,6 +187,14 @@ public class OrganizationUnitHistory : TenantEntity
     
     [MaxLength(500)]
     public string? ChangeReason { get; set; }
+
+    /// <summary>
+    /// Anything the reason does not cover: the memo reference, the board minute, who approved it.
+    /// Demo feedback round 2 (O-3b) asked for "EffectiveFrom, EffectiveTo, ChangeReason and any
+    /// other ones"; this is the "any other ones".
+    /// </summary>
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
     
     [ForeignKey(nameof(OrganizationUnitId))]
     public virtual OrganizationUnit OrganizationUnit { get; set; } = null!;
