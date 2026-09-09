@@ -1125,6 +1125,17 @@ Inventory must never select a book merely to populate its legacy owner evidence 
 the verified CRLF-preserved preassigned-line-ID hunk pending this explicit accounting/product decision. No database
 was accessed or mutated and no migration or remote action occurred.
 
+The user approved the recommended event-shape split. Sale and Auction will use the two-member C8 group;
+Donation and Destruction will use the existing governed C7 single-event ambient boundary. Stage C10 is now
+active from exact base `181d46166cc40e135f8994fa58e4362599cad491` on branch
+`codex/finance-producer-group-compatibility-c10` in fresh worktree
+`RHEMA-ERP-finance-producer-group-compatibility-c10`. C10 is limited to a Finance-owned, fail-closed execution
+result that returns compatibility posting/journal identities selected from the already frozen Finance member
+representations for C8 and C7. Producers receive no book selector and retain no authority to enumerate or choose
+books. GPT-5.6 Sol Medium owns implementation, followed by independent GPT-5.6 Sol High review. The partial
+Inventory c9b worktree remains preserved and will be superseded by a fresh exact-base reissue after C10 approval
+and integration. No schema/migration or configured-database mutation is authorized.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
