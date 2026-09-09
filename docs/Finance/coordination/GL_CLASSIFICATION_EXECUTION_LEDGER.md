@@ -1154,6 +1154,13 @@ historical retry/reversal compatibility. Fresh build and EF parity passed; C10 p
 ending at C8; no configured database was accessed. Ordered local integration of the one approved C10 commit is
 active, followed by primary verification and a fresh Inventory reissue.
 
+C10 integration completed locally as `3f5636b1`. Every candidate-owned blob matches approved commit
+`c732171b`; the approved range and integrated tree pass diff checks. A fresh primary solution build completed
+with zero errors and 1,106 inherited warnings, the test project rebuilt with zero errors, and the integrated
+C7/C8/C10 focused set passed 34/34. No database or migration operation occurred and all unrelated primary work
+remains preserved. C10 is complete; the next action is a fresh exact-base Inventory B2 reissue implementing the
+approved C8 Sale/Auction and C7 Donation/Destruction split.
+
 Stage C4 independent review cycle 1 returned `CHANGES_REQUIRED` at clean candidate `ebf3c2e4`. Material
 gates are: SQL Server `nvarchar` constraints compare byte `DATALENGTH` to character counts and reject valid
 fingerprints/currency; initialization lacks relational same-tenant cutoff-period authority and same-book
