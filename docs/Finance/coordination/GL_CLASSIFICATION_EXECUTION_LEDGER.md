@@ -1263,6 +1263,13 @@ recovery, synchronized two-context disposal replay and direct C10 substitution/z
 missing. Terra Medium remains assigned to those exact evidence gaps; integration stays blocked and no configured
 database or migration was touched.
 
+A fresh Terra evidence task added clean commit `668f218fd2bb811a72271e72457209410aab8a47` with direct
+real-service Stock Adjustment disposal-preview attack coverage. It denies forged tenant/source/Finance/maker/
+fingerprint authority, non-deterministic adjustment/item identities and positive disposal quantities before
+repository mutation. A shared-machine build/test process remained active beyond the task turn, so this test
+commit is not yet review-ready and its focused result must be reconciled before handoff. Remaining evidence is
+being completed in smaller bounded families, beginning with C10 compatibility substitution and zero mutation.
+
 The original Inventory task confirmed the remaining harness is feasible by reusing the C8 relational and guarded
 SQL Server fixtures but did not complete it across repeated bounded turns. To avoid another incomplete handoff,
 the clean checkpoint `3d8d1d82` was reassigned to a fresh GPT-5.6 Terra Medium test-harness task limited to the
