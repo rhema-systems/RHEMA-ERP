@@ -151,7 +151,6 @@ public sealed class LegacyPostingPathLockdownTests
             Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "FixedAssets", "FixedAssetDepreciationService.cs"),
             Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "FixedAssets", "AssetValuationService.cs"),
             Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "FixedAssets", "AssetDisposalService.cs"),
-            Path.Combine(root, "src", "ErpSystem.Core", "Services", "Sales", "ReturnOrderService.cs"),
             Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinancePurchaseOrderController.cs"),
             Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "SupplierReturnsController.cs")
         };
@@ -160,6 +159,31 @@ public sealed class LegacyPostingPathLockdownTests
         {
             File.ReadAllText(path).Should().Contain("PostAsync", $"posting-capable file {Path.GetRelativePath(root, path)} should call IFinancePostingEngine");
         }
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-LegacyPostingLockdown")]
+    [Trait("Category", "Architecture")]
+    public void ReturnOrderService_ShouldUseOnlyGovernedProducerContracts()
+    {
+        var root = FindRepositoryRoot();
+        var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "Sales", "ReturnOrderService.cs"));
+
+        service.Should().Contain("IFinanceProducerIntentService") // C7 preparation
+            .And.Contain("IFinanceProducerApprovedExecutionService") // C11/C12 execution
+            .And.Contain("IFinanceProducerReversalPreparationService") // C13 reversal
+            .And.Contain("IFinanceProducerReplayVerificationService") // C15 replay
+            .And.Contain("PrepareAsync(")
+            .And.Contain("ExecuteInAmbientTransactionAsync(")
+            .And.Contain("PrepareReversalAsync(")
+            .And.Contain("VerifyPostedAsync(");
+
+        service.Should().NotContain("IFinancePostingEngine")
+            .And.NotContain("ISubledgerPostingService")
+            .And.NotContain("AccountingBook")
+            .And.NotContain("BookCode")
+            .And.NotContain("GetActiveBooks")
+            .And.NotContain(".PostAsync(");
     }
 
     [Fact]

@@ -168,7 +168,7 @@ public sealed class ArCreditNotePostingMigrationTests
         var first = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
         var replay = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
         var conflict = () => service.ReverseCreditNoteAsync(fixture.CreditNote.Id,
-            new ReverseCreditNoteDto { Reason = "Different correction", ReversalDate = request.ReversalDate });
+            new ReverseCreditNoteDto { Reason = request.Reason, ReversalDate = request.ReversalDate!.Value.AddDays(1) });
 
         replay.ReversalJournalEntryId.Should().Be(first.ReversalJournalEntryId);
         await conflict.Should().ThrowAsync<InvalidOperationException>()
@@ -225,6 +225,7 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.ReturnOrders.CountAsync()).Should().Be(0);
     }
 
+    #if false // Superseded immediate-posting coverage. Governed C7/C11/C12/C13/C15 coverage follows the legacy block.
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "AccountsReceivable")]
@@ -685,6 +686,89 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
     }
 
+    #endif
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task GovernedSalesCreditNote_LockedSourceTamperBlocksExecution()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var originalEventId = Guid.NewGuid();
+        db.AccountingEvents.Add(new AccountingEvent
+        {
+            Id = originalEventId, TenantId = tenantId, OriginatingModuleCode = "SALES",
+            SourceDocumentType = "SalesCreditNote", SourceDocumentId = fixture.CreditNote.Id,
+            PostingAction = "Post", IdempotencyKey = $"AR:SalesCreditNote:{tenantId:N}:{fixture.CreditNote.Id:N}:Post",
+            Status = AccountingEventStatuses.Posted
+        });
+        fixture.CreditNote.JournalEntryId = Guid.NewGuid();
+        await db.SaveChangesAsync();
+
+        var reversalEventId = Guid.NewGuid();
+        const string fingerprint = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+        var producer = new Mock<IFinanceProducerIntentService>();
+        producer.Setup(x => x.GetAsync(reversalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            Id = reversalEventId, RequestFingerprint = fingerprint, ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved
+        });
+        var reversals = new Mock<IFinanceProducerReversalPreparationService>();
+        reversals.Setup(x => x.PrepareReversalAsync(It.IsAny<PrepareProducerAccountingReversalDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProducerAccountingReversalPreparationResultDto(reversalEventId, originalEventId, fingerprint,
+                AccountingEventStatuses.PendingApproval, ProducerIntentDecisionStatuses.Approved));
+        var replay = new Mock<IFinanceProducerReplayVerificationService>();
+        replay.Setup(x => x.VerifyPostedAsync(originalEventId, It.IsAny<FinanceProducerReplayVerificationRequestDto>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                db.AccountingEvents.Single(x => x.Id == originalEventId).Status = AccountingEventStatuses.Failed;
+                db.SaveChanges();
+            })
+            .ReturnsAsync(new FinanceProducerReplayVerificationResultDto(
+                originalEventId, fingerprint, "owner-effect", AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object, reversals.Object, replay.Object);
+
+        var act = () => service.ReverseCreditNoteAsync(fixture.CreditNote.Id,
+            new ReverseCreditNoteDto { Reason = "Tamper test", ReversalDate = new DateTime(2026, 7, 6) });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note reversal source authority changed before execution.");
+        execution.Verify(x => x.ExecuteInAmbientTransactionAsync(It.IsAny<Guid>(), It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task GovernedSalesCreditNote_PostCommitAuditFailureDoesNotRecordRollbackFailure()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var eventId = Guid.NewGuid();
+        const string fingerprint = "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE";
+        var prepared = new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved, RequestFingerprint = fingerprint };
+        var producer = new Mock<IFinanceProducerIntentService>();
+        producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(prepared);
+        producer.Setup(x => x.GetAsync(eventId, It.IsAny<CancellationToken>())).ReturnsAsync(prepared);
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        execution.Setup(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(eventId, fingerprint, AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
+        var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(x => x.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("audit store unavailable"));
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object,
+            Mock.Of<IFinanceProducerReversalPreparationService>(), Mock.Of<IFinanceProducerReplayVerificationService>(), audit.Object);
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("audit store unavailable");
+        db.ChangeTracker.Clear();
+        (await db.CreditNotes.SingleAsync(x => x.Id == fixture.CreditNote.Id)).JournalEntryId.Should().NotBeNull();
+        execution.Verify(x => x.RecordFailureAfterRollbackAsync(It.IsAny<Guid>(), It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -700,7 +784,9 @@ public sealed class ArCreditNotePostingMigrationTests
         Guid tenantId,
         IFinanceProducerIntentService? producerIntents = null,
         IFinanceProducerApprovedExecutionService? producerExecution = null,
-        IFinanceProducerReversalPreparationService? producerReversals = null)
+        IFinanceProducerReversalPreparationService? producerReversals = null,
+        IFinanceProducerReplayVerificationService? replayVerifier = null,
+        IFinanceAuditService? financeAuditService = null)
     {
         var currentUserService = CreateCurrentUserService(tenantId);
         var currentUserProvider = CreateCurrentUserProvider(tenantId, currentUserService.Object.UserId!);
@@ -744,12 +830,22 @@ public sealed class ArCreditNotePostingMigrationTests
             workflowMock.Object,
             workflowStatusAdapters,
             Mock.Of<ILogger<ReturnOrderService>>(),
-            financeAuditService: auditService,
+            financeAuditService: financeAuditService ?? auditService,
             financeProducerIntents: producerIntents,
             financeProducerExecution: producerExecution,
-            financeProducerReversals: producerReversals);
+            financeProducerReversals: producerReversals,
+            financeProducerReplayVerifier: replayVerifier ?? CreateReplayVerifier().Object);
 
         return (service, subledgerPostingMock);
+    }
+
+    private static Mock<IFinanceProducerReplayVerificationService> CreateReplayVerifier()
+    {
+        var replay = new Mock<IFinanceProducerReplayVerificationService>();
+        replay.Setup(x => x.VerifyPostedAsync(It.IsAny<Guid>(), It.IsAny<FinanceProducerReplayVerificationRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceProducerReplayVerificationResultDto(
+                Guid.NewGuid(), "replay", "owner-effect", AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
+        return replay;
     }
 
     private static (PaymentService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreatePaymentService(
