@@ -601,6 +601,14 @@ public static class JobAnalysisMappingExtensions
             PositionTitle = entity.Position?.Title ?? string.Empty,
             JobDescriptionId = entity.JobDescriptionId,
             JobDescriptionNumber = entity.JobDescription?.JobDescriptionNumber,
+            SalaryGradeId = entity.SalaryGradeId,
+            SalaryGradeCode = entity.SalaryGrade?.Code,
+            SalaryGradeName = entity.SalaryGrade?.Name,
+            SalaryLevelId = entity.SalaryLevelId,
+            SalaryLevelCode = entity.SalaryLevel?.Code,
+            SalaryNotchId = entity.SalaryNotchId,
+            SalaryNotchNumber = entity.SalaryNotch?.NotchNumber,
+            PlannedSalarySource = entity.PlannedSalarySource,
             CurrentCount = entity.CurrentCount,
             CurrentFilled = entity.CurrentFilled,
             CurrentVacant = entity.CurrentVacant,
@@ -638,8 +646,10 @@ public static class JobAnalysisMappingExtensions
             PlannedCount = dto.PlannedCount,
             PlannedNewPositions = dto.PlannedNewPositions,
             PlannedEliminations = dto.PlannedEliminations,
-            PlannedAverageSalary = dto.PlannedAverageSalary,
-            PlannedTotalCost = dto.PlannedTotalCost,
+            // ⚠ The amount, the total, the scale ids and the source are written by the service
+            // (ApplyLineSalaryAsync), which checks the scale and resolves the figure. Not here.
+            PlannedAverageSalary = dto.PlannedAverageSalary ?? 0m,
+            PlannedTotalCost = 0m,
             Quarter = dto.Quarter,
             TargetFillDate = dto.TargetFillDate,
             Priority = dto.Priority,
@@ -658,8 +668,7 @@ public static class JobAnalysisMappingExtensions
         entity.PlannedCount = dto.PlannedCount;
         entity.PlannedNewPositions = dto.PlannedNewPositions;
         entity.PlannedEliminations = dto.PlannedEliminations;
-        entity.PlannedAverageSalary = dto.PlannedAverageSalary;
-        entity.PlannedTotalCost = dto.PlannedTotalCost;
+        // ⚠ Amount, total, scale ids and source: the service's ApplyLineSalaryAsync, not here.
         entity.Quarter = dto.Quarter;
         entity.TargetFillDate = dto.TargetFillDate;
         entity.Priority = dto.Priority;

@@ -9,7 +9,6 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -19,13 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -37,6 +29,13 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PlanningBaselinePanel } from '@/components/hr/manpower/PlanningBaselinePanel';
+import {
+  BudgetLineDialog,
+  budgetLineFormFromLine,
+  budgetLinePayload,
+  emptyBudgetLineForm,
+  type BudgetLineFormState,
+} from '@/components/hr/manpower/BudgetLineDialog';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { workflowApiService } from '@/services/workflow-api.service';
@@ -44,6 +43,13 @@ import { workflowApiService } from '@/services/workflow-api.service';
 const fmtMoney = (v?: number | null) =>
   v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 0 });
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
+
+const SOURCE_LABEL: Record<string, string> = {
+  Notch: 'from the notch',
+  LevelMidpoint: 'level mid-point',
+  GradeMinimum: 'grade minimum',
+  Manual: 'entered by hand',
+};
 
 const STATUS_TONE: Record<string, string> = {
   Draft: 'bg-slate-100 text-slate-700',
@@ -61,7 +67,7 @@ export default function ManpowerBudgetDetailPage() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const [addingLine, setAddingLine] = useState(false);
-  const [line, setLine] = useState({ positionId: '', plannedCount: 1, plannedAverageSalary: 0, isCritical: false });
+  const [line, setLine] = useState<BudgetLineFormState>(() => emptyBudgetLineForm());
   /**
    * ⚠ The budget and its lines could be created, submitted and approved — and never corrected.
    * A figure typed wrongly could only be fixed by deleting the line and adding it again, and the
@@ -75,13 +81,10 @@ export default function ManpowerBudgetDetailPage() {
    * typed on creation can be corrected afterwards. Line corrections stay here.
    */
   const [rejectReason, setRejectReason] = useState<string | null>(null);
-  const [editingLine, setEditingLine] = useState<null | {
-    id: string; positionTitle: string;
-    currentCount: string; currentFilled: string; currentVacant: string;
-    currentAverageSalary: string; currentTotalCost: string;
-    plannedCount: string; plannedNewPositions: string; plannedEliminations: string;
-    plannedAverageSalary: string; priority: string; isCritical: boolean; notes: string;
-  }>(null);
+  // Round 2b, R3: one dialog for add and correct (`BudgetLineDialog`), with the salary read
+  // from the scale — grade pre-selected from the position, notch chosen, figure filled and its
+  // source recorded. Every stored field is now editable (quarter, target date, priority, notes).
+  const [editingLine, setEditingLine] = useState<null | { id: string; positionTitle: string; form: BudgetLineFormState }>(null);
   const [removingLine, setRemovingLine] = useState<{ id: string; title: string } | null>(null);
   const [removingBudget, setRemovingBudget] = useState(false);
 
@@ -349,6 +352,7 @@ export default function ManpowerBudgetDetailPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Position</TableHead>
+                  <TableHead>On the scale</TableHead>
                   <TableHead className="text-right">Filled</TableHead>
                   <TableHead className="text-right">Planned</TableHead>
                   <TableHead className="text-right">Average salary</TableHead>
@@ -366,9 +370,17 @@ export default function ManpowerBudgetDetailPage() {
                         <Badge className="ml-2 bg-rose-100 text-rose-800">Critical</Badge>
                       )}
                     </TableCell>
+                    <TableCell className="text-sm">
+                      {l.salaryGradeCode
+                        ? [l.salaryGradeCode, l.salaryLevelCode && l.salaryLevelCode !== l.salaryGradeCode ? `level ${l.salaryLevelCode}` : null, l.salaryNotchNumber ? `notch ${l.salaryNotchNumber}` : null].filter(Boolean).join(' · ')
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell className="text-right">{l.currentFilled}</TableCell>
                     <TableCell className="text-right font-medium">{l.plannedCount}</TableCell>
-                    <TableCell className="text-right">{fmtMoney(l.plannedAverageSalary)}</TableCell>
+                    <TableCell className="text-right">
+                      {fmtMoney(l.plannedAverageSalary)}
+                      <div className="text-xs text-muted-foreground">{SOURCE_LABEL[l.plannedSalarySource] ?? l.plannedSalarySourceName}</div>
+                    </TableCell>
                     <TableCell className="text-right">{fmtMoney(l.plannedTotalCost)}</TableCell>
                     <TableCell>
                       <Badge variant="outline">{l.priority}</Badge>
@@ -380,22 +392,7 @@ export default function ManpowerBudgetDetailPage() {
                           variant="ghost"
                           title="Correct this line"
                           onClick={() =>
-                            setEditingLine({
-                              id: l.id,
-                              positionTitle: l.positionTitle ?? 'this line',
-                              currentCount: String(l.currentCount ?? 0),
-                              currentFilled: String(l.currentFilled ?? 0),
-                              currentVacant: String(l.currentVacant ?? 0),
-                              currentAverageSalary: String(l.currentAverageSalary ?? 0),
-                              currentTotalCost: String(l.currentTotalCost ?? 0),
-                              plannedCount: String(l.plannedCount ?? 0),
-                              plannedNewPositions: String(l.plannedNewPositions ?? 0),
-                              plannedEliminations: String(l.plannedEliminations ?? 0),
-                              plannedAverageSalary: String(l.plannedAverageSalary ?? 0),
-                              priority: l.priority ?? 'Medium',
-                              isCritical: Boolean(l.isCritical),
-                              notes: l.notes ?? '',
-                            })
+                            setEditingLine({ id: l.id, positionTitle: l.positionTitle ?? 'this line', form: budgetLineFormFromLine(l) })
                           }
                         >
                           <Pencil className="h-4 w-4" />
@@ -424,89 +421,21 @@ export default function ManpowerBudgetDetailPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={addingLine} onOpenChange={setAddingLine}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add a budget line</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="space-y-2">
-              <Label>Position *</Label>
-              <Select value={line.positionId} onValueChange={(v) => setLine({ ...line, positionId: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a position" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(positions ?? []).map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Posts authorised *</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={line.plannedCount}
-                  onChange={(e) => setLine({ ...line, plannedCount: Number(e.target.value) })}
-                />
-                {/* The API refuses a budget that establishes fewer posts than are already filled. */}
-                <p className="text-xs text-muted-foreground">
-                  Cannot be fewer than the number already in post.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Average salary</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={line.plannedAverageSalary}
-                  onChange={(e) => setLine({ ...line, plannedAverageSalary: Number(e.target.value) })}
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddingLine(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!line.positionId || busy !== null}
-              onClick={async () => {
-                await run(
-                  'add the line',
-                  () =>
-                    jobArchitectureService.addBudgetLine(id, {
-                      positionId: line.positionId,
-                      plannedCount: line.plannedCount,
-                      plannedNewPositions: line.plannedCount,
-                      plannedEliminations: 0,
-                      plannedAverageSalary: line.plannedAverageSalary,
-                      plannedTotalCost: line.plannedAverageSalary * line.plannedCount,
-                      currentCount: 0,
-                      currentFilled: 0,
-                      currentVacant: 0,
-                      currentAverageSalary: 0,
-                      currentTotalCost: 0,
-                      priority: 'Medium',
-                      isCritical: line.isCritical,
-                    }),
-                  'Line added',
-                );
-                qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
-                setAddingLine(false);
-                setLine({ positionId: '', plannedCount: 1, plannedAverageSalary: 0, isCritical: false });
-              }}
-            >
-              Add
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <BudgetLineDialog
+        open={addingLine}
+        onOpenChange={(o) => { setAddingLine(o); if (!o) setLine(emptyBudgetLineForm()); }}
+        title="Add a budget line"
+        positions={positions ?? []}
+        value={line}
+        onChange={setLine}
+        busy={busy !== null}
+        onSubmit={async () => {
+          await run('add the line', () => jobArchitectureService.addBudgetLine(id, budgetLinePayload(line)), 'Line added');
+          qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+          setAddingLine(false);
+          setLine(emptyBudgetLineForm());
+        }}
+      />
 
       <Dialog open={rejectReason !== null} onOpenChange={(o) => !o && setRejectReason(null)}>
         <DialogContent>
@@ -543,74 +472,27 @@ export default function ManpowerBudgetDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editingLine !== null} onOpenChange={(o) => !o && setEditingLine(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Correct the line for {editingLine?.positionTitle}</DialogTitle>
-          </DialogHeader>
-          {editingLine && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="mlPlanned">Posts planned</Label>
-                <Input id="mlPlanned" type="number" min={0} value={editingLine.plannedCount}
-                  onChange={(e) => setEditingLine({ ...editingLine, plannedCount: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mlNew">New posts</Label>
-                <Input id="mlNew" type="number" min={0} value={editingLine.plannedNewPositions}
-                  onChange={(e) => setEditingLine({ ...editingLine, plannedNewPositions: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mlFilled">Filled today</Label>
-                <Input id="mlFilled" type="number" min={0} value={editingLine.currentFilled}
-                  onChange={(e) => setEditingLine({ ...editingLine, currentFilled: e.target.value })} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="mlAvg">Average salary</Label>
-                <Input id="mlAvg" type="number" min={0} value={editingLine.plannedAverageSalary}
-                  onChange={(e) => setEditingLine({ ...editingLine, plannedAverageSalary: e.target.value })} />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingLine(null)}>Cancel</Button>
-            <Button
-              disabled={busy !== null}
-              onClick={async () => {
-                if (!editingLine) return;
-                const plannedCount = Number(editingLine.plannedCount || 0);
-                const plannedAverageSalary = Number(editingLine.plannedAverageSalary || 0);
-                await run(
-                  'correct the line',
-                  () =>
-                    jobArchitectureService.updateBudgetLine(editingLine.id, {
-                      id: editingLine.id,
-                      currentCount: Number(editingLine.currentCount || 0),
-                      currentFilled: Number(editingLine.currentFilled || 0),
-                      currentVacant: Number(editingLine.currentVacant || 0),
-                      currentAverageSalary: Number(editingLine.currentAverageSalary || 0),
-                      currentTotalCost: Number(editingLine.currentTotalCost || 0),
-                      plannedCount,
-                      plannedNewPositions: Number(editingLine.plannedNewPositions || 0),
-                      plannedEliminations: Number(editingLine.plannedEliminations || 0),
-                      plannedAverageSalary,
-                      // Kept consistent with the figures above rather than left stale.
-                      plannedTotalCost: plannedAverageSalary * plannedCount,
-                      priority: editingLine.priority as any,
-                      isCritical: editingLine.isCritical,
-                      notes: editingLine.notes || null,
-                    }),
-                  'Line corrected',
-                );
-                qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
-                setEditingLine(null);
-              }}
-            >
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {editingLine && (
+        <BudgetLineDialog
+          open
+          onOpenChange={(o) => !o && setEditingLine(null)}
+          title={`Correct the line for ${editingLine.positionTitle}`}
+          positions={positions ?? []}
+          value={editingLine.form}
+          onChange={(form) => setEditingLine({ ...editingLine, form })}
+          busy={busy !== null}
+          positionLocked
+          onSubmit={async () => {
+            await run(
+              'correct the line',
+              () => jobArchitectureService.updateBudgetLine(editingLine.id, { id: editingLine.id, ...budgetLinePayload(editingLine.form) }),
+              'Line corrected',
+            );
+            qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+            setEditingLine(null);
+          }}
+        />
+      )}
 
       <ConfirmationDialog
         open={removingLine !== null}

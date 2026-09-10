@@ -636,6 +636,36 @@ public class ManpowerBudgetLine : TenantEntity
     [ForeignKey(nameof(JobDescriptionId))]
     public virtual JobDescription? JobDescription { get; set; }
 
+    /// <summary>
+    /// The place on the salary scale the planned average salary was read from (round 2b, R3).
+    /// </summary>
+    /// <remarks>
+    /// <para>The demo asked for "the salary that goes with a position" to show once the position
+    /// is chosen, and for the line to take its figure from the scale rather than a typed number.
+    /// Grade → (level) → notch, all optional, pre-selected on screen from
+    /// <c>EmployeePosition.SalaryGradeId</c> (122 of 212 live positions carry one, measured
+    /// 2026-09-10). The amount stays editable: <see cref="PlannedSalarySource"/> says whether it
+    /// was read from the notch, the level's mid-point, the grade's minimum, or typed.</para>
+    /// <para>Restrict on all three: a grade referenced by a budget line cannot be deleted from
+    /// under it; retire it instead (the structure's own rule).</para>
+    /// </remarks>
+    public Guid? SalaryGradeId { get; set; }
+
+    [ForeignKey(nameof(SalaryGradeId))]
+    public virtual SalaryGrade? SalaryGrade { get; set; }
+
+    public Guid? SalaryLevelId { get; set; }
+
+    [ForeignKey(nameof(SalaryLevelId))]
+    public virtual SalaryLevel? SalaryLevel { get; set; }
+
+    public Guid? SalaryNotchId { get; set; }
+
+    [ForeignKey(nameof(SalaryNotchId))]
+    public virtual SalaryNotch? SalaryNotch { get; set; }
+
+    public PlannedSalarySource PlannedSalarySource { get; set; } = PlannedSalarySource.Manual;
+
     // Current
     public int CurrentCount { get; set; }
     public int CurrentFilled { get; set; }

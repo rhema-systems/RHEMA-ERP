@@ -1064,6 +1064,21 @@ export interface ManpowerBudget {
   rejectionReason?: string | null;
 }
 
+export type PlannedSalarySource = 'Notch' | 'LevelMidpoint' | 'GradeMinimum' | 'Manual';
+
+/** "The salary that goes with this position": the grade the post carries, if any (R3). */
+export interface PositionSalaryReference {
+  positionId: string;
+  positionTitle: string;
+  hasGrade: boolean;
+  salaryGradeId?: string | null;
+  gradeCode?: string | null;
+  gradeName?: string | null;
+  minSalary?: number | null;
+  maxSalary?: number | null;
+  tiers: 'GradeAndNotch' | 'GradeLevelAndNotch' | string;
+}
+
 export interface ManpowerBudgetLine {
   id: string;
   tenantId: string;
@@ -1072,6 +1087,16 @@ export interface ManpowerBudgetLine {
   positionTitle: string;
   jobDescriptionId?: string | null;
   jobDescriptionNumber?: string | null;
+  /** Where the planned salary came from (round 2b, R3). */
+  salaryGradeId?: string | null;
+  salaryGradeCode?: string | null;
+  salaryGradeName?: string | null;
+  salaryLevelId?: string | null;
+  salaryLevelCode?: string | null;
+  salaryNotchId?: string | null;
+  salaryNotchNumber?: number | null;
+  plannedSalarySource: PlannedSalarySource;
+  plannedSalarySourceName?: string;
   currentCount: number;
   currentFilled: number;
   currentVacant: number;
@@ -1080,7 +1105,9 @@ export interface ManpowerBudgetLine {
   plannedCount: number;
   plannedNewPositions: number;
   plannedEliminations: number;
+  /** On a write, null = read it from the scale; a number = typed (Manual). */
   plannedAverageSalary: number;
+  /** Computed by the server (average × planned count) — never send it. */
   plannedTotalCost: number;
   quarter?: number | null;
   targetFillDate?: string | null;

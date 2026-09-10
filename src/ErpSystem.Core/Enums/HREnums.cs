@@ -5847,6 +5847,29 @@ public enum ManpowerBudgetStatus
     Closed = 7
 }
 
+/// <summary>
+/// Where a manpower budget line's planned average salary came from (round 2b, R3, decision D-1).
+/// </summary>
+/// <remarks>
+/// ⚠ <c>Manual</c> is deliberately the highest member and the entity default, and the migration's
+/// column default is 4, not the scaffolded 0 — every line that exists when R3 lands was typed by
+/// hand. A zero here would be a value that is not a member (the lane E1/G trap, fourth time).
+/// </remarks>
+public enum PlannedSalarySource
+{
+    [Description("Notch on the scale")]
+    Notch = 1,
+
+    [Description("Level mid-point")]
+    LevelMidpoint = 2,
+
+    [Description("Grade minimum")]
+    GradeMinimum = 3,
+
+    [Description("Entered by hand")]
+    Manual = 4
+}
+
 public enum BudgetPriority
 {
     [Description("Critical")]

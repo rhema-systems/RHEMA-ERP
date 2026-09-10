@@ -772,6 +772,12 @@ public class JobAnalysisController : ControllerBase
         return Ok(await _manpowerBudgetService.GetPlanningBaselineAsync(organizationUnitId, periodStart, periodEnd, cancellationToken));
     }
 
+    /// <summary>"The salary that goes with this position": the grade it carries, for the line picker (round 2b, R3).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("positions/{positionId:guid}/salary-reference")]
+    public async Task<ActionResult<PositionSalaryReferenceDto>> GetPositionSalaryReference(Guid positionId, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetPositionSalaryReferenceAsync(positionId, cancellationToken));
+
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
     [HttpGet("budgets/pending-approvals")]
     public async Task<ActionResult<IEnumerable<ManpowerBudgetSummaryDto>>> GetPendingBudgetApprovals()

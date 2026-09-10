@@ -43,6 +43,7 @@ import type {
   JobWorkingCondition,
   ManpowerBudget,
   ManpowerPlanningBaseline,
+  PositionSalaryReference,
   ManpowerBudgetLine,
   OrganisationCompetencyGap,
   PositionCompetency,
@@ -796,7 +797,7 @@ class JobArchitectureService {
    * ⚠ Note the route: a line is CREATED under its budget and then addressed at
    * `JobAnalysis/lines/{id}` — the same asymmetry the bank branches have.
    */
-  updateBudgetLine(lineId: string, payload: Partial<ManpowerBudgetLine> & { id: string }) {
+  updateBudgetLine(lineId: string, payload: ManpowerBudgetLineWrite & { id: string }) {
     return apiService.put<ManpowerBudgetLine>(`${this.jobs}/lines/${lineId}`, payload);
   }
 
@@ -805,7 +806,7 @@ class JobArchitectureService {
     return apiService.delete<void>(`${this.jobs}/lines/${lineId}`);
   }
 
-  addBudgetLine(budgetId: string, payload: Partial<ManpowerBudgetLine> & { positionId: string }) {
+  addBudgetLine(budgetId: string, payload: ManpowerBudgetLineWrite & { positionId: string }) {
     return apiService.post<ManpowerBudgetLine>(`${this.jobs}/budgets/${budgetId}/lines`, {
       manpowerBudgetId: budgetId,
       ...payload,
@@ -847,6 +848,11 @@ class JobArchitectureService {
     });
   }
 
+  /** The grade a position carries, for the budget line's scale picker (R3). */
+  getPositionSalaryReference(positionId: string) {
+    return apiService.get<PositionSalaryReference>(`${this.jobs}/positions/${positionId}/salary-reference`);
+  }
+
   // ── establishment (FR-HR-136) ──────────────────────────────────────────────
 
   getPositionEstablishment(positionId: string) {
@@ -868,5 +874,13 @@ class JobArchitectureService {
     );
   }
 }
+
+/**
+ * A budget line as written (R3). `plannedAverageSalary: null` means "read it from the scale
+ * named by the grade/level/notch ids"; a number is kept as typed. The total is never sent.
+ */
+export type ManpowerBudgetLineWrite = Omit<Partial<ManpowerBudgetLine>, 'plannedAverageSalary'> & {
+  plannedAverageSalary?: number | null;
+};
 
 export const jobArchitectureService = new JobArchitectureService();

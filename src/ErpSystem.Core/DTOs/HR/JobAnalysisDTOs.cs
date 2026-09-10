@@ -1107,6 +1107,21 @@ public class ManpowerPlanningPositionDto
     public int SuggestedNewHires { get; set; }
 }
 
+/// <summary>"The salary that goes with this position" (round 2b, R3): the grade the post carries, if any.</summary>
+public class PositionSalaryReferenceDto
+{
+    public Guid PositionId { get; set; }
+    public string PositionTitle { get; set; } = string.Empty;
+    public bool HasGrade => SalaryGradeId != null;
+    public Guid? SalaryGradeId { get; set; }
+    public string? GradeCode { get; set; }
+    public string? GradeName { get; set; }
+    public decimal? MinSalary { get; set; }
+    public decimal? MaxSalary { get; set; }
+    /// <summary>The scale's tiers for this tenant, so a picker knows whether to show the level.</summary>
+    public SalaryStructureTiers Tiers { get; set; }
+}
+
 public class RejectManpowerBudgetDto
 {
     public string? Reason { get; set; }
@@ -1136,6 +1151,17 @@ public class ManpowerBudgetLineDto : BaseDto
     public string PositionTitle { get; set; } = string.Empty;
     public Guid? JobDescriptionId { get; set; }
     public string? JobDescriptionNumber { get; set; }
+
+    // Where the planned salary came from (round 2b, R3)
+    public Guid? SalaryGradeId { get; set; }
+    public string? SalaryGradeCode { get; set; }
+    public string? SalaryGradeName { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public string? SalaryLevelCode { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    public int? SalaryNotchNumber { get; set; }
+    public PlannedSalarySource PlannedSalarySource { get; set; }
+    public string PlannedSalarySourceName => PlannedSalarySource.ToString();
     
     // Current
     public int CurrentCount { get; set; }
@@ -1167,6 +1193,18 @@ public class ManpowerBudgetLineDto : BaseDto
 /// </summary>
 public class CreateManpowerBudgetLineDto : CreateDtoBase
 {
+    /// <summary>
+    /// Grade → (level) → notch on the salary scale (round 2b, R3; all optional). The service
+    /// checks each belongs to the one above and to this tenant. With no
+    /// <see cref="PlannedAverageSalary"/> the amount is read from the deepest one named — notch
+    /// amount, else level mid-point, else grade minimum — and the source recorded; with one, the
+    /// figure is kept as typed and the source is <c>Manual</c>. Naming neither is refused.
+    /// <c>PlannedTotalCost</c> is IGNORED since R3: the server computes average × planned count.
+    /// </summary>
+    public Guid? SalaryGradeId { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+
     [Required]
     public Guid ManpowerBudgetId { get; set; }
 
@@ -1201,8 +1239,9 @@ public class CreateManpowerBudgetLineDto : CreateDtoBase
     [Range(0, int.MaxValue)]
     public int PlannedEliminations { get; set; }
 
+    /// <summary>Null = read it from the scale (grade/level/notch). A value = typed, kept as is, source <c>Manual</c>.</summary>
     [Range(0, double.MaxValue)]
-    public decimal PlannedAverageSalary { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal PlannedTotalCost { get; set; }
@@ -1224,6 +1263,11 @@ public class CreateManpowerBudgetLineDto : CreateDtoBase
 /// </summary>
 public class UpdateManpowerBudgetLineDto : UpdateDtoBase
 {
+    /// <summary>As on the create DTO: the place on the scale, all optional, checked for consistency; the total is computed.</summary>
+    public Guid? SalaryGradeId { get; set; }
+    public Guid? SalaryLevelId { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+
     [Required]
     [Range(0, int.MaxValue)]
     public int CurrentCount { get; set; }
@@ -1250,8 +1294,9 @@ public class UpdateManpowerBudgetLineDto : UpdateDtoBase
     [Range(0, int.MaxValue)]
     public int PlannedEliminations { get; set; }
 
+    /// <summary>Null = read it from the scale (grade/level/notch). A value = typed, kept as is, source <c>Manual</c>.</summary>
     [Range(0, double.MaxValue)]
-    public decimal PlannedAverageSalary { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal PlannedTotalCost { get; set; }

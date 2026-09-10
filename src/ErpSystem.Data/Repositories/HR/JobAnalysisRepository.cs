@@ -315,6 +315,7 @@ public class ManpowerBudgetLineRepository : GenericRepository<ManpowerBudgetLine
         return await _dbSet
             .Include(l => l.Position)
             .Include(l => l.JobDescription)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch)
             .Where(l => l.ManpowerBudgetId == budgetId)
             .OrderBy(l => l.Position.Title)
             .ToListAsync();
@@ -333,6 +334,7 @@ public class ManpowerBudgetLineRepository : GenericRepository<ManpowerBudgetLine
     {
         return await _dbSet
             .Include(l => l.Position)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch)
             .Where(l => l.ManpowerBudgetId == budgetId && l.IsCritical)
             .OrderBy(l => l.Priority)
             .ToListAsync();

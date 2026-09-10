@@ -199,6 +199,9 @@ public interface IManpowerBudgetService
         Guid organizationUnitId, DateOnly periodStart, DateOnly periodEnd, CancellationToken cancellationToken = default);
 
     // Budget Line operations
+    /// <summary>The grade a position carries, if any, so a budget line can start from it (round 2b, R3).</summary>
+    Task<PositionSalaryReferenceDto> GetPositionSalaryReferenceAsync(Guid positionId, CancellationToken cancellationToken = default);
+
     Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<ManpowerBudgetLineDto>> GetBudgetLinesAsync(Guid budgetId, CancellationToken cancellationToken = default);
     Task<ManpowerBudgetLineDto> UpdateBudgetLineAsync(UpdateManpowerBudgetLineDto updateDto, CancellationToken cancellationToken = default);

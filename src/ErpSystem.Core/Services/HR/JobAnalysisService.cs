@@ -2813,14 +2813,19 @@ public class ManpowerBudgetService : IManpowerBudgetService
     public async Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default)
     {
         await GetOwnedBudgetAsync(createDto.ManpowerBudgetId);
+        var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
-        entity.TenantId = GetTenantId();
+        entity.TenantId = tenantId;
+
+        await ApplyLineSalaryAsync(entity, createDto.SalaryGradeId, createDto.SalaryLevelId, createDto.SalaryNotchId,
+            createDto.PlannedAverageSalary, tenantId, cancellationToken);
 
         await _budgetLineRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _budgetLineRepository.GetQueryable()
             .Include(l => l.Position)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch)
             .FirstOrDefaultAsync(l => l.Id == entity.Id, cancellationToken);
 
         _logger.LogInformation("Budget line added to budget: {BudgetId}", createDto.ManpowerBudgetId);
@@ -2846,13 +2851,121 @@ public class ManpowerBudgetService : IManpowerBudgetService
             throw JobArchitectureException.NotFound("Budget line not found");
 
         updateDto.UpdateEntity(entity);
+        await ApplyLineSalaryAsync(entity, updateDto.SalaryGradeId, updateDto.SalaryLevelId, updateDto.SalaryNotchId,
+            updateDto.PlannedAverageSalary, entity.TenantId, cancellationToken);
 
         await _budgetLineRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Budget line updated: {LineId}", updateDto.Id);
 
+        // Re-read with the scale navigations: a changed grade/level/notch id would otherwise be
+        // mapped with the OLD rows' names (the F2 shape again).
+        entity = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Include(l => l.Position)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch)
+            .FirstAsync(l => l.Id == updateDto.Id, cancellationToken);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Round 2b, R3 (D-1): checks the place on the scale a line names and resolves its planned
+    /// average salary from it — notch amount, else level mid-point, else grade minimum — unless
+    /// the caller typed a figure, which is kept and marked <c>Manual</c>. The total is always
+    /// average × planned count, so the two cannot drift.
+    /// </summary>
+    private async Task ApplyLineSalaryAsync(
+        ManpowerBudgetLine line, Guid? gradeId, Guid? levelId, Guid? notchId, decimal? typedAmount,
+        Guid tenantId, CancellationToken cancellationToken)
+    {
+        SalaryGrade? grade = null;
+        SalaryLevel? level = null;
+        SalaryNotch? notch = null;
+
+        if (notchId.HasValue)
+        {
+            notch = await _unitOfWork.Repository<SalaryNotch>().GetQueryable().AsNoTracking()
+                .Include(n => n.Level).ThenInclude(l => l.Grade)
+                .FirstOrDefaultAsync(n => n.Id == notchId.Value && n.TenantId == tenantId && !n.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The salary notch named does not exist in this organisation's scale.");
+            level = notch.Level;
+            grade = notch.Level.Grade;
+            if (levelId.HasValue && levelId.Value != level.Id)
+                throw JobArchitectureException.Invalid($"Notch {notch.NotchNumber} is not on the level named; it belongs to level {level.Code} of grade {grade.Code}.");
+            if (gradeId.HasValue && gradeId.Value != grade.Id)
+                throw JobArchitectureException.Invalid($"Notch {notch.NotchNumber} is not on the grade named; it belongs to grade {grade.Code}.");
+        }
+        else if (levelId.HasValue)
+        {
+            level = await _unitOfWork.Repository<SalaryLevel>().GetQueryable().AsNoTracking()
+                .Include(l => l.Grade)
+                .FirstOrDefaultAsync(l => l.Id == levelId.Value && l.TenantId == tenantId && !l.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The salary level named does not exist in this organisation's scale.");
+            grade = level.Grade;
+            if (gradeId.HasValue && gradeId.Value != grade.Id)
+                throw JobArchitectureException.Invalid($"Level {level.Code} is not on the grade named; it belongs to grade {grade.Code}.");
+        }
+        else if (gradeId.HasValue)
+        {
+            grade = await _unitOfWork.Repository<SalaryGrade>().GetQueryable().AsNoTracking()
+                .FirstOrDefaultAsync(g => g.Id == gradeId.Value && g.TenantId == tenantId && !g.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The salary grade named does not exist in this organisation's scale.");
+        }
+
+        line.SalaryGradeId = grade?.Id;
+        line.SalaryLevelId = level?.Id;
+        line.SalaryNotchId = notch?.Id;
+
+        if (typedAmount.HasValue)
+        {
+            line.PlannedAverageSalary = typedAmount.Value;
+            line.PlannedSalarySource = PlannedSalarySource.Manual;
+        }
+        else if (notch != null)
+        {
+            line.PlannedAverageSalary = notch.SalaryAmount;
+            line.PlannedSalarySource = PlannedSalarySource.Notch;
+        }
+        else if (level != null)
+        {
+            line.PlannedAverageSalary = level.MidSalary;
+            line.PlannedSalarySource = PlannedSalarySource.LevelMidpoint;
+        }
+        else if (grade != null)
+        {
+            line.PlannedAverageSalary = grade.MinSalary;
+            line.PlannedSalarySource = PlannedSalarySource.GradeMinimum;
+        }
+        else
+        {
+            throw JobArchitectureException.Invalid(
+                "Give the line an average salary, or choose the grade (and notch) on the scale it should be read from.");
+        }
+
+        line.PlannedTotalCost = line.PlannedAverageSalary * line.PlannedCount;
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionSalaryReferenceDto> GetPositionSalaryReferenceAsync(Guid positionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable().AsNoTracking()
+            .Include(p => p.SalaryGrade)
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId && !p.IsDeleted, cancellationToken)
+            ?? throw JobArchitectureException.NotFound("The position does not exist in this organisation.");
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var grade = position.SalaryGrade is { IsDeleted: false } g ? g : null;
+        return new PositionSalaryReferenceDto
+        {
+            PositionId = position.Id,
+            PositionTitle = position.Title,
+            SalaryGradeId = grade?.Id,
+            GradeCode = grade?.Code,
+            GradeName = grade?.Name,
+            MinSalary = grade?.MinSalary,
+            MaxSalary = grade?.MaxSalary,
+            Tiers = settings.SalaryStructureTiers,
+        };
     }
 
     public async Task<bool> DeleteBudgetLineAsync(Guid lineId, CancellationToken cancellationToken = default)

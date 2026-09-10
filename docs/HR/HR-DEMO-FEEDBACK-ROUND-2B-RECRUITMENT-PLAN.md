@@ -1,6 +1,6 @@
 # HR demo feedback, round 2b — Recruitment: budget, establishment, requisition
 
-> **Status: LANES R1 (36 ×2) and R2 (57 ×2, `hr-jobarch/run-r2.mjs`) DONE 2026-09-10; R3 next.** Source: the feedback document *HR Demo Meetings —
+> **Status: LANES R1 (36 ×2), R2 (57 ×2) and R3 (55 ×2, `hr-jobarch/run-r3.mjs`) DONE 2026-09-10; R4a next.** Source: the feedback document *HR Demo Meetings —
 > Changes and Additions 2* (2 pages, section RECRUITMENT), brought by the user on 2026-09-10 after
 > the round-2 HR demo, plus one follow-up from the user the same day (Finance must approve and
 > process requisition costs). Every bullet of the document is accounted for in § 2 — as a build
@@ -203,7 +203,24 @@ suggested new hires). Reuses `HrPolicyCalculations`; `UpcomingRetirementDto` gai
 and a re-fetch; `PlanningBaselinePanel.tsx` on the form and as a detail tab. Harness
 `run-r2.mjs` with its own unit tree (never a second root).
 
-### R3 — Salary from the scale on the budget line · migration `AddManpowerBudgetLineSalaryScale`
+### R3 — Salary from the scale on the budget line · migration `20260910163909_AddManpowerBudgetLineSalaryScale` · ✅ **DONE 2026-09-10** · 55 ×2
+
+- [x] Entity + enum `PlannedSalarySource {Notch=1, LevelMidpoint=2, GradeMinimum=3, Manual=4}`; migration rewritten to guarded SQL with the column **defaulting to 4** (the scaffold said 0 — the fourth time this round), three Restrict FKs + indexes; listed in `FastBuildMigrationMetadata`.
+- [x] DTOs: the three ids on create/update; `PlannedAverageSalary` is `decimal?` (null = read from the scale); `PlannedTotalCost` is **ignored and computed** (average × posts) so the two cannot drift — asserted with a caller sending 999,999.
+- [x] `ApplyLineSalaryAsync` (service): notch → level → grade consistency with sentences naming the offending pair; resolution notch amount → level mid-point → grade minimum → typed (Manual); naming nothing is refused. Update re-reads with the scale navigations (F2 shape).
+- [x] `GET api/JobAnalysis/positions/{id}/salary-reference` — the post's grade, range and the tenant's tiers.
+- [x] `components/hr/common/SalaryScalePicker.tsx` — the cascade extracted from `SalaryAssignmentsTab.tsx` (⚠ the tab still carries its own copy for now: its fields are react-hook-form bound through `SelectField`, and swapping them in the same slice would have re-baselined the E1/E1b harnesses; recorded as a tidy for R4a or the closure sweep). `components/hr/manpower/BudgetLineDialog.tsx` — one dialog for add and correct: position labelled `title · unit · code`, grade pre-selected from the position, amount filled with a caption naming its source, overtype = Manual, clear = back to the scale; quarter, target date, priority, critical and notes editable. Table gains "On the scale" and the source under the amount.
+- [x] Harness `run-r3.mjs`; regression after: R1 36, R2 57, slice 7 47, slice 8 40, slice 12 41, C1 36, C2 143.
+
+**What the build changed from the plan, and what it found.**
+
+1. **Pre-select is real:** 122 of 212 live positions carry a `SalaryGradeId` (measured 2026-09-10). The plan's worry that the column was near-dead was about READERS, not data.
+2. **The tenant is two-tier with payroll as source**, so the picker resolves the grade's one implicit level silently (lane G's rule) and `LevelMidpoint` only arises when a caller names a level explicitly — the harness does, through the API.
+3. ⚠ **`SalaryEntities.cs` has NO namespace declaration** — `SalaryGrade`/`SalaryLevel`/`SalaryNotch` live in the global namespace. They resolve from anywhere, which is why nothing had noticed.
+4. ⚠ **The read DTO's blank lines contain four spaces.** An anchor copied from a blank-stripped read did not match; anchors were re-cut to avoid blank lines. Read the join point verbatim (`cat -A`) before anchoring on a region with blank lines.
+5. **Not browser-walked.** The dialog and picker type-check clean; nobody has watched the amount fill itself yet.
+
+The plan as written:
 
 `ManpowerBudgetLine.SalaryGradeId/SalaryLevelId/SalaryNotchId` (Guid?, Restrict, one-way navs) +
 `PlannedSalarySource {Notch=1, LevelMidpoint=2, GradeMinimum=3, Manual=4}` (⚠ migration default

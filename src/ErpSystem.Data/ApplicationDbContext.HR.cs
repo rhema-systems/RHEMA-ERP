@@ -6233,6 +6233,14 @@ private void ConfigureHREntities(ModelBuilder builder)
 
             entity.Property(x => x.Priority).HasConversion<int>();
 
+            // Round 2b, R3: the place on the scale the planned salary was read from. Restrict, no
+            // navigation back from the grade — the structure does not need to know its budgets.
+            entity.HasIndex(x => x.SalaryGradeId);
+            entity.Property(x => x.PlannedSalarySource).HasConversion<int>();
+            entity.HasOne(x => x.SalaryGrade).WithMany().HasForeignKey(x => x.SalaryGradeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.SalaryLevel).WithMany().HasForeignKey(x => x.SalaryLevelId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.SalaryNotch).WithMany().HasForeignKey(x => x.SalaryNotchId).OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(x => x.ManpowerBudget)
                 .WithMany(x => x.BudgetLines)
                 .HasForeignKey(x => x.ManpowerBudgetId)
