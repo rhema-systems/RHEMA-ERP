@@ -1312,6 +1312,17 @@ transaction-aware identity tracking, pre-clear tracker proof, exhaustive zero/al
 separate contexts and guarded SQL Server lock coverage are corrected. Terra continues those fixes; no configured
 database, production schema, migration or remote state was touched.
 
+Sol High review of governance `29c69a4c` remains changes-required: the test snapshot mislabeled legacy Account
+balances and omitted actual C2 balances, transactions, event attempts/postings/receipts and audits; several denials
+did not use the full snapshot; the mocked C12 path did not compare complete locked-reload economics; its custom hash
+sorted lines contrary to immutable order; and no-auto-approval remained implicit. Terra is replacing this with exact
+ordered request comparison, full mapped-row snapshots and explicit decision-call denial. Relational correction
+`ee1a2c27` is clean and keeps the 5/5 pass while narrowing provider accommodation to RowVersion, making identity
+tracking rollback-safe, checking tracker state before Clear, persisting real audit evidence and asserting exact
+C10/C11/C12/C15 receipt/fingerprint/journal/read-only retry. Sol High review is active; separate-context, guarded SQL
+lock and C13 reversal coverage continue in a follow-on. No configured database, production schema, migration or
+remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
