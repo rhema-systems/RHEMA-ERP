@@ -1064,6 +1064,27 @@ export interface ManpowerBudget {
   rejectionReason?: string | null;
 }
 
+/** "Use the position establishment to initiate the budget" (round 2b, R4a). */
+export interface CreateManpowerBudgetFromEstablishment {
+  organizationUnitId: string;
+  fiscalYear: number;
+  periodStart: string;
+  periodEnd: string;
+  includeUnestablished?: boolean;
+  businessJustification?: string | null;
+}
+
+export interface AddLinesFromEstablishmentResult {
+  added: number;
+  alreadyOnBudget: number;
+  skippedUnestablished: number;
+  lines: ManpowerBudgetLine[];
+}
+
+export interface ManpowerBudgetDetail extends ManpowerBudget {
+  budgetLines: ManpowerBudgetLine[];
+}
+
 export type PlannedSalarySource = 'Notch' | 'LevelMidpoint' | 'GradeMinimum' | 'Manual';
 
 /** "The salary that goes with this position": the grade the post carries, if any (R3). */

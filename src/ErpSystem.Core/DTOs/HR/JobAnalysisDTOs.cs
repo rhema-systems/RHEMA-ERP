@@ -1103,6 +1103,10 @@ public class ManpowerPlanningPositionDto
     /// <summary>People in this post who appear in the exits-due lists.</summary>
     public int ExitsDue { get; set; }
 
+    /// <summary>Mean monthly basic pay of the people in the post (the planning estimate), and its sum.</summary>
+    public decimal CurrentAverageSalary { get; set; }
+    public decimal CurrentSalaryCost { get; set; }
+
     /// <summary><c>max(0, Gap) + ExitsDue</c>: what it would take to be at establishment at the end of the period.</summary>
     public int SuggestedNewHires { get; set; }
 }
@@ -1120,6 +1124,44 @@ public class PositionSalaryReferenceDto
     public decimal? MaxSalary { get; set; }
     /// <summary>The scale's tiers for this tenant, so a picker knows whether to show the level.</summary>
     public SalaryStructureTiers Tiers { get; set; }
+}
+
+/// <summary>
+/// "Use the position establishment to initiate the budget" (round 2b, R4a): a Draft budget for a
+/// unit and year, with one line per post in the subtree, pre-filled from the planning baseline.
+/// </summary>
+public class CreateManpowerBudgetFromEstablishmentDto
+{
+    [Required]
+    public Guid OrganizationUnitId { get; set; }
+
+    [Required]
+    [Range(2000, 2100)]
+    public int FiscalYear { get; set; }
+
+    [Required]
+    public DateOnly PeriodStart { get; set; }
+
+    [Required]
+    public DateOnly PeriodEnd { get; set; }
+
+    /// <summary>
+    /// Also draft a line for posts nobody has established. Their gap is unknown, so such a line
+    /// plans only the exits due; the budget's approval is what establishes them. Default true.
+    /// </summary>
+    public bool IncludeUnestablished { get; set; } = true;
+
+    [MaxLength(2000)]
+    public string? BusinessJustification { get; set; }
+}
+
+/// <summary>What "add posts from the establishment" did to a draft budget.</summary>
+public class AddLinesFromEstablishmentResultDto
+{
+    public int Added { get; set; }
+    public int AlreadyOnBudget { get; set; }
+    public int SkippedUnestablished { get; set; }
+    public List<ManpowerBudgetLineDto> Lines { get; set; } = new();
 }
 
 public class RejectManpowerBudgetDto

@@ -2662,11 +2662,18 @@ public class ManpowerBudgetService : IManpowerBudgetService
 
         decimal salaryCost = 0m;
         var withoutPay = 0;
+        var payByPosition = new Dictionary<Guid, (decimal Sum, int Count)>();
         foreach (var e in employees)
         {
             placementOf.TryGetValue(e.Id, out var placement);
             var (amount, _) = HrBasicPay.ResolveForPlanning(e, placement);
-            if (amount is > 0m) salaryCost += amount.Value; else withoutPay++;
+            if (amount is > 0m)
+            {
+                salaryCost += amount.Value;
+                payByPosition.TryGetValue(e.PositionId, out var acc);
+                payByPosition[e.PositionId] = (acc.Sum + amount.Value, acc.Count + 1);
+            }
+            else withoutPay++;
         }
 
         // Exits due in the period.
@@ -2751,10 +2758,13 @@ public class ManpowerBudgetService : IManpowerBudgetService
         {
             filledOf.TryGetValue(p.Id, out var filled);
             exitsOf.TryGetValue(p.Id, out var exits);
+            payByPosition.TryGetValue(p.Id, out var pay);
             var established = p.EstablishmentApprovedOn != null;
             int? gap = established ? Math.Max(0, p.ExpectedHeadcount - filled) : null;
             return new ManpowerPlanningPositionDto
             {
+                CurrentSalaryCost = pay.Sum,
+                CurrentAverageSalary = pay.Count == 0 ? 0m : Math.Round(pay.Sum / pay.Count, 2),
                 PositionId = p.Id,
                 Title = p.Title,
                 Code = p.Code,
@@ -2791,6 +2801,190 @@ public class ManpowerBudgetService : IManpowerBudgetService
             ExitsDueTotal = exitingIds.Count,
             Positions = positionRows,
         };
+    }
+
+    // ── From the establishment (round 2b, R4a) ───────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<ManpowerBudgetDetailDto> CreateFromEstablishmentAsync(
+        CreateManpowerBudgetFromEstablishmentDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var baseline = await GetPlanningBaselineAsync(dto.OrganizationUnitId, dto.PeriodStart, dto.PeriodEnd, cancellationToken);
+
+        // One live budget per unit and year. A second draft would be two answers to one question;
+        // a correction goes into the existing one (Draft/Rejected are editable since R1).
+        var clash = await _budgetRepository.GetQueryable().AsNoTracking()
+            .Where(b => b.TenantId == tenantId && !b.IsDeleted
+                     && b.OrganizationUnitId == dto.OrganizationUnitId && b.FiscalYear == dto.FiscalYear
+                     && (b.Status == ManpowerBudgetStatus.Draft || b.Status == ManpowerBudgetStatus.Submitted
+                      || b.Status == ManpowerBudgetStatus.UnderReview || b.Status == ManpowerBudgetStatus.Rejected))
+            .Select(b => new { b.BudgetNumber, b.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (clash != null)
+            throw JobArchitectureException.Conflict(
+                $"{baseline.OrganizationUnitName} already has a {clash.Status} budget for {dto.FiscalYear} ({clash.BudgetNumber}). Edit that one, or add posts to it from the establishment.");
+
+        var unit = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable().AsNoTracking()
+            .FirstAsync(u => u.Id == dto.OrganizationUnitId && u.TenantId == tenantId, cancellationToken);
+
+        var positions = baseline.Positions.Where(p => dto.IncludeUnestablished || p.IsEstablished).ToList();
+        var lines = new List<ManpowerBudgetLine>();
+        foreach (var p in positions)
+            lines.Add(await BuildLineFromBaselineAsync(p, tenantId, cancellationToken));
+
+        var budget = new ManpowerBudget
+        {
+            TenantId = tenantId,
+            BudgetNumber = await GenerateBudgetNumberAsync(cancellationToken),
+            FiscalYear = dto.FiscalYear,
+            OrganizationUnitId = unit.Id,
+            OrganizationLevelId = unit.OrganizationLevelId,
+            Status = ManpowerBudgetStatus.Draft,
+            PeriodStartDate = dto.PeriodStart.ToDateTime(TimeOnly.MinValue),
+            PeriodEndDate = dto.PeriodEnd.ToDateTime(TimeOnly.MinValue),
+            CurrentHeadcount = baseline.CurrentHeadcount,
+            CurrentSalaryCost = baseline.CurrentSalaryCost,
+            PlannedTerminations = baseline.ExitsDueTotal,
+            PlannedHeadcount = lines.Sum(l => l.PlannedCount),
+            PlannedNewHires = lines.Sum(l => l.PlannedNewPositions),
+            PlannedSalaryCost = lines.Sum(l => l.PlannedTotalCost),
+            // The four budgets are the holder's to type: the establishment says how many posts and
+            // what they cost on the scale, not what the organisation will spend on benefits,
+            // recruitment or training. Zero here is "not yet decided", and the screen says so.
+            BusinessJustification = dto.BusinessJustification ??
+                $"Drafted from the establishment of {baseline.OrganizationUnitName} on {DateTime.UtcNow:dd MMM yyyy}: " +
+                $"{positions.Count} post(s), {positions.Sum(p => p.Gap ?? 0)} below establishment, {baseline.ExitsDueTotal} exit(s) due in the period.",
+        };
+        budget.TotalBudget = 0m;
+
+        await _budgetRepository.AddAsync(budget);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        foreach (var line in lines)
+        {
+            line.ManpowerBudgetId = budget.Id;
+            await _budgetLineRepository.AddAsync(line);
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget {Number} drafted from the establishment of unit {UnitId} with {Lines} line(s)",
+            budget.BudgetNumber, unit.Id, lines.Count);
+
+        return await GetDetailByIdAsync(budget.Id, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<AddLinesFromEstablishmentResultDto> AddLinesFromEstablishmentAsync(
+        Guid budgetId, bool includeUnestablished, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        if (budget.Status != ManpowerBudgetStatus.Draft && budget.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState("Posts can be added from the establishment only while the budget is Draft or Rejected.");
+        if (budget.OrganizationUnitId is null)
+            throw JobArchitectureException.InvalidState("This budget names no organisation unit, so there is no establishment to read.");
+
+        var baseline = await GetPlanningBaselineAsync(budget.OrganizationUnitId.Value,
+            DateOnly.FromDateTime(budget.PeriodStartDate), DateOnly.FromDateTime(budget.PeriodEndDate), cancellationToken);
+        var existing = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted)
+            .Select(l => l.PositionId)
+            .ToListAsync(cancellationToken);
+        var existingSet = existing.ToHashSet();
+
+        var result = new AddLinesFromEstablishmentResultDto();
+        foreach (var p in baseline.Positions)
+        {
+            // ⚠ Never overwrites: a line already on the budget is the holder's figure.
+            if (existingSet.Contains(p.PositionId)) { result.AlreadyOnBudget++; continue; }
+            if (!includeUnestablished && !p.IsEstablished) { result.SkippedUnestablished++; continue; }
+            var line = await BuildLineFromBaselineAsync(p, tenantId, cancellationToken);
+            line.ManpowerBudgetId = budget.Id;
+            await _budgetLineRepository.AddAsync(line);
+            result.Added++;
+        }
+        if (result.Added > 0)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            var all = await _budgetLineRepository.GetByBudgetIdAsync(budget.Id);
+            budget.PlannedHeadcount = all.Sum(l => l.PlannedCount);
+            budget.PlannedNewHires = all.Sum(l => l.PlannedNewPositions);
+            budget.PlannedSalaryCost = all.Sum(l => l.PlannedTotalCost);
+            await _budgetRepository.UpdateAsync(budget);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        result.Lines = (await _budgetLineRepository.GetByBudgetIdAsync(budget.Id)).Where(l => l.TenantId == tenantId).ToDtoList();
+        return result;
+    }
+
+    /// <summary>
+    /// One line from one baseline row. Posts authorised = filled + gap (the establishment, where
+    /// one exists; the people in post where none does); new posts = the gap plus the exits due;
+    /// the salary from the post's grade on the scale, else the mean pay of the people in it.
+    /// </summary>
+    private async Task<ManpowerBudgetLine> BuildLineFromBaselineAsync(
+        ManpowerPlanningPositionDto p, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var line = new ManpowerBudgetLine
+        {
+            TenantId = tenantId,
+            PositionId = p.PositionId,
+            CurrentCount = p.IsEstablished ? p.ExpectedHeadcount : p.Filled,
+            CurrentFilled = p.Filled,
+            CurrentVacant = p.Gap ?? 0,
+            CurrentAverageSalary = p.CurrentAverageSalary,
+            CurrentTotalCost = p.CurrentSalaryCost,
+            PlannedCount = p.Filled + (p.Gap ?? 0),
+            PlannedNewPositions = p.SuggestedNewHires,
+            PlannedEliminations = 0,
+            Priority = BudgetPriority.Medium,
+            IsCritical = false,
+            Notes = p.IsEstablished
+                ? $"From the establishment: {p.Filled} in post of {p.ExpectedHeadcount} authorised, {p.ExitsDue} exit(s) due."
+                : $"From the establishment: {p.Filled} in post, not established (no gap can be stated), {p.ExitsDue} exit(s) due.",
+        };
+        await ApplyLineSalaryAsync(line, p.SalaryGradeId, null, null,
+            p.SalaryGradeId is null ? p.CurrentAverageSalary : null, tenantId, cancellationToken);
+        return line;
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<PositionEstablishmentResultDto>> GetEstablishmentListAsync(
+        Guid? organizationUnitId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable().AsNoTracking()
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted
+                     && (organizationUnitId == null || p.OrganizationUnitId == organizationUnitId.Value))
+            .Select(p => new { p.Id, p.Title, p.ExpectedHeadcount, p.EstablishmentApprovedOn, p.EstablishmentSourceBudgetId })
+            .ToListAsync(cancellationToken);
+        var ids = positions.Select(p => p.Id).ToList();
+        // The same count the per-position read and the enforcement paths use.
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+            .Where(e => e.TenantId == tenantId && ids.Contains(e.PositionId) && e.IsActive)
+            .GroupBy(e => e.PositionId).Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.Key, g => g.Count, cancellationToken);
+        var sourceIds = positions.Where(p => p.EstablishmentSourceBudgetId != null).Select(p => p.EstablishmentSourceBudgetId!.Value).Distinct().ToList();
+        var sources = sourceIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _budgetRepository.GetQueryable().AsNoTracking()
+                .Where(b => sourceIds.Contains(b.Id)).Select(b => new { b.Id, b.BudgetNumber })
+                .ToDictionaryAsync(b => b.Id, b => b.BudgetNumber, cancellationToken);
+        return positions.Select(p =>
+        {
+            occupied.TryGetValue(p.Id, out var filled);
+            return new PositionEstablishmentResultDto
+            {
+                PositionId = p.Id,
+                PositionTitle = p.Title,
+                ExpectedHeadcount = p.ExpectedHeadcount,
+                CurrentlyFilled = filled,
+                EstablishmentApprovedOn = p.EstablishmentApprovedOn,
+                EstablishmentSourceBudgetId = p.EstablishmentSourceBudgetId,
+                EstablishmentSourceBudgetNumber = p.EstablishmentSourceBudgetId is { } sid && sources.TryGetValue(sid, out var n) ? n : null,
+                IsEstablished = p.EstablishmentApprovedOn != null,
+            };
+        }).OrderBy(r => r.PositionTitle).ToList();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -2995,14 +3189,32 @@ public class ManpowerBudgetService : IManpowerBudgetService
 
     #region Helper Methods
 
+    /// <summary>The next budget number for the current year: <c>MPB-{year}-{seq:D4}</c>.</summary>
+    /// <remarks>
+    /// ⚠ Rewritten in round 2b, R4a. The old body counted budgets whose <b>fiscal year</b> equalled
+    /// the current calendar year and stamped the current year on the number — so every budget for
+    /// any other fiscal year got the same <c>MPB-2026-0001</c> (four harness budgets for 2045–2048
+    /// did, and the register would have shown it at the demo). Area 17 § 3.6 had recorded that
+    /// this generator "counts rows". It now issues one past the highest sequence already used for
+    /// the year's prefix, <b>deleted rows included</b> (the lane-4 lesson: a scan that ignores
+    /// deleted rows re-issues their numbers). There is no unique index on <c>BudgetNumber</c>; a
+    /// sequence service would be the next step if concurrency ever bites.
+    /// </remarks>
     private async Task<string> GenerateBudgetNumberAsync(CancellationToken cancellationToken)
     {
         var year = DateTime.UtcNow.Year;
         var tenantId = GetTenantId();
-        var count = await _budgetRepository.GetQueryable()
-            .CountAsync(b => b.TenantId == tenantId && b.FiscalYear == year, cancellationToken);
-
-        return $"MPB-{year}-{(count + 1):D4}";
+        var prefix = $"MPB-{year}-";
+        var numbers = await _budgetRepository.GetQueryable()
+            .IgnoreQueryFilters()
+            .Where(b => b.TenantId == tenantId && b.BudgetNumber.StartsWith(prefix))
+            .Select(b => b.BudgetNumber)
+            .ToListAsync(cancellationToken);
+        var highest = 0;
+        foreach (var n in numbers)
+            if (n.Length > prefix.Length && int.TryParse(n[prefix.Length..], out var seq) && seq > highest)
+                highest = seq;
+        return $"{prefix}{(highest + 1):D4}";
     }
 
     #endregion

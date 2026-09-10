@@ -28,7 +28,6 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
-import { employeePositionService } from '@/services/hr/employee-position.service';
 import type { PositionEstablishment } from '@/types/hr/job-architecture';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -54,23 +53,16 @@ export default function EstablishmentPage() {
   const [headcount, setHeadcount] = useState(1);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  // Round 2b, R4a: withdrawing an establishment asks why, and confirms, instead of sending a
+  // constant reason on a single click.
+  const [withdrawing, setWithdrawing] = useState<{ id: string; title: string } | null>(null);
+  const [withdrawReason, setWithdrawReason] = useState('');
 
-  const { data: positions, isLoading } = useQuery({
-    queryKey: ['positions', 'all'],
-    queryFn: () => employeePositionService.getAll(),
-  });
-
-  // One establishment read per position. The list is small (146 in the reference tenant) and each
-  // row needs the live filled count, which only this endpoint computes.
-  const { data: establishments } = useQuery({
-    queryKey: ['establishment', 'all', (positions ?? []).length],
-    enabled: !!positions?.length,
-    queryFn: async () =>
-      Promise.all(
-        (positions ?? []).map((p) =>
-          jobArchitectureService.getPositionEstablishment(p.id).catch(() => null),
-        ),
-      ),
+  // One read for every position (R4a). This used to be one call per position — 231 requests
+  // on the live tenant — because only the per-position endpoint computed the live filled count.
+  const { data: establishments, isLoading } = useQuery({
+    queryKey: ['establishment', 'all'],
+    queryFn: () => jobArchitectureService.getEstablishmentList(),
   });
 
   const rows = useMemo(() => {
@@ -106,12 +98,15 @@ export default function EstablishmentPage() {
     }
   };
 
-  const withdraw = async (positionId: string) => {
+  const withdraw = async () => {
+    if (!withdrawing) return;
     setBusy(true);
     try {
-      await jobArchitectureService.withdrawPositionEstablishment(positionId, 'Withdrawn by HR');
+      await jobArchitectureService.withdrawPositionEstablishment(withdrawing.id, withdrawReason.trim());
       toast.success('Establishment withdrawn — the post is no longer constrained');
       refresh();
+      setWithdrawing(null);
+      setWithdrawReason('');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not withdraw it');
     } finally {
@@ -237,11 +232,15 @@ export default function EstablishmentPage() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {/* Null source = set here by HR; a number = it came up FR-HR-135's chain. */}
-                        {e.establishmentSourceBudgetNumber
-                          ? `Budget ${e.establishmentSourceBudgetNumber}`
-                          : e.isEstablished
-                            ? 'Set by HR'
-                            : '—'}
+                        {e.establishmentSourceBudgetNumber && e.establishmentSourceBudgetId ? (
+                          <Link className="underline" href={`/hr/manpower-budgets/${e.establishmentSourceBudgetId}`}>
+                            Budget {e.establishmentSourceBudgetNumber}
+                          </Link>
+                        ) : e.isEstablished ? (
+                          'Set by HR'
+                        ) : (
+                          '—'
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
@@ -260,7 +259,7 @@ export default function EstablishmentPage() {
                             variant="ghost"
                             size="sm"
                             disabled={busy}
-                            onClick={() => withdraw(e.positionId)}
+                            onClick={() => { setWithdrawReason(''); setWithdrawing({ id: e.positionId, title: e.positionTitle }); }}
                           >
                             Withdraw
                           </Button>
@@ -315,6 +314,34 @@ export default function EstablishmentPage() {
             <Button onClick={save} disabled={!reason.trim() || busy}>
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Set establishment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!withdrawing} onOpenChange={(open) => !open && setWithdrawing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Withdraw the establishment of {withdrawing?.title}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              The post goes back to unconstrained: requisitions and movements against it are no
+              longer checked, and its headcount is kept only as a planning figure.
+            </p>
+            <Label htmlFor="withdraw-reason">Reason *</Label>
+            <Input
+              id="withdraw-reason"
+              value={withdrawReason}
+              onChange={(e) => setWithdrawReason(e.target.value)}
+              placeholder="Why the authorisation no longer stands"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWithdrawing(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={withdraw} disabled={!withdrawReason.trim() || busy}>
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Withdraw
             </Button>
           </DialogFooter>
         </DialogContent>

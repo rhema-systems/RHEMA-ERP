@@ -778,6 +778,31 @@ public class JobAnalysisController : ControllerBase
     public async Task<ActionResult<PositionSalaryReferenceDto>> GetPositionSalaryReference(Guid positionId, CancellationToken cancellationToken)
         => Ok(await _manpowerBudgetService.GetPositionSalaryReferenceAsync(positionId, cancellationToken));
 
+    /// <summary>Every position's establishment in one read (round 2b, R4a) — the admin screen used one call per position.</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("establishment")]
+    public async Task<ActionResult<IEnumerable<PositionEstablishmentResultDto>>> GetEstablishmentList(
+        [FromQuery] Guid? organizationUnitId, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetEstablishmentListAsync(organizationUnitId, cancellationToken));
+
+    /// <summary>"Use the position establishment to initiate the budget" (round 2b, R4a): a Draft with a line per post.</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetWritePolicy)]
+    [HttpPost("budgets/from-establishment")]
+    public async Task<ActionResult<ManpowerBudgetDetailDto>> CreateBudgetFromEstablishment(
+        [FromBody] CreateManpowerBudgetFromEstablishmentDto dto, CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var created = await _manpowerBudgetService.CreateFromEstablishmentAsync(dto, cancellationToken);
+        return CreatedAtAction(nameof(GetBudget), new { id = created.Id }, created);
+    }
+
+    /// <summary>Adds posts from the establishment to a draft budget; lines already on it are left alone (R4a).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetWritePolicy)]
+    [HttpPost("budgets/{id:guid}/lines/from-establishment")]
+    public async Task<ActionResult<AddLinesFromEstablishmentResultDto>> AddLinesFromEstablishment(
+        Guid id, [FromQuery] bool includeUnestablished = true, CancellationToken cancellationToken = default)
+        => Ok(await _manpowerBudgetService.AddLinesFromEstablishmentAsync(id, includeUnestablished, cancellationToken));
+
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
     [HttpGet("budgets/pending-approvals")]
     public async Task<ActionResult<IEnumerable<ManpowerBudgetSummaryDto>>> GetPendingBudgetApprovals()

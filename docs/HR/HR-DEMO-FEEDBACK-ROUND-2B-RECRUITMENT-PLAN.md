@@ -1,6 +1,6 @@
 # HR demo feedback, round 2b — Recruitment: budget, establishment, requisition
 
-> **Status: LANES R1 (36 ×2), R2 (57 ×2) and R3 (55 ×2, `hr-jobarch/run-r3.mjs`) DONE 2026-09-10; R4a next.** Source: the feedback document *HR Demo Meetings —
+> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2) and R4a (60 ×2, `hr-jobarch/run-r4.mjs`) DONE 2026-09-10; R5 next.** Source: the feedback document *HR Demo Meetings —
 > Changes and Additions 2* (2 pages, section RECRUITMENT), brought by the user on 2026-09-10 after
 > the round-2 HR demo, plus one follow-up from the user the same day (Finance must approve and
 > process requisition costs). Every bullet of the document is accounted for in § 2 — as a build
@@ -231,7 +231,23 @@ from `SalaryAssignmentsTab.tsx:164-247` (the tab consumes it). Line dialog also 
 target fill date, priority, critical, notes. ⚠ Check how many live positions carry a
 `SalaryGradeId` before promising a pre-select.
 
-### R4a — Plan a budget from the establishment · no migration
+### R4a — Plan a budget from the establishment · no migration · ✅ **DONE 2026-09-10** · 60 ×2
+
+- [x] `PositionEstablishmentDto`: `IsEstablished`, `EstablishmentApprovedOn`, `EstablishmentSourceBudgetId/Number`, `GapKnown`; `VacantCount`/`IsFullyFilled`/`IsOverEstablishment` are false/0 for an unestablished post; the repository no longer floors the headcount to 1, names the source budget in one query, and counts the filled under `HrServingEmployees`.
+- [x] Reconcile opens a vacancy only for an **established** post below strength; an open vacancy on an unestablished post is closed with the reason *"the position has no approved establishment, so no gap can be stated for it"* (not "back at establishment"); a vacancy already `RequisitionRaised` is never closed under its owner. ⚠ **On the live tenant the first run closed all 38 phantom vacancies**; the 23 open afterwards all sit on established posts — every one a leftover harness fixture, which is the rule working.
+- [x] `POST api/JobAnalysis/budgets/from-establishment` (Draft, one line per post in the subtree, the header from the baseline, the four money budgets left at 0 for the holder, a justification that says where it came from; 409 naming the live budget for the unit + year — Draft/Submitted/UnderReview/Rejected all count); `POST budgets/{id}/lines/from-establishment` (Draft/Rejected only, never overwrites, re-sums the header); `GET api/JobAnalysis/establishment?organizationUnitId=` (the admin list in one read).
+- [x] `PlanBudgetFromEstablishmentDialog.tsx`; the establishment screen gains a unit picker, "not established" rendering, a Source column and the **Plan a budget** button; the admin screen uses the list read, asks for a reason on withdraw, and links the source budget; the budget detail gains **Add posts from the establishment**.
+- [x] Harness `run-r4.mjs` 60 ×2; regression R3 55, R2 57, R1 36, slice 7 47, slice 8 40, slice 12 41.
+
+**What the build changed from the plan, and what it found.**
+
+1. **Line arithmetic for a post from the establishment:** posts authorised = in post + gap (the establishment where one exists, the people in post where none does); new posts = gap + exits due; salary from the post's grade (grade minimum, R3's rule) else the **mean pay of the incumbents**, marked Manual. A new post with nobody in it and no establishment authorises 0 — the first harness run expected 7 where 6 was right, and the assertion now compares the header to the lines.
+2. ⚠ **`GenerateBudgetNumberAsync` gave every budget for a non-current fiscal year the same number.** It counted budgets whose FISCAL year equalled the current calendar year and stamped the current year on the number, so MPB-2026-0001 went to four harness budgets for 2045–2048 (area 17 § 3.6 had recorded "counts rows"). Now one past the highest sequence used for the year's prefix, deleted rows included. No unique index on `BudgetNumber`; a sequence service is the next step if concurrency ever bites. Asserted.
+3. **The clash check counts Rejected as live** — a rejected budget is correctable and resubmittable since R1, so a second draft beside it would be two answers to one question.
+4. ⚠ **`hr-recruitment/run.mjs` could not run as a regression.** Its `setup.mjs` still sent `employeeNumber` (repaired here — the ninth folder from the lane-A warning) and `hireDate` (never a create field; now `dateEmployed`); it then stops on its own definition check ("expected exactly one active StaffRequisition definition, found 0") while the definition exists — the F3 listing-vs-engine mismatch. **R5 owns that folder and repairs the check first.**
+5. **Not browser-walked.**
+
+The plan as written:
 
 `PositionEstablishmentDto` gains `IsEstablished`, `EstablishmentApprovedOn`,
 `EstablishmentSourceBudgetNumber`; the repository stops flooring to 1; `VacantCount` is a gap only

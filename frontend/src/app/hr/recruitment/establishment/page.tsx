@@ -36,6 +36,9 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import { positionVacancyService } from '@/services/hr/recruitment.service';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
+import { PlanBudgetFromEstablishmentDialog } from '@/components/hr/manpower/PlanBudgetFromEstablishmentDialog';
+import { Banknote } from 'lucide-react';
 
 /**
  * Establishment vs. actual headcount — the front of the recruitment funnel.
@@ -53,6 +56,9 @@ export default function EstablishmentPage() {
 
   const [onlyVacant, setOnlyVacant] = useState(true);
   const [includeClosed, setIncludeClosed] = useState(false);
+  // Round 2b, R4a: filter by unit (Level → Unit), and start a budget from what the grid shows.
+  const [unitId, setUnitId] = useState('');
+  const [planning, setPlanning] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [raiseFor, setRaiseFor] = useState<string | null>(null);
   /**
@@ -72,8 +78,8 @@ export default function EstablishmentPage() {
   });
 
   const establishment = useQuery({
-    queryKey: ['hr', 'establishment', onlyVacant],
-    queryFn: () => positionVacancyService.getEstablishment(null, onlyVacant),
+    queryKey: ['hr', 'establishment', onlyVacant, unitId],
+    queryFn: () => positionVacancyService.getEstablishment(unitId || null, onlyVacant),
   });
 
   const vacancies = useQuery({
@@ -193,10 +199,17 @@ export default function EstablishmentPage() {
                 <RefreshCw className={`mr-2 h-4 w-4 ${reconcile.isPending ? 'animate-spin' : ''}`} />
                 Reconcile
               </Button>
+              {/* Round 2b, R4a: the establishment is where a budget starts. */}
+              <Button onClick={() => setPlanning(true)}>
+                <Banknote className="mr-2 h-4 w-4" />
+                Plan a budget
+              </Button>
             </div>
           )
         }
       />
+
+      <PlanBudgetFromEstablishmentDialog open={planning} onOpenChange={setPlanning} initialUnitId={unitId || null} />
 
       {s && (
         <MetricTiles
@@ -352,15 +365,25 @@ export default function EstablishmentPage() {
         </TabsContent>
 
         <TabsContent value="establishment" className="space-y-4 pt-4">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="onlyVacant"
-              checked={onlyVacant}
-              onCheckedChange={(c) => setOnlyVacant(c === true)}
+          <div className="grid gap-4 sm:grid-cols-[2fr_1fr] sm:items-end">
+            <OrganizationUnitPicker
+              value={unitId}
+              onChange={(id) => setUnitId(id)}
+              allowNone="Every unit"
+              unitLabel="Unit"
+              idPrefix="est-unit"
+              showCode
             />
-            <Label htmlFor="onlyVacant" className="font-normal">
-              Only positions below establishment
-            </Label>
+            <div className="flex items-center gap-2 pb-2">
+              <Checkbox
+                id="onlyVacant"
+                checked={onlyVacant}
+                onCheckedChange={(c) => setOnlyVacant(c === true)}
+              />
+              <Label htmlFor="onlyVacant" className="font-normal">
+                Only positions below establishment
+              </Label>
+            </div>
           </div>
 
           <Card>
@@ -378,8 +401,8 @@ export default function EstablishmentPage() {
                     title={onlyVacant ? 'Nothing below establishment' : 'No positions'}
                     description={
                       onlyVacant
-                        ? 'Every position is at or above its expected headcount.'
-                        : 'Positions appear here once the establishment is set.'
+                        ? 'Every established position is at or above its authorised headcount. A post nobody has established has no gap to show.'
+                        : 'No active positions in this unit.'
                     }
                   />
                 </div>
@@ -389,20 +412,34 @@ export default function EstablishmentPage() {
                     <TableRow>
                       <TableHead>Position</TableHead>
                       <TableHead>Unit</TableHead>
-                      <TableHead className="text-right">Expected</TableHead>
+                      <TableHead className="text-right">Established</TableHead>
                       <TableHead className="text-right">Filled</TableHead>
                       <TableHead className="text-right">Gap</TableHead>
+                      <TableHead>Source</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {/* ⚠ An unestablished post shows "not established", never a gap of 0 of 1:
+                        its headcount is the column default and means nothing (R4a). Over-strength
+                        posts are the ones refusing recruitment and movements right now. */}
                     {(establishment.data ?? []).map((p) => (
-                      <TableRow key={p.positionId}>
-                        <TableCell className="font-medium">{p.positionTitle}</TableCell>
+                      <TableRow key={p.positionId} className={p.isOverEstablishment ? 'bg-amber-50' : undefined}>
+                        <TableCell className="font-medium">
+                          {p.positionTitle}
+                          {p.positionCode && <span className="ml-1 text-xs text-muted-foreground">{p.positionCode}</span>}
+                        </TableCell>
                         <TableCell>{p.organizationUnitName || '—'}</TableCell>
-                        <TableCell className="text-right tabular-nums">{p.expectedHeadcount}</TableCell>
-                        <TableCell className="text-right tabular-nums">{p.filledCount}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {p.isEstablished ? p.expectedHeadcount : <span className="text-xs text-muted-foreground">not established</span>}
+                        </TableCell>
+                        <TableCell className={`text-right tabular-nums ${p.isOverEstablishment ? 'font-semibold text-amber-800' : ''}`}>{p.filledCount}</TableCell>
                         <TableCell className="text-right tabular-nums font-medium">
-                          {p.vacantCount}
+                          {p.gapKnown ? p.vacantCount : '—'}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {p.establishmentSourceBudgetNumber
+                            ? `Budget ${p.establishmentSourceBudgetNumber}`
+                            : p.isEstablished ? 'Set by HR' : '—'}
                         </TableCell>
                       </TableRow>
                     ))}

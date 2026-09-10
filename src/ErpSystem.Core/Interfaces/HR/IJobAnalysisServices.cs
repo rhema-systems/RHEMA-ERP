@@ -195,6 +195,15 @@ public interface IManpowerBudgetService
     /// headcount, estimated salary cost, exits due in the period, and each post against its
     /// establishment (round 2b, R2). See <see cref="ManpowerPlanningBaselineDto"/>.
     /// </summary>
+    /// <summary>A Draft budget for a unit and year with one line per post, from the establishment (round 2b, R4a).</summary>
+    Task<ManpowerBudgetDetailDto> CreateFromEstablishmentAsync(CreateManpowerBudgetFromEstablishmentDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds lines for posts in the budget's subtree not yet on it; never overwrites (R4a).</summary>
+    Task<AddLinesFromEstablishmentResultDto> AddLinesFromEstablishmentAsync(Guid budgetId, bool includeUnestablished, CancellationToken cancellationToken = default);
+
+    /// <summary>Every position's establishment in one read — the admin screen's list (R4a).</summary>
+    Task<IEnumerable<PositionEstablishmentResultDto>> GetEstablishmentListAsync(Guid? organizationUnitId, CancellationToken cancellationToken = default);
+
     Task<ManpowerPlanningBaselineDto> GetPlanningBaselineAsync(
         Guid organizationUnitId, DateOnly periodStart, DateOnly periodEnd, CancellationToken cancellationToken = default);
 

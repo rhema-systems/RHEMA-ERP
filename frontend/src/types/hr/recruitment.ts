@@ -675,11 +675,20 @@ export type PositionVacancyStatus = (typeof POSITION_VACANCY_STATUSES)[number];
 export interface PositionEstablishment {
   positionId: string;
   positionTitle: string;
+  positionCode?: string | null;
   organizationUnitId?: string | null;
   organizationUnitName?: string | null;
+  /** ⚠ Meaningless unless `isEstablished` — the column default is 1 (round 2b, R4a). */
   expectedHeadcount: number;
   filledCount: number;
+  /** 0 for an unestablished post: no gap can be stated. Read `gapKnown` first. */
   vacantCount: number;
+  isEstablished: boolean;
+  gapKnown: boolean;
+  isOverEstablishment: boolean;
+  establishmentApprovedOn?: string | null;
+  establishmentSourceBudgetId?: string | null;
+  establishmentSourceBudgetNumber?: string | null;
   openVacancyId?: string | null;
 }
 

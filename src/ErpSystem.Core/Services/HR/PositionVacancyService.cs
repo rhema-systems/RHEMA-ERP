@@ -281,9 +281,13 @@ public class PositionVacancyService : IPositionVacancyService
         var opened = 0;
         var closed = 0;
 
+        // Round 2b, R4a: a vacancy is opened only where a headcount was AUTHORISED. Before this,
+        // every unestablished post with nobody in it (its ExpectedHeadcount the column default of
+        // 1) got a vacancy — 38 on the live tenant, none of them on an established post. Those
+        // are closed below with a reason that says why, not "back at establishment".
         foreach (var p in overview)
         {
-            if (p.VacantCount > 0 && p.OpenVacancyId == null)
+            if (p.IsEstablished && p.VacantCount > 0 && p.OpenVacancyId == null)
             {
                 await _repository.AddAsync(new PositionVacancy
                 {
@@ -303,14 +307,19 @@ public class PositionVacancyService : IPositionVacancyService
                 });
                 opened++;
             }
-            else if (p.VacantCount == 0 && p.OpenVacancyId != null)
+            else if (p.OpenVacancyId != null && (!p.IsEstablished || p.VacantCount == 0))
             {
                 var vac = await _repository.GetByIdAsync(p.OpenVacancyId.Value);
                 if (vac != null && vac.TenantId == current && vac.Status is not (PositionVacancyStatus.Filled or PositionVacancyStatus.Closed))
                 {
-                    vac.Status = PositionVacancyStatus.Filled;
+                    // ⚠ A vacancy raised into a requisition is somebody's live work; reconcile does
+                    // not close it under them, whatever the establishment now says.
+                    if (vac.Status == PositionVacancyStatus.RequisitionRaised) continue;
+                    vac.Status = p.IsEstablished ? PositionVacancyStatus.Filled : PositionVacancyStatus.Closed;
                     vac.ClosedDate = DateTime.UtcNow;
-                    vac.ClosedReason = "Closed by reconcile — position is back at establishment.";
+                    vac.ClosedReason = p.IsEstablished
+                        ? "Closed by reconcile — position is back at establishment."
+                        : "Closed by reconcile — the position has no approved establishment, so no gap can be stated for it.";
                     Stamp(vac, userId);
                     await _repository.UpdateAsync(vac);
                     closed++;

@@ -87,6 +87,8 @@ export default function ManpowerBudgetDetailPage() {
   const [editingLine, setEditingLine] = useState<null | { id: string; positionTitle: string; form: BudgetLineFormState }>(null);
   const [removingLine, setRemovingLine] = useState<{ id: string; title: string } | null>(null);
   const [removingBudget, setRemovingBudget] = useState(false);
+  // R4a: pull the posts of the budget's subtree onto it; lines already here are never touched.
+  const [addingFromEstablishment, setAddingFromEstablishment] = useState(false);
 
   const { data: budget, isLoading } = useQuery({
     queryKey: ['manpower-budget', id],
@@ -333,11 +335,19 @@ export default function ManpowerBudgetDetailPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Budget lines</CardTitle>
-          {isDraft && (
-            <Button variant="outline" size="sm" onClick={() => setAddingLine(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add line
-            </Button>
+          {canEdit && (
+            <div className="flex gap-2">
+              {budget.organizationUnitId && (
+                <Button variant="outline" size="sm" onClick={() => setAddingFromEstablishment(true)} disabled={busy !== null}>
+                  <Banknote className="mr-2 h-4 w-4" />
+                  Add posts from the establishment
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setAddingLine(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add line
+              </Button>
+            </div>
           )}
         </CardHeader>
         <CardContent>
@@ -506,6 +516,22 @@ export default function ManpowerBudgetDetailPage() {
           await run('remove the line', () => jobArchitectureService.deleteBudgetLine(removingLine.id), 'Line removed');
           qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
           setRemovingLine(null);
+        }}
+      />
+
+      <ConfirmationDialog
+        open={addingFromEstablishment}
+        onOpenChange={setAddingFromEstablishment}
+        title="Add posts from the establishment?"
+        description="Every post in the unit and the units under it that is not yet on this budget gets a line: posts authorised from the establishment, new posts from the gap and the exits due, the salary from the scale. Lines already here are left exactly as they are."
+        confirmText="Add posts"
+        onConfirm={async () => {
+          await run('add posts from the establishment', async () => {
+            const r = await jobArchitectureService.addLinesFromEstablishment(id, true);
+            toast.message(`${r.added} added · ${r.alreadyOnBudget} already on the budget`);
+          }, 'Posts added');
+          qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+          setAddingFromEstablishment(false);
         }}
       />
 

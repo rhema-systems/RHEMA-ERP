@@ -42,6 +42,9 @@ import type {
   JobValuationSummary,
   JobWorkingCondition,
   ManpowerBudget,
+  AddLinesFromEstablishmentResult,
+  CreateManpowerBudgetFromEstablishment,
+  ManpowerBudgetDetail,
   ManpowerPlanningBaseline,
   PositionSalaryReference,
   ManpowerBudgetLine,
@@ -851,6 +854,26 @@ class JobArchitectureService {
   /** The grade a position carries, for the budget line's scale picker (R3). */
   getPositionSalaryReference(positionId: string) {
     return apiService.get<PositionSalaryReference>(`${this.jobs}/positions/${positionId}/salary-reference`);
+  }
+
+  /** A Draft budget with a line per post in the unit's subtree, from the establishment (R4a). 409 if one is live for the unit + year. */
+  createBudgetFromEstablishment(payload: CreateManpowerBudgetFromEstablishment) {
+    return apiService.post<ManpowerBudgetDetail>(`${this.jobs}/budgets/from-establishment`, payload);
+  }
+
+  /** Adds posts from the establishment to a draft; lines already on it are never overwritten (R4a). */
+  addLinesFromEstablishment(budgetId: string, includeUnestablished = true) {
+    return apiService.post<AddLinesFromEstablishmentResult>(
+      `${this.jobs}/budgets/${budgetId}/lines/from-establishment?includeUnestablished=${includeUnestablished}`,
+      {},
+    );
+  }
+
+  /** Every position's establishment in one read — the admin screen's list (R4a). */
+  getEstablishmentList(organizationUnitId?: string | null) {
+    return apiService.get<PositionEstablishment[]>(`${this.jobs}/establishment`, {
+      organizationUnitId: organizationUnitId ?? undefined,
+    });
   }
 
   // ── establishment (FR-HR-136) ──────────────────────────────────────────────

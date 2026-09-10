@@ -3,6 +3,8 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR;
+using ErpSystem.Core.Entities.HR.JobAnalysis;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -80,20 +82,31 @@ public class PositionVacancyRepository : GenericRepository<PositionVacancy>, IPo
                 p.OrganizationUnitId,
                 OrgUnitName = p.OrganizationUnit.Name,
                 p.ExpectedHeadcount,
+                p.EstablishmentApprovedOn,
+                p.EstablishmentSourceBudgetId,
             })
             .ToListAsync();
 
         var positionIds = positions.Select(p => p.Id).ToList();
 
+        // One serving predicate (round 2b, R2/R4a): this read used to ignore IsActive.
         var filledCounts = await _context.Set<Employee>().AsNoTracking()
-            .Where(e => positionIds.Contains(e.PositionId) && !e.IsDeleted
-                     && e.StaffStatus != StaffStatus.Terminated
-                     && e.StaffStatus != StaffStatus.Retired
-                     && e.StaffStatus != StaffStatus.Inactive)
+            .Where(e => positionIds.Contains(e.PositionId))
+            .Where(HrServingEmployees.Predicate)
             .GroupBy(e => e.PositionId)
             .Select(g => new { PositionId = g.Key, Count = g.Count() })
             .ToListAsync();
         var filledMap = filledCounts.ToDictionary(x => x.PositionId, x => x.Count);
+
+        // The budget a stamp came from, named — null source = set by HR on the admin screen.
+        var sourceIds = positions.Where(p => p.EstablishmentSourceBudgetId != null)
+            .Select(p => p.EstablishmentSourceBudgetId!.Value).Distinct().ToList();
+        var sourceNumbers = sourceIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _context.Set<ManpowerBudget>().AsNoTracking()
+                .Where(b => sourceIds.Contains(b.Id))
+                .Select(b => new { b.Id, b.BudgetNumber })
+                .ToDictionaryAsync(b => b.Id, b => b.BudgetNumber);
 
         var openVacancies = await _dbSet.AsNoTracking()
             .Where(v => positionIds.Contains(v.PositionId) && !v.IsDeleted && OpenStatuses.Contains(v.Status))
@@ -114,8 +127,14 @@ public class PositionVacancyRepository : GenericRepository<PositionVacancy>, IPo
                 PositionCode = p.Code,
                 OrganizationUnitId = p.OrganizationUnitId,
                 OrganizationUnitName = p.OrgUnitName,
-                ExpectedHeadcount = p.ExpectedHeadcount <= 0 ? 1 : p.ExpectedHeadcount,
+                // ⚠ No longer floored to 1: the number is shown as stored and means nothing
+                // unless IsEstablished (see the DTO).
+                ExpectedHeadcount = p.ExpectedHeadcount,
                 FilledCount = filled,
+                IsEstablished = p.EstablishmentApprovedOn != null,
+                EstablishmentApprovedOn = p.EstablishmentApprovedOn,
+                EstablishmentSourceBudgetId = p.EstablishmentSourceBudgetId,
+                EstablishmentSourceBudgetNumber = p.EstablishmentSourceBudgetId is { } sid && sourceNumbers.TryGetValue(sid, out var num) ? num : null,
                 OpenVacancyId = vac?.Id,
                 OpenVacancyStatus = vac?.Status,
                 OldestOpenVacancyDate = vac?.VacatedDate,
