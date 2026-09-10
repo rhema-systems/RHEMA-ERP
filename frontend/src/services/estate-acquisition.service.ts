@@ -638,7 +638,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('otherAcquisitionCost', 'Other Acquisition Cost', WorkflowFieldType.Number, false),
       tf('totalCapitalizedCost', 'Total Land Asset Cost', WorkflowFieldType.Number),
       tf('capitalizationValue', 'Capitalization Value', WorkflowFieldType.Number),
-      tf('glAccount', 'Move To GL Account'),
+      tf('glAccount', 'Fixed Asset GL Account'),
       tf('custodian', 'Custodian'),
     ],
   },

@@ -1049,12 +1049,12 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .GetQueryable(item => item.EstateManagedAssetId == assetId
                 && item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted)
-            .Select(item => new { item.BoundaryVerified, item.BoundaryCoordinates })
             .ToListAsync();
         if (demarcations.Count == 0)
             throw new InvalidOperationException("Add at least one demarcation within the main cadastral boundary.");
         if (demarcations.Any(item => !item.BoundaryVerified))
             throw new InvalidOperationException("Verify every demarcation before project handoff.");
+        EnsureDemarcationCostingReconcilesForOutbound(asset, demarcations);
         foreach (var demarcation in demarcations)
         {
             EstateBoundaryGeometry.ValidateContained(

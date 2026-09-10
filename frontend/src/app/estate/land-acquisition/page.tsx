@@ -812,7 +812,7 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('totalCapitalizedCost', 'Total Land Asset Cost', 'text', undefined, 1, true),
     field('capitalizationValue', 'Capitalization Value', 'text', undefined, 1, true),
     field('capitalizationBreakdown', 'Capitalization Breakdown', 'textarea', undefined, 2, true),
-    field('glAccount', 'Move To GL Account'),
+    field('glAccount', 'Fixed Asset GL Account'),
     field('custodian', 'Custodian'),
     field('assetNotes', 'Asset Notes', 'textarea', undefined, 2),
   ],
@@ -1317,7 +1317,7 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Cost capitalization',
       description:
-        'Review the costs accumulated in Land Under Acquisition before moving the land into inventory.',
+        'Review the costs accumulated in Land Under Acquisition before registering the land in Fixed Assets and Land Bank.',
       keys: [
         'ownerConsiderationCost',
         'externalSurveyorCost',
@@ -1332,7 +1332,7 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Finance and custody',
       description:
-        'Capture purpose, zoning, ownership verification, GL transfer target, custodian, and notes.',
+        'Capture purpose, zoning, ownership verification, custodian, and notes.',
       keys: [
         'purpose',
         'zoningClassification',

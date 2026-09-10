@@ -765,7 +765,7 @@ export default function EstateLandManagementPage() {
                     value={formatArea(selected.asset.areaSquareMeters)}
                   />
                   <DetailRow
-                    label="Valuation"
+                    label="Capitalized value"
                     value={formatMoney(
                       selected.asset.valuationAmount,
                       selected.asset.currency

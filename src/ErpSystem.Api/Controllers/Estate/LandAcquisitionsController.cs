@@ -8,6 +8,7 @@ using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -231,6 +232,12 @@ public class LandAcquisitionsController : ControllerBase
         acquisition.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        if (request.ProcedureId == (int)AcquisitionProcedure.LandAssetCreation)
+        {
+            await EnsureFinanceFixedAssetForLandAssetAsync(acquisition, request.Values, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
 
         var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
         var missingInputs = GetMissingStageInputs(acquisition, request.ProcedureId, documentRequirementsByStage);
@@ -1384,6 +1391,325 @@ public class LandAcquisitionsController : ControllerBase
         acquiringOwner.UpdatedBy = _currentUserService.UserName;
         acquiringOwner.LastModifiedById = GetUserId();
     }
+
+    private async Task EnsureFinanceFixedAssetForLandAssetAsync(
+        LandAcquisition acquisition,
+        Dictionary<string, object?> values,
+        CancellationToken cancellationToken)
+    {
+        var landAsset = acquisition.LandAssets
+            .Where(item => !item.IsDeleted)
+            .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+            .FirstOrDefault();
+        if (landAsset == null)
+        {
+            return;
+        }
+
+        var capitalization = BuildCapitalizationSummary(
+            acquisition,
+            ReadWorkspaceSnapshots(acquisition),
+            values,
+            landAsset);
+        var capitalizedValue = RoundMoney(capitalization.TotalCapitalizedCost);
+        if (capitalizedValue <= 0m)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var userName = _currentUserService.UserName ?? "System";
+        var userId = GetUserId();
+        var sourceDocumentType = "EstateLandAsset";
+        var category = await EnsureLandFixedAssetCategoryAsync(
+            acquisition.TenantId,
+            Text(values, "glAccount") ?? landAsset.GlAccount,
+            cancellationToken);
+        var books = await GetActiveFixedAssetBooksAsync(acquisition.TenantId, cancellationToken);
+        var defaultBook = books.FirstOrDefault(book => book.IsDefault) ?? books.First();
+        var assetCode = await BuildUniqueFixedAssetCodeAsync(
+            acquisition.TenantId,
+            landAsset.AssetNumber ?? landAsset.AssetCode ?? GenerateLandAssetNumber(acquisition.ProjectReference),
+            landAsset.Id,
+            sourceDocumentType,
+            cancellationToken);
+        var assetName = Text(values, "parcelIdentifier") ??
+                        landAsset.ParcelIdentifier ??
+                        $"{acquisition.ProjectReference} land";
+        var purchaseDate = acquisition.Registrations
+                               .Where(item => !item.IsDeleted)
+                               .OrderByDescending(item => item.RegistrationDate ?? item.UpdatedAt ?? item.CreatedAt)
+                               .Select(item => item.RegistrationDate)
+                               .FirstOrDefault()
+                           ?? acquisition.SubmittedAt
+                           ?? acquisition.CreatedAt;
+
+        var fixedAsset = await _context.FixedAssets
+            .Include(item => item.BookValues)
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == acquisition.TenantId &&
+                !item.IsDeleted &&
+                item.SourceDocumentType == sourceDocumentType &&
+                item.SourceDocumentId == landAsset.Id,
+                cancellationToken);
+
+        if (fixedAsset == null)
+        {
+            fixedAsset = new FixedAsset
+            {
+                TenantId = acquisition.TenantId,
+                AssetCode = assetCode,
+                SourceDocumentType = sourceDocumentType,
+                SourceDocumentId = landAsset.Id,
+                CreatedAt = now,
+                CreatedBy = userName,
+                CreatedById = userId
+            };
+            _context.FixedAssets.Add(fixedAsset);
+        }
+
+        fixedAsset.AssetCode = assetCode;
+        fixedAsset.Name = TrimAssetIdentifier(assetName, 200);
+        fixedAsset.Description = Text(values, "assetNotes") ??
+                                 landAsset.Notes ??
+                                 $"Land asset created from land acquisition {acquisition.ProjectReference}.";
+        fixedAsset.Location = Text(values, "assetLocation") ?? landAsset.Location ?? acquisition.Location;
+        fixedAsset.FixedAssetCategoryId = category.Id;
+        fixedAsset.PurchaseDate = purchaseDate.Date;
+        fixedAsset.PlacedInServiceDate = purchaseDate.Date;
+        fixedAsset.PurchasePrice = capitalizedValue;
+        fixedAsset.InstallationCost = 0m;
+        fixedAsset.TaxAmount = 0m;
+        fixedAsset.CapitalizationDate = now.Date;
+        fixedAsset.AcquisitionCost = capitalizedValue;
+        fixedAsset.NetBookValue = capitalizedValue;
+        fixedAsset.DepreciationMethod = DepreciationMethod.StraightLine;
+        fixedAsset.DepreciationConvention = DepreciationConvention.FullMonth;
+        fixedAsset.UsefulLifeMonths = 1200;
+        fixedAsset.ResidualValue = capitalizedValue;
+        fixedAsset.DiminishingBalanceRatePercent = 0m;
+        fixedAsset.LifetimeProductionCapacity = 0m;
+        fixedAsset.AccumulatedProductionUnits = 0m;
+        fixedAsset.Status = FixedAssetStatus.Capitalized;
+        fixedAsset.FunctionalCurrencyCode = "GHS";
+        fixedAsset.TransactionCurrencyCode = "GHS";
+        fixedAsset.CapitalizedAt = now;
+        fixedAsset.UpdatedAt = now;
+        fixedAsset.UpdatedBy = userName;
+        fixedAsset.LastModifiedById = userId;
+
+        foreach (var book in books)
+        {
+            var bookValue = fixedAsset.BookValues.FirstOrDefault(value =>
+                !value.IsDeleted && value.AccountingBookId == book.Id);
+            if (bookValue == null)
+            {
+                bookValue = new FixedAssetBookValue
+                {
+                    TenantId = acquisition.TenantId,
+                    FixedAssetId = fixedAsset.Id,
+                    AccountingBookId = book.Id,
+                    CreatedAt = now,
+                    CreatedBy = userName,
+                    CreatedById = userId
+                };
+                fixedAsset.BookValues.Add(bookValue);
+            }
+
+            bookValue.BookClassification = book.Code;
+            bookValue.AcquisitionCost = capitalizedValue;
+            bookValue.AccumulatedDepreciation = 0m;
+            bookValue.NetBookValue = capitalizedValue;
+            bookValue.ResidualValue = capitalizedValue;
+            bookValue.UsefulLifeMonths = 1200;
+            bookValue.RemainingUsefulLifeMonths = 1200;
+            bookValue.DepreciationMethod = DepreciationMethod.StraightLine;
+            bookValue.DepreciationConvention = DepreciationConvention.FullMonth;
+            bookValue.DiminishingBalanceRatePercent = 0m;
+            bookValue.LifetimeProductionCapacity = 0m;
+            bookValue.AccumulatedProductionUnits = 0m;
+            bookValue.PlacedInServiceDate = purchaseDate.Date;
+            bookValue.OpeningAsOfDate = now.Date;
+            bookValue.OpeningYtdDepreciation = 0m;
+            bookValue.OpeningPostedToGl = true;
+            bookValue.OpeningPostedDate = now;
+            bookValue.OpeningSource = "EstateLandAssetCreation";
+            bookValue.CapitalizationDate = now.Date;
+            bookValue.SourceDocumentType = sourceDocumentType;
+            bookValue.SourceDocumentId = landAsset.Id;
+            bookValue.UpdatedAt = now;
+            bookValue.UpdatedBy = userName;
+            bookValue.LastModifiedById = userId;
+        }
+
+        var defaultBookValue = fixedAsset.BookValues.FirstOrDefault(value =>
+            !value.IsDeleted && value.AccountingBookId == defaultBook.Id);
+        if (defaultBookValue != null)
+        {
+            fixedAsset.AcquisitionCost = defaultBookValue.AcquisitionCost;
+            fixedAsset.NetBookValue = defaultBookValue.NetBookValue;
+        }
+    }
+
+    private async Task<FixedAssetCategory> EnsureLandFixedAssetCategoryAsync(
+        Guid tenantId,
+        string? selectedGlAccount,
+        CancellationToken cancellationToken)
+    {
+        var landAccount = await ResolveFixedAssetAccountAsync(tenantId, selectedGlAccount, cancellationToken);
+        var templateCategory = await _context.FixedAssetCategories
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted)
+            .OrderBy(item => item.Code == "FA-BLDG" ? 0 : 1)
+            .ThenBy(item => item.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+        landAccount ??= templateCategory == null
+            ? null
+            : await _context.Accounts
+                .FirstOrDefaultAsync(account => account.Id == templateCategory.AssetAccountId, cancellationToken);
+        landAccount ??= await _context.Accounts
+            .Where(account => account.TenantId == tenantId &&
+                              !account.IsDeleted &&
+                              account.Status == AccountStatus.Active &&
+                              account.AccountType == AccountType.Asset)
+            .OrderByDescending(account => account.AccountCategory != null &&
+                                          account.AccountCategory.Contains("Fixed"))
+            .ThenBy(account => account.AccountNumber)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                "Configure an active fixed-asset GL account before creating a land fixed asset register item.");
+
+        var accumulatedDepreciationAccountId = templateCategory?.AccumulatedDepreciationAccountId ?? landAccount.Id;
+        var depreciationExpenseAccountId = templateCategory?.DepreciationExpenseAccountId ?? landAccount.Id;
+
+        var category = await _context.FixedAssetCategories
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId &&
+                !item.IsDeleted &&
+                item.Code == "FA-LAND",
+                cancellationToken);
+        if (category == null)
+        {
+            category = new FixedAssetCategory
+            {
+                TenantId = tenantId,
+                Name = "Land",
+                Code = "FA-LAND",
+                Description = "Land assets created from Estate land acquisition.",
+                DefaultMethod = DepreciationMethod.StraightLine,
+                DefaultUsefulLifeMonths = 1200,
+                DefaultResidualValuePercent = 100m,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUserService.UserName ?? "System",
+                CreatedById = GetUserId()
+            };
+            _context.FixedAssetCategories.Add(category);
+        }
+
+        category.AssetAccountId = landAccount.Id;
+        category.AccumulatedDepreciationAccountId = accumulatedDepreciationAccountId;
+        category.DepreciationExpenseAccountId = depreciationExpenseAccountId;
+        category.DefaultMethod = DepreciationMethod.StraightLine;
+        category.DefaultUsefulLifeMonths = 1200;
+        category.DefaultResidualValuePercent = 100m;
+        category.UpdatedAt = DateTime.UtcNow;
+        category.UpdatedBy = _currentUserService.UserName;
+        category.LastModifiedById = GetUserId();
+        return category;
+    }
+
+    private async Task<Account?> ResolveFixedAssetAccountAsync(
+        Guid tenantId,
+        string? selectedGlAccount,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(selectedGlAccount))
+        {
+            return null;
+        }
+
+        var accountText = selectedGlAccount.Trim();
+        return await _context.Accounts
+            .Where(account => account.TenantId == tenantId &&
+                              !account.IsDeleted &&
+                              account.Status == AccountStatus.Active &&
+                              account.AccountType == AccountType.Asset &&
+                              (account.AccountCode == accountText ||
+                               account.AccountNumber == accountText ||
+                               account.AccountName == accountText))
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<List<AccountingBook>> GetActiveFixedAssetBooksAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var books = await _context.AccountingBooks
+            .Where(book => book.TenantId == tenantId && !book.IsDeleted && book.IsActive && book.AllowsPosting)
+            .OrderBy(book => book.SortOrder)
+            .ThenBy(book => book.Name)
+            .ToListAsync(cancellationToken);
+        if (books.Count > 0)
+        {
+            return books;
+        }
+
+        var fallbackBook = new AccountingBook
+        {
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS",
+            Description = "Primary corporate reporting book for IFRS financial statements.",
+            Purpose = "Primary",
+            IsActive = true,
+            IsDefault = true,
+            AllowsPosting = true,
+            IsSystemDefined = true,
+            SortOrder = 10,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName ?? "System",
+            CreatedById = GetUserId()
+        };
+        _context.AccountingBooks.Add(fallbackBook);
+        return new List<AccountingBook> { fallbackBook };
+    }
+
+    private async Task<string> BuildUniqueFixedAssetCodeAsync(
+        Guid tenantId,
+        string requestedCode,
+        Guid sourceDocumentId,
+        string sourceDocumentType,
+        CancellationToken cancellationToken)
+    {
+        var baseCode = TrimAssetIdentifier(requestedCode, 50);
+        var existingForSource = await _context.FixedAssets
+            .Where(item => item.TenantId == tenantId &&
+                           !item.IsDeleted &&
+                           item.SourceDocumentType == sourceDocumentType &&
+                           item.SourceDocumentId == sourceDocumentId)
+            .Select(item => item.AssetCode)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(existingForSource))
+        {
+            return existingForSource;
+        }
+
+        var code = baseCode;
+        var suffix = 1;
+        while (await _context.FixedAssets.AnyAsync(item =>
+                   item.TenantId == tenantId &&
+                   !item.IsDeleted &&
+                   item.AssetCode == code,
+                   cancellationToken))
+        {
+            var nextSuffix = $"-{suffix++}";
+            code = TrimAssetIdentifier($"{baseCode[..Math.Min(baseCode.Length, 50 - nextSuffix.Length)]}{nextSuffix}", 50);
+        }
+
+        return code;
+    }
+
+    private static decimal RoundMoney(decimal value)
+        => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
     private static Dictionary<int, Dictionary<string, JsonElement>> ReadWorkspaceSnapshots(LandAcquisition acquisition)
     {

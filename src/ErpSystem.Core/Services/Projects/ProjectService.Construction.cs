@@ -363,8 +363,7 @@ public partial class ProjectService
             && !asset.IsDeleted
             && asset.AssetType == EstateManagedAssetType.Land
             && asset.Status == EstateManagedAssetStatus.LandBank
-            && !asset.IsPublishedToExternalPortal
-            && asset.IsReadyForProjectManagement);
+            && !asset.IsPublishedToExternalPortal);
 
         var readyAssetList = readyLandAssets.ToList();
         var readyAssetIds = readyAssetList.Select(asset => asset.Id).ToList();
@@ -391,6 +390,12 @@ public partial class ProjectService
                 .ToList();
             foreach (var demarcation in assetDemarcations)
             {
+                if ((!asset.IsReadyForProjectManagement && !demarcation.IsReadyForProjectManagement)
+                    || demarcation.IsPublishedToExternalPortal)
+                {
+                    continue;
+                }
+
                 var demarcationReference = EstateLandDemarcationReference.Build(
                     asset.AssetCode,
                     demarcation.DemarcationNumber);

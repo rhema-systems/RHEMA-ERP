@@ -1081,6 +1081,9 @@ export default function DemarcateLandDialog({
                         {pending.description}
                       </td>
                       <td className="px-4 py-3 tabular-nums">Pending save</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        Not costed
+                      </td>
                       <td className="px-4 py-3 tabular-nums">
                         {pending.beaconCount}
                       </td>

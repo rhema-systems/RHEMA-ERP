@@ -9,6 +9,7 @@ using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Models;
+using ErpSystem.Core.Services.Estate;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Api.Services.Notifications;
 using ErpSystem.Data;
@@ -1692,8 +1693,59 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .Take(limit)
             .ToListAsync(cancellationToken);
 
+        var demarcationQuery = _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Include(item => item.EstateManagedAsset)
+                .ThenInclude(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.IsPublishedToExternalPortal
+                && item.ExternalListingStatus == "Published"
+                && item.BoundaryVerified
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                && !item.EstateManagedAsset.ProjectId.HasValue
+                && !item.EstateManagedAsset.IsPublishedToExternalPortal);
+
+        if (normalizedListingType != null)
+        {
+            demarcationQuery = demarcationQuery.Where(item => item.ExternalListingType == normalizedListingType
+                || item.ExternalListingType == "SaleAndRent");
+        }
+
+        if (normalizedLocation != null)
+        {
+            demarcationQuery = demarcationQuery.Where(item =>
+                (item.EstateManagedAsset.Location != null && item.EstateManagedAsset.Location.ToLower().Contains(normalizedLocation))
+                || (item.EstateManagedAsset.Town != null && item.EstateManagedAsset.Town.ToLower().Contains(normalizedLocation))
+                || (item.EstateManagedAsset.District != null && item.EstateManagedAsset.District.ToLower().Contains(normalizedLocation))
+                || (item.EstateManagedAsset.Region != null && item.EstateManagedAsset.Region.ToLower().Contains(normalizedLocation)));
+        }
+
+        if (normalizedSearch != null)
+        {
+            demarcationQuery = demarcationQuery.Where(item =>
+                item.Description.ToLower().Contains(normalizedSearch)
+                || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
+                || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
+                || (item.EstateManagedAsset.Description != null && item.EstateManagedAsset.Description.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.Location != null && item.EstateManagedAsset.Location.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.Town != null && item.EstateManagedAsset.Town.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.District != null && item.EstateManagedAsset.District.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.ProjectTitle != null && item.EstateManagedAsset.ProjectTitle.ToLower().Contains(normalizedSearch)));
+        }
+
+        var filteredDemarcations = await demarcationQuery
+            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
         var listings = filtered
             .Select(ToExternalListingDto)
+            .Concat(filteredDemarcations.Select(ToExternalListingDto))
+            .Take(limit)
             .ToList();
 
         return Ok(new { success = true, data = listings });
@@ -1707,15 +1759,30 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 _db.EstateManagedAssets.AsNoTracking())
             .Where(item => item.TenantId == tenantId)
             .Select(item => item.Id);
+        var demarcationListingAssetIds = _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Where(item => item.Id == listingId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.IsPublishedToExternalPortal
+                && item.ExternalListingStatus == "Published"
+                && item.BoundaryVerified
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                && !item.EstateManagedAsset.ProjectId.HasValue
+                && !item.EstateManagedAsset.IsPublishedToExternalPortal)
+            .Select(item => item.EstateManagedAssetId);
         var document = await _db.EstateManagedAssetDocuments
             .AsNoTracking()
             .Include(item => item.EstateManagedAsset)
             .FirstOrDefaultAsync(item => item.Id == documentId
-                && item.EstateManagedAssetId == listingId
                 && item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.IsListingImage
-                && externallyAvailableAssetIds.Contains(item.EstateManagedAssetId), cancellationToken);
+                && (externallyAvailableAssetIds.Contains(item.EstateManagedAssetId)
+                    || demarcationListingAssetIds.Contains(item.EstateManagedAssetId)), cancellationToken);
 
         if (document == null)
         {
@@ -1739,13 +1806,45 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && (item.AssetType == EstateManagedAssetType.Land
                     || item.AssetType == EstateManagedAssetType.Property
                     || item.AssetType == EstateManagedAssetType.Facility), cancellationToken);
+        var demarcationListing = asset is null
+            ? await _db.EstateLandDemarcations
+                .AsNoTracking()
+                .Include(item => item.EstateManagedAsset)
+                .FirstOrDefaultAsync(item => item.Id == listingId
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.IsPublishedToExternalPortal
+                    && item.ExternalListingStatus == "Published"
+                    && item.BoundaryVerified
+                    && item.EstateManagedAsset.TenantId == tenantId
+                    && !item.EstateManagedAsset.IsDeleted
+                    && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                    && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                    && !item.EstateManagedAsset.ProjectId.HasValue
+                    && !item.EstateManagedAsset.IsPublishedToExternalPortal,
+                    cancellationToken)
+            : null;
+        asset ??= demarcationListing?.EstateManagedAsset;
 
         if (asset == null)
         {
             return NotFound(new { success = false, message = "Listing was not found or is not available." });
         }
 
-        var requestType = NormalizeListingRequestType(request.RequestType, asset.ExternalListingType);
+        var listingType = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
+        var listingReference = demarcationListing is null
+            ? asset.AssetCode
+            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
+        var listingName = demarcationListing is null
+            ? asset.Name
+            : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+        var listingCurrency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
+        var listingSalePrice = demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice;
+        var listingPrice = demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
+        var listingMonthlyRent = demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent;
+        var listingLeaseTermMonths = demarcationListing?.ExternalLeaseTermMonths ?? asset.ExternalLeaseTermMonths;
+
+        var requestType = NormalizeListingRequestType(request.RequestType, listingType);
         if (requestType == "Purchase" && request.OfferAmount is not > 0)
         {
             return BadRequest(new { success = false, message = "Enter a positive bid amount for this land sale." });
@@ -1802,7 +1901,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     && field.Value == customer.Id.ToString())
                 && procedureCase.Fields.Any(field => !field.IsDeleted
                     && field.Key == "propertyUnit"
-                    && (field.Value == asset.AssetCode
+                    && (field.Value == listingReference
+                        || field.Value == asset.AssetCode
                         || (asset.ProjectUnitCode != null && field.Value == asset.ProjectUnitCode))),
                 cancellationToken);
         if (alreadySubmitted)
@@ -1818,17 +1918,17 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var reference = BuildExternalReference("LISTING");
         var requestLabel = requestType == "Purchase" ? "Purchase bid" : "Rental request";
         var transactionSummary = requestType == "Purchase"
-            ? $"{requestLabel} for {asset.AssetCode} - {asset.Name} by {customer.PartnerName} ({customer.CustomerAccountNumber}) at {asset.ExternalListingCurrency} {request.OfferAmount:0.##}."
-            : $"{requestLabel} for {asset.AssetCode} - {asset.Name} by {customer.PartnerName} ({customer.CustomerAccountNumber}).";
+            ? $"{requestLabel} for {listingReference} - {listingName} by {customer.PartnerName} ({customer.CustomerAccountNumber}) at {listingCurrency} {request.OfferAmount:0.##}."
+            : $"{requestLabel} for {listingReference} - {listingName} by {customer.PartnerName} ({customer.CustomerAccountNumber}).";
         var description = string.IsNullOrWhiteSpace(request.Message)
             ? transactionSummary
             : $"{transactionSummary} {request.Message.Trim()}";
-        var publishedListingType = asset.ExternalListingType == "SaleAndRent"
+        var publishedListingType = listingType == "SaleAndRent"
             ? "Sale or Rent"
-            : asset.ExternalListingType;
+            : listingType;
         var publishedAmount = requestType == "Purchase"
-            ? asset.ExternalSalePrice ?? asset.ExternalListingPrice
-            : asset.ExternalMonthlyRent ?? asset.ExternalListingPrice;
+            ? listingSalePrice ?? listingPrice
+            : listingMonthlyRent ?? listingPrice;
 
         var fieldValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1837,16 +1937,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["sourceReference"] = customer.Id.ToString(),
             ["customerAccountReference"] = customer.CustomerAccountNumber,
             ["customerName"] = customer.PartnerName,
-            ["propertyUnit"] = asset.ProjectUnitCode ?? asset.AssetCode,
-            ["listingReference"] = asset.AssetCode,
+            ["propertyUnit"] = listingReference,
+            ["listingReference"] = listingReference,
             ["listingType"] = publishedListingType,
             ["requestType"] = requestLabel,
             ["listingPrice"] = publishedAmount?.ToString("0.##"),
             ["offerAmount"] = requestType == "Purchase" ? request.OfferAmount?.ToString("0.##") : null,
-            ["currency"] = asset.ExternalListingCurrency,
-            ["requestedLeaseTerm"] = requestType == "Purchase" || !asset.ExternalLeaseTermMonths.HasValue
+            ["currency"] = listingCurrency,
+            ["requestedLeaseTerm"] = requestType == "Purchase" || !listingLeaseTermMonths.HasValue
                 ? null
-                : $"{asset.ExternalLeaseTermMonths.Value} months",
+                : $"{listingLeaseTermMonths.Value} months",
             ["requestMessage"] = request.Message?.Trim(),
             ["customerValidationStatus"] = "Pending",
             ["listingValidationStatus"] = "Pending",
@@ -1875,7 +1975,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             var created = await _procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
                 "PropertyManagement",
                 "EstatePropertyManagementListingApplication",
-                $"{requestLabel} - {asset.Name}",
+                $"{requestLabel} - {listingName}",
                 reference,
                 applicantName,
                 "External Portal - Estate Listings",
@@ -2184,6 +2284,53 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             PrimaryImageDocumentId = image?.Id,
             PrimaryImageUrl = image is null ? null : $"/estate/external/listings/{asset.Id}/images/{image.Id}",
             SourceLabel = "Source: Estate / Property Management -> External Portal"
+        };
+    }
+
+    private static object ToExternalListingDto(EstateLandDemarcation demarcation)
+    {
+        var asset = demarcation.EstateManagedAsset;
+        var image = asset.Documents
+            .Where(document => document.IsListingImage)
+            .OrderByDescending(document => document.IsPrimaryListingImage)
+            .ThenByDescending(document => document.CreatedAt)
+            .FirstOrDefault();
+        var landReference = EstateLandDemarcationReference.Build(
+            asset.AssetCode,
+            demarcation.DemarcationNumber);
+
+        return new
+        {
+            Id = demarcation.Id,
+            AssetCode = landReference,
+            Name = $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}",
+            asset.AssetType,
+            asset.Status,
+            Description = FirstNonBlank(demarcation.ExternalListingNotes, demarcation.Description, asset.Description),
+            asset.Location,
+            asset.Region,
+            asset.District,
+            asset.Town,
+            asset.BlockName,
+            asset.FloorLabel,
+            UnitType = "Land portion",
+            AreaSquareMeters = demarcation.AreaSquareFeet / 10.7639104167m,
+            AreaValue = demarcation.AreaSquareFeet,
+            AreaUnit = "square feet",
+            demarcation.ExternalListingType,
+            demarcation.ExternalListingPrice,
+            demarcation.ExternalSalePrice,
+            demarcation.ExternalMonthlyRent,
+            demarcation.ExternalLeaseTermMonths,
+            asset.GroundRentPayable,
+            asset.GroundRentRatePerAcre,
+            asset.GroundRentComputed,
+            demarcation.ExternalListingCurrency,
+            demarcation.ExternalListingNotes,
+            demarcation.ExternalPublishedAt,
+            PrimaryImageDocumentId = image?.Id,
+            PrimaryImageUrl = image is null ? null : $"/estate/external/listings/{demarcation.Id}/images/{image.Id}",
+            SourceLabel = "Source: Estate Land Bank Demarcation -> External Portal"
         };
     }
 
