@@ -1063,6 +1063,16 @@ A narrow Sol Medium correction is active to reject equal canonical fingerprints 
 mutation and prove same/different-action denials plus distinct compensating-effect success. No database or
 migration was touched; integration and Sales remain gated.
 
+C13 bridge provenance correction is committed cleanly as
+`03db3318e910c5bda2624ffcc41dbd760e0a3d94` atop `65d93c80`. Finance now rebuilds the full canonical C13
+request from immutable original evidence and only allowed reversal inputs, then requires byte-identical snapshot
+JSON and exact C6 fingerprint before ID-only execution or failure recording. A fully self-consistent, independently
+approved generic C7 reversal with changed balanced economics, dimensions, descriptions and flags is denied by
+both overloads before the trusted executor, while canonical C13 success/retry/C10/failure remains green. Focused
+C13 passed 25/25, widened C7/C10-C13 passed 59 with 5 guarded SQL skips, Core contract passed 2/2, and build/EF/
+456-migration/script/ancestry/scope gates pass. Final Sol High re-review is active; no database, schema, migration,
+owner, default or ledger-in-candidate changed.
+
 C13 P1 correction is committed cleanly as `7b24841dc820d0a320ed1ecf4d79c76b24bb2640` atop `3c74a1a6`.
 Finance now canonicalizes and compares the original immutable and requested reversal effect fingerprints, rejecting
 equality before event or audit mutation regardless of owner action; the DTO documents the required distinct
