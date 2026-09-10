@@ -1205,6 +1205,15 @@ targeted Core compile also stalled in the invoking Roslyn process. Terra is diag
 from the blame artifacts before retrying; Sol High is independently tracing the fixture and locked authority path.
 No passing relational claim, integration, database, migration or remote action has been made.
 
+The relational-hang diagnosis is complete at clean Sales checkpoint `6d631b4f`. The 20-second abort was a false
+positive during EF cold model construction and used stale pre-correction binaries; a longer run completed and
+exposed fixture defects instead. The committed fact retains the completed caller transaction through retry, uses
+one mutable actor scope, omits C15 injection and does not persist the exact producer receipt, while its leaf
+fabricates C6/C10/C12 terminal state. Sol High found no new production P1 in the inspected invoice lock, locked C13
+rebuild or explicit-date guard, but requires current-binary proof. Terra is rebuilding the fixture with sequential
+maker/checker/owner scopes, production Finance services and disposed transaction boundaries before retrying the
+focused gates. Integration remains blocked; no configured database or migration was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
