@@ -207,6 +207,16 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
 
     async Task<FinanceProducerApprovedExecutionResultDto>
         IFinanceProducerApprovedExecutionService.ExecuteInAmbientTransactionAsync(
+            Guid accountingEventId, ProducerOwnerEffectReceiptDto receipt,
+            CancellationToken cancellationToken)
+    {
+        var intent = await ReconstructApprovedC13ReversalIntentAsync(accountingEventId, cancellationToken);
+        return await ((IFinanceProducerApprovedExecutionService)this).ExecuteInAmbientTransactionAsync(
+            accountingEventId, intent, receipt, cancellationToken);
+    }
+
+    async Task<FinanceProducerApprovedExecutionResultDto>
+        IFinanceProducerApprovedExecutionService.ExecuteInAmbientTransactionAsync(
             Guid accountingEventId, ProducerAccountingIntentDto preparedIntent,
             ProducerOwnerEffectReceiptDto receipt, CancellationToken cancellationToken)
     {
@@ -227,6 +237,20 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         CancellationToken cancellationToken) =>
         ((IFinanceProducerApprovedExecution)this).RecordFailureAfterRollbackAsync(
             accountingEventId, preparedIntent, receipt, failure, cancellationToken);
+
+    async Task IFinanceProducerApprovedExecutionService.RecordFailureAfterRollbackAsync(
+        Guid accountingEventId, ProducerOwnerEffectReceiptDto receipt, Exception failure,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+        if (_db.Database.CurrentTransaction is not null)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_FAILURE_REQUIRES_ROLLBACK: owner transaction must be rolled back before durable failure evidence is written.");
+        _db.ChangeTracker.Clear();
+        var intent = await ReconstructApprovedC13ReversalIntentAsync(accountingEventId, cancellationToken);
+        await ((IFinanceProducerApprovedExecutionService)this).RecordFailureAfterRollbackAsync(
+            accountingEventId, intent, receipt, failure, cancellationToken);
+    }
 
     internal async Task<CreateAccountingEventDto> BuildRequestAsync(ProducerAccountingIntentDto intent, CancellationToken ct)
     {
@@ -378,6 +402,60 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             ?? throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_INVALID: owner-effect authority is missing."),
         PostingRequest = ToProducerPosting(source.PostingRequest)
     };
+
+    private async Task<ProducerAccountingIntentDto> ReconstructApprovedC13ReversalIntentAsync(
+        Guid accountingEventId, CancellationToken cancellationToken)
+    {
+        RequireEnabled();
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var snapshot = await ReconstructPreparedRequestAsync(accountingEventId, cancellationToken);
+        var reversal = await _db.AccountingEvents.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == accountingEventId && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("AccountingEvent was not found.");
+        if (reversal.EventKind != AccountingEventKinds.Reversal
+            || reversal.Status is not (AccountingEventStatuses.PendingApproval
+                or AccountingEventStatuses.Failed or AccountingEventStatuses.Posted)
+            || reversal.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved
+            || !reversal.ProducerDecidedByUserId.HasValue
+            || reversal.ProducerDecidedByUserId == reversal.PreparedByUserId
+            || string.IsNullOrWhiteSpace(reversal.ProducerDecisionReason)
+            || !reversal.ReversesAccountingEventId.HasValue
+            || reversal.SupersedesAccountingEventId != reversal.ReversesAccountingEventId
+            || reversal.CorrectsAccountingEventId.HasValue)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_C13_EXECUTION_AUTHORITY_INVALID: ID-only execution requires an independently approved canonical C13 reversal.");
+
+        var originalId = reversal.ReversesAccountingEventId.Value;
+        var originalSnapshot = await ReconstructPreparedRequestAsync(originalId, cancellationToken);
+        var original = await _db.AccountingEvents.AsNoTracking()
+            .Include(item => item.AccountingBookSelectionEvidence)!.ThenInclude(item => item!.Books)
+            .Include(item => item.Postings)
+            .Include(item => item.ProducerReceipt)
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == originalId && !item.IsDeleted,
+                cancellationToken)
+            ?? throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_C13_EXECUTION_LINEAGE_INVALID: original event is unavailable for this tenant.");
+        RequireExactReversalOriginal(original, originalSnapshot, tenantId);
+
+        var posting = snapshot.PostingRequest;
+        var originalPosting = originalSnapshot.PostingRequest;
+        var participant = CanonicalParticipant(snapshot.ProducerParticipantIdentity);
+        var ownerEffect = CanonicalOwnerEffect(snapshot.ExpectedOwnerEffect, participant);
+        if (reversal.RootAccountingEventId != original.Id || reversal.Version != original.Version + 1
+            || !string.Equals(participant, original.ProducerParticipantIdentity, StringComparison.Ordinal)
+            || !string.Equals(posting.OriginModuleCode ?? posting.SourceModule,
+                originalPosting.OriginModuleCode ?? originalPosting.SourceModule, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(posting.SourceDocumentType, originalPosting.SourceDocumentType, StringComparison.Ordinal)
+            || posting.SourceDocumentId != originalPosting.SourceDocumentId
+            || posting.SourceDocumentTenantId != tenantId
+            || (originalPosting.SourceDocumentTenantId.HasValue
+                && originalPosting.SourceDocumentTenantId != tenantId)
+            || !string.Equals(posting.PostingAction, originalPosting.PostingAction, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_C13_EXECUTION_LINEAGE_INVALID: reversal lineage, source or participant authority conflicts with its original event.");
+        RequireReversalOwnerAuthority(originalSnapshot.ExpectedOwnerEffect, ownerEffect);
+        return ToProducerIntent(snapshot);
+    }
 
     private static void RequireExactReversalOriginal(AccountingEvent original,
         CreateAccountingEventDto snapshot, Guid tenantId)

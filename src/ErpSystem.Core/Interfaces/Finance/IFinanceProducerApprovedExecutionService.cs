@@ -11,6 +11,15 @@ namespace ErpSystem.Core.Interfaces.Finance;
 public interface IFinanceProducerApprovedExecutionService
 {
     /// <summary>
+    /// Executes a C13-prepared reversal by durable AccountingEvent identity. Finance reconstructs the complete
+    /// immutable C7 request internally; the owner supplies only its deterministic compensating receipt.
+    /// </summary>
+    Task<FinanceProducerApprovedExecutionResultDto> ExecuteInAmbientTransactionAsync(
+        Guid accountingEventId,
+        ProducerOwnerEffectReceiptDto receipt,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Executes only the exact approved event/request/receipt combination in the caller-owned ambient
     /// Serializable transaction and returns the Finance-selected C10 compatibility representation.
     /// </summary>
@@ -28,6 +37,16 @@ public interface IFinanceProducerApprovedExecutionService
     Task RecordFailureAfterRollbackAsync(
         Guid accountingEventId,
         ProducerAccountingIntentDto preparedIntent,
+        ProducerOwnerEffectReceiptDto receipt,
+        Exception failure,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a failed ID-only C13 reversal execution after rollback. Finance clears rolled-back tracking state
+    /// and reconstructs the immutable request without returning its economics to the owner.
+    /// </summary>
+    Task RecordFailureAfterRollbackAsync(
+        Guid accountingEventId,
         ProducerOwnerEffectReceiptDto receipt,
         Exception failure,
         CancellationToken cancellationToken = default);

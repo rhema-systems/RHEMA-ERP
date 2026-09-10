@@ -12,8 +12,9 @@ public sealed class FinanceProducerApprovedExecutionContractTests
     {
         typeof(IFinanceProducerApprovedExecutionService).IsPublic.Should().BeTrue();
 
-        var execute = typeof(IFinanceProducerApprovedExecutionService)
-            .GetMethod(nameof(IFinanceProducerApprovedExecutionService.ExecuteInAmbientTransactionAsync))!;
+        var execute = typeof(IFinanceProducerApprovedExecutionService).GetMethods()
+            .Single(method => method.Name == nameof(IFinanceProducerApprovedExecutionService.ExecuteInAmbientTransactionAsync)
+                && method.GetParameters().Length == 4);
         execute.ReturnType.Should().Be(typeof(Task<FinanceProducerApprovedExecutionResultDto>));
         execute.GetParameters().Select(parameter => parameter.ParameterType).Should().ContainInOrder(
             typeof(Guid),
@@ -22,6 +23,18 @@ public sealed class FinanceProducerApprovedExecutionContractTests
             typeof(CancellationToken));
         execute.GetParameters().Should().NotContain(parameter =>
             typeof(Delegate).IsAssignableFrom(parameter.ParameterType));
+
+        var idOnly = typeof(IFinanceProducerApprovedExecutionService).GetMethods()
+            .Single(method => method.Name == nameof(IFinanceProducerApprovedExecutionService.ExecuteInAmbientTransactionAsync)
+                && method.GetParameters().Length == 3);
+        idOnly.GetParameters().Select(parameter => parameter.ParameterType).Should().ContainInOrder(
+            typeof(Guid), typeof(ProducerOwnerEffectReceiptDto), typeof(CancellationToken));
+        idOnly.GetParameters().Select(parameter => parameter.ParameterType).Should().NotContain([
+            typeof(ProducerAccountingIntentDto), typeof(ProducerFinancePostingRequestDto)
+        ]);
+        idOnly.GetParameters().Select(parameter => parameter.Name).Should().NotContain(name =>
+            name!.Contains("Book", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Line", StringComparison.OrdinalIgnoreCase));
 
         var resultProperties = typeof(FinanceProducerApprovedExecutionResultDto)
             .GetProperties().Select(property => property.Name).ToArray();

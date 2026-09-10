@@ -122,6 +122,158 @@ public sealed class FinanceProducerReversalPreparationC13Tests
             It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task IdOnlyExecution_ReconstructsApprovedC13Intent_AndReturnsStableC10Compatibility()
+    {
+        await using var harness = Harness();
+        var original = await SeedOriginalAsync(harness);
+        var request = ReversalRequest(original);
+        var prepared = await harness.Service.PrepareReversalAsync(request);
+        harness.User.SetupGet(value => value.UserId).Returns(Guid.NewGuid().ToString());
+        await harness.Service.ApprovePreparedAsync(prepared.AccountingEventId,
+            new DecideProducerAccountingIntentDto { Reason = "Independent execution approval" });
+
+        var originalEvidenceId = await harness.Db.AccountingEvents.AsNoTracking()
+            .Where(item => item.Id == original.EventId)
+            .Select(item => item.AccountingBookSelectionEvidenceId).SingleAsync();
+        var primaryBookId = await harness.Db.AccountingBookSelectionEvidenceBooks.AsNoTracking()
+            .Where(item => item.AccountingBookSelectionEvidenceId == originalEvidenceId)
+            .OrderBy(item => item.SelectionOrder).Select(item => item.AccountingBookId).FirstAsync();
+        harness.Db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = primaryBookId, TenantId = harness.TenantId, Code = "IFRS", Name = "IFRS",
+            IsDefault = true, IsActive = true, AllowsPosting = true, FunctionalCurrencyCode = "GHS"
+        });
+        await harness.Db.SaveChangesAsync();
+        var postingEventId = Guid.NewGuid();
+        var journalEntryId = Guid.NewGuid();
+        var executor = new RecordingExecutor
+        {
+            Result = new AccountingEventDto
+            {
+                Id = prepared.AccountingEventId, RequestFingerprint = prepared.AccountingEventRequestFingerprint,
+                Status = AccountingEventStatuses.Posted,
+                Postings = [new AccountingEventPostingDto
+                {
+                    AccountingBookId = primaryBookId, AccountingBookCode = "IFRS",
+                    Status = AccountingEventStatuses.Posted,
+                    FinancePostingEventId = postingEventId, JournalEntryId = journalEntryId
+                }]
+            }
+        };
+        var bridge = new FinanceProducerIntentService(harness.Applicability.Object, harness.Events, executor,
+            harness.Db, harness.User.Object, Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+        var receipt = Receipt(harness.TenantId, request.ExpectedOwnerEffect);
+
+        var first = await ((IFinanceProducerApprovedExecutionService)bridge)
+            .ExecuteInAmbientTransactionAsync(prepared.AccountingEventId, receipt);
+        var retry = await ((IFinanceProducerApprovedExecutionService)bridge)
+            .ExecuteInAmbientTransactionAsync(prepared.AccountingEventId, receipt);
+
+        retry.Should().Be(first);
+        first.Should().Be(new FinanceProducerApprovedExecutionResultDto(prepared.AccountingEventId,
+            prepared.AccountingEventRequestFingerprint, AccountingEventStatuses.Posted,
+            postingEventId, journalEntryId));
+        executor.Requests.Should().HaveCount(2);
+        executor.Requests.Select(item => item.Request.PostingRequest.Lines).Should()
+            .OnlyContain(lines => lines[0].CreditAmount == 125m && lines[1].DebitAmount == 125m);
+        executor.Receipts.Should().OnlyContain(item => ReferenceEquals(item, receipt));
+
+        var failure = new InvalidOperationException("owner transaction rolled back");
+        await ((IFinanceProducerApprovedExecutionService)bridge)
+            .RecordFailureAfterRollbackAsync(prepared.AccountingEventId, receipt, failure);
+        executor.FailedEventId.Should().Be(prepared.AccountingEventId);
+        executor.Failure.Should().BeSameAs(failure);
+        executor.FailureRequest!.Request.PostingRequest.Lines[0].CreditAmount.Should().Be(125m);
+    }
+
+    [Fact]
+    public async Task IdOnlyExecution_RejectsReceiptMismatchAndMissingAmbientTransaction()
+    {
+        await using var harness = Harness();
+        var original = await SeedOriginalAsync(harness);
+        var request = ReversalRequest(original);
+        var prepared = await harness.Service.PrepareReversalAsync(request);
+        harness.User.SetupGet(value => value.UserId).Returns(Guid.NewGuid().ToString());
+        await harness.Service.ApprovePreparedAsync(prepared.AccountingEventId,
+            new DecideProducerAccountingIntentDto { Reason = "Independent execution approval" });
+        var receipt = Receipt(harness.TenantId, request.ExpectedOwnerEffect);
+        receipt.EffectFingerprint = Hash('A');
+
+        await FluentActions.Awaiting(() => ((IFinanceProducerApprovedExecutionService)harness.Service)
+            .ExecuteInAmbientTransactionAsync(prepared.AccountingEventId, receipt)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("*receipt differs*");
+
+        receipt.EffectFingerprint = request.ExpectedOwnerEffect.EffectFingerprint;
+        await FluentActions.Awaiting(() => ((IFinanceProducerApprovedExecutionService)harness.Service)
+            .ExecuteInAmbientTransactionAsync(prepared.AccountingEventId, receipt)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("*transaction*");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IdOnlyExecution_WrongEventOrTenantIsNotDiscoverable(bool wrongTenant)
+    {
+        await using var harness = Harness();
+        var original = await SeedOriginalAsync(harness);
+        var request = ReversalRequest(original);
+        var prepared = await harness.Service.PrepareReversalAsync(request);
+        harness.User.SetupGet(value => value.UserId).Returns(Guid.NewGuid().ToString());
+        await harness.Service.ApprovePreparedAsync(prepared.AccountingEventId,
+            new DecideProducerAccountingIntentDto { Reason = "Independent execution approval" });
+        if (wrongTenant)
+            harness.User.SetupGet(value => value.TenantId).Returns(Guid.NewGuid());
+        var executor = new RecordingExecutor();
+        var bridge = new FinanceProducerIntentService(harness.Applicability.Object, harness.Events, executor,
+            harness.Db, harness.User.Object, Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+
+        await FluentActions.Awaiting(() => ((IFinanceProducerApprovedExecutionService)bridge)
+            .ExecuteInAmbientTransactionAsync(wrongTenant ? prepared.AccountingEventId : Guid.NewGuid(),
+                Receipt(harness.TenantId, request.ExpectedOwnerEffect))).Should()
+            .ThrowAsync<KeyNotFoundException>();
+        executor.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("source")]
+    [InlineData("snapshot")]
+    [InlineData("fingerprint")]
+    [InlineData("nonapproved")]
+    [InlineData("lineage")]
+    public async Task IdOnlyExecution_TamperedOrUnapprovedAuthorityFailsBeforeExecution(string mutation)
+    {
+        await using var harness = Harness();
+        var original = await SeedOriginalAsync(harness);
+        var request = ReversalRequest(original);
+        var prepared = await harness.Service.PrepareReversalAsync(request);
+        if (mutation != "nonapproved")
+        {
+            harness.User.SetupGet(value => value.UserId).Returns(Guid.NewGuid().ToString());
+            await harness.Service.ApprovePreparedAsync(prepared.AccountingEventId,
+                new DecideProducerAccountingIntentDto { Reason = "Independent execution approval" });
+        }
+        var row = await harness.Db.AccountingEvents.SingleAsync(item => item.Id == prepared.AccountingEventId);
+        switch (mutation)
+        {
+            case "source": row.SourceDocumentType = "UNTRUSTED_SOURCE"; break;
+            case "snapshot": row.ProducerIntentSnapshotJson = row.ProducerIntentSnapshotJson!.Replace("125", "126", StringComparison.Ordinal); break;
+            case "fingerprint": row.RequestFingerprint = Hash('A'); break;
+            case "lineage": row.RootAccountingEventId = Guid.NewGuid(); break;
+        }
+        await harness.Db.SaveChangesAsync();
+        harness.Db.ChangeTracker.Clear();
+        var executor = new RecordingExecutor();
+        var bridge = new FinanceProducerIntentService(harness.Applicability.Object, harness.Events, executor,
+            harness.Db, harness.User.Object, Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+
+        await FluentActions.Awaiting(() => ((IFinanceProducerApprovedExecutionService)bridge)
+            .ExecuteInAmbientTransactionAsync(prepared.AccountingEventId,
+                Receipt(harness.TenantId, request.ExpectedOwnerEffect))).Should()
+            .ThrowAsync<InvalidOperationException>();
+        executor.Requests.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("snapshot")]
     [InlineData("source")]
@@ -216,7 +368,7 @@ public sealed class FinanceProducerReversalPreparationC13Tests
             audit.Object, Options.Create(new AccountingEventOptions { Enabled = true }));
         var service = new FinanceProducerIntentService(applicability.Object, events, events, db, user.Object,
             Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
-        return new TestHarness(service, db, tenantId, actor, user, applicability, audit);
+        return new TestHarness(service, events, db, tenantId, actor, user, applicability, audit);
     }
 
     private static async Task<OriginalEvidence> SeedOriginalAsync(TestHarness harness)
@@ -337,6 +489,13 @@ public sealed class FinanceProducerReversalPreparationC13Tests
         }
     };
 
+    private static ProducerOwnerEffectReceiptDto Receipt(Guid tenantId, ProducerOwnerEffectIdentityDto effect) => new()
+    {
+        TenantId = tenantId, ParticipantCode = effect.ParticipantCode, OwnerEntityType = effect.OwnerEntityType,
+        OwnerEntityId = effect.OwnerEntityId, OwnerAction = effect.OwnerAction,
+        EffectFingerprint = effect.EffectFingerprint
+    };
+
     private static Guid DeterministicGuid(Guid source, string purpose)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"{source:N}:{purpose}"));
@@ -357,11 +516,41 @@ public sealed class FinanceProducerReversalPreparationC13Tests
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private sealed record OriginalEvidence(Guid EventId, Guid OwnerId, CreateAccountingEventDto Request);
-    private sealed record TestHarness(FinanceProducerIntentService Service, ApplicationDbContext Db,
+    private sealed record TestHarness(FinanceProducerIntentService Service, AccountingEventService Events,
+        ApplicationDbContext Db,
         Guid TenantId, Guid Actor, Mock<ICurrentUserService> User,
         Mock<IAccountingBookApplicabilityService> Applicability,
         Mock<IFinanceAuditService> Audit) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => Db.DisposeAsync();
+    }
+
+    private sealed class RecordingExecutor : ITrustedAccountingEventExecutor
+    {
+        public AccountingEventDto Result { get; set; } = new();
+        public List<ReleaseAccountingEventDto> Requests { get; } = [];
+        public List<ProducerOwnerEffectReceiptDto> Receipts { get; } = [];
+        public Guid? FailedEventId { get; private set; }
+        public ReleaseAccountingEventDto? FailureRequest { get; private set; }
+        public Exception? Failure { get; private set; }
+        public Task<AccountingEventDto> ExecuteApprovedInAmbientTransactionAsync(Guid accountingEventId,
+            ReleaseAccountingEventDto request, ProducerOwnerEffectReceiptDto receipt,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request); Receipts.Add(receipt); return Task.FromResult(Result);
+        }
+        public Task RecordApprovedFailureAfterRollbackAsync(Guid accountingEventId, ReleaseAccountingEventDto request,
+            ProducerOwnerEffectReceiptDto receipt, Exception failure, CancellationToken cancellationToken = default)
+        {
+            FailedEventId = accountingEventId; FailureRequest = request; Failure = failure;
+            Receipts.Add(receipt); return Task.CompletedTask;
+        }
+        public Task<AccountingEventDto> PrepareGroupMemberInAmbientTransactionAsync(CreateAccountingEventDto request,
+            CancellationToken cancellationToken = default) => Task.FromResult(Result);
+        public Task<AccountingEventDto> ValidatePreparedGroupMemberAsync(Guid accountingEventId,
+            CreateAccountingEventDto request, CancellationToken cancellationToken = default) => Task.FromResult(Result);
+        public Task<AccountingEventDto> ExecuteApprovedGroupMemberInAmbientTransactionAsync(Guid accountingEventId,
+            ReleaseAccountingEventDto request, Guid producerIntentGroupId, Guid approvedCheckerId,
+            Guid expectedAmbientTransactionId, CancellationToken cancellationToken = default) => Task.FromResult(Result);
     }
 }
