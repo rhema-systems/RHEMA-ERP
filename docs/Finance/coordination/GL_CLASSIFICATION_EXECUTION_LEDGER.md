@@ -1265,6 +1265,15 @@ inserts preassigned C7 posting/receipt graphs and execution reaches real Finance
 omission was the tenant seed, now supplied. Both branches remain unintegrated pending green gates. No configured
 database, production schema, migration or remote state was touched.
 
+Sales governance correction `7a3561a3` is clean atop `05b9cb23` and closes the prior red matrix: remaining AR
+credit-note facts now use governed C7/C11/C15 evidence; deterministic tamper and reversal paths are repaired;
+reason/date conflicts are distinct; duplicate retry preserves journal/audit counts; denial side effects are checked;
+the retired PaymentService endpoint is asserted as an explicit domain rejection; and lockdown requires C11
+Approved consumption while forbidding owner approval, book/default/ALL_ACTIVE_BOOKS and decision paths. The required filter
+builds and passes 38/38. Sol High re-review is active before integration. The production relational fixture has
+progressed through tenant, period, module, book period and account-book validation into real dimension resolution;
+only test-local schema/seed is changing. No configured database, migration, production or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
