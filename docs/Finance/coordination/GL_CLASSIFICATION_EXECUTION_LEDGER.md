@@ -1100,6 +1100,15 @@ ambient execution/C10 compatibility authority. It may expose no lines, book sele
 Sales remains clean and will be reissued only after Sol High approval and integration. No database, migration or
 owner file was touched.
 
+The C13/C12 identity-only bridge is committed cleanly as
+`65d93c80275c4ea1b5aa5092887524b11cde23da` atop approved `7b24841d`. Additive Core overloads accept only event
+identity and owner receipt/failure evidence; Finance internally reconstructs and revalidates immutable prepared
+C7/C13 authority before delegating to unchanged C12 ambient execution, C10 compatibility selection and the
+post-rollback failure boundary. Existing full-request methods remain compatible and no lines/books/snapshots are
+exposed. C13 passed 24/24, relevant C7/C10-C13 passed 58 with 5 guarded SQL skips, Core contract passed 2/2,
+and build/EF/456-migration/script/ancestry/scope gates are clean. Independent Sol High review is active;
+integration and Sales remain gated. No database, schema, migration, owner, ledger-in-candidate or default changed.
+
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
 `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c12` on branch
