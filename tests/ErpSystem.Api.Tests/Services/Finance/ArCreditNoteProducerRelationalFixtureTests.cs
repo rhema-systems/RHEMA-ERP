@@ -33,8 +33,9 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 /// <summary>
 /// Relational owner proof for the Sales C7/C11/C12/C13/C15 handoff. The named shared-memory
-/// SQLite harness executes the production AccountingEventService and FinancePostingEngine;
-/// C14 provider guards intentionally omit only SQL Server application locks.
+/// SQLite harness executes the production AccountingEventService and FinancePostingEngine.
+/// It is provider evidence only: SQL Server schema, rowversion, and application-lock parity are
+/// separately guarded and are not claimed by this fixture.
 /// </summary>
 public sealed class ArCreditNoteProducerRelationalFixtureTests
 {
@@ -68,15 +69,31 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         await callerTransaction.CommitAsync();
 
         posted.JournalEntryId.Should().NotBeNull();
+        fixture.Db.ChangeTracker.Entries().Should().OnlyContain(x => x.State == EntityState.Unchanged,
+            "the committed owner transaction must leave no pending tracked mutation before reload");
         fixture.Db.ChangeTracker.Clear();
-        var durable = await fixture.Db.AccountingEvents.Include(x => x.Postings).SingleAsync();
+        var durable = await fixture.Db.AccountingEvents.Include(x => x.Postings).Include(x => x.ProducerReceipt).SingleAsync();
         durable.Status.Should().Be(AccountingEventStatuses.Posted);
+        durable.ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Approved);
+        durable.RequestFingerprint.Should().NotBeNullOrWhiteSpace();
         durable.Postings.Should().ContainSingle(x => x.FinancePostingEventId.HasValue && x.JournalEntryId.HasValue);
+        durable.ProducerReceipt.Should().NotBeNull();
+        durable.ProducerReceipt!.AccountingEventId.Should().Be(durable.Id);
+        durable.ProducerReceipt.OwnerEntityId.Should().Be(fixture.CreditNote.Id);
+        durable.ProducerReceipt.RequestFingerprint.Should().Be(durable.RequestFingerprint);
         (await fixture.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().Be(posted.JournalEntryId);
+        var finance = await fixture.Db.FinancePostingEvents.SingleAsync(x => x.SourceDocumentId == fixture.CreditNote.Id);
+        finance.JournalEntryId.Should().Be(posted.JournalEntryId);
+        finance.RequestFingerprint.Should().NotBeNullOrWhiteSpace("the C10 compatibility leaf retains its own canonical posting fingerprint");
+        (await fixture.Db.JournalEntries.CountAsync()).Should().Be(1);
+        (await fixture.Db.AccountTransactions.CountAsync()).Should().Be(2);
+        (await fixture.Db.AccountBalances.CountAsync()).Should().BeGreaterThan(0);
+        (await fixture.Db.AuditLogs.CountAsync()).Should().BeGreaterThan(0, "success uses the real durable audit service");
 
         var retry = await fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
         retry.JournalEntryId.Should().Be(posted.JournalEntryId);
         (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(2, "an exact retry is Finance and owner read-only; the fixture also carries the original invoice authority");
+        (await fixture.Db.AccountingEventProducerReceipts.CountAsync()).Should().Be(1, "C15 retry cannot duplicate the C12 receipt");
     }
 
     [Fact]
@@ -244,7 +261,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             var frozen = new AccountingBookSelectionDto { SelectionEvidenceId = selection.Id, EffectiveDate = credit.DocumentDate, OriginatingModuleCode = "SALES", SourceDocumentType = "AR_CREDIT_NOTE", PostingAction = "POST_CREDIT_NOTE", CalculationInputHash = Hash('A'), SelectionFingerprint = Hash('B'), Books = [new AccountingBookSelectionBookDto { AccountingBookId = book.Id, AccountingBookCode = book.Code, SelectionOrder = 1, AuthorityFingerprint = Hash('C') }] };
             applicability.Setup(x => x.ResolveAsync(It.IsAny<ResolveAccountingBookApplicabilityDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(frozen);
             applicability.Setup(x => x.FreezeAsync(It.IsAny<FreezeAccountingBookSelectionDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(frozen);
-            var audit = new FaultingAudit();
+            var durableAudit = new FinanceAuditService(db, user.Object, new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
+            var audit = new FaultingAudit(durableAudit);
             var events = new AccountingEventService(db, user.Object, applicability.Object,
                 new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit), audit,
                 Options.Create(new AccountingEventOptions { Enabled = true }));
@@ -254,7 +272,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             var workflow = new Mock<IWorkflowIntegrationService>();
             var service = new ReturnOrderService(new GenericRepository<ReturnOrder>(db), new GenericRepository<ReturnOrderLine>(db), new GenericRepository<CreditNote>(db), new GenericRepository<CreditNoteLine>(db), new GenericRepository<Refund>(db), new UnitOfWork(db), provider.Object, Mock.Of<IDocumentNumberingService>(), workflow.Object,
                 new WorkflowStatusAdapterRegistry([new CreditNoteWorkflowStatusAdapter(), new RefundWorkflowStatusAdapter()]), NullLogger<ReturnOrderService>.Instance,
-                financeAuditService: new FinanceAuditService(db, user.Object, new HttpContextAccessor { HttpContext = new DefaultHttpContext() }), financeProducerIntents: producer, financeProducerExecution: producer, financeProducerReversals: producer, financeProducerReplayVerifier: producer);
+                financeAuditService: durableAudit, financeProducerIntents: producer, financeProducerExecution: producer, financeProducerReversals: producer, financeProducerReplayVerifier: producer);
             return new Fixture(connection, db, credit, service, producer, audit, sql, state, user, maker, checker);
         }
 
@@ -272,19 +290,19 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await _connection.DisposeAsync(); }
     }
 
-    private sealed class FaultingAudit : IFinanceAuditService
+    private sealed class FaultingAudit(IFinanceAuditService inner) : IFinanceAuditService
     {
         public bool FailPostingAudit { get; set; }
         public Task<AuditLog> RecordAsync(FinanceAuditEventDto auditEvent, CancellationToken cancellationToken = default)
         {
             if (FailPostingAudit && auditEvent.EventType == FinanceAuditEvents.PostingEventCreated)
                 throw new InvalidOperationException("injected production posting audit failure");
-            return Task.FromResult(new AuditLog());
+            return inner.RecordAsync(auditEvent, cancellationToken);
         }
 
         public Task<IReadOnlyList<AuditLog>> GetAuditTrailAsync(Guid tenantId, string resource,
             string resourceId, int limit = 100, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<AuditLog>>([]);
+            inner.GetAuditTrailAsync(tenantId, resource, resourceId, limit, cancellationToken);
     }
 
     private sealed class SqlCapture : DbCommandInterceptor
@@ -318,8 +336,6 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
 
     private sealed class SalesSqliteDbContext(DbContextOptions<SalesSqliteDbContext> options) : ApplicationDbContext(options)
     {
-        private readonly HashSet<(Type Type, Guid Id)> _persistedEntityKeys = [];
-
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -329,10 +345,12 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             {
                 var rowVersion = entity.FindProperty("RowVersion");
                 if (rowVersion is not null)
+                {
                     rowVersion.ValueGenerated = ValueGenerated.Never;
+                    rowVersion.IsConcurrencyToken = false;
+                }
                 foreach (var property in entity.GetProperties())
                 {
-                    property.IsConcurrencyToken = false;
                     // EF's SQLite provider rejects SUM(decimal), while the production SQL
                     // Server provider executes the authoritative invoice-credit aggregate.
                     // This local relational model stores decimals as doubles only so that the
@@ -345,20 +363,22 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
 
         public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
-            // Production services construct several related BaseEntity rows with preassigned
-            // GUIDs. EF's disconnected-graph heuristic labels such unpersisted SQLite fixture
-            // rows Modified. Retain an in-memory identity register of rows this fixture has
-            // actually saved so those new graph rows are inserted, while real loaded rows keep
-            // their normal update semantics.
-            foreach (var entry in ChangeTracker.Entries<BaseEntity>()
-                         .Where(entry => entry.State == EntityState.Modified && !_persistedEntityKeys.Contains((entry.Entity.GetType(), entry.Entity.Id))))
-                entry.State = EntityState.Added;
+            // Query current transactional state, never an in-memory success cache: a row that
+            // was inserted before rollback must be reinserted during C12 recovery.
+            foreach (var entry in ChangeTracker.Entries<BaseEntity>().Where(entry => entry.State == EntityState.Modified))
+                if (!await ExistsAsync(entry, cancellationToken)) entry.State = EntityState.Added;
+            return await base.SaveChangesAsync(cancellationToken);
+        }
 
-            var result = await base.SaveChangesAsync(cancellationToken);
-            foreach (var entry in ChangeTracker.Entries<BaseEntity>()
-                         .Where(entry => entry.State != EntityState.Detached))
-                _persistedEntityKeys.Add((entry.Entity.GetType(), entry.Entity.Id));
-            return result;
+        private async Task<bool> ExistsAsync(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry<BaseEntity> entry, CancellationToken cancellationToken)
+        {
+            var store = StoreObjectIdentifier.Table(entry.Metadata.GetTableName()!, entry.Metadata.GetSchema());
+            var key = entry.Metadata.FindPrimaryKey()!.Properties.Single();
+            await using var command = Database.GetDbConnection().CreateCommand();
+            command.Transaction = Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = $"SELECT 1 FROM \"{entry.Metadata.GetTableName()}\" WHERE \"{key.GetColumnName(store)}\" = @id LIMIT 1";
+            var parameter = command.CreateParameter(); parameter.ParameterName = "@id"; parameter.Value = entry.Entity.Id.ToString(); command.Parameters.Add(parameter);
+            return await command.ExecuteScalarAsync(cancellationToken) is not null;
         }
     }
 
