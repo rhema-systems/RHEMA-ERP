@@ -1274,6 +1274,15 @@ builds and passes 38/38. Sol High re-review is active before integration. The pr
 progressed through tenant, period, module, book period and account-book validation into real dimension resolution;
 only test-local schema/seed is changing. No configured database, migration, production or remote state was touched.
 
+Sol High re-review of `7a3561a3` is still changes-required despite 38/38 green: the closed-period case never
+executes an approved intent, the shared helper permits random event substitution and `It.IsAny` request/receipt
+authority, the C15 result is unrelated to the supplied evidence, denial tests do not baseline durable Finance state,
+and lockdown does not explicitly forbid owner approval calls. The governance task has resumed to make event,
+fingerprint, C11 decision, C12 receipt and C15 replay binding exact and to exercise the true closed-period gate.
+The production relational fixture continues through real dimension-rule includes with only test-local table/seed
+additions. Neither branch is integrated; no configured database, production schema, migration or remote state was
+touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
