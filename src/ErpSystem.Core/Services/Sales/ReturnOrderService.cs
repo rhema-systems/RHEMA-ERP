@@ -13,6 +13,8 @@ using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Data;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ErpSystem.Core.Services.Sales;
 
@@ -32,8 +34,10 @@ public class ReturnOrderService : IReturnOrderService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ILogger<ReturnOrderService> _logger;
     private readonly IDocumentNumberingService _documentNumberingService;
-    private readonly IFinancePostingEngine? _financePostingEngine;
     private readonly IFinanceAuditService? _financeAuditService;
+    private readonly IFinanceProducerIntentService? _financeProducerIntents;
+    private readonly IFinanceProducerApprovedExecutionService? _financeProducerExecution;
+    private readonly IFinanceProducerReversalPreparationService? _financeProducerReversals;
 
     public ReturnOrderService(
         IGenericRepository<ReturnOrder> returnRepo,
@@ -48,7 +52,10 @@ public class ReturnOrderService : IReturnOrderService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<ReturnOrderService> logger,
         IFinancePostingEngine? financePostingEngine = null,
-        IFinanceAuditService? financeAuditService = null)
+        IFinanceAuditService? financeAuditService = null,
+        IFinanceProducerIntentService? financeProducerIntents = null,
+        IFinanceProducerApprovedExecutionService? financeProducerExecution = null,
+        IFinanceProducerReversalPreparationService? financeProducerReversals = null)
     {
         _returnRepo = returnRepo;
         _returnLineRepo = returnLineRepo;
@@ -60,10 +67,12 @@ public class ReturnOrderService : IReturnOrderService
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
-        // Return workflows need Sales document numbers and Finance posting hooks; both sides are intentional after merge.
+        // Keep the obsolete engine constructor slot source-compatible while C7 owns this path.
         _documentNumberingService = documentNumberingService;
-        _financePostingEngine = financePostingEngine;
         _financeAuditService = financeAuditService;
+        _financeProducerIntents = financeProducerIntents;
+        _financeProducerExecution = financeProducerExecution;
+        _financeProducerReversals = financeProducerReversals;
     }
 
     // ═════════════════════════════════════
@@ -550,97 +559,69 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<CreditNoteDetailDto> PostCreditNoteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        if (_financePostingEngine == null)
-            throw new InvalidOperationException("Central finance posting engine is not configured for AR credit note posting.");
-
+        var producer = RequireProducerIntents();
+        var execution = RequireProducerExecution();
         CreditNote? cn = null;
-        FinancePostingResultDto? postingResult = null;
-        var wasAlreadyLinked = false;
+        ProducerAccountingIntentDto? intent = null;
+        AccountingEventDto? prepared = null;
         var transactionStarted = false;
+        var executionAttempted = false;
 
         try
         {
-            // The source link and the engine-created journal/event must commit together. Serializable
-            // isolation also makes the prior-posted-credit limit authoritative under concurrent posts.
+            cn = await LoadCreditNoteForPostingAsync(id, cancellationToken);
+            if (cn.JournalEntryId.HasValue)
+                return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+
+            // Preparation deliberately happens before any Sales mutation. C11 later accepts an ID-only
+            // maker/checker decision; this method never approves a producer intent.
+            intent = await BuildSalesCreditNoteProducerIntentAsync(cn, cancellationToken);
+            prepared = await producer.PrepareAsync(intent, cancellationToken);
+            intent.AccountingEventId = prepared.Id;
+            if (prepared.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
+                return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             transactionStarted = true;
-
             cn = await LoadCreditNoteForPostingAsync(id, cancellationToken);
-            wasAlreadyLinked = cn.JournalEntryId.HasValue;
-
-            var postingRequest = await BuildSalesCreditNotePostingRequestAsync(cn, cancellationToken);
-            postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
-
-            if (cn.JournalEntryId.HasValue && cn.JournalEntryId.Value != postingResult.JournalEntryId)
-                throw new InvalidOperationException("AR credit note is linked to a different journal entry than the posting engine result.");
-
-            if (!cn.JournalEntryId.HasValue)
+            if (cn.JournalEntryId.HasValue)
             {
-                cn.JournalEntryId = postingResult.JournalEntryId;
-                cn.CreditNoteStatus = CreditNoteStatus.Approved;
-                cn.UpdatedAt = DateTime.UtcNow;
-                cn.UpdatedBy = _currentUserProvider.Username;
-                await _creditNoteRepo.UpdateAsync(cn);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
+                return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
             }
 
+            var decision = await producer.GetAsync(prepared.Id, cancellationToken);
+            RequireApprovedPreparedAuthority(prepared, decision);
+            // This tracked, rollback-safe Sales mutation is the deterministic owner effect acknowledged by C12.
+            cn.UpdatedAt = DateTime.UtcNow;
+            cn.UpdatedBy = _currentUserProvider.Username;
+            await _creditNoteRepo.UpdateAsync(cn);
+            executionAttempted = true;
+            var result = await execution.ExecuteInAmbientTransactionAsync(prepared.Id, intent,
+                ReceiptFor(cn, intent.ExpectedOwnerEffect), cancellationToken);
+            ValidateCompatibility(prepared, result);
+            cn.JournalEntryId = result.JournalEntryId;
+            cn.CreditNoteStatus = CreditNoteStatus.Approved;
+            await _creditNoteRepo.UpdateAsync(cn);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
             transactionStarted = false;
 
-            if (postingResult.WasDuplicate || wasAlreadyLinked)
-            {
-                await RecordArCreditNoteAuditAsync(
-                    FinanceAuditEvents.ArCreditNoteDuplicatePostingAttempt,
-                    cn,
-                    postingEventId: postingResult.PostingEventId,
-                    journalEntryId: postingResult.JournalEntryId,
-                    afterValues: new
-                    {
-                        postingResult.PostingEventId,
-                        postingResult.JournalEntryId,
-                        postingResult.PostingAction,
-                        postingResult.WasDuplicate
-                    },
-                    comment: "Duplicate AR credit note posting request returned the existing posting.",
-                    cancellationToken: cancellationToken);
-            }
-            else
-            {
-                await RecordArCreditNoteAuditAsync(
-                    FinanceAuditEvents.ArCreditNotePosted,
-                    cn,
-                    postingEventId: postingResult.PostingEventId,
-                    journalEntryId: postingResult.JournalEntryId,
-                    afterValues: new
-                    {
-                        postingResult.PostingEventId,
-                        postingResult.JournalEntryId,
-                        postingResult.JournalEntryNumber,
-                        postingResult.TotalDebitAmount,
-                        postingResult.TotalCreditAmount,
-                        postingResult.FunctionalCurrencyCode,
-                        postingResult.PostingDate
-                    },
-                    comment: "AR credit note posted through the central finance posting engine.",
-                    cancellationToken: cancellationToken);
-            }
-
-            _logger.LogInformation(
-                "Posted AR credit note {DocumentNumber} through finance posting engine with journal {JournalEntryId}. Duplicate={WasDuplicate}",
-                cn.DocumentNumber,
-                postingResult.JournalEntryId,
-                postingResult.WasDuplicate);
-
+            await RecordArCreditNoteAuditAsync(FinanceAuditEvents.ArCreditNotePosted, cn,
+                postingEventId: result.FinancePostingEventId, journalEntryId: result.JournalEntryId,
+                afterValues: new { result.AccountingEventId, result.FinancePostingEventId, result.JournalEntryId },
+                comment: "AR credit note posted through the governed Finance producer boundary.", cancellationToken: cancellationToken);
             return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
         }
         catch (Exception ex)
         {
             if (transactionStarted)
-            {
                 await _unitOfWork.RollbackAsync(cancellationToken);
-            }
-
-            if (cn != null)
+            if (executionAttempted && prepared is not null && intent is not null)
+                await execution.RecordFailureAfterRollbackAsync(prepared.Id, intent,
+                    ReceiptFor(cn ?? throw new InvalidOperationException("Credit note was unavailable after rollback."), intent.ExpectedOwnerEffect), ex, cancellationToken);
+            if (cn != null && prepared is null)
             {
                 await RecordArCreditNoteAuditAsync(
                     FinanceAuditEvents.ArCreditNotePostingFailed,
@@ -650,7 +631,7 @@ public class ReturnOrderService : IReturnOrderService
                     cancellationToken: cancellationToken);
             }
 
-            _logger.LogError(ex, "Failed to post AR credit note {DocumentNumber}", cn?.DocumentNumber ?? id.ToString());
+            _logger.LogError(ex, "Failed to prepare or execute governed AR credit note {DocumentNumber}", cn?.DocumentNumber ?? id.ToString());
             throw;
         }
     }
@@ -739,20 +720,19 @@ public class ReturnOrderService : IReturnOrderService
         ReverseCreditNoteDto dto,
         CancellationToken cancellationToken = default)
     {
-        if (_financePostingEngine == null)
-            throw new InvalidOperationException("Central finance posting engine is not configured for AR credit note reversal.");
+        var producer = RequireProducerIntents();
+        var execution = RequireProducerExecution();
+        var reversals = RequireProducerReversals();
         if (string.IsNullOrWhiteSpace(dto.Reason))
             throw new InvalidOperationException("A credit note reversal reason is required.");
 
         CreditNote? creditNote = null;
+        ProducerAccountingReversalPreparationResultDto? prepared = null;
+        ProducerOwnerEffectIdentityDto? ownerEffect = null;
         var transactionStarted = false;
+        var executionAttempted = false;
         try
         {
-            // Serialize the status check, inverse journal, and source links. A repeated request
-            // returns the first completed reversal rather than creating a second one.
-            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-            transactionStarted = true;
-
             var tenantId = _currentUserProvider.TenantId;
             creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
                 .FirstOrDefaultAsync(cancellationToken)
@@ -762,9 +742,6 @@ public class ReturnOrderService : IReturnOrderService
             {
                 if (!creditNote.ReversalJournalEntryId.HasValue || !creditNote.ReversalPostingEventId.HasValue)
                     throw new InvalidOperationException("Reversed AR credit note is missing its immutable reversal references.");
-
-                await _unitOfWork.CommitAsync(cancellationToken);
-                transactionStarted = false;
                 return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
             }
 
@@ -773,53 +750,53 @@ public class ReturnOrderService : IReturnOrderService
             if (creditNote.CreditNoteStatus != CreditNoteStatus.Approved && creditNote.CreditNoteStatus != CreditNoteStatus.Applied)
                 throw new InvalidOperationException("Only approved or applied AR credit notes can be reversed.");
 
-            var originalPostingEvent = await _unitOfWork.Repository<FinancePostingEvent>()
+            var original = await _unitOfWork.Repository<AccountingEvent>()
                 .GetQueryable(e =>
                     e.TenantId == tenantId &&
-                    e.SourceModule == "AR" &&
+                    e.OriginatingModuleCode == "SALES" &&
                     e.SourceDocumentType == "SalesCreditNote" &&
                     e.SourceDocumentId == creditNote.Id &&
-                    e.PostingAction == "Post" &&
-                    e.PostingStatus == "Posted" &&
-                    e.JournalEntryId == creditNote.JournalEntryId &&
+                    e.PostingAction == "Post" && e.IdempotencyKey == SalesCreditNotePostingKey(creditNote) &&
+                    e.Status == AccountingEventStatuses.Posted &&
                     !e.IsDeleted)
                 .FirstOrDefaultAsync(cancellationToken)
-                ?? throw new InvalidOperationException("The original AR credit note posting event was not found for this tenant.");
-
-            var reversalPlan = await _financePostingEngine.GetReversalPlanAsync(
-                originalPostingEvent.Id,
-                dto.Reason,
-                dto.ReversalDate,
-                cancellationToken);
-            var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                ?? throw new InvalidOperationException("The original governed AR credit note event was not found for this tenant.");
+            ownerEffect = OwnerEffectFor(creditNote, "REVERSE", $"{original.Id:N}:{dto.ReversalDate?.Date:O}:{dto.Reason.Trim()}");
+            prepared = await reversals.PrepareReversalAsync(new PrepareProducerAccountingReversalDto
             {
-                SourceModule = "AR",
-                OriginModuleCode = "SALES",
-                SourceDocumentType = "SalesCreditNoteReversal",
-                SourceDocumentId = creditNote.Id,
-                SourceDocumentTenantId = creditNote.TenantId,
-                ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
-                ReversalReason = reversalPlan.Reason,
-                ReversalType = "Correction",
-                PostingAction = reversalPlan.PostingAction,
-                SourceDocumentReference = $"{creditNote.DocumentNumber}-REV",
-                Description = $"Reverse AR credit note {creditNote.DocumentNumber}",
-                PostingDate = reversalPlan.ReversalDate,
-                JournalType = "AR Credit Note Reversal",
-                BookClassification = originalPostingEvent.BookClassification,
-                FunctionalCurrencyCode = originalPostingEvent.FunctionalCurrencyCode,
-                IdempotencyKey = $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Reverse",
-                ReturnExistingOnDuplicate = true,
-                Lines = reversalPlan.ReversalLines
+                OriginalAccountingEventId = original.Id,
+                ReversalAccountingEventId = DeterministicGuid(creditNote.Id, "AR-CREDIT-NOTE-REVERSAL"),
+                IdempotencyKey = SalesCreditNoteReversalKey(creditNote),
+                ReversalDate = (dto.ReversalDate ?? DateTime.UtcNow).Date,
+                Reason = dto.Reason.Trim(), ParticipantIdentity = ownerEffect.ParticipantCode,
+                ExpectedOwnerEffect = ownerEffect
             }, cancellationToken);
+            if (prepared.DecisionStatus != ProducerIntentDecisionStatuses.Approved)
+                return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
 
-            creditNote.CreditNoteStatus = CreditNoteStatus.Reversed;
-            creditNote.ReversalJournalEntryId = postingResult.JournalEntryId;
-            creditNote.ReversalPostingEventId = postingResult.PostingEventId;
-            creditNote.ReversedAt = reversalPlan.ReversalDate;
-            creditNote.ReversalReason = reversalPlan.Reason;
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            transactionStarted = true;
+            creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
+                .FirstAsync(cancellationToken);
+            var decision = await producer.GetAsync(prepared.AccountingEventId, cancellationToken);
+            if (decision.Id != prepared.AccountingEventId || decision.RequestFingerprint != prepared.AccountingEventRequestFingerprint
+                || decision.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
+                throw new InvalidOperationException("AR credit note reversal approval authority changed before execution.");
             creditNote.UpdatedAt = DateTime.UtcNow;
             creditNote.UpdatedBy = _currentUserProvider.Username;
+            await _creditNoteRepo.UpdateAsync(creditNote);
+            executionAttempted = true;
+            var result = await execution.ExecuteInAmbientTransactionAsync(prepared.AccountingEventId,
+                ReceiptFor(creditNote, ownerEffect), cancellationToken);
+            if (result.AccountingEventId != prepared.AccountingEventId || result.AccountingEventRequestFingerprint != prepared.AccountingEventRequestFingerprint
+                || result.Status != AccountingEventStatuses.Posted || result.FinancePostingEventId == Guid.Empty || result.JournalEntryId == Guid.Empty)
+                throw new InvalidOperationException("AR credit note reversal compatibility evidence does not bind to the prepared event.");
+
+            creditNote.CreditNoteStatus = CreditNoteStatus.Reversed;
+            creditNote.ReversalJournalEntryId = result.JournalEntryId;
+            creditNote.ReversalPostingEventId = result.FinancePostingEventId;
+            creditNote.ReversedAt = dto.ReversalDate?.Date ?? DateTime.UtcNow.Date;
+            creditNote.ReversalReason = dto.Reason.Trim();
             await _creditNoteRepo.UpdateAsync(creditNote);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
@@ -828,8 +805,8 @@ public class ReturnOrderService : IReturnOrderService
             await RecordArCreditNoteAuditAsync(
                 FinanceAuditEvents.ArCreditNoteReversed,
                 creditNote,
-                postingEventId: postingResult.PostingEventId,
-                journalEntryId: postingResult.JournalEntryId,
+                postingEventId: result.FinancePostingEventId,
+                journalEntryId: result.JournalEntryId,
                 afterValues: new
                 {
                     creditNote.CreditNoteStatus,
@@ -837,8 +814,8 @@ public class ReturnOrderService : IReturnOrderService
                     creditNote.ReversalJournalEntryId,
                     creditNote.ReversedAt
                 },
-                reason: reversalPlan.Reason,
-                comment: "AR credit note reversed through the central finance posting engine.",
+                reason: creditNote.ReversalReason,
+                comment: "AR credit note reversed through the governed Finance producer boundary.",
                 cancellationToken: cancellationToken);
 
             return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
@@ -848,7 +825,11 @@ public class ReturnOrderService : IReturnOrderService
             if (transactionStarted)
                 await _unitOfWork.RollbackAsync(cancellationToken);
 
-            if (creditNote != null)
+            if (executionAttempted && prepared is not null && ownerEffect is not null)
+                await execution.RecordFailureAfterRollbackAsync(prepared.AccountingEventId,
+                    ReceiptFor(creditNote ?? throw new InvalidOperationException("Credit note was unavailable after rollback."), ownerEffect), ex, cancellationToken);
+
+            if (creditNote != null && prepared is null)
             {
                 await RecordArCreditNoteAuditAsync(
                     FinanceAuditEvents.ArCreditNoteReversalFailed,
@@ -960,7 +941,7 @@ public class ReturnOrderService : IReturnOrderService
         return creditNote;
     }
 
-    private async Task<FinancePostingRequestDto> BuildSalesCreditNotePostingRequestAsync(
+    private async Task<ProducerAccountingIntentDto> BuildSalesCreditNoteProducerIntentAsync(
         CreditNote creditNote,
         CancellationToken cancellationToken)
     {
@@ -1125,24 +1106,63 @@ public class ReturnOrderService : IReturnOrderService
         if (RoundMoney(postingLines.Sum(l => l.DebitAmount)) != RoundMoney(postingLines.Sum(l => l.CreditAmount)))
             throw new InvalidOperationException("AR credit note posting is not balanced.");
 
-        return new FinancePostingRequestDto
+        var owner = OwnerEffectFor(creditNote, "POST", "POST");
+        return new ProducerAccountingIntentDto
         {
-            SourceModule = "AR",
-            OriginModuleCode = "SALES",
-            SourceDocumentType = "SalesCreditNote",
-            SourceDocumentId = creditNote.Id,
-            SourceDocumentTenantId = creditNote.TenantId,
-            PostingAction = "Post",
-            SourceDocumentReference = creditNote.DocumentNumber,
-            Description = $"Sales credit note {creditNote.DocumentNumber} - {creditNote.BusinessPartner.PartnerName}",
-            PostingDate = creditNote.DocumentDate,
-            JournalType = "AR Credit Note",
-            BookClassification = "IFRS",
-            FunctionalCurrencyCode = functionalCurrency,
-            IdempotencyKey = $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Post",
-            ReturnExistingOnDuplicate = true,
-            Lines = postingLines
+            AccountingEventId = DeterministicGuid(creditNote.Id, "AR-CREDIT-NOTE-POST"),
+            EventKind = AccountingEventKinds.Original,
+            IdempotencyKey = SalesCreditNotePostingKey(creditNote),
+            ParticipantIdentity = owner.ParticipantCode,
+            ExpectedOwnerEffect = owner,
+            PostingRequest = new ProducerFinancePostingRequestDto
+            {
+                SourceModule = "AR", OriginModuleCode = "SALES", SourceDocumentType = "SalesCreditNote",
+                SourceDocumentId = creditNote.Id, SourceDocumentTenantId = creditNote.TenantId, PostingAction = "Post",
+                SourceDocumentReference = creditNote.DocumentNumber,
+                Description = $"Sales credit note {creditNote.DocumentNumber} - {creditNote.BusinessPartner.PartnerName}",
+                PostingDate = creditNote.DocumentDate, JournalType = "AR Credit Note", FunctionalCurrencyCode = functionalCurrency,
+                IdempotencyKey = SalesCreditNotePostingKey(creditNote), ReturnExistingOnDuplicate = true, Lines = postingLines
+            }
         };
+    }
+
+    private IFinanceProducerIntentService RequireProducerIntents() => _financeProducerIntents
+        ?? throw new InvalidOperationException("Governed Finance producer intents are not configured for AR credit note posting.");
+    private IFinanceProducerApprovedExecutionService RequireProducerExecution() => _financeProducerExecution
+        ?? throw new InvalidOperationException("Governed Finance producer execution is not configured for AR credit note posting.");
+    private IFinanceProducerReversalPreparationService RequireProducerReversals() => _financeProducerReversals
+        ?? throw new InvalidOperationException("Governed Finance producer reversal preparation is not configured for AR credit note reversal.");
+
+    private static string SalesCreditNotePostingKey(CreditNote creditNote) =>
+        $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Post";
+    private static string SalesCreditNoteReversalKey(CreditNote creditNote) =>
+        $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Reverse";
+    private static Guid DeterministicGuid(Guid source, string purpose) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes($"{source:N}:{purpose}"))[..16]);
+    private static ProducerOwnerEffectIdentityDto OwnerEffectFor(CreditNote creditNote, string action, string salt)
+    {
+        const string participant = "SALES.CREDIT_NOTE.V1";
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"{participant}:{creditNote.TenantId:N}:{creditNote.Id:N}:{action}:{salt}")));
+        return new ProducerOwnerEffectIdentityDto { ParticipantCode = participant, OwnerEntityType = "SALES_CREDIT_NOTE",
+            OwnerEntityId = creditNote.Id, OwnerAction = action, EffectFingerprint = fingerprint };
+    }
+    private static ProducerOwnerEffectReceiptDto ReceiptFor(CreditNote creditNote, ProducerOwnerEffectIdentityDto effect) => new()
+    {
+        TenantId = creditNote.TenantId, ParticipantCode = effect.ParticipantCode, OwnerEntityType = effect.OwnerEntityType,
+        OwnerEntityId = effect.OwnerEntityId, OwnerAction = effect.OwnerAction, EffectFingerprint = effect.EffectFingerprint
+    };
+    private static void RequireApprovedPreparedAuthority(AccountingEventDto prepared, AccountingEventDto decision)
+    {
+        if (decision.Id != prepared.Id || decision.RequestFingerprint != prepared.RequestFingerprint
+            || decision.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
+            throw new InvalidOperationException("AR credit note requires an unchanged independent Finance approval before posting.");
+    }
+    private static void ValidateCompatibility(AccountingEventDto prepared, FinanceProducerApprovedExecutionResultDto result)
+    {
+        if (result.AccountingEventId != prepared.Id || result.AccountingEventRequestFingerprint != prepared.RequestFingerprint
+            || result.Status != AccountingEventStatuses.Posted || result.FinancePostingEventId == Guid.Empty || result.JournalEntryId == Guid.Empty)
+            throw new InvalidOperationException("AR credit note compatibility evidence does not bind to the prepared Finance event.");
     }
 
     private async Task<decimal> GetPostedSalesCreditTotalForInvoiceAsync(
