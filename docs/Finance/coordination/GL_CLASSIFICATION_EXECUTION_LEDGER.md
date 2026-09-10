@@ -1181,6 +1181,15 @@ C15 tests passed 15/15, Core contract discovery 3/3 and the widened C7/C10/C13/C
 pending-model, ancestry, scope and diff gates pass. Independent Sol High review is active before integration; no
 database, schema or migration was touched.
 
+Independent Sol High review approved exact C15 commit `cebca196540bc23d48e1df111fc4698ad4c45a07`
+with no P1/P2. Review confirmed immutable snapshot reconstruction, complete receipt-to-event binding, independent
+approval and Posted authority, exact reuse of the Finance-owned C10 resolver, canonical C13 original/reversal
+validation, no-tracking reads and a strictly book/line-blind public surface. Focused C7/C10/C12/C13/C15 tests passed
+67/67, Core contracts 3/3, and build, EF, exact 456-migration, ancestry, diff, ledger and credential gates passed.
+C15 was integrated locally as `0230083f1d5339127baa876d633268d71d4ad880`; no configured database, schema,
+migration, owner or remote state was touched. Sales is authorized to consume this verifier and remove its weaker
+owner-side Finance authority reconstruction.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
