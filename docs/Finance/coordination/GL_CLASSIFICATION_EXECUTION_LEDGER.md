@@ -1109,6 +1109,18 @@ disabled/default selector denial, compatibility binding, rollback-before-durable
 frozen-book reversal under C5 drift, then run widened/EF/migration gates. No database or migration was touched;
 independent review and integration remain gated.
 
+Interim Sol High review at clean Sales checkpoint `89af441c` found five P1 owner-boundary gaps: credit-note and
+invoice economics are not freshly locked/revalidated under Serializable after maker-checker delay; post-commit
+audit/read failures can be misreported as rolled-back Finance failures; exact retries trust mutable owner journal
+links without reconciling C7/C10/C13 evidence; omitted reversal dates recompute across days; and the public Sales
+response exposes no durable event/fingerprint handoff for the independent checker. The legacy lockdown and direct-
+posting fixtures are also stale. In parallel, a real shared-SQLite C7/C11/C12 owner fixture was scaffolded and
+builds, but its final eager-navigation tables/rerun were incomplete and remain uncommitted. Terra Medium owner
+correction has resumed with explicit preservation of that scaffold, checked owner locking/revalidation, strict
+pre-commit failure recording, authoritative replay reconciliation, durable reversal date, minimal book-blind
+checker evidence, stale-test migration and relational concurrency/rollback gates. Integration remains blocked;
+no database or migration was touched.
+
 Sales now has six clean commits through `89af441c860335fcfe0ad14102b7c818f18d5625`: the governed owner
 conversion, pending/approved compatibility tests, reversal retry conflict guard, additional handoff evidence,
 legacy posting-engine dependency removal and fixture adaptation. Core and API test projects build with zero
