@@ -742,6 +742,14 @@ public class ReturnOrderService : IReturnOrderService
             {
                 if (!creditNote.ReversalJournalEntryId.HasValue || !creditNote.ReversalPostingEventId.HasValue)
                     throw new InvalidOperationException("Reversed AR credit note is missing its immutable reversal references.");
+
+                var requestedDate = dto.ReversalDate?.Date;
+                if (!string.Equals(creditNote.ReversalReason, dto.Reason.Trim(), StringComparison.Ordinal)
+                    || (requestedDate.HasValue && creditNote.ReversedAt?.Date != requestedDate))
+                {
+                    throw new InvalidOperationException(
+                        "AR credit note reversal retry conflicts with the immutable reversal evidence.");
+                }
                 return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
             }
 
