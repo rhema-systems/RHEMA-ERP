@@ -1256,6 +1256,15 @@ diagnosis also found the exact fixture mismatch: EF treated a new non-default-GU
 correcting only test-local tracking for that new graph and rerunning current binaries. No production, schema,
 migration, configured database or remote state was touched.
 
+Sol High review of governance checkpoint `05b9cb23` remains changes-required. The focused class/lockdown run is
+29 passed/9 failed: two owner-guard and two reversal facts still lack governed dependencies, replay/date/tamper
+facts lack exact C7/C11/C15 posting evidence, the retired PaymentService case and quarantined SupplierReturns scan
+remain stale, and denial/duplicate assertions do not yet prove zero durable Finance mutation or exact C15 replay.
+The task has resumed on this explicit matrix. On the relational path, test-local identity tracking now correctly
+inserts preassigned C7 posting/receipt graphs and execution reaches real FinancePostingEngine; the next fixture-only
+omission was the tenant seed, now supplied. Both branches remain unintegrated pending green gates. No configured
+database, production schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
