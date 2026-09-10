@@ -10,10 +10,17 @@
  * ⚠ **The weight total is advisory.** It is shown because a team planning its year wants to know,
  * and nothing blocks on it: a half-built set is the ordinary state of a team mid-planning.
  *
- * Round 2, lane F1 (plan § 6.6).
+ * ⚠ **An objective becomes active by being APPROVED, not by being activated (lane F3).** The
+ * direct Draft → Active move is refused by the server, so this screen offers "Send for approval"
+ * instead: the head of the unit the team serves — or HR — signs it off through the workflow
+ * engine. Leaving an Activate button on a draft would have been a button whose only outcome is a
+ * refusal, and worse, a door round the approval if the server had allowed it.
+ *
+ * Round 2, lanes F1 and F3 (plan § 6.6).
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -26,6 +33,7 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
+import { WorkflowReasonDialog } from '@/components/workflow/WorkflowReasonDialog';
 import { teamActivityService } from '@/services/hr/team-activity.service';
 import { teamService } from '@/services/hr/team.service';
 import {
@@ -102,6 +110,15 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'dest
 };
 
 export function TeamObjectivesTab({ teamId }: { teamId: string }) {
+  const queryClient = useQueryClient();
+  const [reasonFor, setReasonFor] = useState<{ id: string; mode: 'reject' | 'recall' } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refreshObjectives = () => {
+    void queryClient.invalidateQueries({ queryKey: ['hr', 'teams', teamId, 'objectives'] });
+    void queryClient.invalidateQueries({ queryKey: ['hr', 'teams', teamId, 'dashboard'] });
+  };
+
   const { data: members = [] } = useQuery({
     queryKey: ['hr', 'teams', teamId, 'members'],
     queryFn: () => teamService.getMembers(teamId),
@@ -164,9 +181,45 @@ export function TeamObjectivesTab({ teamId }: { teamId: string }) {
         }}
         actions={[
           {
-            label: 'Activate',
-            visible: (o) => o.status === 'Draft' || o.status === 'OnHold',
+            // ⚠ Draft is NOT here. A draft objective reaches Active only through the approval
+            // below; resuming one that was put on hold is the team's own call and stays direct.
+            label: 'Resume',
+            visible: (o) => o.status === 'OnHold',
             run: (o) => teamActivityService.changeObjectiveStatus(o.id, 'Active'),
+          },
+          {
+            label: 'Send for approval',
+            visible: (o) => o.status === 'Draft',
+            run: (o) => teamActivityService.submitObjective(o.id),
+            confirm: {
+              title: 'Send this objective for approval?',
+              description:
+                'It needs an owner and a due date. The head of the unit this team serves, or HR, decides '
+                + 'whether it becomes active.',
+            },
+          },
+          {
+            label: 'Approve',
+            visible: (o) => o.status === 'PendingApproval',
+            run: (o) => teamActivityService.approveObjective(o.id),
+            confirm: {
+              title: 'Approve this objective?',
+              description: 'Approving it is what makes it active and puts the team to work on it.',
+            },
+          },
+          {
+            label: 'Send back…',
+            visible: (o) => o.status === 'PendingApproval',
+            run: async (o) => {
+              setReasonFor({ id: o.id, mode: 'reject' });
+            },
+          },
+          {
+            label: 'Withdraw…',
+            visible: (o) => o.status === 'PendingApproval',
+            run: async (o) => {
+              setReasonFor({ id: o.id, mode: 'recall' });
+            },
           },
           {
             label: 'Put on hold',
@@ -293,6 +346,46 @@ export function TeamObjectivesTab({ teamId }: { teamId: string }) {
               )}
             </>
           );
+        }}
+      />
+
+      {/*
+        Same two doors as the charter, and the same distinction: a refusal needs a reason because
+        the team has to know what to change; a withdrawal does not, because nobody refused anything.
+      */}
+      <WorkflowReasonDialog
+        open={reasonFor !== null}
+        onOpenChange={(open) => !open && setReasonFor(null)}
+        title={reasonFor?.mode === 'reject' ? 'Send this objective back?' : 'Withdraw this submission?'}
+        description={
+          reasonFor?.mode === 'reject'
+            ? 'It returns to draft for the team to rework. Say what needs to change.'
+            : 'It returns to draft and nobody is asked to approve it. Nothing is recorded against it.'
+        }
+        reasonLabel={reasonFor?.mode === 'reject' ? 'What needs to change' : 'Note (optional)'}
+        reasonPlaceholder={
+          reasonFor?.mode === 'reject'
+            ? 'The target is not measurable as written.'
+            : 'Withdrawn to name an owner.'
+        }
+        confirmText={reasonFor?.mode === 'reject' ? 'Send back' : 'Withdraw'}
+        requireReason={reasonFor?.mode === 'reject'}
+        variant={reasonFor?.mode === 'reject' ? 'destructive' : 'default'}
+        isLoading={busy}
+        onConfirm={async (reason) => {
+          if (!reasonFor) return;
+          setBusy(true);
+          try {
+            if (reasonFor.mode === 'reject') {
+              await teamActivityService.rejectObjective(reasonFor.id, reason);
+            } else {
+              await teamActivityService.recallObjective(reasonFor.id, reason || undefined);
+            }
+            setReasonFor(null);
+            refreshObjectives();
+          } finally {
+            setBusy(false);
+          }
         }}
       />
     </div>

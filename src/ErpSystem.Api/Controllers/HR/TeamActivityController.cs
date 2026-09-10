@@ -94,6 +94,29 @@ public class TeamActivityController : ControllerBase
         Guid id, CancellationToken cancellationToken)
         => Ok(await _service.ApproveTermsAsync(id, cancellationToken));
 
+    /// <summary>
+    /// Declines a charter, sending it back to the committee to be reworked (lane F3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The reason is required by the SERVICE, not by the DTO, so a blank one answers 422 with
+    /// the rule's own words rather than 400 with ASP.NET's canned validation text — the same
+    /// door-consistency lane D2 measured the cost of getting wrong.
+    /// </remarks>
+    [HttpPost("terms/{id:guid}/reject")]
+    [ProducesResponseType(typeof(TeamTermsOfReferenceDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TeamTermsOfReferenceDetailDto>> RejectTerms(
+        Guid id, [FromBody] TeamApprovalReasonDto? body, CancellationToken cancellationToken)
+        => Ok(await _service.RejectTermsAsync(id, body?.Reason, cancellationToken));
+
+    /// <summary>The committee withdrawing its own submission before anyone has ruled (lane F3).</summary>
+    [HttpPost("terms/{id:guid}/recall")]
+    [ProducesResponseType(typeof(TeamTermsOfReferenceDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TeamTermsOfReferenceDetailDto>> RecallTerms(
+        Guid id, [FromBody] TeamApprovalReasonDto? body, CancellationToken cancellationToken)
+        => Ok(await _service.RecallTermsAsync(id, body?.Reason, cancellationToken));
+
     /// <summary>Clones the approved terms to a new draft at version + 1.</summary>
     [HttpPost("terms/{id:guid}/new-version")]
     [ProducesResponseType(typeof(TeamTermsOfReferenceDetailDto), StatusCodes.Status200OK)]
@@ -171,6 +194,46 @@ public class TeamActivityController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _service.ChangeObjectiveStatusAsync(
             id, status, body ?? new TeamObjectiveStatusChangeDto(), cancellationToken));
+
+    // ── The objective's approval, on the workflow engine (lane F3) ────────────
+    //
+    // ⚠ These four are the ONLY route from Draft to Active. The status door above refuses that
+    // transition by hand — otherwise a lead who found the approval inconvenient could set the
+    // status themselves and the whole lane would be decoration.
+
+    /// <summary>Sends a draft objective for approval.</summary>
+    [HttpPost("objectives/{id:guid}/submit")]
+    [ProducesResponseType(typeof(TeamObjectiveDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TeamObjectiveDetailDto>> SubmitObjective(
+        Guid id, CancellationToken cancellationToken)
+        => Ok(await _service.SubmitObjectiveAsync(id, cancellationToken));
+
+    /// <summary>Approves it, which is what makes it active.</summary>
+    [HttpPost("objectives/{id:guid}/approve")]
+    [ProducesResponseType(typeof(TeamObjectiveDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TeamObjectiveDetailDto>> ApproveObjective(
+        Guid id, CancellationToken cancellationToken)
+        => Ok(await _service.ApproveObjectiveAsync(id, cancellationToken));
+
+    /// <summary>Refuses it, sending it back to draft with a required reason.</summary>
+    [HttpPost("objectives/{id:guid}/reject")]
+    [ProducesResponseType(typeof(TeamObjectiveDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TeamObjectiveDetailDto>> RejectObjective(
+        Guid id, [FromBody] TeamApprovalReasonDto? body, CancellationToken cancellationToken)
+        => Ok(await _service.RejectObjectiveAsync(id, body?.Reason, cancellationToken));
+
+    /// <summary>The team withdrawing its own submission before anyone has ruled.</summary>
+    [HttpPost("objectives/{id:guid}/recall")]
+    [ProducesResponseType(typeof(TeamObjectiveDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TeamObjectiveDetailDto>> RecallObjective(
+        Guid id, [FromBody] TeamApprovalReasonDto? body, CancellationToken cancellationToken)
+        => Ok(await _service.RecallObjectiveAsync(id, body?.Reason, cancellationToken));
 
     [HttpDelete("objectives/{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

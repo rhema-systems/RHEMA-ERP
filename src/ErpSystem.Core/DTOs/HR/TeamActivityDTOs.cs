@@ -52,6 +52,16 @@ public class TeamTermsOfReferenceDetailDto : TeamTermsOfReferenceListDto
     public string? Notes { get; set; }
     public string? DocumentMimeType { get; set; }
     public long? DocumentFileSizeBytes { get; set; }
+
+    /// <summary>
+    /// Why an approver sent this version back (lane F3). Null when it has never been refused.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ On the DETAIL, not the list. A refusal is something its author reads once and acts on;
+    /// putting it on every row of the version table would make a committee's history read as a
+    /// column of complaints rather than a version chain.
+    /// </remarks>
+    public string? RejectionReason { get; set; }
 }
 
 public class CreateTeamTermsOfReferenceDto
@@ -131,6 +141,16 @@ public class TeamObjectiveDetailDto : TeamObjectiveListDto
     public string? OutcomeSummary { get; set; }
     public DateOnly? CompletedOn { get; set; }
     public string? CancelledReason { get; set; }
+
+    /// <summary>
+    /// Why an approver refused to let this objective start (lane F3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately NOT folded into <see cref="CancelledReason"/>. An objective refused before
+    /// it began and one the team chose to stop pursuing are different facts, and a single column
+    /// makes them indistinguishable a year later.
+    /// </remarks>
+    public string? RejectionReason { get; set; }
 }
 
 public class CreateTeamObjectiveDto
@@ -329,3 +349,19 @@ public class TeamTaskAttachmentDto
 }
 
 #endregion
+
+/// <summary>
+/// The reason an approver sends a charter or an objective back, or a committee withdraws one
+/// (round 2, lane F3).
+/// </summary>
+/// <remarks>
+/// ⚠ One DTO for both doors, and the reason is optional HERE while the service REFUSES a blank
+/// one on reject. That is not an oversight: recall genuinely has no reason to give — nobody
+/// refused anything — and a <c>[Required]</c> here would have answered 400 from the model binder
+/// with ASP.NET's canned validation text instead of 422 with the rule's own words.
+/// </remarks>
+public class TeamApprovalReasonDto
+{
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
+}

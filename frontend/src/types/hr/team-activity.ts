@@ -109,6 +109,13 @@ export interface TeamTermsOfReferenceDetail extends TeamTermsOfReference {
   notes?: string | null;
   documentMimeType?: string | null;
   documentFileSizeBytes?: number | null;
+  /**
+   * Why an approver sent this version back (lane F3). Null when it has never been refused.
+   *
+   * ⚠ On the DETAIL only — a refusal is read once and acted on, and a column of them on the
+   * version table would make a committee's history read as a list of complaints.
+   */
+  rejectionReason?: string | null;
 }
 
 export interface CreateTeamTermsOfReferenceRequest {
@@ -154,6 +161,13 @@ export interface TeamObjectiveDetail extends TeamObjective {
   outcomeSummary?: string | null;
   completedOn?: string | null;
   cancelledReason?: string | null;
+  /**
+   * Why an approver refused to let this objective start (lane F3).
+   *
+   * ⚠ Not the same as `cancelledReason`: refused-before-it-began and stopped-part-way are
+   * different facts, and one column cannot tell them apart a year later.
+   */
+  rejectionReason?: string | null;
 }
 
 export interface CreateTeamObjectiveRequest {

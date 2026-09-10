@@ -14,15 +14,35 @@ public class TeamActivityService : ITeamActivityService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ITeamAccessGuard _access;
+    private readonly IWorkflowIntegrationService _workflow;
+    private readonly IWorkflowStatusAdapterRegistry _adapters;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TeamActivityService> _logger;
+
+    /// <summary>The workflow entity-type keys, round 2 lane F3.</summary>
+    /// <remarks>
+    /// ⚠ Prefixed <c>Hr</c>: the engine's entity-type namespace is FLAT and shared across every
+    /// module, so a bare <c>Objective</c> or <c>TermsOfReference</c> could collide with another
+    /// module's — and a collision does not error, it silently deep-links an approver to somebody
+    /// else's screen. The HR asset types were prefixed for exactly this reason.
+    /// </remarks>
+    private const string TermsEntityType = "HrTeamTermsOfReference";
+
+    private const string ObjectiveEntityType = "HrTeamObjective";
 
     public TeamActivityService(
         IUnitOfWork unitOfWork,
         ITeamAccessGuard access,
+        IWorkflowIntegrationService workflow,
+        IWorkflowStatusAdapterRegistry adapters,
+        ICurrentUserProvider currentUserProvider,
         ILogger<TeamActivityService> logger)
     {
         _unitOfWork = unitOfWork;
         _access = access;
+        _workflow = workflow;
+        _adapters = adapters;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
 
@@ -93,6 +113,98 @@ public class TeamActivityService : ITeamActivityService
         throw new UnauthorizedAccessException(
             "This task is not assigned to you, so only the team's lead or deputy can move it.");
     }
+
+    /// <summary>
+    /// The approval authority for a team's charter and its objectives: the head of the unit the
+    /// team serves, falling back to HR (round 2, Q-8).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ This is the rule the engine cannot express, and the hole F3 exists to close.</b>
+    /// F1's <c>approve</c> asked only whether the caller could WRITE to the team — so the lead
+    /// could approve their own charter, a committee granting itself its own authority. Write
+    /// access and approval authority are different questions and this is where they part.</para>
+    ///
+    /// <para><b>Why it is here and not in the workflow definition.</b> "The owning unit's head" is
+    /// a fact about the RECORD — which unit does this particular committee serve — not a role, and
+    /// conditional routing does not route (cross-module defect #3: a transition's condition is
+    /// persisted as a JSON blob and the evaluator expects a bare expression, so the branch is
+    /// never taken and nothing errors). The definition therefore names the roles a unit head could
+    /// hold and this narrows to the head of THIS team's unit. It also runs BEFORE
+    /// <c>CanUserApproveAsync</c>, so the refusal explains itself in terms of the record rather
+    /// than the generic "you are not assigned as an approver" — and so the rule still holds if the
+    /// definition is missing or wrong.</para>
+    ///
+    /// <para><b>The fallback is deliberate, and it is HR, not "anyone".</b> A team that serves no
+    /// unit — a cross-cutting statutory committee — and a unit whose head post is vacant are both
+    /// ordinary states, not errors. Refusing in either case would leave a committee unable to be
+    /// chartered until an unrelated org change happened.</para>
+    /// </remarks>
+    private async Task RequireApprovalAuthorityAsync(Team team, string what, CancellationToken ct)
+    {
+        // HR is the standing fallback and can act on any team, which is the same shape every other
+        // horizontal check in this service takes.
+        if (_access.IsHrDesk()) return;
+
+        var caller = CallerEmployeeId();
+        if (caller is null)
+            throw new UnauthorizedAccessException(
+                $"Your login is not linked to an employee record, so it cannot approve {what}.");
+
+        var unitId = team.OrganizationUnitId;
+        var unit = unitId is null
+            ? null
+            : await _unitOfWork.Repository<OrganizationUnit>().GetQueryable().AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == unitId && !u.IsDeleted, ct);
+
+        var head = unit?.HeadEmployeeId;
+        if (head is not null && head == caller) return;
+
+        // ⚠ The refusal NAMES the authority. "You are not an approver" leaves the lead with nothing
+        // to do next; "the head of Finance signs this off" tells them who to go to.
+        var unitName = unit?.Name;
+
+        throw new UnauthorizedAccessException(
+            head is null
+                ? $"Only HR can approve {what} for {team.Name}"
+                  + (unitId is null
+                      ? " — it does not sit under an organisation unit."
+                      : $" — {unitName ?? "its unit"} has no head on record.")
+                : $"Only the head of {unitName ?? "the owning unit"}, or HR, can approve {what} for "
+                  + $"{team.Name}. Leading a team is not the same as being able to approve its own charter.");
+    }
+
+    /// <summary>
+    /// Refuses to let "no workflow configured" mean "approved by whoever pressed submit".
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ THE PLATFORM AUTO-APPROVES WHEN NO DEFINITION IS PUBLISHED, and for these two
+    /// surfaces that is wrong.</b> <c>WorkflowIntegrationService.SubmitAsync</c> answers
+    /// <c>Success = true</c>, <c>Outcome = Approved</c>, <c>ApprovalRequired = false</c> when the
+    /// entity type has no active approval workflow — a deliberate "workflow is optional" design
+    /// that suits a module where the direct lifecycle is the normal one. Here it silently reopens
+    /// the exact hole this lane exists to close: the lead presses submit, the adapter maps Approved,
+    /// and a committee has granted itself its own charter with nobody asked. Found by the harness's
+    /// no-definition assertion on the first green-looking run.</para>
+    ///
+    /// <para>So an approval that was never actually sought is REFUSED here rather than honoured. The
+    /// seeded definitions (<c>EnsureHrWorkflowsSeededAsync</c>) mean a properly provisioned tenant
+    /// always has one, so this guards a mis-provisioned tenant — and it says so out loud, because
+    /// "approval is not configured" is an administrator's problem and nobody can act on a silence.</para>
+    ///
+    /// <para><b>Scoped to these two surfaces on purpose.</b> Changing
+    /// <c>WorkflowIntegrationService</c> would change every module that relies on the optional
+    /// behaviour, which is not this lane's call to make.</para>
+    /// </remarks>
+    private static void RequireApprovalWasActuallySought(WorkflowIntegrationResult result, string what)
+    {
+        if (result.ApprovalRequired) return;
+
+        throw new InvalidOperationException(
+            $"No approval workflow is configured for {what}, so submitting would approve it with "
+            + "nobody having been asked. Ask an administrator to publish a workflow definition for "
+            + "this type first.");
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
     //  Terms of reference
@@ -195,6 +307,17 @@ public class TeamActivityService : ITeamActivityService
         return ToDetailDto(entity);
     }
 
+    /// <summary>
+    /// Sends a draft charter for approval — through the workflow engine (round 2, lane F3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ **The engine decides the status, this method does not.** Submit used to set
+    /// <c>PendingApproval</c> itself; now the adapter maps whatever the engine returns. That matters
+    /// because a definition may auto-approve, route to two steps, or refuse to start at all — and a
+    /// hand-set status would claim the first of those had happened whatever the engine actually did.
+    /// With no published definition the submit is REFUSED rather than quietly succeeding, which is
+    /// the assertion that distinguishes a real integration from an adapter running on its own.
+    /// </remarks>
     public async Task<TeamTermsOfReferenceDetailDto> SubmitTermsAsync(
         Guid id, CancellationToken cancellationToken = default)
     {
@@ -204,22 +327,85 @@ public class TeamActivityService : ITeamActivityService
         if (entity.Status != TeamTorStatus.Draft)
             throw new InvalidOperationException($"Only a draft can be submitted; this one is {entity.Status}.");
 
-        entity.Status = TeamTorStatus.PendingApproval;
+        // ⚠ A charter with no purpose is not a charter. Checked before the engine is troubled,
+        // because "what is this committee for" is a fact about the record, not a routing choice.
+        if (string.IsNullOrWhiteSpace(entity.Purpose))
+            throw new InvalidOperationException(
+                "Say what the committee is for before sending its terms of reference for approval.");
+
+        var result = await _workflow.SubmitAsync(TermsEntityType, entity.Id);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to start the charter approval workflow.");
+        RequireApprovalWasActuallySought(result, "terms of reference");
+
+        _adapters.GetAdapter(TermsEntityType)
+            .ApplySubmitOutcome(entity, result.Outcome, _currentUserProvider.UserId);
+
+        // ⚠ A resubmission clears the previous refusal. Leaving it would show a charter sitting at
+        // PendingApproval still displaying why it was turned down last time.
+        entity.RejectionReason = null;
+
         await Terms.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return ToDetailDto(entity);
+        _logger.LogInformation(
+            "Terms of reference v{Version} for team {TeamId} submitted; now {Status}.",
+            entity.Version, entity.TeamId, entity.Status);
+
+        return await GetTermsByIdAsync(id, cancellationToken) ?? ToDetailDto(entity);
     }
 
+    /// <summary>
+    /// Approves a charter — the engine's decision, then the consequences the engine cannot apply.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ **Two gates, in this order.** The record-level authority (Q-8: the owning unit's head,
+    /// falling back to HR) runs FIRST so a refusal names who can actually sign; the engine's own
+    /// <c>CanUserApproveAsync</c> runs second. Either one alone would be wrong: the domain rule
+    /// still has to hold when a definition is missing or mis-authored, and the engine still has to
+    /// be the thing that advances the instance.
+    /// </remarks>
     public async Task<TeamTermsOfReferenceDetailDto> ApproveTermsAsync(
         Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await RequireTermsAsync(id, cancellationToken);
-        await RequireTeamWriteAsync(entity.TeamId, cancellationToken);
+        await RequireTeamReadAsync(entity.TeamId, cancellationToken);
 
-        if (entity.Status is not (TeamTorStatus.Draft or TeamTorStatus.PendingApproval))
+        if (entity.Status != TeamTorStatus.PendingApproval)
             throw new InvalidOperationException(
-                $"Version {entity.Version} is already {entity.Status.ToString().ToLowerInvariant()}.");
+                entity.Status == TeamTorStatus.Draft
+                    ? $"Version {entity.Version} has not been submitted for approval yet."
+                    : $"Version {entity.Version} is already {entity.Status.ToString().ToLowerInvariant()}.");
+
+        var team = await RequireTeamAsync(entity.TeamId, cancellationToken);
+        await RequireApprovalAuthorityAsync(team, "terms of reference", cancellationToken);
+
+        // The engine resolves approvers by ApplicationUser, so it gets UserId; ApprovedById below is
+        // an Employee FK and gets the employee. See hr-attendance-actor-conventions.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflow.CanUserApproveAsync(TermsEntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this charter's workflow.");
+
+        var result = await _workflow.ProcessApprovalAsync(
+            TermsEntityType, entity.Id, actingUserId, "Approve", null);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _adapters.GetAdapter(TermsEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId);
+
+        // ⚠ A multi-step definition leaves this at PendingApproval — one approver of three has
+        // signed. Superseding the standing charter now would retire it on a decision nobody has
+        // finished making, so the consequences below run ONLY on the final approval.
+        if (entity.Status != TeamTorStatus.Approved)
+        {
+            await Terms.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return await GetTermsByIdAsync(id, cancellationToken) ?? ToDetailDto(entity);
+        }
 
         var tenantId = GetTenantId();
 
@@ -238,7 +424,9 @@ public class TeamActivityService : ITeamActivityService
             await Terms.UpdateAsync(old);
         }
 
-        entity.Status = TeamTorStatus.Approved;
+        // ⚠ The STATUS is not set here — the adapter already did, from the engine's outcome. Only
+        // the things the adapter cannot reach: the approving EMPLOYEE (the engine hands back a
+        // user), and the date.
         entity.ApprovedById = CallerEmployeeId();
         entity.ApprovedOn = DateTime.UtcNow;
         await Terms.UpdateAsync(entity);
@@ -247,6 +435,85 @@ public class TeamActivityService : ITeamActivityService
         _logger.LogInformation(
             "Terms of reference v{Version} approved for team {TeamId}; {Count} superseded.",
             entity.Version, entity.TeamId, standing.Count);
+
+        return await GetTermsByIdAsync(id, cancellationToken) ?? ToDetailDto(entity);
+    }
+
+    /// <summary>
+    /// Declines a charter, sending it back to the committee with a reason.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The reason is REQUIRED. A refusal with no reason leaves the committee knowing only that
+    /// somebody said no, which is the defect <c>ManpowerBudget</c> shipped — it took a reason, set
+    /// the status and discarded it.
+    /// </remarks>
+    public async Task<TeamTermsOfReferenceDetailDto> RejectTermsAsync(
+        Guid id, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireTermsAsync(id, cancellationToken);
+        await RequireTeamReadAsync(entity.TeamId, cancellationToken);
+
+        if (entity.Status != TeamTorStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Version {entity.Version} is not awaiting approval; it is {entity.Status.ToString().ToLowerInvariant()}.");
+
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Say why the terms of reference are being sent back.");
+
+        var team = await RequireTeamAsync(entity.TeamId, cancellationToken);
+        await RequireApprovalAuthorityAsync(team, "terms of reference", cancellationToken);
+
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflow.CanUserApproveAsync(TermsEntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this charter's workflow.");
+
+        var text = reason.Trim();
+        var result = await _workflow.ProcessApprovalAsync(
+            TermsEntityType, entity.Id, actingUserId, "Reject", text);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _adapters.GetAdapter(TermsEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId, text);
+        await Terms.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Terms of reference v{Version} for team {TeamId} sent back.", entity.Version, entity.TeamId);
+
+        return await GetTermsByIdAsync(id, cancellationToken) ?? ToDetailDto(entity);
+    }
+
+    /// <summary>
+    /// The committee withdrawing its own submission before anyone has ruled on it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Gated on WRITE, not on approval authority — this is the submitting side taking its own
+    /// document back, the mirror image of submit. No reason is stored against it: nothing was
+    /// refused, so <c>RejectionReason</c> stays null rather than acquiring a sentence that would
+    /// later read as an approver's verdict.
+    /// </remarks>
+    public async Task<TeamTermsOfReferenceDetailDto> RecallTermsAsync(
+        Guid id, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireTermsAsync(id, cancellationToken);
+        await RequireTeamWriteAsync(entity.TeamId, cancellationToken);
+
+        if (entity.Status != TeamTorStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only a version awaiting approval can be recalled; this one is {entity.Status.ToString().ToLowerInvariant()}.");
+
+        var result = await _workflow.RecallAsync(TermsEntityType, entity.Id, _currentUserProvider.UserId, reason);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to recall the charter.");
+
+        _adapters.GetAdapter(TermsEntityType)
+            .ApplyRecallOutcome(entity, _currentUserProvider.UserId, reason);
+        await Terms.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return await GetTermsByIdAsync(id, cancellationToken) ?? ToDetailDto(entity);
     }
@@ -413,6 +680,7 @@ public class TeamActivityService : ITeamActivityService
             Notes = e.Notes,
             DocumentMimeType = e.DocumentMimeType,
             DocumentFileSizeBytes = e.DocumentFileSizeBytes,
+            RejectionReason = e.RejectionReason,
         };
     }
 
@@ -534,6 +802,23 @@ public class TeamActivityService : ITeamActivityService
             throw new InvalidOperationException(
                 $"This objective is {entity.Status.ToString().ToLowerInvariant()} and cannot be moved again.");
 
+        // ⚠ THE BACK DOOR, CLOSED (round 2, lane F3). Approval-owned transitions cannot be made by
+        // hand here, or the whole lane would be decorative: a lead who found the approval
+        // inconvenient could set the status themselves and nothing would say so. Submitting and
+        // approving have their own doors, which go through the engine.
+        if (status == TeamObjectiveStatus.PendingApproval)
+            throw new InvalidOperationException(
+                "Send the objective for approval instead — that is what puts it in front of an approver. "
+                + "Setting the status by hand would leave nobody actually asked.");
+
+        if (status == TeamObjectiveStatus.Active
+            && entity.Status is TeamObjectiveStatus.Draft or TeamObjectiveStatus.PendingApproval)
+            throw new InvalidOperationException(
+                entity.Status == TeamObjectiveStatus.Draft
+                    ? "A draft objective becomes active by being approved, not by being set active. "
+                      + "Send it for approval first."
+                    : "This objective is awaiting approval. It becomes active when the approver signs it off.");
+
         switch (status)
         {
             case TeamObjectiveStatus.Completed:
@@ -566,6 +851,147 @@ public class TeamActivityService : ITeamActivityService
         }
 
         entity.Status = status;
+        await Objectives.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (await GetObjectiveByIdAsync(id, cancellationToken))!;
+    }
+
+    // ── The objective's approval, on the engine (round 2, lane F3) ────────────
+    //
+    // ⚠ Why an objective and not a task. An objective is what the team UNDERTAKES to deliver, and
+    // the thing a review is later written against — so somebody outside the team has an interest in
+    // whether it is the right undertaking and whether its weight, target and deadline are honest.
+    // A task is how the team goes about it and belongs entirely to the team. Only the first crosses
+    // the boundary an approval exists to police.
+
+    public async Task<TeamObjectiveDetailDto> SubmitObjectiveAsync(
+        Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireObjectiveAsync(id, cancellationToken);
+        await RequireTeamWriteAsync(entity.TeamId, cancellationToken);
+
+        if (entity.Status != TeamObjectiveStatus.Draft)
+            throw new InvalidOperationException(
+                $"Only a draft objective can be sent for approval; this one is {entity.Status.ToString().ToLowerInvariant()}.");
+
+        // ⚠ An objective with no owner and no deadline is a wish. Both are checked here rather than
+        // on create, because a half-built objective is the ordinary state of one being planned —
+        // the same reasoning that keeps the weight rule advisory.
+        if (entity.OwnerMemberId is null)
+            throw new InvalidOperationException(
+                "Name the member accountable for this objective before sending it for approval.");
+        if (entity.DueDate is null)
+            throw new InvalidOperationException(
+                "Give this objective a due date before sending it for approval — an undertaking with no "
+                + "deadline cannot be reviewed against.");
+
+        var result = await _workflow.SubmitAsync(ObjectiveEntityType, entity.Id);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to start the objective approval workflow.");
+        RequireApprovalWasActuallySought(result, "team objectives");
+
+        _adapters.GetAdapter(ObjectiveEntityType)
+            .ApplySubmitOutcome(entity, result.Outcome, _currentUserProvider.UserId);
+        entity.RejectionReason = null;
+
+        await Objectives.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Team objective {ObjectiveId} submitted; now {Status}.", entity.Id, entity.Status);
+
+        return (await GetObjectiveByIdAsync(id, cancellationToken))!;
+    }
+
+    public async Task<TeamObjectiveDetailDto> ApproveObjectiveAsync(
+        Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireObjectiveAsync(id, cancellationToken);
+        await RequireTeamReadAsync(entity.TeamId, cancellationToken);
+
+        if (entity.Status != TeamObjectiveStatus.PendingApproval)
+            throw new InvalidOperationException(
+                entity.Status == TeamObjectiveStatus.Draft
+                    ? "This objective has not been sent for approval yet."
+                    : $"This objective is {entity.Status.ToString().ToLowerInvariant()}, not awaiting approval.");
+
+        var team = await RequireTeamAsync(entity.TeamId, cancellationToken);
+        await RequireApprovalAuthorityAsync(team, "objectives", cancellationToken);
+
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflow.CanUserApproveAsync(ObjectiveEntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this objective's workflow.");
+
+        var result = await _workflow.ProcessApprovalAsync(
+            ObjectiveEntityType, entity.Id, actingUserId, "Approve", null);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _adapters.GetAdapter(ObjectiveEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId);
+        await Objectives.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (await GetObjectiveByIdAsync(id, cancellationToken))!;
+    }
+
+    public async Task<TeamObjectiveDetailDto> RejectObjectiveAsync(
+        Guid id, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireObjectiveAsync(id, cancellationToken);
+        await RequireTeamReadAsync(entity.TeamId, cancellationToken);
+
+        if (entity.Status != TeamObjectiveStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"This objective is {entity.Status.ToString().ToLowerInvariant()}, not awaiting approval.");
+
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Say why the objective is being sent back.");
+
+        var team = await RequireTeamAsync(entity.TeamId, cancellationToken);
+        await RequireApprovalAuthorityAsync(team, "objectives", cancellationToken);
+
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflow.CanUserApproveAsync(ObjectiveEntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current step of this objective's workflow.");
+
+        var text = reason.Trim();
+        var result = await _workflow.ProcessApprovalAsync(
+            ObjectiveEntityType, entity.Id, actingUserId, "Reject", text);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _adapters.GetAdapter(ObjectiveEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId, text);
+        await Objectives.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (await GetObjectiveByIdAsync(id, cancellationToken))!;
+    }
+
+    public async Task<TeamObjectiveDetailDto> RecallObjectiveAsync(
+        Guid id, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireObjectiveAsync(id, cancellationToken);
+        await RequireTeamWriteAsync(entity.TeamId, cancellationToken);
+
+        if (entity.Status != TeamObjectiveStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only an objective awaiting approval can be recalled; this one is {entity.Status.ToString().ToLowerInvariant()}.");
+
+        var result = await _workflow.RecallAsync(ObjectiveEntityType, entity.Id, _currentUserProvider.UserId, reason);
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                result.ExecutionResult.Message ?? "Failed to recall the objective.");
+
+        _adapters.GetAdapter(ObjectiveEntityType)
+            .ApplyRecallOutcome(entity, _currentUserProvider.UserId, reason);
         await Objectives.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -794,6 +1220,7 @@ public class TeamActivityService : ITeamActivityService
             OutcomeSummary = o.OutcomeSummary,
             CompletedOn = o.CompletedOn,
             CancelledReason = o.CancelledReason,
+            RejectionReason = o.RejectionReason,
         };
     }
 

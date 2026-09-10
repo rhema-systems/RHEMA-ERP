@@ -504,6 +504,15 @@ namespace ErpSystem.Web.Services
                     ("EMPLOYEE_SEPARATION", "Employee Separation", "Separation Approval", "Resignation, retirement or termination: Draft -> PendingApproval (Managing Director, FR-HR-092) -> Approved.", mdOnly),
                     ("JOB_DESCRIPTION", "Job Description", "Job Description Approval", "Authoring or revising a job description: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
                     ("APPRAISAL_TEMPLATE", "Appraisal Template", "Appraisal Template Approval", "Appraisal template publication: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    // Round 2, lane F3. Q-8 answered "the owning unit's head, falling back to HR" —
+                    // which is a fact about the RECORD (which unit does this committee serve), not a
+                    // role, and conditional routing does not route (cross-module defect #3). So the
+                    // definition names the roles a unit head could hold and TeamActivityService
+                    // narrows to the head of THIS team's unit, falling back to HR when the team
+                    // serves no unit or the unit has no head. Same division the seeding note above
+                    // describes for "the line manager approves".
+                    ("HR_TEAM_TERMS_OF_REFERENCE", "HR Team Terms Of Reference", "Committee Charter Approval", "A committee's terms of reference: Draft -> PendingApproval (owning unit's head, or HR) -> Approved.", staffRaised),
+                    ("HR_TEAM_OBJECTIVE", "HR Team Objective", "Team Objective Approval", "What a team undertakes to deliver: Draft -> PendingApproval (owning unit's head, or HR) -> Active.", staffRaised),
                 };
 
                 foreach (var tenant in tenants)

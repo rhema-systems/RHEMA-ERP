@@ -289,6 +289,54 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            // ── Round 2, lane F3 — teams and committees ──────────────────────
+            //
+            // ⚠ Both deep-link to the TEAM page and its tab, not to a record of their own, because
+            // neither has a page of its own — a charter and an objective are read in the context of
+            // the committee they belong to. The team id therefore has to be loaded here; the record
+            // alone cannot produce a usable link.
+            if (key == Normalize("HrTeamTermsOfReference") || key == Normalize("HR_TEAM_TERMS_OF_REFERENCE")
+                || key == Normalize("HR Team Terms Of Reference"))
+            {
+                var terms = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.TeamTermsOfReference>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var charteredTeam = terms == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Team>()
+                        .FirstOrDefaultAsync(t => t.Id == terms.TeamId);
+                info.EntityType = "HrTeamTermsOfReference";
+                info.EntityNumber = terms == null ? null : $"v{terms.Version}";
+                // Which committee, and which version — "v1" and "v4" of the same charter are
+                // different decisions, exactly as they are for a job description.
+                info.EntityName = terms == null
+                    ? null
+                    : $"{charteredTeam?.Name ?? "Team"} — terms of reference v{terms.Version}";
+                info.ActionUrl = terms == null
+                    ? null
+                    : $"/administration/hr/organization/teams/{terms.TeamId}";
+                return info;
+            }
+
+            if (key == Normalize("HrTeamObjective") || key == Normalize("HR_TEAM_OBJECTIVE")
+                || key == Normalize("HR Team Objective"))
+            {
+                var objective = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.TeamObjective>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var objectiveTeam = objective == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Team>()
+                        .FirstOrDefaultAsync(t => t.Id == objective.TeamId);
+                info.EntityType = "HrTeamObjective";
+                info.EntityNumber = objective?.Code;
+                info.EntityName = objective == null
+                    ? null
+                    : $"{objectiveTeam?.Name ?? "Team"} — {objective.Title}";
+                info.ActionUrl = objective == null
+                    ? null
+                    : $"/administration/hr/organization/teams/{objective.TeamId}";
+                return info;
+            }
+
             if (key == Normalize("StaffMovement") || key == Normalize("STAFF_MOVEMENT") || key == Normalize("Staff Movement"))
             {
                 var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()

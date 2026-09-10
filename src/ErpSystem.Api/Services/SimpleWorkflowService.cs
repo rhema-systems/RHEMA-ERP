@@ -1692,6 +1692,67 @@ public class SimpleWorkflowService : IWorkflowService
             return context;
         }
 
+        // ── Round 2, lane F3 — teams and committees ──────────────────────────────
+        //
+        // ⚠ Both cases carry `organizationUnitId` and `teamType`, and those are the two a tenant
+        // would actually branch on: a statutory committee serving the whole organisation is a
+        // different sign-off from a project team inside one department. The unit is read from the
+        // TEAM, not from the record, because neither a charter nor an objective knows which unit it
+        // serves — the team does.
+        if (IsEntityType(entityTypeRecord, "HR_TEAM_TERMS_OF_REFERENCE", "HrTeamTermsOfReference", "HR Team Terms Of Reference"))
+        {
+            var terms = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.TeamTermsOfReference>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Terms of reference not found");
+
+            var chartedTeam = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Team>()
+                .FirstOrDefaultAsync(t => t.Id == terms.TeamId);
+
+            context["teamId"] = terms.TeamId;
+            context["teamName"] = chartedTeam?.Name;
+            context["teamType"] = chartedTeam?.TeamType.ToString();
+            context["organizationUnitId"] = chartedTeam?.OrganizationUnitId;
+            context["version"] = terms.Version;
+            // A first charter is a different conversation from a re-issue — the same distinction
+            // the job-description context draws with isFirstVersion.
+            context["isFirstVersion"] = terms.Version <= 1;
+            context["effectiveFrom"] = terms.EffectiveFrom.ToString("yyyy-MM-dd");
+            context["effectiveTo"] = terms.EffectiveTo?.ToString("yyyy-MM-dd");
+            // Open-ended authority is the one worth routing higher: a charter with no end date is
+            // a standing power, not an annual one.
+            context["isOpenEnded"] = terms.EffectiveTo is null;
+            context["status"] = terms.Status.ToString();
+
+            return context;
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_TEAM_OBJECTIVE", "HrTeamObjective", "HR Team Objective"))
+        {
+            var objective = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.TeamObjective>()
+                .FirstOrDefaultAsync(o => o.Id == entityId)
+                ?? throw new InvalidOperationException("Team objective not found");
+
+            var owningTeam = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Team>()
+                .FirstOrDefaultAsync(t => t.Id == objective.TeamId);
+
+            context["teamId"] = objective.TeamId;
+            context["teamName"] = owningTeam?.Name;
+            context["teamType"] = owningTeam?.TeamType.ToString();
+            context["organizationUnitId"] = owningTeam?.OrganizationUnitId;
+            context["objectiveCode"] = objective.Code;
+            context["objectiveTitle"] = objective.Title;
+            // The weight is what a tenant wanting a heavier sign-off on the team's biggest
+            // undertaking would branch on; the window says whether this is a year's work or a month's.
+            context["weight"] = objective.Weight;
+            context["startDate"] = objective.StartDate.ToString("yyyy-MM-dd");
+            context["dueDate"] = objective.DueDate?.ToString("yyyy-MM-dd");
+            context["hasOwner"] = objective.OwnerMemberId is not null;
+            context["progressMode"] = objective.ProgressMode.ToString();
+            context["status"] = objective.Status.ToString();
+
+            return context;
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_MOVEMENT", "StaffMovement", "Staff Movement"))
         {
             var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()

@@ -34,6 +34,12 @@ public interface ITeamActivityService
     /// <summary>Approves it, and supersedes whatever approved version the team held before.</summary>
     Task<TeamTermsOfReferenceDetailDto> ApproveTermsAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>Declines it, sending it back to Draft with a REQUIRED reason (lane F3).</summary>
+    Task<TeamTermsOfReferenceDetailDto> RejectTermsAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>The committee withdrawing its own submission before anyone has ruled (lane F3).</summary>
+    Task<TeamTermsOfReferenceDetailDto> RecallTermsAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
+
     /// <summary>Clones an approved version to a new Draft at version + 1.</summary>
     Task<TeamTermsOfReferenceDetailDto> NewTermsVersionAsync(Guid id, CancellationToken cancellationToken = default);
 
@@ -60,6 +66,20 @@ public interface ITeamActivityService
     /// </summary>
     Task<TeamObjectiveDetailDto> ChangeObjectiveStatusAsync(
         Guid id, TeamObjectiveStatus status, TeamObjectiveStatusChangeDto body, CancellationToken cancellationToken = default);
+
+    // ── Approval, on the workflow engine (lane F3) ────────────────────────────
+    //
+    // ⚠ These four are the ONLY way an objective reaches Active from Draft.
+    // ChangeObjectiveStatusAsync refuses that transition by hand, or the approval would be
+    // decorative — a lead who found it inconvenient could simply set the status themselves.
+
+    Task<TeamObjectiveDetailDto> SubmitObjectiveAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<TeamObjectiveDetailDto> ApproveObjectiveAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<TeamObjectiveDetailDto> RejectObjectiveAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
+
+    Task<TeamObjectiveDetailDto> RecallObjectiveAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteObjectiveAsync(Guid id, CancellationToken cancellationToken = default);
 

@@ -667,7 +667,76 @@ reason: no scenario seeds a `Team` at all. Closing it means one scenario that cr
 committees, charters them, and then holds a meeting — which belongs with the organisation scenario,
 not bolted onto this lane.
 
-**F3 — Workflow.** Entity types `HrTeamObjective`, `HrTeamTermsOfReference` through the four-step recipe; no migration beyond the status enums.
+**F3 — Workflow.** **BUILT 2026-09-10 — `hr-teams/run-f3.mjs`, 71 ×2.** Entity types
+`HrTeamTermsOfReference` and `HrTeamObjective` through the four-step recipe, adapters in
+`HrTeamWorkflowStatusAdapters.cs`, both shipped with a default definition in `seed-workflows`.
+Migration `20260910043146_AddTeamApprovalRejectionReasons` (guarded, listed) — **one more than the
+plan expected**, for two nullable `RejectionReason` columns. Regression after it: `run-f1.mjs`
+**121** (was 117, four assertions added below), `run-f2.mjs` **99** (was 98), `hr-jobarch/run-c2.mjs`
+143.
+
+**What the build changed from the design.**
+
+1. **⚠ F1 shipped a hole, and this lane's first job was closing it.** F1's `approve` asked only
+   whether the caller could WRITE to the team — so **the lead could approve their own charter**, a
+   committee granting itself its own authority. `run-f1.mjs` was *asserting that behaviour*. Both
+   halves are now the other way round: F1 asserts the lead is refused (403, naming the unit), and
+   HR signs. **A harness inherited from the lane that shipped a defect will assert the defect.**
+2. **Q-8's "owning unit's head, falling back to HR" lives in the SERVICE, not the definition.**
+   "The head of the unit this committee serves" is a fact about the record, not a role, and
+   conditional routing does not route (cross-module defect #3). So the definition names the roles a
+   unit head could hold and `RequireApprovalAuthorityAsync` narrows to the head of *this* team's
+   unit. It runs BEFORE `CanUserApproveAsync` so the refusal names who can actually sign, and so
+   the rule holds when a definition is missing or mis-authored. The fallback is HR, not "anyone" —
+   a team serving no unit, and a unit whose head post is vacant, are ordinary states.
+3. **The direct status route is CLOSED for the two approval-owned transitions.**
+   `ChangeObjectiveStatusAsync` refuses `Draft → Active` and any hand-set `PendingApproval`. Without
+   that the whole lane is decoration: a lead who found the approval inconvenient could set the
+   status and nothing would say so. Everything from `Active` onwards — hold, resume, complete,
+   cancel — stays the team's own direct action, the split the PIP adapter made.
+4. **Two `RejectionReason` columns, against the plan's "no migration".** Putting approval on the
+   engine makes refusal a real outcome, and `ManpowerBudget` already shipped the alternative: it
+   took a reason, set the status and discarded it. Deliberately NOT folded into
+   `TeamObjective.CancelledReason` — refused-before-it-began and stopped-part-way are different
+   facts one column cannot tell apart a year later.
+
+**What it found, beyond the plan — four defects, three of them in the instrument.**
+
+- ⚠ **THE REAL ONE: the platform AUTO-APPROVES when no definition is published.**
+  `WorkflowIntegrationService.SubmitAsync` answers `Success = true, Outcome = Approved,
+  ApprovalRequired = false` when an entity type has no active workflow — a deliberate "workflow is
+  optional" design. The adapter mapped `Approved` faithfully, so on a tenant with no definition the
+  lead pressed Submit and the charter went **Draft → Approved**: F1's hole reopened by the lane
+  built to close it, and *looking approved* while it happened. `TeamActivityService` now refuses an
+  approval nobody was asked for. **Scoped to these two surfaces**, because changing
+  `WorkflowIntegrationService` would change every module relying on the optional behaviour — but
+  ⚠ **every other HR surface on this recipe has the same shape**, and none of them asserts against
+  it. Recorded in § 8 for the workflow owner.
+- ⚠ **The workflow definitions listing answers a DIFFERENT question from the engine, three ways
+  over** — and every one of them makes a retire helper report success while doing nothing.
+  **(a)** `?entityType=` is an exact match while the engine's lookup normalises, so
+  `?entityType=HrTeamTermsOfReference` returns zero for a definition stored as
+  `HR Team Terms Of Reference`. **(b)** `isActive` alone is not what live means: the engine requires
+  `IsActive && LifecycleStatus == Published`, and `EnsureHrWorkflowsSeededAsync` re-activates a
+  seeded definition on every API startup **without republishing it** — so a retired one comes back
+  as `{ isActive: true, lifecycleStatus: 'Retired' }`, and `retire` early-returns on an
+  already-retired row without clearing `IsActive`, leaving it permanently stuck. **(c)** `pageSize`
+  is silently capped at 100 against a `totalCount` of 143. Consequence: the run had **four active
+  objective definitions at once**, and the engine's choice between several is unspecified — § 6 was
+  green for a reason it could not state. The helper now pages to the end, filters the way the engine
+  filters, and **re-reads to verify it actually retired what it found**.
+- ⚠ **A tenant-wide sweep needs its assertions qualified by fixture.** `run-f2.mjs` § 7 found the
+  first `TaskOverdue` dispatch in the list; the sweep covers every team, so after three runs it
+  picked up a *previous run's* leftover. True of the system, silent about the fixture under test.
+  Now matched on `teamId`.
+- **An org unit cannot be created "under the first unit you find"** — the server refuses a unit
+  whose level is not below its parent's, and the first unit this database returns sits at the
+  deepest level there is. The fixture creates a **sibling** of a unit that already has a parent,
+  which is valid by construction whatever levels a database happens to have.
+
+**⚠ STILL OWED ON F3 — nothing blocking.** The two entity types are seeded with definitions, so a
+freshly built database can submit and approve without a harness publishing anything first. The
+`Team*` demo-seeding gap recorded under F1 and F2 is unchanged.
 
 Harness `hr-teams/run-f1..f3.mjs`. Details and assertions in § 6.6.
 
@@ -1218,6 +1287,16 @@ needs). Items, in priority order:
 | `docs/HR-FINISH-PLAN.md` § "Where to start next" | — | Point at this document's § 5 for the round-2 lanes. |
 
 | `dev-harness/hr-demo-smoke/demo-coverage-manifest.csv` | — | ⚠ **Lane C2's six tables are absent** (`Certifications`, `SkillCertifications`, `PositionCertificationRequirements`, `EmployeeCertifications`, and the two expiry log tables), and so is any entry in `scenarios/005-employee-master.mjs`'s coverage array. The rule agreed 2026-09-04 (`AGENT-BRIEF.md:8-18`) says every entity a user can create carries at least one seeded row. **Not fixed by C3a on purpose**: a `required` row with no seeding fails `Invoke-UatDemoScenarios.ps1:245` and takes the whole UAT rebuild down, and it could not be confirmed from a dev database whether a fresh rebuild seeds them. Confirm against a rebuilt UAT database, then add the rows and the seeding together. C3a's own nine tables were added WITH their scenario (`146-named-sets.mjs`). |
+
+**⚠ For the workflow engine's owner — found by lane F3, 2026-09-10, NOT fixed centrally.**
+
+| Where | What | Why it matters |
+|---|---|---|
+| `WorkflowIntegrationService.SubmitAsync` | With **no active definition** for an entity type it answers `Success = true, Outcome = Approved, ApprovalRequired = false`. A module's status adapter then maps `Approved` and the record is approved by whoever pressed Submit. | Intentional as "workflow is optional", but on any surface where approval is the *point* it silently removes the control. Lane F3 guards its own two surfaces (`TeamActivityService.RequireApprovalWasActuallySought`); **every other HR service on this recipe has the same shape and none asserts against it.** Worth either a per-type "approval is mandatory" flag or an audit of the callers. |
+| `GET api/Workflow/definitions` | `?entityType=` is an **exact** match while the engine's own lookup normalises (`EntityTypeMatches` strips non-alphanumerics, upper-cases). A definition stored as `HR Team Terms Of Reference` is invisible to `?entityType=HrTeamTermsOfReference`. | Any tool that lists by entity type — including every harness's retire helper — silently finds nothing and reports success. |
+| `GET api/Workflow/definitions` | `isActive=true` is not what the engine means by live: `HasActiveApprovalWorkflowAsync` requires `IsActive` **and** `LifecycleStatus == Published`. | A retired definition reads as active. |
+| `GET api/Workflow/definitions` | `pageSize` is silently **capped at 100** with no error; `metadata.totalCount` was 143. | Page one is not the answer, and nothing says so. |
+| `DatabaseSeedingService.EnsureHrWorkflowsSeededAsync` | Re-**activates** a seeded definition on every API startup **without republishing it**, so a retired one returns as `{ IsActive: true, LifecycleStatus: Retired }`. `RetireWorkflowDefinitionAsync` then early-returns on an already-retired row without clearing `IsActive`. | An administrator who retires a seeded HR definition finds it back after the next restart, in a state that cannot be retired again. |
 
 The first four are corrections to **claims**, not to code; make them when lane A lands so the
 plan and the ledger flip in the same commit as the fix.

@@ -115,6 +115,20 @@ public class TeamTermsOfReference : TenantEntity
 
     public DateTime? ApprovedOn { get; set; }
 
+    /// <summary>
+    /// Why an approver declined to sign this version off (lane F3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Added because a rejection that keeps no reason is a defect this codebase has already
+    /// shipped once: <c>ManpowerBudget.RejectAsync</c> took a reason, set the status and discarded
+    /// it, so a budget holder could see they had been refused with no way to find out why. A
+    /// rejected charter goes back to <see cref="TeamTorStatus.Draft"/> — it is a document under
+    /// revision, not a request that dies — and the reason is the only thing that tells its author
+    /// what to change. Cleared when the version is next approved.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
     // ── The signed charter, through the controlled gate ───────────────────────
     // ⚠ Three ids and the metadata, never a path. A caller-supplied file location on a JSON body is
     // the sink that had to be removed from the guarantor form, the award attachment and three
@@ -215,6 +229,19 @@ public class TeamObjective : TenantEntity
 
     [MaxLength(1000)]
     public string? CancelledReason { get; set; }
+
+    /// <summary>
+    /// Why an approver declined to let this objective become active (lane F3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Distinct from <see cref="CancelledReason"/>, and deliberately not folded into it. A
+    /// cancelled objective is one the team decided to stop pursuing; a rejected one was never
+    /// allowed to start, and goes back to <see cref="TeamObjectiveStatus.Draft"/> to be reworked.
+    /// Storing both in one column would make "why did this stop" and "why was this refused"
+    /// indistinguishable a year later. Cleared when the objective is next approved.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
 
     public virtual ICollection<TeamTask> Tasks { get; set; } = new List<TeamTask>();
 }

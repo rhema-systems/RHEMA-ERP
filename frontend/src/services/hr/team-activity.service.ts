@@ -66,6 +66,23 @@ class TeamActivityService {
     return apiService.post<TeamTermsOfReferenceDetail>(`${this.baseUrl}/terms/${id}/approve`, {});
   }
 
+  /**
+   * Declines a charter, sending it back to the committee.
+   *
+   * ⚠ The reason is REQUIRED by the server (422 without one), even though the payload type
+   * allows it to be absent — recall shares the same DTO and genuinely has nothing to say.
+   */
+  rejectTerms(id: string, reason: string) {
+    return apiService.post<TeamTermsOfReferenceDetail>(
+      `${this.baseUrl}/terms/${id}/reject`, { reason });
+  }
+
+  /** The committee withdrawing its own submission before anyone has ruled. */
+  recallTerms(id: string, reason?: string) {
+    return apiService.post<TeamTermsOfReferenceDetail>(
+      `${this.baseUrl}/terms/${id}/recall`, { reason: reason ?? null });
+  }
+
   newTermsVersion(id: string) {
     return apiService.post<TeamTermsOfReferenceDetail>(`${this.baseUrl}/terms/${id}/new-version`, {});
   }
@@ -104,6 +121,29 @@ class TeamActivityService {
 
   updateObjective(id: string, payload: UpdateTeamObjectiveRequest) {
     return apiService.put<TeamObjectiveDetail>(`${this.baseUrl}/objectives/${id}`, payload);
+  }
+
+  // ── The objective's approval (lane F3) ──────────────────────────
+  //
+  // ⚠ These four are the ONLY route from Draft to Active. `changeObjectiveStatus` refuses that
+  // transition, so a screen cannot activate an objective nobody approved.
+
+  submitObjective(id: string) {
+    return apiService.post<TeamObjectiveDetail>(`${this.baseUrl}/objectives/${id}/submit`, {});
+  }
+
+  approveObjective(id: string) {
+    return apiService.post<TeamObjectiveDetail>(`${this.baseUrl}/objectives/${id}/approve`, {});
+  }
+
+  rejectObjective(id: string, reason: string) {
+    return apiService.post<TeamObjectiveDetail>(
+      `${this.baseUrl}/objectives/${id}/reject`, { reason });
+  }
+
+  recallObjective(id: string, reason?: string) {
+    return apiService.post<TeamObjectiveDetail>(
+      `${this.baseUrl}/objectives/${id}/recall`, { reason: reason ?? null });
   }
 
   /**
