@@ -150,6 +150,107 @@ public sealed class EstateManagedAssetsController : ControllerBase
         });
     }
 
+    [HttpGet("portal-listing-demarcations")]
+    public async Task<IActionResult> GetPortalListingDemarcations([FromQuery] string? search = null, [FromQuery] int take = 300)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return Ok(new { success = true, data = Array.Empty<object>() });
+        }
+
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToLowerInvariant();
+        var limit = Math.Clamp(take <= 0 ? 300 : take, 1, 500);
+        var query = _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Include(item => item.EstateManagedAsset)
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && (item.IsPublishedToExternalPortal || item.ExternalListingType != "None"));
+
+        if (normalizedSearch != null)
+        {
+            query = query.Where(item =>
+                item.Description.ToLower().Contains(normalizedSearch)
+                || (item.ParentLandAssetReference != null
+                    && item.ParentLandAssetReference.ToLower().Contains(normalizedSearch))
+                || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
+                || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
+                || (item.EstateManagedAsset.Location != null && item.EstateManagedAsset.Location.ToLower().Contains(normalizedSearch)));
+        }
+
+        var candidates = await query
+            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .Take(limit)
+            .Select(item => new
+            {
+                ListingScope = "demarcation",
+                ParentAssetId = item.EstateManagedAssetId,
+                Id = item.Id,
+                AssetCode = item.ParentLandAssetReference ?? item.EstateManagedAsset.AssetCode,
+                Name = item.Description,
+                Description = $"Demarcation {item.DemarcationNumber} of {item.EstateManagedAsset.AssetCode} - {item.EstateManagedAsset.Name}",
+                Location = item.EstateManagedAsset.Location,
+                Purpose = item.EstateManagedAsset.Purpose,
+                ZoningClassification = item.EstateManagedAsset.ZoningClassification,
+                PlanningComplianceStatus = item.EstateManagedAsset.PlanningComplianceStatus,
+                GisLayerReference = item.EstateManagedAsset.GisLayerReference,
+                GisProvider = item.EstateManagedAsset.GisProvider,
+                GisFeatureId = item.EstateManagedAsset.GisFeatureId,
+                GisSourceCrs = item.EstateManagedAsset.GisSourceCrs,
+                GisSyncStatus = item.EstateManagedAsset.GisSyncStatus,
+                GisLastSyncedAt = item.EstateManagedAsset.GisLastSyncedAt,
+                BoundaryVerified = item.BoundaryVerified,
+                BoundaryCoordinates = item.BoundaryCoordinates,
+                SurveyPlanNumber = item.EstateManagedAsset.SurveyPlanNumber,
+                MapSheetNumber = item.EstateManagedAsset.MapSheetNumber,
+                CadastreDescription = item.EstateManagedAsset.CadastreDescription,
+                Region = item.EstateManagedAsset.Region,
+                District = item.EstateManagedAsset.District,
+                Town = item.EstateManagedAsset.Town,
+                AreaValue = item.AreaSquareFeet,
+                AreaUnit = "SqFt",
+                AreaSquareMeters = item.AreaSquareFeet / 10.7639m,
+                SurveyorName = item.EstateManagedAsset.SurveyorName,
+                SurveyDate = item.EstateManagedAsset.SurveyDate,
+                BeaconCount = item.BeaconCount,
+                DemarcationCount = 0,
+                VerifiedDemarcationCount = 0,
+                IsReadyForProjectManagement = item.IsReadyForProjectManagement,
+                AssetType = EstateManagedAssetType.Land,
+                Status = item.EstateManagedAsset.Status,
+                SourceType = item.EstateManagedAsset.SourceType,
+                LandAcquisitionId = item.EstateManagedAsset.LandAcquisitionId,
+                ProjectId = item.EstateManagedAsset.ProjectId,
+                ProjectCode = item.EstateManagedAsset.ProjectCode,
+                ProjectTitle = item.EstateManagedAsset.ProjectTitle,
+                AreaSquareFeet = item.AreaSquareFeet,
+                ValuationAmount = item.AllocatedCost,
+                Currency = item.ExternalListingCurrency,
+                IsAvailableForLease = item.ExternalListingType == "Rent" || item.ExternalListingType == "SaleAndRent",
+                IsAvailableForSale = item.ExternalListingType == "Sale" || item.ExternalListingType == "SaleAndRent",
+                IsPublishedFromProject = item.EstateManagedAsset.IsPublishedFromProject,
+                PublishedFromProjectAt = item.EstateManagedAsset.PublishedFromProjectAt,
+                IsPublishedToExternalPortal = item.IsPublishedToExternalPortal,
+                ExternalListingType = item.ExternalListingType,
+                ExternalListingStatus = item.ExternalListingStatus,
+                ExternalListingPrice = item.ExternalListingPrice,
+                ExternalSalePrice = item.ExternalSalePrice,
+                ExternalMonthlyRent = item.ExternalMonthlyRent,
+                ExternalLeaseTermMonths = item.ExternalLeaseTermMonths,
+                ExternalListingCurrency = item.ExternalListingCurrency,
+                ExternalListingNotes = item.ExternalListingNotes,
+                ExternalPublishedAt = item.ExternalPublishedAt,
+                Notes = item.FixedAssetPostingStatus
+            })
+            .ToListAsync();
+
+        return Ok(new { success = true, data = candidates });
+    }
+
     [HttpPost("{id:guid}/demarcations")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
     public async Task<IActionResult> CreateLandDemarcation(Guid id, [FromBody] SaveEstateLandDemarcationDto request)

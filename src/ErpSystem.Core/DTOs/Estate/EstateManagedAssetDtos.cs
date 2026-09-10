@@ -260,6 +260,7 @@ public class SaveEstateLandDemarcationDto
     public int BeaconCount { get; set; }
     public string BoundaryCoordinates { get; set; } = string.Empty;
     public bool BoundaryVerified { get; set; }
+    public decimal? TargetSalePrice { get; set; }
 }
 
 public class UpdateEstateLandDemarcationDispositionDto

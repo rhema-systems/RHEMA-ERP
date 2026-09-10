@@ -28,6 +28,8 @@ export enum EstateManagedAssetSourceType {
 
 export interface EstateManagedAsset {
   id: string;
+  listingScope?: 'asset' | 'demarcation';
+  parentAssetId?: string;
   assetCode: string;
   name: string;
   description?: string;
@@ -213,6 +215,7 @@ export interface SaveEstateLandDemarcation {
   beaconCount: number;
   boundaryCoordinates: string;
   boundaryVerified: boolean;
+  targetSalePrice?: number | null;
 }
 
 export interface UpdateEstateLandDemarcationDisposition {
@@ -446,6 +449,42 @@ export class EstateLandManagementService {
       ? response.data
           .map(normalizeManagedAsset)
           .filter((asset) => assetMatchesQuery(asset, query))
+      : [];
+  }
+
+  async getPortalListingDemarcations(
+    search?: string
+  ): Promise<EstateManagedAsset[]> {
+    const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
+      '/estate/managed-assets/portal-listing-demarcations',
+      {
+        search: search || undefined,
+        take: 300,
+      }
+    );
+
+    return Array.isArray(response.data)
+      ? response.data.map((item) =>
+          normalizeManagedAsset({
+            ...item,
+            listingScope: 'demarcation',
+            parentAssetId: item.parentAssetId,
+            ownershipHistory: item.ownershipHistory ?? [],
+            demarcationCount: item.demarcationCount ?? 0,
+            verifiedDemarcationCount: item.verifiedDemarcationCount ?? 0,
+            currency: item.currency || item.externalListingCurrency || 'GHS',
+            externalListingCurrency: item.externalListingCurrency || 'GHS',
+            gisProvider: item.gisProvider || 'GeoServer',
+            gisSyncStatus: item.gisSyncStatus || 'NotLinked',
+            isAvailableForLease: item.isAvailableForLease ?? false,
+            isAvailableForSale: item.isAvailableForSale ?? false,
+            isPublishedFromProject: item.isPublishedFromProject ?? false,
+            autoGenerateRentInvoices: item.autoGenerateRentInvoices ?? false,
+            rentGracePeriodDays: item.rentGracePeriodDays ?? 0,
+            rentPenaltyMethod: item.rentPenaltyMethod || 'None',
+            rentPenaltyValue: item.rentPenaltyValue ?? 0,
+          })
+        )
       : [];
   }
 

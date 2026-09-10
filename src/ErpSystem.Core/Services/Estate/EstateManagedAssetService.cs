@@ -183,6 +183,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.IsAvailableForLease = false;
         asset.IsAvailableForSale = false;
         asset.IsPublishedFromProject = false;
+        asset.IsPublishedToExternalPortal = false;
+        asset.ExternalListingType = "None";
+        asset.ExternalListingStatus = "Draft";
+        asset.ExternalListingPrice = null;
+        asset.ExternalSalePrice = null;
+        asset.ExternalMonthlyRent = null;
+        asset.ExternalLeaseTermMonths = null;
+        asset.ExternalListingNotes = null;
+        asset.ExternalPublishedAt = null;
         // Acquisition publishes into Estate Land Bank; Land Management marks project readiness after demarcation.
         asset.IsReadyForProjectManagement = false;
         asset.Notes = TrimOrNull(handoff.Notes);
@@ -201,7 +210,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     private async Task EnsureAcquisitionCanBeRepublishedAsync(EstateManagedAsset asset)
     {
-        if (asset.IsPublishedToExternalPortal)
+        // An asset deliberately moved back to Asset Creation may retain a stale
+        // whole-asset portal flag from an earlier test/listing. Treat that flag
+        // as invalid once the asset is no longer in Land Bank; the handoff above
+        // resets the whole-asset listing state. A currently Land Bank-published
+        // asset still requires an explicit withdrawal before republishing.
+        if (asset.IsPublishedToExternalPortal
+            && asset.Status == EstateManagedAssetStatus.LandBank)
         {
             throw new InvalidOperationException(
                 "Withdraw the active external land listing before publishing the acquisition to the land bank again.");
@@ -583,13 +598,15 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var parent = await ResolveParentDemarcationAsync(assetId, request.ParentDemarcationId);
         var measurement = ValidateDemarcationRequest(asset, request, parent);
         var repository = _unitOfWork.Repository<EstateLandDemarcation>();
-        var existingBoundaries = await repository
-            .GetQueryable(item => item.EstateManagedAssetId == assetId
-                && item.ParentDemarcationId == request.ParentDemarcationId
+        var activeDemarcations = (await repository.FindAsync(item =>
+                item.EstateManagedAssetId == assetId
                 && item.TenantId == _currentUserProvider.TenantId
-                && !item.IsDeleted)
+                && !item.IsDeleted))
+            .ToList();
+        var existingBoundaries = activeDemarcations
+            .Where(item => item.ParentDemarcationId == request.ParentDemarcationId)
             .Select(item => item.BoundaryCoordinates)
-            .ToListAsync();
+            .ToList();
         if (existingBoundaries.Count > 0)
         {
             var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
@@ -625,6 +642,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             CreatedBy = _currentUserProvider.Username,
             CreatedById = _currentUserProvider.UserId
         };
+        var demarcationsForCosting = activeDemarcations.Append(demarcation).ToList();
+        ApplyAutomaticDemarcationCosting(asset, activeDemarcations, demarcation, request.TargetSalePrice);
+        RebalanceByAreaDemarcationCosts(asset, demarcationsForCosting);
 
         await repository.AddAsync(demarcation);
         await ResetDemarcationReadinessAsync(asset, parent);
@@ -713,12 +733,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             demarcation.DemarcationNumber);
         if (boundaryChanged)
         {
-            demarcation.CostAllocationMethod = "NotSet";
-            demarcation.AllocatedCost = null;
-            demarcation.CostPerAcre = null;
-            demarcation.FixedAssetPostingStatus = "NotReady";
+            ApplyAutomaticDemarcationCosting(asset, activeDemarcations, demarcation, request.TargetSalePrice);
             demarcation.FixedAssetPostedAt = null;
         }
+        else if (request.TargetSalePrice is > 0m)
+        {
+            demarcation.TargetSalePrice = request.TargetSalePrice;
+        }
+        RebalanceByAreaDemarcationCosts(asset, activeDemarcations);
         demarcation.UpdatedAt = DateTime.UtcNow;
         demarcation.UpdatedBy = _currentUserProvider.Username;
         demarcation.LastModifiedById = _currentUserProvider.UserId;
@@ -785,6 +807,11 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
 
         var listingType = NormalizeListingType(request.ExternalListingType);
+        var listingStatus = request.IsPublishedToExternalPortal
+            ? NormalizeListingStatus(request.ExternalListingStatus)
+            : "Draft";
+        var publishToCustomerPortal = request.IsPublishedToExternalPortal
+            && string.Equals(listingStatus, "Published", StringComparison.OrdinalIgnoreCase);
         if (request.IsPublishedToExternalPortal && listingType == "None")
         {
             throw new InvalidOperationException("Select Sale, Rent, or Sale and Rent before sending this demarcation to Portal Listings.");
@@ -799,11 +826,11 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var monthlyRent = includesRent
             ? request.ExternalMonthlyRent ?? (!includesSale ? request.ExternalListingPrice : null)
             : null;
-        if (request.IsPublishedToExternalPortal && includesSale && salePrice is not > 0m)
+        if (publishToCustomerPortal && includesSale && salePrice is not > 0m)
         {
             throw new InvalidOperationException("Enter the sale price before listing this demarcation.");
         }
-        if (request.IsPublishedToExternalPortal && includesRent && monthlyRent is not > 0m)
+        if (publishToCustomerPortal && includesRent && monthlyRent is not > 0m)
         {
             throw new InvalidOperationException("Enter the monthly rent before listing this demarcation.");
         }
@@ -811,9 +838,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         demarcation.IsReadyForProjectManagement = request.IsReadyForProjectManagement;
         demarcation.IsPublishedToExternalPortal = request.IsPublishedToExternalPortal;
         demarcation.ExternalListingType = listingType;
-        demarcation.ExternalListingStatus = request.IsPublishedToExternalPortal
-            ? NormalizeListingStatus(request.ExternalListingStatus)
-            : "Draft";
+        demarcation.ExternalListingStatus = listingStatus;
         demarcation.ExternalSalePrice = salePrice;
         demarcation.ExternalMonthlyRent = monthlyRent;
         demarcation.ExternalLeaseTermMonths = includesRent && request.ExternalLeaseTermMonths > 0
@@ -841,7 +866,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 : demarcation.AllocatedCost is > 0m
                     ? "Costed"
                     : "NotReady";
-        demarcation.ExternalPublishedAt = request.IsPublishedToExternalPortal
+        demarcation.ExternalPublishedAt = publishToCustomerPortal
             ? demarcation.ExternalPublishedAt ?? DateTime.UtcNow
             : null;
         demarcation.UpdatedAt = DateTime.UtcNow;
@@ -968,6 +993,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             demarcation.ExternalSalePrice = demarcation.ExternalSalePrice ?? targetSalePrice;
             demarcation.ExternalListingPrice = demarcation.ExternalListingPrice ?? targetSalePrice;
         }
+        RebalanceByAreaDemarcationCosts(asset, demarcations);
         demarcation.UpdatedAt = DateTime.UtcNow;
         demarcation.UpdatedBy = _currentUserProvider.Username;
         demarcation.LastModifiedById = _currentUserProvider.UserId;
@@ -1984,6 +2010,137 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 : "ByArea";
     }
 
+    private static void ApplyAutomaticDemarcationCosting(
+        EstateManagedAsset asset,
+        IReadOnlyCollection<EstateLandDemarcation> demarcations,
+        EstateLandDemarcation demarcation,
+        decimal? targetSalePrice)
+    {
+        var demarcationAcres = GetDemarcationAreaInAcres(demarcation);
+        decimal costPerAcre;
+
+        if (demarcation.ParentDemarcationId.HasValue)
+        {
+            var parentDemarcation = demarcations.FirstOrDefault(item =>
+                item.Id == demarcation.ParentDemarcationId.Value)
+                ?? throw new InvalidOperationException("Parent demarcation was not found.");
+            if (parentDemarcation.AllocatedCost is not > 0m)
+            {
+                throw new InvalidOperationException(
+                    "Set the parent parcel cost before calculating child parcel cost by area.");
+            }
+
+            var parentAcres = GetDemarcationAreaInAcres(parentDemarcation);
+            costPerAcre = decimal.Round(
+                parentDemarcation.AllocatedCost.Value / parentAcres,
+                2,
+                MidpointRounding.AwayFromZero);
+        }
+        else
+        {
+            var totalCost = asset.ValuationAmount ?? 0m;
+            if (totalCost <= 0m)
+            {
+                throw new InvalidOperationException(
+                    "Record the land total valuation or capitalized cost before calculating demarcation cost by area.");
+            }
+
+            var totalAcres = GetAssetAreaInAcres(asset);
+            if (totalAcres <= 0m)
+            {
+                throw new InvalidOperationException(
+                    "Record the land area before calculating demarcation cost by area.");
+            }
+
+            costPerAcre = decimal.Round(totalCost / totalAcres, 2, MidpointRounding.AwayFromZero);
+        }
+
+        demarcation.CostAllocationMethod = "ByArea";
+        demarcation.CostPerAcre = costPerAcre;
+        demarcation.AllocatedCost = decimal.Round(
+            costPerAcre * demarcationAcres,
+            2,
+            MidpointRounding.AwayFromZero);
+        demarcation.TargetSalePrice = targetSalePrice is > 0m ? targetSalePrice : null;
+        demarcation.FixedAssetPostingStatus = "Costed";
+    }
+
+    private static void RebalanceByAreaDemarcationCosts(
+        EstateManagedAsset asset,
+        IReadOnlyCollection<EstateLandDemarcation> demarcations)
+    {
+        var rootCostPool = asset.ValuationAmount ?? 0m;
+        if (rootCostPool <= 0m)
+        {
+            return;
+        }
+
+        RebalanceDemarcationCostGroup(null, rootCostPool, demarcations);
+    }
+
+    private static void RebalanceDemarcationCostGroup(
+        Guid? parentDemarcationId,
+        decimal costPool,
+        IReadOnlyCollection<EstateLandDemarcation> demarcations)
+    {
+        var directChildren = demarcations
+            .Where(item => item.ParentDemarcationId == parentDemarcationId)
+            .OrderBy(item => item.DemarcationNumber)
+            .ToList();
+        if (directChildren.Count == 0 || costPool <= 0m)
+        {
+            return;
+        }
+
+        var manualTotal = directChildren
+            .Where(item => string.Equals(
+                    item.CostAllocationMethod,
+                    "Manual",
+                    StringComparison.OrdinalIgnoreCase)
+                && item.AllocatedCost is > 0m)
+            .Sum(item => item.AllocatedCost!.Value);
+        var byAreaChildren = directChildren
+            .Where(item => !string.Equals(
+                item.CostAllocationMethod,
+                "Manual",
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var byAreaPool = costPool - manualTotal;
+        if (byAreaChildren.Count > 0 && byAreaPool > 0m)
+        {
+            var totalArea = byAreaChildren.Sum(GetDemarcationAreaInAcres);
+            if (totalArea > 0m)
+            {
+                var allocatedTotal = 0m;
+                for (var index = 0; index < byAreaChildren.Count; index++)
+                {
+                    var child = byAreaChildren[index];
+                    var acres = GetDemarcationAreaInAcres(child);
+                    var allocatedCost = index == byAreaChildren.Count - 1
+                        ? decimal.Round(byAreaPool - allocatedTotal, 2, MidpointRounding.AwayFromZero)
+                        : decimal.Round(byAreaPool * (acres / totalArea), 2, MidpointRounding.AwayFromZero);
+
+                    child.CostAllocationMethod = "ByArea";
+                    child.AllocatedCost = allocatedCost;
+                    child.CostPerAcre = decimal.Round(
+                        allocatedCost / acres,
+                        2,
+                        MidpointRounding.AwayFromZero);
+                    child.FixedAssetPostingStatus = allocatedCost > 0m ? "Costed" : "NotReady";
+                    allocatedTotal += allocatedCost;
+                }
+            }
+        }
+
+        foreach (var child in directChildren)
+        {
+            if (child.AllocatedCost is > 0m)
+            {
+                RebalanceDemarcationCostGroup(child.Id, child.AllocatedCost.Value, demarcations);
+            }
+        }
+    }
+
     private static decimal GetAssetAreaInAcres(EstateManagedAsset asset)
     {
         if (asset.AreaValue is > 0m)
@@ -2002,6 +2159,17 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         return asset.AreaSquareMeters is > 0m
             ? asset.AreaSquareMeters.Value / 4046.8564224m
             : 0m;
+    }
+
+    private static decimal GetDemarcationAreaInAcres(EstateLandDemarcation demarcation)
+    {
+        var acres = demarcation.AreaSquareFeet / 43560m;
+        if (acres <= 0m)
+        {
+            throw new InvalidOperationException("The demarcation area must be available before costing.");
+        }
+
+        return acres;
     }
 
     private static string BuildParentFixedAssetReference(
