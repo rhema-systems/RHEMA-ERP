@@ -1121,6 +1121,16 @@ pre-commit failure recording, authoritative replay reconciliation, durable rever
 checker evidence, stale-test migration and relational concurrency/rollback gates. Integration remains blocked;
 no database or migration was touched.
 
+Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
+`IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
+fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
+provider except InMemory, so SQLite cannot exercise the approved lock path. A bounded Sol Medium C14 correction
+is active from exact base `d902e32b39976736e58b991351386392a2b5c67e` in clean worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-data-transaction-lock-provider-c14`. It must preserve
+checked SQL Server locking, require an active SQLite transaction before a provider-local return, and fail closed
+for unknown providers, with normal-discovery tests. Sales remains gated; no configured database or migration was
+touched.
+
 Sales correction added clean commits `c2be313e`, `c7213486` and `dc677181`: in-transaction canonical intent
 revalidation, post-commit failure separation, durable reversal-date reuse, book-blind checker handoff fields and
 the real relational fixture scaffold. The candidate still is not review-ready because the fixture has not run
