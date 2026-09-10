@@ -832,6 +832,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceProducerApprovedExecutionService>(provider =>
                 provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>());
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceProducerReversalPreparationService>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>());
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.IFinanceProducerApprovedExecution>(provider =>
                 provider.GetRequiredService<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentService>());
             services.AddOptions<ErpSystem.Api.Services.Finance.GL.FinanceProducerIntentGroupOptions>()

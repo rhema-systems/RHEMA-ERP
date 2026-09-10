@@ -40,3 +40,26 @@ public sealed class DecideProducerAccountingIntentDto
 {
     public string Reason { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// Producer-controlled evidence for preparing an exact reversal of one posted C7 AccountingEvent.
+/// Finance reloads the original immutable economics and frozen book authority; neither is accepted here.
+/// </summary>
+public sealed class PrepareProducerAccountingReversalDto
+{
+    public Guid OriginalAccountingEventId { get; set; }
+    public Guid ReversalAccountingEventId { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public DateTime ReversalDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string ParticipantIdentity { get; set; } = string.Empty;
+    public ProducerOwnerEffectIdentityDto ExpectedOwnerEffect { get; set; } = new();
+}
+
+/// <summary>Book-blind durable identity returned after Finance prepares the exact C7 reversal.</summary>
+public sealed record ProducerAccountingReversalPreparationResultDto(
+    Guid AccountingEventId,
+    Guid OriginalAccountingEventId,
+    string AccountingEventRequestFingerprint,
+    string Status,
+    string DecisionStatus);

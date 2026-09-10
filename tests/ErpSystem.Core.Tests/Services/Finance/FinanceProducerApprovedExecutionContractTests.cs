@@ -34,4 +34,24 @@ public sealed class FinanceProducerApprovedExecutionContractTests
         resultProperties.Should().NotContain(name =>
             name.Contains("Book", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void ReversalPreparationContract_IsBookAndLineBlind()
+    {
+        typeof(IFinanceProducerReversalPreparationService).IsPublic.Should().BeTrue();
+        var method = typeof(IFinanceProducerReversalPreparationService)
+            .GetMethod(nameof(IFinanceProducerReversalPreparationService.PrepareReversalAsync))!;
+        method.GetParameters().Select(parameter => parameter.ParameterType).Should().ContainInOrder(
+            typeof(PrepareProducerAccountingReversalDto), typeof(CancellationToken));
+
+        var requestProperties = typeof(PrepareProducerAccountingReversalDto).GetProperties()
+            .Select(property => property.Name).ToArray();
+        requestProperties.Should().NotContain(name =>
+            name.Contains("Book", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Line", StringComparison.OrdinalIgnoreCase));
+        typeof(ProducerAccountingReversalPreparationResultDto).GetProperties()
+            .Select(property => property.Name).Should().NotContain(name =>
+                name.Contains("Book", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Line", StringComparison.OrdinalIgnoreCase));
+    }
 }

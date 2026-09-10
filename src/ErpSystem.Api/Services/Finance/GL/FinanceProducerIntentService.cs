@@ -18,7 +18,7 @@ namespace ErpSystem.Api.Services.Finance.GL;
 /// C6 maker/checker state; book choice and per-book execution remain entirely inside Finance.
 /// </summary>
 public sealed partial class FinanceProducerIntentService : IFinanceProducerIntentService, IFinanceProducerApprovedExecution,
-    IFinanceProducerApprovedExecutionService
+    IFinanceProducerApprovedExecutionService, IFinanceProducerReversalPreparationService
 {
     private readonly IAccountingBookApplicabilityService _applicability;
     private readonly IAccountingEventService _events;
@@ -54,6 +54,73 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         ValidateIntent(intent);
         var request = await BuildRequestAsync(intent, cancellationToken);
         return await _events.CreateAsync(request, cancellationToken);
+    }
+
+    public async Task<ProducerAccountingReversalPreparationResultDto> PrepareReversalAsync(
+        PrepareProducerAccountingReversalDto request, CancellationToken cancellationToken = default)
+    {
+        RequireEnabled();
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.OriginalAccountingEventId == Guid.Empty || request.ReversalAccountingEventId == Guid.Empty
+            || request.OriginalAccountingEventId == request.ReversalAccountingEventId)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_IDENTITY_INVALID: distinct original and deterministic reversal identities are required.");
+        if (request.ReversalDate == default)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_DATE_INVALID: an exact reversal date is required.");
+        var reason = request.Reason?.Trim() ?? string.Empty;
+        if (reason.Length is 0 or > 500)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_REASON_INVALID: a reason of 1 to 500 characters is required.");
+
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        var originalRequest = await ReconstructPreparedRequestAsync(
+            request.OriginalAccountingEventId, cancellationToken);
+        var original = await _db.AccountingEvents.AsNoTracking()
+            .Include(item => item.AccountingBookSelectionEvidence)!
+                .ThenInclude(item => item!.Books)
+            .Include(item => item.Postings)
+            .Include(item => item.ProducerReceipt)
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId
+                && item.Id == request.OriginalAccountingEventId && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("Original AccountingEvent was not found for this tenant.");
+        RequireExactReversalOriginal(original, originalRequest, tenantId);
+
+        var participant = CanonicalParticipant(request.ParticipantIdentity);
+        if (!string.Equals(participant, original.ProducerParticipantIdentity, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_PARTICIPANT_CONFLICT: reversal preparation must retain the original participant authority.");
+        var ownerEffect = CanonicalOwnerEffect(request.ExpectedOwnerEffect, participant);
+        RequireReversalOwnerAuthority(originalRequest.ExpectedOwnerEffect, ownerEffect);
+
+        var key = request.IdempotencyKey?.Trim().ToUpperInvariant() ?? string.Empty;
+        var existingById = await _db.AccountingEvents.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == request.ReversalAccountingEventId && !item.IsDeleted,
+            cancellationToken);
+        var existingByKey = await _db.AccountingEvents.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.IdempotencyKey == key && !item.IsDeleted,
+            cancellationToken);
+        if ((existingById is not null && !string.Equals(existingById.IdempotencyKey, key, StringComparison.Ordinal))
+            || (existingByKey is not null && existingByKey.Id != request.ReversalAccountingEventId))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_IDENTITY_CONFLICT: reversal ID and idempotency identity must remain paired.");
+
+        var prepared = await PrepareAsync(new ProducerAccountingIntentDto
+        {
+            AccountingEventId = request.ReversalAccountingEventId,
+            EventKind = AccountingEventKinds.Reversal,
+            SupersedesAccountingEventId = original.Id,
+            ReversesAccountingEventId = original.Id,
+            IdempotencyKey = key,
+            ParticipantIdentity = participant,
+            ExpectedOwnerEffect = ownerEffect,
+            PostingRequest = BuildExactReversalPosting(originalRequest.PostingRequest,
+                tenantId, request.ReversalDate.Date, reason)
+        }, cancellationToken);
+
+        return new ProducerAccountingReversalPreparationResultDto(
+            prepared.Id, original.Id, prepared.RequestFingerprint, prepared.Status,
+            prepared.ProducerDecisionStatus);
     }
 
     public async Task<AccountingEventDto> GetAsync(Guid accountingEventId, CancellationToken cancellationToken = default)
@@ -310,6 +377,126 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         ExpectedOwnerEffect = source.ExpectedOwnerEffect
             ?? throw new InvalidOperationException("ACCOUNTING_EVENT_SNAPSHOT_INVALID: owner-effect authority is missing."),
         PostingRequest = ToProducerPosting(source.PostingRequest)
+    };
+
+    private static void RequireExactReversalOriginal(AccountingEvent original,
+        CreateAccountingEventDto snapshot, Guid tenantId)
+    {
+        if (original.EventKind != AccountingEventKinds.Original || original.Version != 1
+            || original.RootAccountingEventId != original.Id
+            || original.SupersedesAccountingEventId.HasValue || original.CorrectsAccountingEventId.HasValue
+            || original.ReversesAccountingEventId.HasValue)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_ORIGINAL_KIND_INVALID: only a canonical original C7 event may be reversed.");
+        if (original.Status != AccountingEventStatuses.Posted
+            || original.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved
+            || original.AccountingBookSelectionEvidence is null)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_ORIGINAL_NOT_POSTED: exact reversal requires approved posted C7 evidence.");
+
+        var evidence = original.AccountingBookSelectionEvidence;
+        if (evidence.TenantId != tenantId || evidence.Id != original.AccountingBookSelectionEvidenceId
+            || !string.Equals(evidence.CalculationInputHash, snapshot.ExpectedCalculationInputHash, StringComparison.Ordinal)
+            || !string.Equals(evidence.SelectionFingerprint, snapshot.ExpectedSelectionFingerprint, StringComparison.Ordinal)
+            || !string.Equals(evidence.SelectionFingerprint, original.SelectionFingerprint, StringComparison.Ordinal)
+            || evidence.EffectiveDate.Date != original.EventDate.Date
+            || !string.Equals(evidence.OriginatingModuleCode, original.OriginatingModuleCode, StringComparison.Ordinal)
+            || !string.Equals(evidence.SourceDocumentType, original.SourceDocumentType, StringComparison.Ordinal)
+            || !string.Equals(evidence.PostingAction, original.PostingAction, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_FROZEN_AUTHORITY_INVALID: original C5 evidence conflicts with the immutable C7 snapshot.");
+
+        var selected = evidence.Books.OrderBy(item => item.SelectionOrder).ToList();
+        var posted = original.Postings.OrderBy(item => item.SelectionOrder).ToList();
+        if (selected.Count == 0 || selected.Count != posted.Count
+            || selected.Any(item => item.TenantId != tenantId
+                || item.AccountingBookSelectionEvidenceId != evidence.Id)
+            || posted.Any(item => item.TenantId != tenantId || item.AccountingEventId != original.Id
+                || item.EventVersion != original.Version || item.Status != AccountingEventStatuses.Posted
+                || !item.FinancePostingEventId.HasValue || !item.JournalEntryId.HasValue)
+            || selected.Zip(posted).Any(pair => pair.First.AccountingBookId != pair.Second.AccountingBookId
+                || pair.First.SelectionOrder != pair.Second.SelectionOrder
+                || !string.Equals(pair.First.AccountingBookCodeSnapshot,
+                    pair.Second.AccountingBookCodeSnapshot, StringComparison.Ordinal)
+                || !string.Equals(pair.First.AuthorityFingerprint,
+                    pair.Second.AuthorityFingerprint, StringComparison.Ordinal)))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_FROZEN_SET_INVALID: original selected-book and posted representation evidence disagree.");
+
+        var expected = snapshot.ExpectedOwnerEffect
+            ?? throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_OWNER_AUTHORITY_INVALID: original owner authority is missing.");
+        var receipt = original.ProducerReceipt;
+        if (receipt is null || receipt.TenantId != tenantId || receipt.AccountingEventId != original.Id
+            || !string.Equals(receipt.ParticipantCode, original.ProducerParticipantIdentity, StringComparison.Ordinal)
+            || !string.Equals(receipt.ParticipantCode, expected.ParticipantCode, StringComparison.Ordinal)
+            || !string.Equals(receipt.OwnerEntityType, expected.OwnerEntityType, StringComparison.Ordinal)
+            || receipt.OwnerEntityId != expected.OwnerEntityId
+            || !string.Equals(receipt.OwnerAction, expected.OwnerAction, StringComparison.Ordinal)
+            || !string.Equals(receipt.EffectFingerprint, expected.EffectFingerprint, StringComparison.Ordinal)
+            || !string.Equals(receipt.RequestFingerprint, original.RequestFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_OWNER_AUTHORITY_INVALID: original participant receipt conflicts with the immutable snapshot.");
+    }
+
+    private static void RequireReversalOwnerAuthority(ProducerOwnerEffectIdentityDto? original,
+        ProducerOwnerEffectIdentityDto reversal)
+    {
+        if (original is null
+            || !string.Equals(original.ParticipantCode, reversal.ParticipantCode, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(original.OwnerEntityType, reversal.OwnerEntityType, StringComparison.OrdinalIgnoreCase)
+            || original.OwnerEntityId != reversal.OwnerEntityId)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_OWNER_AUTHORITY_CONFLICT: reversal owner lineage must retain the original participant, entity type and entity ID.");
+    }
+
+    private static ProducerFinancePostingRequestDto BuildExactReversalPosting(
+        FinancePostingRequestV2Dto original, Guid tenantId, DateTime reversalDate, string reason) => new()
+    {
+        SourceModule = original.SourceModule,
+        OriginModuleCode = original.OriginModuleCode,
+        SourceDocumentType = original.SourceDocumentType,
+        SourceDocumentId = original.SourceDocumentId,
+        SourceDocumentTenantId = original.SourceDocumentTenantId ?? tenantId,
+        ReversalReason = reason,
+        ReversalType = "Exact producer AccountingEvent reversal",
+        PostingAction = original.PostingAction,
+        SourceDocumentReference = original.SourceDocumentReference,
+        Description = $"Reversal: {original.Description}",
+        PostingDate = reversalDate,
+        JournalType = original.JournalType,
+        FunctionalCurrencyCode = original.FunctionalCurrencyCode,
+        ReturnExistingOnDuplicate = true,
+        PreserveHistoricalExchangeRateSnapshot = true,
+        Lines = original.Lines.Select(line => new FinancePostingLineDto
+        {
+            AccountId = line.AccountId,
+            SourceDocumentLineId = line.SourceDocumentLineId,
+            Description = $"Reversal: {line.Description}",
+            DebitAmount = line.CreditAmount,
+            CreditAmount = line.DebitAmount,
+            TransactionCurrency = line.TransactionCurrency,
+            TransactionDebitAmount = line.TransactionCreditAmount,
+            TransactionCreditAmount = line.TransactionDebitAmount,
+            ForeignCurrencyAmount = line.ForeignCurrencyAmount,
+            ExchangeRateId = line.ExchangeRateId,
+            ExchangeRate = line.ExchangeRate,
+            ExchangeRateSource = line.ExchangeRateSource,
+            ExchangeRateDate = line.ExchangeRateDate,
+            SourceReferenceNumber = line.SourceReferenceNumber,
+            LineNumber = line.LineNumber,
+            Dimensions = line.Dimensions.Select(dimension => new FinancePostingDimensionValueDto
+            {
+                DimensionCode = dimension.DimensionCode,
+                ValueCode = dimension.ValueCode,
+                SourceEntityType = dimension.SourceEntityType,
+                SourceEntityId = dimension.SourceEntityId
+            }).ToList(),
+            FinanceDimensionSetId = line.FinanceDimensionSetId,
+            SegmentString = line.SegmentString,
+            Notes = reason,
+            TransactionTag = "Reversal"
+        }).ToList()
     };
 
     private static ProducerFinancePostingRequestDto ToProducerPosting(FinancePostingRequestV2Dto source) => new()
