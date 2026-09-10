@@ -1,6 +1,6 @@
 # HR demo feedback, round 2 — findings, decisions and build plan
 
-> **Status: LANES A, B1, B2, C1, C2, C3a, D1, D2, E1, E1b and G BUILT (D2 on 2026-09-10)** (A: 88 ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 ×2, `hr-organization/run-b1.mjs`; C1: 36 ×2, `hr-jobarch/run-c1.mjs`; C2: 143 ×2, `hr-jobarch/run-c2.mjs`; D1: 79 ×2, `hr-probation/run-d1.mjs`; E1: 49 ×2, `hr-payroll-membership/run-e1.mjs`). Lanes B2, B3, C3, D2, E2, F planned, not built. Source: the feedback
+> **Status: LANES A, B1, B2, B3, C1, C2, C3a, D1, D2, E1, E1b and G BUILT (D2 and B3 on 2026-09-10)** (A: 88 ×2, `hr-employee-docs/run-round2-laneA.mjs`; B1: 140 ×2, `hr-organization/run-b1.mjs`; C1: 36 ×2, `hr-jobarch/run-c1.mjs`; C2: 143 ×2, `hr-jobarch/run-c2.mjs`; D1: 79 ×2, `hr-probation/run-d1.mjs`; E1: 49 ×2, `hr-payroll-membership/run-e1.mjs`). Lanes C3b, E2, F planned, not built (B3: 77 ×2, `hr-organization/run-b3.mjs`). Source: the feedback
 > document *HR Demo Meetings — Changes and Additions* (4 pages; sections Organization Structure,
 > Job Position, Skills Setup, Employee Profile), brought by the user on 2026-09-08 after the HR
 > module demo. Every bullet of that document is accounted for below — as a bug, a build item, a
@@ -287,7 +287,7 @@ mechanical and long.
 Lane G (salary structure tiers and source, § 1.6) was added on 2026-09-09 between E1b and C3; it
 is independent of the rest. **C3 was split into C3a and C3b** the same day (see the lane block);
 C3a is built. **D2 was built on 2026-09-10, out of order** — ahead of C3b, which is still owed.
-**What remains: C3b, F, B3, E2**, plus lane H on its trigger. **Lane H** (a movement changes the pay but not the placement) was
+**What remains: C3b, F, E2**, plus lane H on its trigger (B3 built 2026-09-10). **Lane H** (a movement changes the pay but not the placement) was
 added the same day out of lane G's closing note, and is deferred with a trigger rather than a
 position in the order: **before the next demo**, because Staff Movements is session 14 of the
 demo walk. Everything else keeps the order below.
@@ -372,6 +372,17 @@ What the build changed from the plan, and what it found:
 6. **The organogram drawer was not touched.** It reads `AccountCode`, which still holds the code — now Finance's rather than free text — so it keeps working unchanged. Showing code *and name* there needs a name the HR read does not carry, and inventing a field nothing fills is what X-3 was. Left as it is.
 
 **B3 — The picker sweep.** No migration. Replace every flat unit dropdown in § 6.1.3 with the shared picker, screen by screen, each with a screen-payload probe that the chosen id still reaches the API. Split into two halves if it runs long (HR/admin screens, then SHE/training/performance screens). Harness: extend each area's existing UI-payload probe rather than a new one.
+
+✅ **BUILT 2026-09-10 — 77 ×2, `hr-organization/run-b3.mjs`.** Frontend only; type-checks clean under `tsconfig.hr-slice.json`. Not browser-walked.
+
+**What the build changed from the plan, and what it found.**
+
+1. **Two doors, not one.** Half the sites hold the unit id in local state (filters, dialogs) and take `OrganizationUnitPicker` directly; the other half are react-hook-form forms on the `SelectField options={units.map(...)}` idiom, so a new `components/hr/common/OrganizationUnitPickerField.tsx` is the drop-in there — same contract as `SelectField` (`form.watch`, `form.setValue` with `shouldValidate`, the zod message under the control) plus `levelName` for a form that stores the level as well and `allowAnyLevel` for a scope where "any level" is a state. **28 files swapped:** 12 through the picker, 16 through the field (`unit-goals` uses both). Nothing about any payload changed — the field the form stores is the one it stored before — so the "screen-payload probe" the plan asked for reduces to the static check that the id still binds to the same field name; the harness reads the sources for that.
+2. **Where a form stored the level beside the unit, ONE control now writes both** (`PositionHistoryTab`, goal library, goal templates, appraisal cycles ×2, the at-risk filter): the picker's level select IS the level field, through `onLevelChange`. Two selects that could disagree (a level from one structure, a unit from another) are gone. For that the cascade gained two additive props — `allowNoLevel` (a none row in the level select) and `initialLevelId` (show the stored level when no unit is chosen) — both ignored by every existing caller.
+3. **`OrganizationScopeFields` is now a thin wrapper over the picker**, so training budgets/plans/compliance, learning paths and calibration are on the same implementation without being touched.
+4. **Three sites kept a bespoke shape on purpose:** the responders scope list keeps its two special rows ("every scope", "all units") and adds "One unit…" which reveals the picker; the award-type target keeps one select for Position/Staff level and swaps only the unit branch; `announcements` (multi-select audience) stays as § 6.1.3 said.
+5. **⚠ Deleting an organisation structure LEAVES its units on a level nothing lists.** The first live run found **33 active units** whose level and structure answer 404 — every one lane-R harness residue (`R2/R4 Department …`), left because those cleanups deleted the structure (which took the levels) but not the units. A flat dropdown still offered them; the cascade cannot reach a unit whose level is gone, so the sweep would have hidden them. The debris was deleted through the unit door (33, no refusals), the three lane-R cleanups now delete units before structures, and the harness fails on any *real* orphan while reporting debris by name-prefix. **Recorded, not fixed:** the server should refuse to delete a structure while live units sit on its levels (organization service; with the `Path` backfill from B1's note, for the next data pass).
+6. **The plan's list was partly stale.** `me/directory`, `employees/[id]/edit`, `leave/plans`, `movements/new`, `safety/documents/[id]`, `safety/performance/analytics` have no unit dropdown; `attendance/alert-rules` and `shift-rotations/[id]` do not exist at those paths. The units register and the unit edit page still read the unit list (they administer units); `unit-goals` still reads it for a name lookup in its table. Those four, plus the picker itself, are the only consumers of `organizationUnitService.get*` left, and the harness asserts that set.
 
 ### Lane C — Positions, certifications, sets · 3 slices
 

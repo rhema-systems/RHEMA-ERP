@@ -61,6 +61,16 @@ export interface CascadingPickerProps extends CascadingPickerBounds {
   onLevelChange?: (levelId: string, level: PickerLevel | null) => void;
   /** Offer a "none" row with this label. Without it the picker is a required choice. */
   allowNone?: string;
+  /**
+   * Offer a "no tier" row in the LEVEL select with this label (round 2, lane B3). For a scope
+   * FILTER, "any level" is a real state; a required picker never needs it.
+   */
+  allowNoLevel?: string;
+  /**
+   * The tier to show when there is no current item — a record scoped to a level with no unit
+   * (lane B3). Ignored once an item is chosen; the item's own tier wins.
+   */
+  initialLevelId?: string;
   /** Never offer these ids (the current parent in a move dialog, say). */
   excludeIds?: string[];
   /** Never offer this id or anything beneath it — a unit being re-parented. */
@@ -118,6 +128,8 @@ export function CascadingPicker({
   onChange,
   onLevelChange,
   allowNone,
+  allowNoLevel,
+  initialLevelId,
   excludeIds,
   excludeSubtreeOf,
   includeInactive,
@@ -139,13 +151,19 @@ export function CascadingPicker({
   className,
 }: CascadingPickerProps) {
   const current = useMemo(() => items.find((i) => i.id === value) ?? null, [items, value]);
-  const [levelId, setLevelId] = useState<string>(current?.levelId ?? '');
+  const [levelId, setLevelId] = useState<string>(current?.levelId ?? initialLevelId ?? '');
 
   // On edit (or after the lists load) the tier is where the current value sits.
   useEffect(() => {
     if (current && current.levelId !== levelId) setLevelId(current.levelId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.levelId]);
+
+  // No item, but the caller knows the tier (a level-only scope): follow it.
+  useEffect(() => {
+    if (!current && initialLevelId !== undefined && initialLevelId !== levelId) setLevelId(initialLevelId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLevelId, current?.id]);
 
   const levelOptions = useMemo(
     () =>
@@ -165,8 +183,8 @@ export function CascadingPicker({
   // One possible tier is not a choice; pick it so the user only has the item to choose. The level
   // select stays on screen so a location form and a unit form look and behave alike.
   useEffect(() => {
-    if (!levelId && levelOptions.length === 1) setLevelId(levelOptions[0].id);
-  }, [levelId, levelOptions]);
+    if (!levelId && !allowNoLevel && levelOptions.length === 1) setLevelId(levelOptions[0].id);
+  }, [levelId, levelOptions, allowNoLevel]);
 
   // A tier the bounds no longer allow (the caller narrowed them) is dropped, and the value with it.
   useEffect(() => {
@@ -221,7 +239,8 @@ export function CascadingPicker({
     [items, value, levelId, includeInactive, structureId, excludeIds, excludedSubtree],
   );
 
-  const handleLevel = (next: string) => {
+  const handleLevel = (raw: string) => {
+    const next = raw === PICKER_NONE ? '' : raw;
     setLevelId(next);
     onLevelChange?.(next, levels.find((l) => l.id === next) ?? null);
     // An item from the old tier would contradict the new one.
@@ -240,11 +259,16 @@ export function CascadingPicker({
     <div className={className ?? 'grid gap-4 sm:grid-cols-2'}>
       <div className="space-y-2">
         <Label htmlFor={`${idPrefix}-level`}>{levelLabel}</Label>
-        <Select value={levelId || undefined} onValueChange={handleLevel} disabled={levelDisabled}>
+        <Select
+          value={levelId || (allowNoLevel ? PICKER_NONE : undefined)}
+          onValueChange={handleLevel}
+          disabled={levelDisabled}
+        >
           <SelectTrigger id={`${idPrefix}-level`}>
             <SelectValue placeholder={loading ? 'Loading…' : levelPlaceholder} />
           </SelectTrigger>
           <SelectContent>
+            {allowNoLevel && <SelectItem value={PICKER_NONE}>{allowNoLevel}</SelectItem>}
             {levelOptions.map((l) => (
               <SelectItem key={l.id} value={l.id}>
                 {l.name} (L{l.levelNumber})

@@ -42,9 +42,9 @@ import { safetyInspectionService } from '@/services/hr/safety-inspection.service
 import { safetyReferenceService } from '@/services/hr/safety-reference.service';
 import { safetyChecklistService } from '@/services/hr/safety-checklist.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { SHE_RISK_LEVEL_OPTIONS, SHE_HAZARD_RISK_LEVEL_OPTIONS, SHE_HAZARD_STATUS_OPTIONS } from '@/types/hr/safety-hazards';
 import { SHE_CORRECTIVE_ACTION_STATUS_OPTIONS } from '@/types/hr/safety-incidents';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import {
   SHE_INSPECTION_TYPE_OPTIONS,
   SHE_INSPECTION_CATEGORY_OPTIONS,
@@ -219,10 +219,6 @@ export default function InspectionDetailPage() {
     queryFn: () => locationService.getAll(),
   });
 
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
 
   const { data: checklists = [] } = useQuery({
     queryKey: ['hr', 'safety-checklists'],
@@ -927,13 +923,7 @@ export default function InspectionDetailPage() {
                 <TextField form={editForm} name="specificArea" label="Specific area" />
               </FieldRow>
               <FieldRow>
-                <SelectField
-                  form={editForm}
-                  name="organizationUnitId"
-                  label="Organization unit"
-                  allowEmpty
-                  options={orgUnits.map((u) => ({ value: u.id, label: u.name }))}
-                />
+                <OrganizationUnitPickerField form={editForm} name="organizationUnitId" label="Organization unit" allowEmpty />
                 <SelectField
                   form={editForm}
                   name="checklistId"

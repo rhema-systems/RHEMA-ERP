@@ -32,7 +32,6 @@ import {
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import { safetyInspectionService } from '@/services/hr/safety-inspection.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { SHE_RISK_LEVEL_OPTIONS } from '@/types/hr/safety-hazards';
 import type {
   SafetyInspection,
@@ -51,6 +50,7 @@ import {
   type LocalAnswer,
 } from './checklist-scoring';
 import { cn } from '@/lib/utils';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
  * The walk (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §5): header fields, every section
@@ -116,16 +116,10 @@ export function InspectionChecklistRun({ inspection, onChanged }: Props) {
   }, [checklist.fields, watchedFields]);
 
   const needsLocations = checklist.fields.some((f) => f.fieldType === 'Location');
-  const needsUnits = checklist.fields.some((f) => f.fieldType === 'OrganizationUnit');
   const { data: locations = [] } = useQuery({
     queryKey: ['hr', 'locations'],
     queryFn: () => locationService.getAll(),
     enabled: needsLocations,
-  });
-  const { data: orgUnits = [] } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-    enabled: needsUnits,
   });
 
   const score = computeLocalScore(inspection, answers, fieldValuesForScore);
@@ -316,7 +310,7 @@ export function InspectionChecklistRun({ inspection, onChanged }: Props) {
         );
       case 'OrganizationUnit':
         return (
-          <SelectField key={f.id} form={fieldForm} name={name} label={label} allowEmpty options={orgUnits.map((u) => ({ value: u.id, label: u.name }))} />
+          <OrganizationUnitPickerField key={f.id} form={fieldForm} name={name} label={label} allowEmpty />
         );
       default:
         return <TextField key={f.id} form={fieldForm} name={name} label={label} placeholder={f.helpText ?? undefined} />;

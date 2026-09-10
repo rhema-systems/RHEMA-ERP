@@ -18,9 +18,9 @@ import {
 } from '@/components/ui/select';
 import { assetRegisterService } from '@/services/hr/asset-register.service';
 import { locationService } from '@/services/hr/location.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { ASSET_CONDITIONS, COMPANY_ASSET_STATUSES } from '@/types/hr/assets';
 import type { CompanyAsset, UpdateCompanyAssetRequest } from '@/types/hr/assets';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 const NONE = '__none__';
 
@@ -195,10 +195,6 @@ export function AssetForm({
     queryKey: ['hr', 'assets', 'types'],
     queryFn: () => assetRegisterService.getTypes(),
   });
-  const { data: units = [] } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
   const { data: locations = [] } = useQuery({
     queryKey: ['hr', 'locations'],
     queryFn: () => locationService.getAll(),
@@ -298,14 +294,13 @@ export function AssetForm({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Organisation unit</Label>
-            <Select value={values.unitId} onValueChange={(v) => set('unitId', v)}>
-              <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Not set</SelectItem>
-                {units.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <OrganizationUnitPicker
+              value={values.unitId === NONE ? '' : values.unitId}
+              onChange={(id) => set('unitId', id || NONE)}
+              allowNone="Not set"
+              unitLabel="Organisation unit"
+              idPrefix="asset-form-unit"
+            />
           </div>
           <div className="space-y-2">
             <Label>Location</Label>

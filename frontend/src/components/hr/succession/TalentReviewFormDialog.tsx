@@ -25,8 +25,8 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import { talentReviewService } from '@/services/hr/succession.service';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 const orNull = (v?: string) => (v && v.trim() !== '' ? v : null);
 
@@ -60,10 +60,6 @@ export function TalentReviewFormDialog({
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: units } = useQuery({
-    queryKey: ['organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -126,14 +122,7 @@ export function TalentReviewFormDialog({
           </FieldRow>
           <FieldRow>
             <EmployeePickerField form={form} name="facilitatedById" label="Facilitated by" />
-            <SelectField
-              form={form}
-              name="organizationUnitId"
-              label="Scope"
-              options={(units ?? []).map((u: any) => ({ value: u.id, label: u.name }))}
-              allowEmpty
-              emptyLabel="Whole organisation"
-            />
+            <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Scope" allowEmpty emptyLabel="Whole organisation" />
           </FieldRow>
           <TextareaField form={form} name="agenda" label="Agenda" />
 

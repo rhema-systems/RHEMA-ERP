@@ -20,6 +20,10 @@ export interface OrganizationUnitPickerProps extends CascadingPickerBounds {
   onLevelChange?: (levelId: string, level: OrganizationLevel | null) => void;
   /** Offer a "none" row with this label; without it the unit is a required choice. */
   allowNone?: string;
+  /** Offer a "no level" row with this label — for a scope filter where "any level" is a state. */
+  allowNoLevel?: string;
+  /** The level to show when no unit is chosen (a level-only scope on edit). */
+  initialLevelId?: string;
   excludeIds?: string[];
   /** The unit being re-parented: it and its whole subtree are never offered. */
   excludeSubtreeOf?: string;
@@ -60,6 +64,8 @@ export function OrganizationUnitPicker({
   onChange,
   onLevelChange,
   allowNone,
+  allowNoLevel,
+  initialLevelId,
   excludeIds,
   excludeSubtreeOf,
   includeInactive,
@@ -134,6 +140,8 @@ export function OrganizationUnitPicker({
           : undefined
       }
       allowNone={allowNone}
+      allowNoLevel={allowNoLevel}
+      initialLevelId={initialLevelId}
       excludeIds={excludeIds}
       excludeSubtreeOf={excludeSubtreeOf}
       includeInactive={includeInactive}
