@@ -1045,6 +1045,15 @@ remain valid. The two approved commits were integrated locally as `4ed93425` and
 owner/schema/migration/default change or configured-database access occurred. C12 is complete and the next gate
 is a fresh exact-base Sales reissue.
 
+C13 implementation is committed cleanly as `3c74a1a6065e908b99aec9ce1d8fc7b33c923008` from exact base
+`b79e5da7e1eeb73ff9ff88cde0965accf117598f`. The additive Core contract is book/line blind; Finance reloads
+and validates immutable original C7 snapshot, C5 frozen evidence, posted representations and owner receipt,
+reconstructs exact opposite economics/dimensions with Reversal lineage, and delegates to governed C7 prepare
+without current C5 resolution. C13 tests passed 13/13, Core contract tests 2/2, widened C6/C7/C11-C13 passed
+72 with 17 guarded SQL skips, and build/EF/456-migration/script/ancestry/scope gates are clean. No HTTP, owner,
+schema, migration, default or configured-database change occurred. Independent Sol High review is active;
+integration and Sales reissue remain gated.
+
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
 `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c12` on branch
