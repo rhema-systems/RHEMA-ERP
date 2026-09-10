@@ -1063,6 +1063,15 @@ A narrow Sol Medium correction is active to reject equal canonical fingerprints 
 mutation and prove same/different-action denials plus distinct compensating-effect success. No database or
 migration was touched; integration and Sales remain gated.
 
+C13 P1 correction is committed cleanly as `7b24841dc820d0a320ed1ecf4d79c76b24bb2640` atop `3c74a1a6`.
+Finance now canonicalizes and compares the original immutable and requested reversal effect fingerprints, rejecting
+equality before event or audit mutation regardless of owner action; the DTO documents the required distinct
+compensating effect. Same-fingerprint POST/REVERSE denials and distinct-fingerprint preparation/approval pass.
+C13 passed 15/15, relevant C7/C10-C13 passed 49 with 5 guarded SQL skips, Core contract passed 2/2 and the API
+build has zero errors. Full Core discovery exposed unrelated inherited module failures and later hung, while the
+bounded C13 Core suite is green. Final Sol High re-review is active; no ledger-in-candidate, schema, owner,
+default, migration or database changed.
+
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
 `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c12` on branch
