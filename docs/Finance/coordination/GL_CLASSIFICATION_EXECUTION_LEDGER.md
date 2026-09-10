@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage C13 — exact producer reversal preparation |
+| Phase | Stage B3 — Sales credit-note accounting-event cutover |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/finance_reversal_prep_c13` |
-| Exact base | `b79e5da7e1eeb73ff9ff88cde0965accf117598f` |
-| Branch | `codex/finance-producer-reversal-preparation-c13` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-producer-reversal-preparation-c13` |
+| Implementing task | Coordinator subagent `/root/sales_cutover` reissued after C13 |
+| Exact base | `45d254753d58c7e47e745c4f34cc77513205255c` |
+| Branch | `codex/sales-accounting-event-cutover-c13` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c13` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `b79e5da7e1eeb73ff9ff88cde0965accf117598f` |
+| Primary HEAD at activation | `45d254753d58c7e47e745c4f34cc77513205255c` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Sales reversal reconciliation found a missing Finance historical-intent preparer; bounded precursor active |
+| Review status | C13 approved and integrated; fresh exact-base Sales implementation active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1080,6 +1080,15 @@ gates passed 15 C13 tests, 67 combined C6/C7/C10-C13 tests, 2 Core contract test
 456-migration, ancestry, scope and clean-status gates passed. The two approved commits were integrated locally
 as `7ab707ab` and `4ece4951` without conflict. No database or migration was touched. C13 is complete; Sales may
 restart from a fresh exact primary base.
+
+Stage B3 Sales is reissued after C13 from fresh exact base
+`45d254753d58c7e47e745c4f34cc77513205255c` in clean worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c13` on branch
+`codex/sales-accounting-event-cutover-c13`. Both prerequisite gaps are now closed: C12 supplies Core-facing
+approved ambient execution/compatibility/failure handling, and C13 supplies Finance-owned exact reversal
+preparation from immutable historical authority. Terra Medium implementation may proceed without Sales book
+selection, legacy posting-engine use or Finance-history reconstruction. Independent Sol High review and clean
+integration remain required before HR/Payroll.
 
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
