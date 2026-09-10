@@ -1323,6 +1323,15 @@ C10/C11/C12/C15 receipt/fingerprint/journal/read-only retry. Sol High review is 
 lock and C13 reversal coverage continue in a follow-on. No configured database, production schema, migration or
 remote state was touched.
 
+Sales governance correction `0f53f95d` is clean atop `29c69a4c`: it replaces the bespoke hash with an immutable
+JSON-cloned prepared request and strict ordered deep C12 comparison; snapshots full mapped scalar rows for events,
+postings, attempts, receipts, Finance postings, journals, transactions, actual balances, exposures and audits across
+all denials; scopes permitted failure/tamper deltas; and explicitly verifies no producer approval calls. The isolated
+class passes 28/28 and combined filter 38/38; Sol High review is active. Relational `ee1a2c27` remains changes-
+required despite 5/5: tracker cleanliness is still asserted after Clear, zero/all and C10–C15 authority assertions
+are incomplete, and separate-context/guarded-SQL/C13 boundaries remain unproved. Terra is correcting the first two
+sets before expansion. No configured database, production schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
