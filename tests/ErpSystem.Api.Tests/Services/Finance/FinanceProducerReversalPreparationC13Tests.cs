@@ -274,6 +274,59 @@ public sealed class FinanceProducerReversalPreparationC13Tests
         executor.Requests.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task IdOnlyExecutionAndFailure_RejectSelfConsistentGenericC7ReversalProvenance()
+    {
+        await using var harness = Harness();
+        var original = await SeedOriginalAsync(harness);
+        var reversalEvidence = ReversalRequest(original);
+        var generic = FinanceProducerIntentService.ToProducerIntent(original.Request);
+        generic.AccountingEventId = reversalEvidence.ReversalAccountingEventId;
+        generic.EventKind = AccountingEventKinds.Reversal;
+        generic.SupersedesAccountingEventId = original.EventId;
+        generic.ReversesAccountingEventId = original.EventId;
+        generic.IdempotencyKey = reversalEvidence.IdempotencyKey;
+        generic.ParticipantIdentity = reversalEvidence.ParticipantIdentity;
+        generic.ExpectedOwnerEffect = reversalEvidence.ExpectedOwnerEffect;
+        generic.PostingRequest.PostingDate = reversalEvidence.ReversalDate;
+        generic.PostingRequest.ReversalReason = reversalEvidence.Reason;
+        generic.PostingRequest.ReversalType = "Generic self-consistent reversal";
+        generic.PostingRequest.Description = "Owner-supplied generic reversal economics";
+        generic.PostingRequest.ReturnExistingOnDuplicate = false;
+        generic.PostingRequest.PreserveHistoricalExchangeRateSnapshot = false;
+        foreach (var line in generic.PostingRequest.Lines)
+        {
+            (line.DebitAmount, line.CreditAmount) = (line.CreditAmount, line.DebitAmount);
+            (line.TransactionDebitAmount, line.TransactionCreditAmount) =
+                (line.TransactionCreditAmount, line.TransactionDebitAmount);
+        }
+        generic.PostingRequest.Lines[0].CreditAmount = 124m;
+        generic.PostingRequest.Lines[1].DebitAmount = 124m;
+        generic.PostingRequest.Lines[0].Dimensions[0].ValueCode = "ALTERED";
+
+        var prepared = await harness.Service.PrepareAsync(generic);
+        harness.User.SetupGet(value => value.UserId).Returns(Guid.NewGuid().ToString());
+        await harness.Service.ApprovePreparedAsync(prepared.Id,
+            new DecideProducerAccountingIntentDto { Reason = "Approved generic C7 reversal" });
+        var stored = await harness.Db.AccountingEvents.AsNoTracking().SingleAsync(item => item.Id == prepared.Id);
+        stored.ProducerIntentSnapshotHash.Should().Be(Sha256(stored.ProducerIntentSnapshotJson!));
+        stored.RequestFingerprint.Should().Be(prepared.RequestFingerprint);
+        var executor = new RecordingExecutor();
+        var bridge = new FinanceProducerIntentService(harness.Applicability.Object, harness.Events, executor,
+            harness.Db, harness.User.Object, Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+        var receipt = Receipt(harness.TenantId, reversalEvidence.ExpectedOwnerEffect);
+
+        await FluentActions.Awaiting(() => ((IFinanceProducerApprovedExecutionService)bridge)
+            .ExecuteInAmbientTransactionAsync(prepared.Id, receipt)).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("*canonical C13 reconstruction path*");
+        await FluentActions.Awaiting(() => ((IFinanceProducerApprovedExecutionService)bridge)
+            .RecordFailureAfterRollbackAsync(prepared.Id, receipt,
+                new InvalidOperationException("owner rollback"))).Should()
+            .ThrowAsync<InvalidOperationException>().WithMessage("*canonical C13 reconstruction path*");
+        executor.Requests.Should().BeEmpty();
+        executor.FailedEventId.Should().BeNull();
+    }
+
     [Theory]
     [InlineData("snapshot")]
     [InlineData("source")]

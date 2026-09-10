@@ -105,18 +105,9 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             throw new InvalidOperationException(
                 "ACCOUNTING_EVENT_REVERSAL_IDENTITY_CONFLICT: reversal ID and idempotency identity must remain paired.");
 
-        var prepared = await PrepareAsync(new ProducerAccountingIntentDto
-        {
-            AccountingEventId = request.ReversalAccountingEventId,
-            EventKind = AccountingEventKinds.Reversal,
-            SupersedesAccountingEventId = original.Id,
-            ReversesAccountingEventId = original.Id,
-            IdempotencyKey = key,
-            ParticipantIdentity = participant,
-            ExpectedOwnerEffect = ownerEffect,
-            PostingRequest = BuildExactReversalPosting(originalRequest.PostingRequest,
-                tenantId, request.ReversalDate.Date, reason)
-        }, cancellationToken);
+        var prepared = await PrepareAsync(BuildC13ReversalIntent(originalRequest, tenantId,
+            request.ReversalAccountingEventId, key, request.ReversalDate.Date, reason,
+            participant, ownerEffect), cancellationToken);
 
         return new ProducerAccountingReversalPreparationResultDto(
             prepared.Id, original.Id, prepared.RequestFingerprint, prepared.Status,
@@ -454,8 +445,40 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
             throw new InvalidOperationException(
                 "ACCOUNTING_EVENT_C13_EXECUTION_LINEAGE_INVALID: reversal lineage, source or participant authority conflicts with its original event.");
         RequireReversalOwnerAuthority(originalSnapshot.ExpectedOwnerEffect, ownerEffect);
-        return ToProducerIntent(snapshot);
+        var reason = posting.ReversalReason?.Trim() ?? string.Empty;
+        if (reason.Length is 0 or > 500)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_C13_EXECUTION_PROVENANCE_INVALID: canonical reversal reason evidence is missing.");
+        var canonicalIntent = BuildC13ReversalIntent(originalSnapshot, tenantId, reversal.Id,
+            snapshot.SelectionIdempotencyKey?.Trim().ToUpperInvariant() ?? string.Empty,
+            posting.PostingDate.Date, reason, participant, ownerEffect);
+        var canonicalRequest = await BuildRequestAsync(canonicalIntent, cancellationToken);
+        var canonicalSnapshot = JsonSerializer.Serialize(canonicalRequest,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var canonicalFingerprint = AccountingEventService.Fingerprint(canonicalRequest,
+            canonicalRequest.SelectionIdempotencyKey.Trim().ToUpperInvariant(),
+            reversal.Version, reversal.RootAccountingEventId);
+        if (!string.Equals(canonicalSnapshot, reversal.ProducerIntentSnapshotJson, StringComparison.Ordinal)
+            || !string.Equals(canonicalFingerprint, reversal.RequestFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_C13_EXECUTION_PROVENANCE_INVALID: stored reversal evidence was not produced by the canonical C13 reconstruction path.");
+        return canonicalIntent;
     }
+
+    private static ProducerAccountingIntentDto BuildC13ReversalIntent(CreateAccountingEventDto original,
+        Guid tenantId, Guid reversalId, string idempotencyKey, DateTime reversalDate, string reason,
+        string participant, ProducerOwnerEffectIdentityDto ownerEffect) => new()
+    {
+        AccountingEventId = reversalId,
+        EventKind = AccountingEventKinds.Reversal,
+        SupersedesAccountingEventId = original.AccountingEventId,
+        ReversesAccountingEventId = original.AccountingEventId,
+        IdempotencyKey = idempotencyKey,
+        ParticipantIdentity = participant,
+        ExpectedOwnerEffect = ownerEffect,
+        PostingRequest = BuildExactReversalPosting(original.PostingRequest,
+            tenantId, reversalDate, reason)
+    };
 
     private static void RequireExactReversalOriginal(AccountingEvent original,
         CreateAccountingEventDto snapshot, Guid tenantId)
