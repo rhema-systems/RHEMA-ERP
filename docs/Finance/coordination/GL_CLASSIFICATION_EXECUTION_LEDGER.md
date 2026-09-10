@@ -1090,6 +1090,16 @@ preparation from immutable historical authority. Terra Medium implementation may
 selection, legacy posting-engine use or Finance-history reconstruction. Independent Sol High review and clean
 integration remain required before HR/Payroll.
 
+The post-C13 Sales reissue stopped cleanly before owner edits on one remaining contract handoff. C13 returns an
+identity/fingerprint result after Finance-owned reversal reconstruction, but C12 execution still requires the
+complete prepared neutral intent. Sales cannot deserialize and resubmit the stored Finance snapshot without
+reassuming the historical-line authority C13 intentionally removed. A bounded Sol Medium correction is active
+on the approved C13 branch to add ID-only approved execution: Finance will reload/revalidate/reconstruct the
+immutable prepared request internally, bind the compensating owner receipt, and delegate through unchanged C12
+ambient execution/C10 compatibility authority. It may expose no lines, book selector or HTTP execution surface.
+Sales remains clean and will be reissued only after Sol High approval and integration. No database, migration or
+owner file was touched.
+
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
 `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c12` on branch
