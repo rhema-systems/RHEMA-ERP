@@ -9,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -286,6 +287,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         var entity = createDto.ToEntity(current, requestedByUserId);
         entity.RequisitionNumber = await GenerateRequisitionNumberAsync(current, cancellationToken);
+        await ApplyBudgetLinkAsync(entity, createDto.ManpowerBudgetLineId, cancellationToken);
 
         await _requisitionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -306,6 +308,7 @@ public class StaffRequisitionService : IStaffRequisitionService
             throw new InvalidOperationException("Only Draft or Rejected requisitions can be edited.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        await ApplyBudgetLinkAsync(entity, updateDto.ManpowerBudgetLineId, cancellationToken);
 
         await _requisitionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -344,6 +347,10 @@ public class StaffRequisitionService : IStaffRequisitionService
         // and Block mode must refuse before an approver is ever troubled with it.
         await EnforceBudgetAsync(entity, "submitted", cancellationToken);
         await EnforceEstablishmentAsync(entity, "submitted", cancellationToken);
+        // Round 2b, R5 (D-4, D-2): the exception must be written down, and the establishment the
+        // approver is asked to decide against is stamped on the record.
+        await RequireExceptionJustificationAsync(entity, cancellationToken);
+        await StampEstablishmentSnapshotAsync(entity, cancellationToken);
 
         var fromStatus = entity.Status;
 
@@ -859,25 +866,9 @@ public class StaffRequisitionService : IStaffRequisitionService
         var mode = settings.EstablishmentEnforcementMode;
         if (mode == BudgetEnforcementMode.Off) return null;
         if (blockingOnly && mode != BudgetEnforcementMode.Block) return null;
-
-        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
-            .FirstOrDefaultAsync(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId,
-                cancellationToken);
-
-        // Not established by anyone: not constrained. See the remarks.
-        if (position?.EstablishmentApprovedOn == null) return null;
-
-        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
-            .CountAsync(e => e.TenantId == entity.TenantId
-                          && e.PositionId == entity.PositionId
-                          && e.IsActive, cancellationToken);
-
-        var projected = occupied + entity.NumberOfPositions;
-        if (projected <= position.ExpectedHeadcount) return null;
-
-        return $"{position.Title} is established for {position.ExpectedHeadcount} post(s) and "
-             + $"{occupied} are filled. This requisition would take it to {projected}, outside the "
-             + $"establishment approved on {position.EstablishmentApprovedOn:dd MMM yyyy}.";
+        // One computation for the refusal and the panel (R5).
+        var est = await BuildEstablishmentCheckAsync(entity, settings, cancellationToken);
+        return est.WouldExceed ? est.Message : null;
     }
 
     private async Task<RequisitionBudgetCheckDto> BuildBudgetCheckAsync(StaffRequisition entity, CancellationToken cancellationToken)
@@ -885,26 +876,41 @@ public class StaffRequisitionService : IStaffRequisitionService
         var settings = await _policyProvider.GetAsync(cancellationToken);
         var mode = settings.BudgetEnforcementMode;
 
+        // Round 2b, R5: the policy's fiscal year, not the calendar year (§ 3 defect 3).
         var referenceDate = entity.DesiredStartDate != default ? entity.DesiredStartDate : entity.RequestDate;
-        var fiscalYear = referenceDate.Year;
+        var fiscalYear = HrFiscalYear.For(referenceDate, settings);
 
         var result = new RequisitionBudgetCheckDto
         {
             Mode               = mode,
             FiscalYear         = fiscalYear,
             RequestedPositions = entity.NumberOfPositions,
+            Establishment      = await BuildEstablishmentCheckAsync(entity, settings, cancellationToken),
         };
 
-        // Match the position's budget line for the fiscal year.
-        //
-        // ⚠ Only an APPROVED or ACTIVE budget counts. This previously matched any budget and merely
-        // ordered approved ones first, so a Draft budget line constrained — or authorised — a
-        // requisition. That inverts the point of FR-HR-135's chain: headcount is authorised by
-        // Department Head → HR → Managing Director, and until they have ruled, a department typing
-        // "50" into a draft has authorised nothing. Nobody could have noticed before area 17,
-        // because there were no ManpowerBudgetLine rows in the database at all (area-17 build plan
-        // §3.3), so this branch had never once been reached with data.
-        var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable()
+        // The line: the one the requisition is LINKED to (R5), else the old match by position and
+        // fiscal year. Only an APPROVED or ACTIVE budget counts — a Draft authorises nothing
+        // (area 17 slice 7), and a linked budget since rejected or withdrawn is reported by name
+        // rather than silently treated as absent (Q-R4).
+        ManpowerBudgetLine? line = null;
+        if (entity.ManpowerBudgetLineId is { } linkedId)
+        {
+            var linked = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
+                .Include(l => l.ManpowerBudget)
+                .FirstOrDefaultAsync(l => l.Id == linkedId && l.TenantId == entity.TenantId, cancellationToken);
+            if (linked?.ManpowerBudget != null)
+            {
+                result.LinkedLineId = linked.Id;
+                result.LinkedBudgetId = linked.ManpowerBudgetId;
+                result.LinkedBudgetNumber = linked.ManpowerBudget.BudgetNumber;
+                result.LinkedBudgetStatus = linked.ManpowerBudget.Status.ToString();
+                var live = !linked.ManpowerBudget.IsDeleted
+                        && (linked.ManpowerBudget.Status == ManpowerBudgetStatus.Approved
+                         || linked.ManpowerBudget.Status == ManpowerBudgetStatus.Active);
+                if (live) { line = linked; result.IsLinked = true; }
+            }
+        }
+        line ??= await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
             .Include(l => l.ManpowerBudget)
             .Where(l => l.TenantId == entity.TenantId
                      && l.PositionId == entity.PositionId
@@ -919,21 +925,54 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         if (line is null)
         {
-            // No budgeted headcount for this position — enforcement never applies.
             result.HasBudgetLine = false;
             result.ProjectedHeadcount = entity.NumberOfPositions;
-            result.Message = mode == BudgetEnforcementMode.Off
-                ? "Budget enforcement is turned off."
-                : $"No approved manpower budget line exists for this position in {fiscalYear}; the requisition is not budget-constrained.";
+            result.ExceptionRequired = mode != BudgetEnforcementMode.Off;
+            result.ExceptionReason = result.LinkedBudgetNumber != null
+                ? $"Budget {result.LinkedBudgetNumber} is {result.LinkedBudgetStatus}, so it no longer authorises anything."
+                : "No approved manpower budget line covers this position for the fiscal year.";
+            // D-4: under Block a requisition not drawn from an approved budget is refused outright.
+            result.WouldBlock = mode == BudgetEnforcementMode.Block;
+            result.Message = mode switch
+            {
+                BudgetEnforcementMode.Off => "Budget enforcement is turned off.",
+                BudgetEnforcementMode.Block =>
+                    $"No approved manpower budget line covers this position in {fiscalYear}, and budget enforcement is set to Block: " +
+                    "a requisition must be raised against an approved budget line. Plan a budget from the establishment, or ask for the setting to be relaxed.",
+                _ => $"No approved manpower budget line covers this position in {fiscalYear}; the requisition is not budget-constrained, but the exception must be justified.",
+            };
             return result;
         }
+
+        // D-8: what the line budgets for, and what other requisitions have already asked of it.
+        var budgeted = line.PlannedNewPositions > 0 ? line.PlannedNewPositions : Math.Max(0, line.PlannedCount - line.CurrentFilled);
+        var drawdown = await DrawdownAsync(line.Id, entity.Id, cancellationToken);
 
         result.HasBudgetLine = true;
         result.PlannedCount = line.PlannedCount;
         result.CurrentFilled = line.CurrentFilled;
-        result.ProjectedHeadcount = line.CurrentFilled + entity.NumberOfPositions;
-        result.IsOverBudget = mode != BudgetEnforcementMode.Off && result.ProjectedHeadcount > line.PlannedCount;
-        result.WouldBlock = mode == BudgetEnforcementMode.Block && result.IsOverBudget;
+        result.BudgetedNewPosts = budgeted;
+        result.Drawdown = drawdown;
+        result.Remaining = budgeted - drawdown;
+        result.ProjectedHeadcount = line.CurrentFilled + drawdown + entity.NumberOfPositions;
+        if (!result.IsLinked)
+        {
+            // Matched, not linked: the form can offer this line. Naming it is what makes the
+            // requisition budgeted; until then the exception rule applies.
+            result.LinkedLineId ??= line.Id;
+            result.LinkedBudgetId ??= line.ManpowerBudgetId;
+            result.LinkedBudgetNumber ??= line.ManpowerBudget?.BudgetNumber;
+            result.LinkedBudgetStatus ??= line.ManpowerBudget?.Status.ToString();
+            result.ExceptionRequired = mode != BudgetEnforcementMode.Off;
+            result.ExceptionReason = $"Budget {line.ManpowerBudget?.BudgetNumber} covers this position but the requisition is not raised against it.";
+        }
+        else if (result.Establishment is { IsEstablished: true, Gap: <= 0 } est && mode != BudgetEnforcementMode.Off)
+        {
+            result.ExceptionRequired = true;
+            result.ExceptionReason = $"The post is established for {est.ExpectedHeadcount} and {est.Filled} are in it — no establishment gap.";
+        }
+        result.IsOverBudget = mode != BudgetEnforcementMode.Off && drawdown + entity.NumberOfPositions > budgeted;
+        result.WouldBlock = mode == BudgetEnforcementMode.Block && (result.IsOverBudget || !result.IsLinked);
 
         if (mode == BudgetEnforcementMode.Off)
         {
@@ -943,19 +982,189 @@ public class StaffRequisitionService : IStaffRequisitionService
         {
             result.Message =
                 $"This requisition would take the position to {result.ProjectedHeadcount} filled " +
-                $"({line.CurrentFilled} filled + {entity.NumberOfPositions} requested) against an approved " +
-                $"budget of {line.PlannedCount} for {fiscalYear}." +
+                $"({line.CurrentFilled} filled + {drawdown} already requested + {entity.NumberOfPositions} requested) against " +
+                $"{budgeted} new post(s) budgeted for {fiscalYear} on {line.ManpowerBudget?.BudgetNumber} (planned headcount {line.PlannedCount})." +
                 (result.WouldBlock
                     ? " Budget enforcement is set to Block, so it cannot be submitted or approved until the budget is revised."
                     : " Budget enforcement is set to Warn — proceed with caution.");
         }
+        else if (!result.IsLinked && mode == BudgetEnforcementMode.Block)
+        {
+            result.Message =
+                $"Budget {line.ManpowerBudget?.BudgetNumber} covers this position in {fiscalYear} but the requisition is not raised against it, " +
+                "and budget enforcement is set to Block: choose the budget line on the requisition.";
+        }
         else
         {
             result.Message =
-                $"Within budget: {result.ProjectedHeadcount} of {line.PlannedCount} budgeted for {fiscalYear}.";
+                $"Within budget: {drawdown + entity.NumberOfPositions} of {budgeted} new post(s) budgeted for {fiscalYear}" +
+                (result.IsLinked ? $" on {line.ManpowerBudget?.BudgetNumber}." : $" on {line.ManpowerBudget?.BudgetNumber} — not yet raised against it.");
         }
 
         return result;
+    }
+
+    /// <summary>D-8: posts on OTHER live requisitions drawing down from the same line.</summary>
+    private Task<int> DrawdownAsync(Guid lineId, Guid? excludeRequisitionId, CancellationToken cancellationToken)
+        => _unitOfWork.Repository<StaffRequisition>().GetQueryable().AsNoTracking()
+            .Where(r => r.ManpowerBudgetLineId == lineId && !r.IsDeleted
+                     && r.Id != excludeRequisitionId
+                     && r.Status != StaffRequisitionStatus.Cancelled
+                     && r.Status != StaffRequisitionStatus.Rejected)
+            .SumAsync(r => (int?)r.NumberOfPositions, cancellationToken)
+            .ContinueWith(t => t.Result ?? 0, cancellationToken);
+
+    /// <summary>
+    /// The establishment side of the check, as a DTO (R5): the numbers <see cref="CheckEstablishmentAsync"/>
+    /// refuses on, now visible on the panel before submit.
+    /// </summary>
+    private async Task<RequisitionEstablishmentCheckDto> BuildEstablishmentCheckAsync(
+        StaffRequisition entity, CompanyHrPolicySettings settings, CancellationToken cancellationToken)
+    {
+        var mode = settings.EstablishmentEnforcementMode;
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId, cancellationToken);
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .CountAsync(e => e.TenantId == entity.TenantId && e.PositionId == entity.PositionId && e.IsActive, cancellationToken);
+
+        var dto = new RequisitionEstablishmentCheckDto { Mode = mode, Filled = occupied };
+        if (position?.EstablishmentApprovedOn == null)
+        {
+            dto.IsEstablished = false;
+            dto.Message = "Nobody has established this post, so no headcount rule applies to it.";
+            return dto;
+        }
+        dto.IsEstablished = true;
+        dto.ExpectedHeadcount = position.ExpectedHeadcount;
+        dto.Gap = Math.Max(0, position.ExpectedHeadcount - occupied);
+        if (position.EstablishmentSourceBudgetId is { } sid)
+            dto.SourceBudgetNumber = await _unitOfWork.Repository<ManpowerBudget>().GetQueryable().AsNoTracking()
+                .Where(b => b.Id == sid).Select(b => b.BudgetNumber).FirstOrDefaultAsync(cancellationToken);
+        var projected = occupied + entity.NumberOfPositions;
+        dto.WouldExceed = mode != BudgetEnforcementMode.Off && projected > position.ExpectedHeadcount;
+        dto.WouldBlock = dto.WouldExceed && mode == BudgetEnforcementMode.Block;
+        dto.Message = dto.WouldExceed
+            ? $"{position.Title} is established for {position.ExpectedHeadcount} post(s) and {occupied} are filled. This requisition would take it to {projected}, outside the establishment approved on {position.EstablishmentApprovedOn:dd MMM yyyy}."
+            : $"{position.Title} is established for {position.ExpectedHeadcount} post(s); {occupied} filled, {dto.Gap} to fill.";
+        return dto;
+    }
+
+    /// <summary>
+    /// Round 2b, R5: derives the budget link and the two derived columns. Null = not raised
+    /// against a budget. A line must name this position, belong to this tenant, sit on an
+    /// Approved/Active budget, and cover the desired start date's fiscal year.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Refusals are <see cref="InvalidOperationException"/>, which this controller's rules filter
+    /// answers as 422 — the same code its establishment and budget refusals use. An
+    /// <see cref="ArgumentException"/> here would come back as 404, and a bad reference INSIDE a
+    /// payload is a refusal, not a missing resource (the lane-B2 lesson, learned twice).
+    /// </remarks>
+    private async Task ApplyBudgetLinkAsync(StaffRequisition entity, Guid? lineId, CancellationToken cancellationToken)
+    {
+        if (lineId is null)
+        {
+            entity.ManpowerBudgetLineId = null;
+            entity.IsBudgeted = false;
+            entity.BudgetCode = null;
+            return;
+        }
+        var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
+            .Include(l => l.ManpowerBudget)
+            .FirstOrDefaultAsync(l => l.Id == lineId.Value && l.TenantId == entity.TenantId && !l.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The manpower budget line named does not exist in this organisation.");
+        if (line.PositionId != entity.PositionId)
+            throw new InvalidOperationException("The manpower budget line named is for a different position than the requisition.");
+        var budget = line.ManpowerBudget ?? throw new InvalidOperationException("The manpower budget line named belongs to no budget.");
+        if (budget.IsDeleted || (budget.Status != ManpowerBudgetStatus.Approved && budget.Status != ManpowerBudgetStatus.Active))
+            throw new InvalidOperationException($"Budget {budget.BudgetNumber} is {budget.Status}; only an Approved budget can be drawn down from.");
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var referenceDate = entity.DesiredStartDate != default ? entity.DesiredStartDate : entity.RequestDate;
+        var fiscalYear = HrFiscalYear.For(referenceDate, settings);
+        if (budget.FiscalYear != fiscalYear)
+            throw new InvalidOperationException($"Budget {budget.BudgetNumber} is for {budget.FiscalYear}; the desired start date falls in fiscal year {fiscalYear}.");
+
+        entity.ManpowerBudgetLineId = line.Id;
+        entity.IsBudgeted = true;
+        entity.BudgetCode = budget.BudgetNumber;
+    }
+
+    /// <summary>D-4: an exception must be written down where the check says one is required.</summary>
+    private async Task RequireExceptionJustificationAsync(StaffRequisition entity, CancellationToken cancellationToken)
+    {
+        var check = await BuildBudgetCheckAsync(entity, cancellationToken);
+        if (!check.ExceptionRequired || !string.IsNullOrWhiteSpace(entity.ExceptionJustification)) return;
+        throw new InvalidOperationException(
+            $"This requisition needs an exception justification before it can be submitted: {check.ExceptionReason} " +
+            "Say why the post should be recruited for anyway.");
+    }
+
+    /// <summary>D-2: the establishment as the approver will be asked to decide against it.</summary>
+    private async Task StampEstablishmentSnapshotAsync(StaffRequisition entity, CancellationToken cancellationToken)
+    {
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var est = await BuildEstablishmentCheckAsync(entity, settings, cancellationToken);
+        entity.EstablishmentSnapshotOn = DateTime.UtcNow;
+        entity.EstablishmentSnapshotIsEstablished = est.IsEstablished;
+        entity.EstablishmentSnapshotExpected = est.ExpectedHeadcount;
+        entity.EstablishmentSnapshotFilled = est.Filled;
+        entity.EstablishmentSnapshotSourceBudgetNumber = est.SourceBudgetNumber;
+    }
+
+    /// <inheritdoc />
+    public async Task<RequisitionBudgetCheckDto> PreviewBudgetCheckAsync(RequisitionBudgetCheckPreviewDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var probe = new StaffRequisition
+        {
+            Id = dto.ExcludeRequisitionId ?? Guid.Empty,
+            TenantId = tenantId,
+            PositionId = dto.PositionId,
+            NumberOfPositions = dto.NumberOfPositions,
+            DesiredStartDate = dto.DesiredStartDate ?? DateTime.UtcNow.AddDays(30),
+            RequestDate = DateTime.UtcNow,
+            ManpowerBudgetLineId = dto.ManpowerBudgetLineId,
+        };
+        return await BuildBudgetCheckAsync(probe, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<StaffRequisitionDto> CreateFromBudgetLineAsync(Guid lineId, Guid requestedByUserId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var line = await _unitOfWork.Repository<ManpowerBudgetLine>().GetQueryable().AsNoTracking()
+            .Include(l => l.ManpowerBudget).Include(l => l.Position)
+            .FirstOrDefaultAsync(l => l.Id == lineId && l.TenantId == tenantId && !l.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The manpower budget line does not exist in this organisation.");
+        var budget = line.ManpowerBudget!;
+        if (budget.Status != ManpowerBudgetStatus.Approved && budget.Status != ManpowerBudgetStatus.Active)
+            throw new InvalidOperationException($"Budget {budget.BudgetNumber} is {budget.Status}; requisitions are raised from an Approved budget.");
+        var budgeted = line.PlannedNewPositions > 0 ? line.PlannedNewPositions : Math.Max(0, line.PlannedCount - line.CurrentFilled);
+        var drawdown = await DrawdownAsync(line.Id, null, cancellationToken);
+        var remaining = budgeted - drawdown;
+        if (remaining <= 0)
+            throw new InvalidOperationException(
+                $"Budget {budget.BudgetNumber} authorises {budgeted} new post(s) for {line.Position?.Title} and {drawdown} are already requested; nothing is left to draw down.");
+
+        var start = budget.PeriodStartDate > DateTime.UtcNow ? budget.PeriodStartDate : DateTime.UtcNow.AddDays(30);
+        var dto = new CreateStaffRequisitionDto
+        {
+            PositionId = line.PositionId,
+            OrganizationUnitId = line.Position?.OrganizationUnitId,
+            OrganizationLevelId = line.Position?.OrganizationLevelId,
+            RequisitionTitle = line.Position?.Title ?? "Requisition from budget",
+            Type = StaffRequisitionType.NewPosition,
+            // The budget line's Critical maps to the requisition's Urgent — the two ladders differ by one name.
+            Priority = line.Priority switch { BudgetPriority.Critical => StaffRequisitionPriority.Urgent, BudgetPriority.High => StaffRequisitionPriority.High, BudgetPriority.Low => StaffRequisitionPriority.Low, _ => StaffRequisitionPriority.Medium },
+            NumberOfPositions = remaining,
+            DesiredStartDate = start,
+            BusinessJustification = $"Raised from manpower budget {budget.BudgetNumber} ({budget.FiscalYear}), line for {line.Position?.Title}: {budgeted} new post(s) authorised, {drawdown} already requested.",
+            Notes = string.Empty,
+            AllowInternalCandidates = true,
+            AllowExternalCandidates = true,
+            ManpowerBudgetLineId = line.Id,
+        };
+        return await CreateAsync(dto, tenantId, requestedByUserId, cancellationToken);
     }
 
     /// <summary>

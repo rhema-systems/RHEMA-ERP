@@ -54,6 +54,12 @@ export default function RequisitionDetailPage() {
   const id = (params?.id as string) ?? '';
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // One read of the budget + establishment check for the panel and the card (R5).
+  const check = useQuery({
+    queryKey: ['hr', 'requisition-budget', id],
+    queryFn: () => staffRequisitionService.checkBudget(id),
+    enabled: !!id,
+  });
   const { hasAnyRole } = useAuth();
 
   const isHr = hasAnyRole(['SuperAdmin', 'HR']);
@@ -234,10 +240,9 @@ export default function RequisitionDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
-          {/* Shown before submit because in Block mode the server will refuse on exactly this. */}
-          {(r.status === 'Draft' || r.status === 'Rejected' || r.status === 'Submitted') && (
-            <BudgetCheckPanel requisitionId={id} />
-          )}
+          {/* At every status since R5: the approver a month later wants the same figures the
+              requester saw. In Block mode the server refuses on exactly this. */}
+          <BudgetCheckPanel requisitionId={id} data={check.data} />
 
           <InfoCard title="The role">
             <InfoRow label="Position" value={r.positionTitle} />
@@ -314,9 +319,64 @@ export default function RequisitionDetailPage() {
             </CardContent>
           </Card>
 
-          <InfoCard title="Budget and people">
-            <InfoRow label="Budgeted" value={r.isBudgeted ? 'Yes' : 'No'} />
-            <InfoRow label="Budget code" value={r.budgetCode} />
+          {/* Round 2b, R5 (D-2): the establishment as it stood at submit is the record; the live
+              figure beside it is a courtesy, and a drift is shown, never used to refuse. */}
+          <InfoCard title="Budget and establishment">
+            <InfoRow
+              label="Budgeted"
+              value={
+                r.isBudgeted && r.budgetCode ? (
+                  check.data?.linkedBudgetId ? (
+                    <Link href={`/hr/manpower-budgets/${check.data.linkedBudgetId}`} className="text-primary hover:underline">
+                      Yes · {r.budgetCode}
+                    </Link>
+                  ) : (
+                    `Yes · ${r.budgetCode}`
+                  )
+                ) : (
+                  'No — not raised against an approved budget line'
+                )
+              }
+            />
+            {check.data?.hasBudgetLine && (
+              <InfoRow
+                label="Drawdown"
+                value={`${check.data.drawdown} requested by others · ${check.data.remaining ?? 0} left · this one asks for ${check.data.requestedPositions} of ${check.data.budgetedNewPosts ?? 0} budgeted`}
+              />
+            )}
+            {r.exceptionJustification && <InfoRow label="Exception justification" value={r.exceptionJustification} />}
+            {check.data?.exceptionRequired && !r.exceptionJustification && (
+              <InfoRow label="Exception" value={`Required to submit: ${check.data.exceptionReason}`} />
+            )}
+            <InfoRow
+              label="Establishment at submit"
+              value={
+                r.establishmentSnapshotOn
+                  ? r.establishmentSnapshotIsEstablished
+                    ? `${r.establishmentSnapshotExpected} authorised · ${r.establishmentSnapshotFilled} in post · gap ${Math.max(0, (r.establishmentSnapshotExpected ?? 0) - (r.establishmentSnapshotFilled ?? 0))}${r.establishmentSnapshotSourceBudgetNumber ? ` · set by ${r.establishmentSnapshotSourceBudgetNumber}` : ' · set by HR'} (${formatDate(r.establishmentSnapshotOn)})`
+                    : `Not established (${formatDate(r.establishmentSnapshotOn)})`
+                  : 'Not yet submitted'
+              }
+            />
+            {check.data?.establishment && (
+              <InfoRow
+                label="Establishment now"
+                value={
+                  <span>
+                    {check.data.establishment.isEstablished
+                      ? `${check.data.establishment.expectedHeadcount} authorised · ${check.data.establishment.filled} in post · gap ${check.data.establishment.gap}`
+                      : 'Not established'}
+                    {r.establishmentSnapshotOn && (
+                      (check.data.establishment.isEstablished !== r.establishmentSnapshotIsEstablished ||
+                        check.data.establishment.expectedHeadcount !== r.establishmentSnapshotExpected ||
+                        check.data.establishment.filled !== r.establishmentSnapshotFilled) && (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">changed since submit</span>
+                      )
+                    )}
+                  </span>
+                }
+              />
+            )}
             <InfoRow label="Raised by" value={r.requestedByName} />
             {r.cancelledByName && (
               <>

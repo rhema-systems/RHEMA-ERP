@@ -211,6 +211,9 @@ public interface IManpowerBudgetService
     /// <summary>The grade a position carries, if any, so a budget line can start from it (round 2b, R3).</summary>
     Task<PositionSalaryReferenceDto> GetPositionSalaryReferenceAsync(Guid positionId, CancellationToken cancellationToken = default);
 
+    /// <summary>Approved budget lines a requisition for this position may draw down from, with what each has left (round 2b, R5).</summary>
+    Task<IEnumerable<BudgetLineForRequisitionDto>> GetLinesForPositionAsync(Guid positionId, int? fiscalYear, CancellationToken cancellationToken = default);
+
     Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<ManpowerBudgetLineDto>> GetBudgetLinesAsync(Guid budgetId, CancellationToken cancellationToken = default);
     Task<ManpowerBudgetLineDto> UpdateBudgetLineAsync(UpdateManpowerBudgetLineDto updateDto, CancellationToken cancellationToken = default);

@@ -1118,6 +1118,9 @@ export interface ManpowerBudgetLine {
   salaryNotchNumber?: number | null;
   plannedSalarySource: PlannedSalarySource;
   plannedSalarySourceName?: string;
+  /** Posts on live requisitions drawing down from this line, and what is left (R5, D-8). */
+  requisitionedCount: number;
+  remaining: number;
   currentCount: number;
   currentFilled: number;
   currentVacant: number;

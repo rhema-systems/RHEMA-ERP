@@ -21,6 +21,7 @@ import type {
   RaiseRequisitionResult,
   RequisitionAttachment,
   RequisitionBudgetCheck,
+  RequisitionBudgetCheckPreview,
   RequisitionComment,
   RequisitionCost,
   RequisitionCostForm,
@@ -96,6 +97,16 @@ class StaffRequisitionService {
    */
   checkBudget(id: string): Promise<RequisitionBudgetCheck> {
     return apiService.get<RequisitionBudgetCheck>(`${this.baseUrl}/${id}/budget-check`);
+  }
+
+  /** The same check for a requisition still being typed — the form's live preview (R5). */
+  previewBudgetCheck(payload: RequisitionBudgetCheckPreview): Promise<RequisitionBudgetCheck> {
+    return apiService.post<RequisitionBudgetCheck>(`${this.baseUrl}/budget-check/preview`, payload);
+  }
+
+  /** A Draft drawing down what an approved budget line has left — "out of the budget, raise requisitions" (R5). */
+  createFromBudgetLine(lineId: string): Promise<StaffRequisition> {
+    return apiService.post<StaffRequisition>(`${this.baseUrl}/from-budget-line/${lineId}`, {});
   }
 
   // ── writes ───────────────────────────────────────────────────────────────

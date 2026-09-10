@@ -73,6 +73,13 @@ public static class StaffRequisitionMappingExtensions
             // Budget
             IsBudgeted                  = entity.IsBudgeted,
             BudgetCode                  = entity.BudgetCode,
+            ManpowerBudgetLineId        = entity.ManpowerBudgetLineId,
+            ExceptionJustification      = entity.ExceptionJustification,
+            EstablishmentSnapshotOn     = entity.EstablishmentSnapshotOn,
+            EstablishmentSnapshotIsEstablished = entity.EstablishmentSnapshotIsEstablished,
+            EstablishmentSnapshotExpected = entity.EstablishmentSnapshotExpected,
+            EstablishmentSnapshotFilled = entity.EstablishmentSnapshotFilled,
+            EstablishmentSnapshotSourceBudgetNumber = entity.EstablishmentSnapshotSourceBudgetNumber,
 
             // Recruitment Strategy
             AllowInternalCandidates     = entity.AllowInternalCandidates,
@@ -146,6 +153,13 @@ public static class StaffRequisitionMappingExtensions
             ImpactIfNotFilled           = entity.ImpactIfNotFilled,
             IsBudgeted                  = entity.IsBudgeted,
             BudgetCode                  = entity.BudgetCode,
+            ManpowerBudgetLineId        = entity.ManpowerBudgetLineId,
+            ExceptionJustification      = entity.ExceptionJustification,
+            EstablishmentSnapshotOn     = entity.EstablishmentSnapshotOn,
+            EstablishmentSnapshotIsEstablished = entity.EstablishmentSnapshotIsEstablished,
+            EstablishmentSnapshotExpected = entity.EstablishmentSnapshotExpected,
+            EstablishmentSnapshotFilled = entity.EstablishmentSnapshotFilled,
+            EstablishmentSnapshotSourceBudgetNumber = entity.EstablishmentSnapshotSourceBudgetNumber,
             AllowInternalCandidates     = entity.AllowInternalCandidates,
             AllowExternalCandidates     = entity.AllowExternalCandidates,
             RequestedById               = entity.RequestedById,
@@ -217,8 +231,10 @@ public static class StaffRequisitionMappingExtensions
             TargetStartDateReason       = dto.TargetStartDateReason,
             BusinessJustification       = dto.BusinessJustification,
             ImpactIfNotFilled           = dto.ImpactIfNotFilled,
-            IsBudgeted                  = dto.IsBudgeted,
-            BudgetCode                  = dto.BudgetCode,
+            // ⚠ IsBudgeted / BudgetCode are NOT taken from the DTO since round 2b, R5: the service
+            // derives both from ManpowerBudgetLineId (ApplyBudgetLinkAsync). A client still sending
+            // them is ignored.
+            ExceptionJustification      = dto.ExceptionJustification,
             AllowInternalCandidates     = dto.AllowInternalCandidates,
             AllowExternalCandidates     = dto.AllowExternalCandidates,
             RequestedById               = requestedById,
@@ -251,8 +267,8 @@ public static class StaffRequisitionMappingExtensions
         entity.TargetStartDateReason    = dto.TargetStartDateReason;
         entity.BusinessJustification    = dto.BusinessJustification;
         entity.ImpactIfNotFilled        = dto.ImpactIfNotFilled;
-        entity.IsBudgeted               = dto.IsBudgeted;
-        entity.BudgetCode               = dto.BudgetCode;
+        // ⚠ IsBudgeted / BudgetCode: derived by the service from the budget link (R5), not here.
+        entity.ExceptionJustification   = dto.ExceptionJustification;
         entity.AllowInternalCandidates  = dto.AllowInternalCandidates;
         entity.AllowExternalCandidates  = dto.AllowExternalCandidates;
         entity.Notes                    = dto.Notes;

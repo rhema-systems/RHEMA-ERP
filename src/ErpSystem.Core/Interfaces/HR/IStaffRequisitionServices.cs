@@ -127,6 +127,12 @@ public interface IStaffRequisitionService
     /// </summary>
     Task<RequisitionBudgetCheckDto> CheckBudgetAsync(Guid requisitionId, CancellationToken cancellationToken = default);
 
+    /// <summary>The same check for a requisition that does not exist yet — the form's live preview (round 2b, R5).</summary>
+    Task<RequisitionBudgetCheckDto> PreviewBudgetCheckAsync(RequisitionBudgetCheckPreviewDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>"Out of the recruitment budget you can be raising requisitions": a Draft drawing down what a line has left (R5).</summary>
+    Task<StaffRequisitionDto> CreateFromBudgetLineAsync(Guid lineId, Guid requestedByUserId, CancellationToken cancellationToken = default);
+
     // ── Cost operations ───────────────────────────────────────────────────────
 
     /// <summary>Records a new cost entry against a requisition.</summary>

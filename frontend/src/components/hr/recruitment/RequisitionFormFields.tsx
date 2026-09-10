@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { BudgetLinePicker } from '@/components/hr/recruitment/BudgetLinePicker';
+import { BudgetCheckPanel } from '@/components/hr/recruitment/BudgetCheckPanel';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { locationService } from '@/services/hr/location.service';
 import { humanizeEnum } from '@/lib/hr/attendance-format';
@@ -41,8 +43,9 @@ export interface RequisitionFormState {
   targetFillDate: string;
   businessJustification: string;
   impactIfNotFilled: string;
-  isBudgeted: boolean;
-  budgetCode: string;
+  /** The approved budget line to draw down from, or '' (R5). Replaces the self-declared flag + free-text code. */
+  manpowerBudgetLineId: string;
+  exceptionJustification: string;
   allowInternalCandidates: boolean;
   allowExternalCandidates: boolean;
   notes: string;
@@ -65,8 +68,8 @@ export const emptyRequisitionForm = (): RequisitionFormState => ({
   targetFillDate: '',
   businessJustification: '',
   impactIfNotFilled: '',
-  isBudgeted: false,
-  budgetCode: '',
+  manpowerBudgetLineId: '',
+  exceptionJustification: '',
   allowInternalCandidates: true,
   allowExternalCandidates: true,
   notes: '',
@@ -77,6 +80,8 @@ interface Props {
   onChange: (next: RequisitionFormState) => void;
   /** The position cannot move once a vacancy hangs off the requisition. */
   positionLocked?: boolean;
+  /** Editing: the requisition whose own posts must not count as drawdown in the preview (R5). */
+  requisitionId?: string;
 }
 
 /**
@@ -87,7 +92,7 @@ interface Props {
  * employee endpoints ended up refusing valid-looking payloads. The parent reads them off the
  * selected position when it builds the payload.
  */
-export function RequisitionFormFields({ value, onChange, positionLocked }: Props) {
+export function RequisitionFormFields({ value, onChange, positionLocked, requisitionId }: Props) {
   const set = <K extends keyof RequisitionFormState>(key: K, v: RequisitionFormState[K]) =>
     onChange({ ...value, [key]: v });
 
@@ -335,25 +340,37 @@ export function RequisitionFormFields({ value, onChange, positionLocked }: Props
           <CardTitle className="text-base">Budget and audience</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex items-center gap-2 pt-6">
-              <Checkbox
-                id="isBudgeted"
-                checked={value.isBudgeted}
-                onCheckedChange={(c) => set('isBudgeted', c === true)}
-              />
-              <Label htmlFor="isBudgeted" className="font-normal">
-                This headcount is already budgeted
-              </Label>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="budgetCode">Budget code</Label>
-              <Input
-                id="budgetCode"
-                value={value.budgetCode}
-                onChange={(e) => set('budgetCode', e.target.value)}
-              />
-            </div>
+          {/* Round 2b, R5: budgeted is a fact about a link. The picker offers the approved lines
+              for the post; the live check below says what the server will say at submit; the
+              exception box appears when the check says one will be required (D-4). */}
+          <BudgetLinePicker
+            positionId={value.positionId}
+            value={value.manpowerBudgetLineId}
+            onChange={(id) => set('manpowerBudgetLineId', id)}
+          />
+          {value.positionId && (
+            <BudgetCheckPanel
+              preview={{
+                positionId: value.positionId,
+                numberOfPositions: Math.max(1, value.numberOfPositions || 1),
+                desiredStartDate: value.desiredStartDate || null,
+                manpowerBudgetLineId: value.manpowerBudgetLineId || null,
+                excludeRequisitionId: requisitionId ?? null,
+              }}
+            />
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="exceptionJustification">Exception justification</Label>
+            <Textarea
+              id="exceptionJustification"
+              rows={3}
+              value={value.exceptionJustification}
+              onChange={(e) => set('exceptionJustification', e.target.value)}
+              placeholder="Why this post should be recruited for without an approved budget line, or with no establishment gap."
+            />
+            <p className="text-xs text-muted-foreground">
+              Required to submit when the check above says so. The approver sees it beside the check.
+            </p>
           </div>
 
           <div className="space-y-2">

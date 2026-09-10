@@ -37,6 +37,7 @@ import {
   type BudgetLineFormState,
 } from '@/components/hr/manpower/BudgetLineDialog';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
+import { staffRequisitionService } from '@/services/hr/recruitment.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { workflowApiService } from '@/services/workflow-api.service';
 
@@ -162,6 +163,7 @@ export default function ManpowerBudgetDetailPage() {
   const status = (budget.statusName ?? budget.status) as string;
   const isDraft = status === 'Draft';
   const isRejected = status === 'Rejected';
+  const isApproved = status === 'Approved' || status === 'Active';
   // A rejected budget is the author's again: correct it and resubmit (the server allows both).
   const canEdit = isDraft || isRejected;
   const canApprove = workflow?.canCurrentUserApprove === true;
@@ -368,7 +370,9 @@ export default function ManpowerBudgetDetailPage() {
                   <TableHead className="text-right">Average salary</TableHead>
                   <TableHead className="text-right">Total cost</TableHead>
                   <TableHead>Priority</TableHead>
-                  {isDraft && <TableHead />}
+                  {/* R5: what requisitions have drawn down from the line, and what is left. */}
+                  <TableHead className="text-right">Requisitioned</TableHead>
+                  {(isDraft || isApproved) && <TableHead />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -395,6 +399,29 @@ export default function ManpowerBudgetDetailPage() {
                     <TableCell>
                       <Badge variant="outline">{l.priority}</Badge>
                     </TableCell>
+                    <TableCell className="text-right">
+                      {l.requisitionedCount}
+                      <div className="text-xs text-muted-foreground">{l.remaining > 0 ? `${l.remaining} left` : 'nothing left'}</div>
+                    </TableCell>
+                    {isApproved && (
+                      <TableCell className="text-right">
+                        {/* "Out of the recruitment budget you can be raising requisitions." */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy !== null || l.remaining <= 0}
+                          title={l.remaining <= 0 ? 'Nothing left on this line' : 'Raise a requisition drawing down what is left'}
+                          onClick={() =>
+                            run('raise a requisition', async () => {
+                              const req = await staffRequisitionService.createFromBudgetLine(l.id);
+                              router.push(`/hr/recruitment/requisitions/${req.id}`);
+                            }, 'Requisition drafted')
+                          }
+                        >
+                          Raise requisition
+                        </Button>
+                      </TableCell>
+                    )}
                     {isDraft && (
                       <TableCell className="text-right">
                         <Button

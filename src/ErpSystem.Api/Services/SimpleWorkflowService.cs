@@ -1873,6 +1873,11 @@ public class SimpleWorkflowService : IWorkflowService
             context["priority"] = requisition.Priority.ToString();
             context["numberOfPositions"] = requisition.NumberOfPositions;
             context["isBudgeted"] = requisition.IsBudgeted;
+            // Round 2b, R5: budgeted is a fact about a link now, and a definition may route an
+            // unbudgeted requisition to a different approver.
+            context["manpowerBudgetLineId"] = requisition.ManpowerBudgetLineId;
+            context["manpowerBudgetNumber"] = requisition.BudgetCode;
+            context["hasBudgetLine"] = requisition.ManpowerBudgetLineId != null;
             context["requestedById"] = requisition.RequestedById;
             context["desiredStartDate"] = requisition.DesiredStartDate;
             context["status"] = requisition.Status.ToString();

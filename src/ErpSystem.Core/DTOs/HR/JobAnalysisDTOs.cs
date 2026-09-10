@@ -1204,6 +1204,10 @@ public class ManpowerBudgetLineDto : BaseDto
     public int? SalaryNotchNumber { get; set; }
     public PlannedSalarySource PlannedSalarySource { get; set; }
     public string PlannedSalarySourceName => PlannedSalarySource.ToString();
+
+    /// <summary>Posts on live requisitions drawing down from this line, and what is left (round 2b, R5, D-8). Filled by the list read.</summary>
+    public int RequisitionedCount { get; set; }
+    public int Remaining { get; set; }
     
     // Current
     public int CurrentCount { get; set; }

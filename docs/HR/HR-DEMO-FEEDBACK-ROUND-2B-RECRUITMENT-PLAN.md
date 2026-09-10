@@ -1,6 +1,6 @@
 # HR demo feedback, round 2b — Recruitment: budget, establishment, requisition
 
-> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2) and R4a (60 ×2, `hr-jobarch/run-r4.mjs`) DONE 2026-09-10; R5 next.** Source: the feedback document *HR Demo Meetings —
+> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2), R4a (60 ×2) and R5 (70 ×2, `hr-jobarch/run-r5.mjs`) DONE 2026-09-10; R7 next.** Source: the feedback document *HR Demo Meetings —
 > Changes and Additions 2* (2 pages, section RECRUITMENT), brought by the user on 2026-09-10 after
 > the round-2 HR demo, plus one follow-up from the user the same day (Finance must approve and
 > process requisition costs). Every bullet of the document is accounted for in § 2 — as a build
@@ -259,7 +259,26 @@ screen: unit picker, "not established" rendered as such, exits-due column, **Pla
 button; admin screen: confirmation + reason on withdraw; budget detail: "Refresh lines from the
 establishment" (Draft only, never overwrites). Harness `run-r4.mjs`.
 
-### R5 — The requisition draws down from the budget · migration `AddStaffRequisitionBudgetLink`
+### R5 — The requisition draws down from the budget · migration `20260910201924_AddStaffRequisitionBudgetLink` · ✅ **DONE 2026-09-10** · 70 ×2
+
+- [x] `StaffRequisition.ManpowerBudgetLineId` (Restrict, one-way nav), `ExceptionJustification`, five `EstablishmentSnapshot*` columns; migration rewritten to guarded SQL (all nullable, no backfill — NULL is true of every existing row); listed.
+- [x] `IsBudgeted`/`BudgetCode` **derived** by `ApplyBudgetLinkAsync` on create and update (the DTO fields stay but are ignored); a line must name the position, sit on an Approved/Active budget and cover the desired start's fiscal year — now the POLICY's fiscal year via the new `HrFiscalYear.For` (§ 3 defect 3).
+- [x] `BuildBudgetCheckAsync`: linked line first, else the old match; `BudgetedNewPosts` (the line's `PlannedNewPositions`, falling back to planned − filled), `Drawdown` over OTHER live requisitions on the line (D-8), `Remaining`; the old `PlannedCount`/`CurrentFilled`/`ProjectedHeadcount` fields keep their meaning so slices 7/8 still read; an `Establishment` block from a new `BuildEstablishmentCheckAsync` that `CheckEstablishmentAsync` now also uses; `ExceptionRequired`/`ExceptionReason`; `WouldBlock` under Block for over-budget OR unlinked (D-4); a linked budget since rejected is reported by name, not silently dropped (Q-R4).
+- [x] Submit: `RequireExceptionJustificationAsync` (D-4) then `StampEstablishmentSnapshotAsync` (D-2), both after the existing enforcement.
+- [x] `POST api/StaffRequisitions/budget-check/preview` (any internal user; the form's live check), `POST api/StaffRequisitions/from-budget-line/{lineId}` (a Draft for what the line has left; refused when nothing is), `GET api/JobAnalysis/budgets/lines/for-position/{id}` (the picker), `ManpowerBudgetLineDto.RequisitionedCount/Remaining` on the list read; routing context gains `manpowerBudgetLineId`, `manpowerBudgetNumber`, `hasBudgetLine`.
+- [x] `BudgetLinePicker.tsx` replaces the checkbox + textbox; `BudgetCheckPanel.tsx` takes a `requisitionId`, a `preview` or `data`, shows two blocks, and renders at every status; `RequisitionFormFields` gains the picker, the live preview and the exception textarea; the detail page's "Budget and establishment" card shows the link, the drawdown, the exception and **snapshot vs live with a "changed since submit" badge**; the budget page's line table gains Requisitioned/Remaining and **Raise requisition** on an approved budget.
+- [x] Harness `run-r5.mjs` 70 ×2; regression R4a 60, R3 55, R2 57, R1 36, slice 7 47, slice 8 40, slice 12 41.
+
+**What the build changed from the plan, and what it found.**
+
+1. **Raise-from-line lives on `StaffRequisitionsController`** (`from-budget-line/{lineId}`), not on the JobAnalysis side as the plan wrote — the requisition service owns creation, and putting it there avoids a circular service dependency.
+2. **The requisition's priority ladder tops out at `Urgent`, not `Critical`** (the budget line's does): one build cycle. Mapped Critical → Urgent.
+3. ⚠ **`StaffRequisitionsController` answers `ArgumentException` with 404 and `InvalidOperationException` with 422** (its rules filter; slice 8 asserts 422 for the establishment). The link checks first threw `ArgumentException` and "budget is Draft" came back as *not found* — the B2 lesson a second time. All link refusals are `InvalidOperationException` → **422**. The round-2b doc's "check the sibling door's convention before picking an exception type" was written and then not followed on the first cut.
+4. **Slices 7 and 8 raise unlinked requisitions with a self-declared `isBudgeted: true`** and submit them under Warn; the flag is ignored now and the submits need `exceptionJustification` — both fixtures carry one, with a comment. ⚠ **Every other harness folder that submits a requisition (hr-recruitment, hr-w3-permissions, hr-portal, …) will hit the same 422 until its fixture says why**; recorded, not fixed here — hr-recruitment's suite is already stopped on its own definition check (R4a note 4).
+5. **The exception rule is a submit-time rule only**, not an approve-time one: an approver acts on what was submitted, and refusing at step 3 of a chain for a missing sentence would be the wrong moment (the slice-8 lesson about failing late).
+6. **Not browser-walked.**
+
+The plan as written:
 
 `StaffRequisition.ManpowerBudgetLineId` (Restrict), `ExceptionJustification`, five establishment
 snapshot columns stamped at submit (D-2). `IsBudgeted` derived; `BudgetCode` = budget number;

@@ -91,6 +91,40 @@ public class StaffRequisition : TenantEntity
 	[MaxLength(50)]
     public string? BudgetCode { get; set; }
 
+    /// <summary>
+    /// The approved manpower budget line this requisition draws down from (round 2b, R5). Null =
+    /// not raised against a budget. When set, <see cref="IsBudgeted"/> is true and
+    /// <see cref="BudgetCode"/> holds the budget's number — <b>both derived by the service, never
+    /// typed</b>: before R5 the flag was a self-declared checkbox and the code a free-text box
+    /// with no reader anywhere.
+    /// </summary>
+    public Guid? ManpowerBudgetLineId { get; set; }
+
+    [ForeignKey(nameof(ManpowerBudgetLineId))]
+    public virtual ManpowerBudgetLine? ManpowerBudgetLine { get; set; }
+
+    /// <summary>
+    /// Why this requisition is raised without an approved budget line, or for a post with no
+    /// establishment gap (decision D-4). Required at submit whenever the budget check says
+    /// <c>ExceptionRequired</c> and enforcement is not Block; under Block an unlinked requisition
+    /// is refused outright.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? ExceptionJustification { get; set; }
+
+    /// <summary>
+    /// The establishment as it stood when the requisition was submitted (decision D-2): what the
+    /// approver is asked to decide against, kept even after the live figures move. The detail page
+    /// shows the live figures beside it and flags drift. Refreshed on every (re)submit.
+    /// </summary>
+    public DateTime? EstablishmentSnapshotOn { get; set; }
+    public bool? EstablishmentSnapshotIsEstablished { get; set; }
+    public int? EstablishmentSnapshotExpected { get; set; }
+    public int? EstablishmentSnapshotFilled { get; set; }
+
+    [MaxLength(50)]
+    public string? EstablishmentSnapshotSourceBudgetNumber { get; set; }
+
     // Recruitment Strategy
     public bool AllowInternalCandidates { get; set; }
     public bool AllowExternalCandidates { get; set; }

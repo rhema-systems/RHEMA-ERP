@@ -11,6 +11,16 @@ namespace ErpSystem.Core.DTOs.HR;
 
 public class StaffRequisitionDto : BaseDto
 {
+    // Round 2b, R5: the budget link (derived — IsBudgeted/BudgetCode follow it) and the
+    // establishment as it stood at submit.
+    public Guid? ManpowerBudgetLineId { get; set; }
+    public string? ExceptionJustification { get; set; }
+    public DateTime? EstablishmentSnapshotOn { get; set; }
+    public bool? EstablishmentSnapshotIsEstablished { get; set; }
+    public int? EstablishmentSnapshotExpected { get; set; }
+    public int? EstablishmentSnapshotFilled { get; set; }
+    public string? EstablishmentSnapshotSourceBudgetNumber { get; set; }
+
     public Guid TenantId { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public string? RequisitionTitle { get; set; }
@@ -141,6 +151,18 @@ public class StaffRequisitionStatusSummaryDto
 
 public class CreateStaffRequisitionDto : CreateDtoBase
 {
+    /// <summary>
+    /// The approved manpower budget line to draw down from (round 2b, R5), or null. The service
+    /// checks it names this position, that its budget is Approved/Active, and that the desired
+    /// start date falls in the budget's fiscal year. ⚠ <c>IsBudgeted</c> and <c>BudgetCode</c> on
+    /// this DTO are IGNORED since R5 — both are derived from the link.
+    /// </summary>
+    public Guid? ManpowerBudgetLineId { get; set; }
+
+    /// <summary>Why the requisition is raised without a budget line, or for a post with no gap (D-4).</summary>
+    [MaxLength(2000)]
+    public string? ExceptionJustification { get; set; }
+
     [Required]
     public Guid PositionId { get; set; }
 
@@ -206,6 +228,12 @@ public class CreateStaffRequisitionDto : CreateDtoBase
 
 public class UpdateStaffRequisitionDto : UpdateDtoBase
 {
+    /// <summary>As on create: the budget line to draw down from, or null. IsBudgeted/BudgetCode are ignored.</summary>
+    public Guid? ManpowerBudgetLineId { get; set; }
+
+    [MaxLength(2000)]
+    public string? ExceptionJustification { get; set; }
+
     [Required]
     public Guid PositionId { get; set; }
 
@@ -533,6 +561,54 @@ public class StaffRequisitionHistoryDto : BaseDto
 /// no budgeted headcount for the position, so enforcement never applies (hiring is never blocked
 /// for an unbudgeted position).
 /// </summary>
+/// <summary>The establishment side of the requisition check (round 2b, R5) — what <c>CheckEstablishmentAsync</c> refuses on, now visible before submit.</summary>
+public class RequisitionEstablishmentCheckDto
+{
+    public BudgetEnforcementMode Mode { get; set; }
+    public string ModeName => Mode.ToString();
+    public bool IsEstablished { get; set; }
+    public int? ExpectedHeadcount { get; set; }
+    /// <summary>Live count of people in the post — not a figure anyone typed.</summary>
+    public int Filled { get; set; }
+    /// <summary>Null when not established: no gap can be stated.</summary>
+    public int? Gap { get; set; }
+    public string? SourceBudgetNumber { get; set; }
+    /// <summary>True when filled + requested would exceed an authorised establishment.</summary>
+    public bool WouldExceed { get; set; }
+    /// <summary>True when the mode is Block and the establishment would be exceeded.</summary>
+    public bool WouldBlock { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>A check for a requisition that does not exist yet — the form asks before saving (R5).</summary>
+public class RequisitionBudgetCheckPreviewDto
+{
+    [Required]
+    public Guid PositionId { get; set; }
+    [Range(1, 1000)]
+    public int NumberOfPositions { get; set; } = 1;
+    public DateTime? DesiredStartDate { get; set; }
+    public Guid? ManpowerBudgetLineId { get; set; }
+    /// <summary>When previewing an edit: the requisition whose own posts must not count as drawdown.</summary>
+    public Guid? ExcludeRequisitionId { get; set; }
+}
+
+/// <summary>An approved budget line a requisition may draw down from — the form's picker (R5).</summary>
+public class BudgetLineForRequisitionDto
+{
+    public Guid LineId { get; set; }
+    public Guid BudgetId { get; set; }
+    public string BudgetNumber { get; set; } = string.Empty;
+    public int FiscalYear { get; set; }
+    public string BudgetStatus { get; set; } = string.Empty;
+    public string? OrganizationUnitName { get; set; }
+    public int PlannedCount { get; set; }
+    public int PlannedNewPositions { get; set; }
+    public int RequisitionedCount { get; set; }
+    public int Remaining { get; set; }
+    public decimal PlannedAverageSalary { get; set; }
+}
+
 public class RequisitionBudgetCheckDto
 {
     /// <summary>Tenant policy: how strictly the budget is enforced (Off / Warn / Block).</summary>
@@ -565,6 +641,25 @@ public class RequisitionBudgetCheckDto
 
     /// <summary>Human-readable explanation for the UI / API error message.</summary>
     public string Message { get; set; } = string.Empty;
+
+    // ── Round 2b, R5 ──────────────────────────────────────────────────────────────────────
+    /// <summary>True when the requisition names a budget line whose budget is Approved/Active.</summary>
+    public bool IsLinked { get; set; }
+    public Guid? LinkedLineId { get; set; }
+    public Guid? LinkedBudgetId { get; set; }
+    public string? LinkedBudgetNumber { get; set; }
+    /// <summary>The linked budget's status — a link to a budget since rejected or withdrawn is reported, not silently dropped (Q-R4).</summary>
+    public string? LinkedBudgetStatus { get; set; }
+    /// <summary>New posts the line budgets for (its PlannedNewPositions; PlannedCount − CurrentFilled where that is 0).</summary>
+    public int? BudgetedNewPosts { get; set; }
+    /// <summary>Posts on OTHER requisitions drawing down from the same line, not Cancelled or Rejected (D-8).</summary>
+    public int Drawdown { get; set; }
+    /// <summary>BudgetedNewPosts − Drawdown, before this requisition.</summary>
+    public int? Remaining { get; set; }
+    public RequisitionEstablishmentCheckDto? Establishment { get; set; }
+    /// <summary>True when an exception justification is required to submit (no approved line, or no gap on an established post).</summary>
+    public bool ExceptionRequired { get; set; }
+    public string? ExceptionReason { get; set; }
 }
 
 #endregion

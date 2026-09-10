@@ -9260,6 +9260,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.OrganizationUnitId);
             entity.HasIndex(x => x.LocationId);
 
+            // Round 2b, R5: the budget line this requisition draws down from. Restrict — a line
+            // with requisitions on it cannot be deleted from under them.
+            entity.HasIndex(x => x.ManpowerBudgetLineId);
+            entity.HasOne(x => x.ManpowerBudgetLine)
+                .WithMany()
+                .HasForeignKey(x => x.ManpowerBudgetLineId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // Requisition numbers must be unique per tenant. JobVacancy / JobCandidate / JobApplication
             // already have this; StaffRequisition did not, so the old Count()+1 generator could hand out
             // a duplicate REQ number and the database would happily store it.

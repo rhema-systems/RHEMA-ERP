@@ -3032,7 +3032,62 @@ public class ManpowerBudgetService : IManpowerBudgetService
         await GetOwnedBudgetAsync(budgetId);
         var tenantId = GetTenantId();
         var entities = await _budgetLineRepository.GetByBudgetIdAsync(budgetId);
-        return entities.Where(l => l.TenantId == tenantId).ToDtoList();
+        var dtos = entities.Where(l => l.TenantId == tenantId).ToDtoList();
+        await DecorateDrawdownAsync(dtos, cancellationToken);
+        return dtos;
+    }
+
+    /// <summary>D-8: posts on live requisitions per line, and what each line has left (round 2b, R5).</summary>
+    private async Task DecorateDrawdownAsync(List<ManpowerBudgetLineDto> lines, CancellationToken cancellationToken)
+    {
+        if (lines.Count == 0) return;
+        var ids = lines.Select(l => l.Id).ToList();
+        var drawn = await _unitOfWork.Repository<Entities.HR.Requisition.StaffRequisition>().GetQueryable().AsNoTracking()
+            .Where(r => r.ManpowerBudgetLineId != null && ids.Contains(r.ManpowerBudgetLineId.Value) && !r.IsDeleted
+                     && r.Status != StaffRequisitionStatus.Cancelled && r.Status != StaffRequisitionStatus.Rejected)
+            .GroupBy(r => r.ManpowerBudgetLineId!.Value)
+            .Select(g => new { LineId = g.Key, Posts = g.Sum(r => r.NumberOfPositions) })
+            .ToDictionaryAsync(g => g.LineId, g => g.Posts, cancellationToken);
+        foreach (var l in lines)
+        {
+            drawn.TryGetValue(l.Id, out var posts);
+            var budgeted = l.PlannedNewPositions > 0 ? l.PlannedNewPositions : Math.Max(0, l.PlannedCount - l.CurrentFilled);
+            l.RequisitionedCount = posts;
+            l.Remaining = budgeted - posts;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<BudgetLineForRequisitionDto>> GetLinesForPositionAsync(Guid positionId, int? fiscalYear, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var lines = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Include(l => l.ManpowerBudget).ThenInclude(b => b.OrganizationUnit)
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.PositionId == positionId
+                     && l.ManpowerBudget != null && !l.ManpowerBudget.IsDeleted
+                     && (l.ManpowerBudget.Status == ManpowerBudgetStatus.Approved || l.ManpowerBudget.Status == ManpowerBudgetStatus.Active)
+                     && (fiscalYear == null || l.ManpowerBudget.FiscalYear == fiscalYear.Value))
+            .ToListAsync(cancellationToken);
+        var dtos = lines.Select(l => l.ToDto()).ToList();
+        await DecorateDrawdownAsync(dtos, cancellationToken);
+        return lines.Select(l =>
+        {
+            var d = dtos.First(x => x.Id == l.Id);
+            return new BudgetLineForRequisitionDto
+            {
+                LineId = l.Id,
+                BudgetId = l.ManpowerBudgetId,
+                BudgetNumber = l.ManpowerBudget!.BudgetNumber,
+                FiscalYear = l.ManpowerBudget.FiscalYear,
+                BudgetStatus = l.ManpowerBudget.Status.ToString(),
+                OrganizationUnitName = l.ManpowerBudget.OrganizationUnit?.Name,
+                PlannedCount = l.PlannedCount,
+                PlannedNewPositions = l.PlannedNewPositions,
+                RequisitionedCount = d.RequisitionedCount,
+                Remaining = d.Remaining,
+                PlannedAverageSalary = l.PlannedAverageSalary,
+            };
+        }).OrderByDescending(x => x.FiscalYear).ThenBy(x => x.BudgetNumber).ToList();
     }
 
     public async Task<ManpowerBudgetLineDto> UpdateBudgetLineAsync(UpdateManpowerBudgetLineDto updateDto, CancellationToken cancellationToken = default)

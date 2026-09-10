@@ -62,8 +62,8 @@ export default function EditRequisitionPage() {
       targetFillDate: dateInput(data.targetFillDate),
       businessJustification: data.businessJustification,
       impactIfNotFilled: data.impactIfNotFilled ?? '',
-      isBudgeted: data.isBudgeted,
-      budgetCode: data.budgetCode ?? '',
+      manpowerBudgetLineId: data.manpowerBudgetLineId ?? '',
+      exceptionJustification: data.exceptionJustification ?? '',
       allowInternalCandidates: data.allowInternalCandidates,
       allowExternalCandidates: data.allowExternalCandidates,
       notes: data.notes ?? '',
@@ -93,8 +93,8 @@ export default function EditRequisitionPage() {
         targetFillDate: form.targetFillDate || null,
         businessJustification: form.businessJustification.trim(),
         impactIfNotFilled: form.impactIfNotFilled.trim() || null,
-        isBudgeted: form.isBudgeted,
-        budgetCode: form.budgetCode.trim() || null,
+        manpowerBudgetLineId: form.manpowerBudgetLineId || null,
+        exceptionJustification: form.exceptionJustification.trim() || null,
         allowInternalCandidates: form.allowInternalCandidates,
         allowExternalCandidates: form.allowExternalCandidates,
         notes: form.notes.trim() || null,
@@ -161,6 +161,7 @@ export default function EditRequisitionPage() {
             value={form}
             onChange={setForm}
             positionLocked={!!data.jobVacancyId}
+            requisitionId={id}
           />
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => router.push(`/hr/recruitment/requisitions/${id}`)}>

@@ -803,6 +803,13 @@ public class JobAnalysisController : ControllerBase
         Guid id, [FromQuery] bool includeUnestablished = true, CancellationToken cancellationToken = default)
         => Ok(await _manpowerBudgetService.AddLinesFromEstablishmentAsync(id, includeUnestablished, cancellationToken));
 
+    /// <summary>Approved budget lines a requisition for this position may draw down from (round 2b, R5). Any internal user: the requester's picker.</summary>
+    [Authorize(Policy = "InternalOnly")]
+    [HttpGet("budgets/lines/for-position/{positionId:guid}")]
+    public async Task<ActionResult<IEnumerable<BudgetLineForRequisitionDto>>> GetLinesForPosition(
+        Guid positionId, [FromQuery] int? fiscalYear, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetLinesForPositionAsync(positionId, fiscalYear, cancellationToken));
+
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
     [HttpGet("budgets/pending-approvals")]
     public async Task<ActionResult<IEnumerable<ManpowerBudgetSummaryDto>>> GetPendingBudgetApprovals()

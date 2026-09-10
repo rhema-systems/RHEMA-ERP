@@ -149,8 +149,17 @@ export interface StaffRequisition {
   businessJustification: string;
   impactIfNotFilled?: string | null;
 
+  /** Derived from `manpowerBudgetLineId` since round 2b, R5; `budgetCode` is the budget's number. */
   isBudgeted: boolean;
   budgetCode?: string | null;
+  manpowerBudgetLineId?: string | null;
+  exceptionJustification?: string | null;
+  /** The establishment as it stood at submit (D-2). */
+  establishmentSnapshotOn?: string | null;
+  establishmentSnapshotIsEstablished?: boolean | null;
+  establishmentSnapshotExpected?: number | null;
+  establishmentSnapshotFilled?: number | null;
+  establishmentSnapshotSourceBudgetNumber?: string | null;
 
   allowInternalCandidates: boolean;
   allowExternalCandidates: boolean;
@@ -225,14 +234,56 @@ export interface CreateStaffRequisition {
   targetStartDateReason?: string | null;
   businessJustification: string;
   impactIfNotFilled?: string | null;
-  isBudgeted: boolean;
+  /** ⚠ Ignored by the server since R5 — both are derived from `manpowerBudgetLineId`. */
+  isBudgeted?: boolean;
   budgetCode?: string | null;
+  /** The approved budget line to draw down from, or null (R5). */
+  manpowerBudgetLineId?: string | null;
+  /** Required at submit when the check says `exceptionRequired` and enforcement is not Block (D-4). */
+  exceptionJustification?: string | null;
   allowInternalCandidates: boolean;
   allowExternalCandidates: boolean;
   notes?: string | null;
 }
 
 export type UpdateStaffRequisition = CreateStaffRequisition & { id: string };
+
+/** The establishment half of the check (R5): what used to be thrown at submit and never shown. */
+export interface RequisitionEstablishmentCheck {
+  mode: 'Off' | 'Warn' | 'Block';
+  isEstablished: boolean;
+  expectedHeadcount?: number | null;
+  filled: number;
+  gap?: number | null;
+  sourceBudgetNumber?: string | null;
+  wouldExceed: boolean;
+  wouldBlock: boolean;
+  message: string;
+}
+
+/** The form's live preview input (R5): the same check for a requisition not yet saved. */
+export interface RequisitionBudgetCheckPreview {
+  positionId: string;
+  numberOfPositions: number;
+  desiredStartDate?: string | null;
+  manpowerBudgetLineId?: string | null;
+  excludeRequisitionId?: string | null;
+}
+
+/** An approved budget line a requisition may draw down from — the picker's rows (R5). */
+export interface BudgetLineForRequisition {
+  lineId: string;
+  budgetId: string;
+  budgetNumber: string;
+  fiscalYear: number;
+  budgetStatus: string;
+  organizationUnitName?: string | null;
+  plannedCount: number;
+  plannedNewPositions: number;
+  requisitionedCount: number;
+  remaining: number;
+  plannedAverageSalary: number;
+}
 
 /**
  * The result of checking a requisition against its position's approved manpower budget.
@@ -251,6 +302,19 @@ export interface RequisitionBudgetCheck {
   isOverBudget: boolean;
   wouldBlock: boolean;
   message: string;
+  // ── round 2b, R5 ──
+  isLinked: boolean;
+  linkedLineId?: string | null;
+  linkedBudgetId?: string | null;
+  linkedBudgetNumber?: string | null;
+  linkedBudgetStatus?: string | null;
+  budgetedNewPosts?: number | null;
+  /** Posts on OTHER live requisitions drawing down from the same line (D-8). */
+  drawdown: number;
+  remaining?: number | null;
+  establishment?: RequisitionEstablishmentCheck | null;
+  exceptionRequired: boolean;
+  exceptionReason?: string | null;
 }
 
 export interface RequisitionCost {

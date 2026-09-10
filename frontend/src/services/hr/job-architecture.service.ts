@@ -1,5 +1,6 @@
 import { apiService } from '../api.service';
 import type { PagedResult } from '@/types/hr/common';
+import type { BudgetLineForRequisition } from '@/types/hr/recruitment';
 import type {
   BatchAssessmentResult,
   Competency,
@@ -873,6 +874,13 @@ class JobArchitectureService {
   getEstablishmentList(organizationUnitId?: string | null) {
     return apiService.get<PositionEstablishment[]>(`${this.jobs}/establishment`, {
       organizationUnitId: organizationUnitId ?? undefined,
+    });
+  }
+
+  /** Approved budget lines a requisition for this position may draw down from, with what each has left (R5). */
+  getLinesForPosition(positionId: string, fiscalYear?: number | null) {
+    return apiService.get<BudgetLineForRequisition[]>(`${this.jobs}/budgets/lines/for-position/${positionId}`, {
+      fiscalYear: fiscalYear ?? undefined,
     });
   }
 

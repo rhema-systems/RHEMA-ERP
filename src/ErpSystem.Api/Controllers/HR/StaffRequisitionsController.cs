@@ -133,6 +133,28 @@ public class StaffRequisitionsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// The budget and establishment check for a requisition that is still being typed (round 2b,
+    /// R5). Any internal user: the requester sees the consequence before saving, not after.
+    /// </summary>
+    [HttpPost("budget-check/preview")]
+    public async Task<ActionResult<RequisitionBudgetCheckDto>> PreviewBudgetCheck([FromBody] RequisitionBudgetCheckPreviewDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _service.PreviewBudgetCheckAsync(dto, ct));
+    }
+
+    /// <summary>Raises a Draft requisition drawing down what an approved budget line has left (round 2b, R5).</summary>
+    [HttpPost("from-budget-line/{lineId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<StaffRequisitionDto>> CreateFromBudgetLine(Guid lineId, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        var created = await _service.CreateFromBudgetLineAsync(lineId, employeeId.Value, ct);
+        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+    }
+
     [HttpGet("number/{requisitionNumber}")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<StaffRequisitionDto>> GetByRequisitionNumber(string requisitionNumber, CancellationToken ct)
