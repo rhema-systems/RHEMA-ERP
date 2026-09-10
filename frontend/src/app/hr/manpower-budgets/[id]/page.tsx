@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { PlanningBaselinePanel } from '@/components/hr/manpower/PlanningBaselinePanel';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { workflowApiService } from '@/services/workflow-api.service';
@@ -111,6 +112,19 @@ export default function ManpowerBudgetDetailPage() {
   const { data: positions } = useQuery({
     queryKey: ['positions', 'all'],
     queryFn: () => employeePositionService.getAll(),
+  });
+
+  // The planning baseline, recomputed live for the budget's own unit and period (R2). It is
+  // labelled "as of today": a budget written in January and read in November will differ from
+  // it, and the live figure is the true one.
+  const baselineArgs = budget?.organizationUnitId && budget.periodStartDate && budget.periodEndDate
+    ? { unit: budget.organizationUnitId, start: budget.periodStartDate.slice(0, 10), end: budget.periodEndDate.slice(0, 10) }
+    : null;
+  const baseline = useQuery({
+    queryKey: ['manpower-baseline', baselineArgs?.unit, baselineArgs?.start, baselineArgs?.end],
+    queryFn: () => jobArchitectureService.getPlanningBaseline(baselineArgs!.unit, baselineArgs!.start, baselineArgs!.end),
+    enabled: !!baselineArgs,
+    staleTime: 60 * 1000,
   });
 
   const refresh = () => {
@@ -302,6 +316,16 @@ export default function ManpowerBudgetDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <PlanningBaselinePanel
+        baseline={baseline.data}
+        loading={!!baselineArgs && baseline.isLoading}
+        error={baseline.isError ? 'The planning baseline could not be loaded.' : undefined}
+        idle={!baselineArgs}
+        title="Planning baseline, as of today"
+        onRefresh={baselineArgs ? () => baseline.refetch() : undefined}
+        compareTo={{ currentHeadcount: budget.currentHeadcount, plannedTerminations: budget.plannedTerminations }}
+      />
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

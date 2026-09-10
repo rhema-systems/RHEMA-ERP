@@ -38,6 +38,15 @@ public static class HrBasicPay
     /// entirely when the basis is negotiated.
     /// </param>
     /// <param name="payrollBasic">Payroll's active monthly basic salary for the person, if it has one.</param>
+    /// <summary>
+    /// The same rule with no payroll figure to hand — for planning reads that sum hundreds of
+    /// people and must not call payroll per person (round 2b, R2). A negotiated employee therefore
+    /// contributes the flat figure on their record, or nothing; the caller's note says so.
+    /// </summary>
+    public static (decimal? Amount, string Source) ResolveForPlanning(
+        Employee employee, EmployeeSalaryAssignment? assignment)
+        => Resolve(employee, assignment, payrollBasic: null);
+
     public static (decimal? Amount, string Source) Resolve(
         Employee employee, EmployeeSalaryAssignment? assignment, decimal? payrollBasic)
     {

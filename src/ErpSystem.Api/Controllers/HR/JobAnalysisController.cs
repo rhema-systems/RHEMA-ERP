@@ -755,6 +755,23 @@ public class JobAnalysisController : ControllerBase
     public async Task<ActionResult<ManpowerBudgetDto?>> GetCurrentOrganizationUnitBudget(Guid organizationUnitId)
         => Ok(await _manpowerBudgetService.GetCurrentBudgetForOrganizationUnitAsync(organizationUnitId));
 
+    /// <summary>
+    /// What the system knows about a unit's subtree before a budget is typed for it (round 2b, R2):
+    /// serving headcount, estimated salary cost, exits due in the period, each post against its
+    /// establishment. The create form pre-fills from it; the detail page shows it live.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("budgets/planning-baseline")]
+    public async Task<ActionResult<ManpowerPlanningBaselineDto>> GetPlanningBaseline(
+        [FromQuery] Guid organizationUnitId,
+        [FromQuery] DateOnly periodStart,
+        [FromQuery] DateOnly periodEnd,
+        CancellationToken cancellationToken)
+    {
+        if (organizationUnitId == Guid.Empty) return BadRequest("organizationUnitId is required.");
+        return Ok(await _manpowerBudgetService.GetPlanningBaselineAsync(organizationUnitId, periodStart, periodEnd, cancellationToken));
+    }
+
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
     [HttpGet("budgets/pending-approvals")]
     public async Task<ActionResult<IEnumerable<ManpowerBudgetSummaryDto>>> GetPendingBudgetApprovals()

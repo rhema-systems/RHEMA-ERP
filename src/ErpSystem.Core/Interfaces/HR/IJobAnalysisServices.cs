@@ -190,6 +190,14 @@ public interface IManpowerBudgetService
     Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// What the system knows about a unit's subtree before a budget is typed for it: serving
+    /// headcount, estimated salary cost, exits due in the period, and each post against its
+    /// establishment (round 2b, R2). See <see cref="ManpowerPlanningBaselineDto"/>.
+    /// </summary>
+    Task<ManpowerPlanningBaselineDto> GetPlanningBaselineAsync(
+        Guid organizationUnitId, DateOnly periodStart, DateOnly periodEnd, CancellationToken cancellationToken = default);
+
     // Budget Line operations
     Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<ManpowerBudgetLineDto>> GetBudgetLinesAsync(Guid budgetId, CancellationToken cancellationToken = default);

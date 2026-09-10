@@ -1160,6 +1160,8 @@ public class SeparationService : ISeparationService
                     EmployeeNumber = d.Employee.EmployeeNumber,
                     PositionTitle = d.Employee.Position?.Title,
                     OrganizationUnitName = d.Employee.OrganizationUnit?.Name,
+                    OrganizationUnitId = d.Employee.OrganizationUnitId,
+                    PositionId = d.Employee.PositionId,
                     DateOfBirth = d.Employee.DateOfBirth,
                     CurrentAge = HrPolicyCalculations.Age(d.Employee.DateOfBirth),
                     RetirementAge = HrPolicyCalculations.EffectiveRetirementAge(settings, d.Employee.Gender),

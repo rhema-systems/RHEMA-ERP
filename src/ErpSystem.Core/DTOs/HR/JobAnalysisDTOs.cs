@@ -1005,6 +1005,108 @@ public class PositionEstablishmentResultDto
 }
 
 /// <summary>Why a manpower budget was refused.</summary>
+/// <summary>
+/// What the system knows about a unit before anyone types a budget for it (round 2b, lane R2):
+/// who is on strength, what they cost, who is due to leave in the period, and where each post
+/// stands against its establishment. The demo asked "which values on the form can be
+/// automatically specified?" — these are the ones, and the form pre-fills from them.
+/// </summary>
+/// <remarks>
+/// <para><b>The unit and everything under it.</b> A budget for a division covers its departments,
+/// so every figure here is over the subtree, walked by <c>ParentUnitId</c> (seeded units carry no
+/// <c>Path</c>). <see cref="UnitIds"/> says which units that was.</para>
+/// <para><b>One serving predicate</b> — <c>HrServingEmployees</c>; see its remarks for the three
+/// older answers this deliberately does not reuse.</para>
+/// <para><b>Salary cost is an estimate.</b> It is the sum of each serving employee's basic pay as
+/// <c>HrBasicPay</c> resolves it without a payroll read (notch, else level mid-point, else the flat
+/// figure on the record). <see cref="EmployeesWithoutPay"/> says how many contributed nothing.</para>
+/// <para><b>Exits due</b> are retirements falling in the period (the compulsory age, honouring a
+/// gender-specific override, or an explicit retirement date), fixed-term contracts scheduled to
+/// end in it, and separations already raised and not yet completed. Terminations nobody has
+/// raised yet cannot be known; the screen says so. A person appearing in two lists is counted
+/// once in <see cref="ExitsDueTotal"/>.</para>
+/// </remarks>
+public class ManpowerPlanningBaselineDto
+{
+    public Guid OrganizationUnitId { get; set; }
+    public string OrganizationUnitName { get; set; } = string.Empty;
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+
+    /// <summary>Always true: the figures are over the unit and its descendants.</summary>
+    public bool IncludesDescendantUnits => true;
+    public List<Guid> UnitIds { get; set; } = new();
+
+    public int CurrentHeadcount { get; set; }
+    public decimal CurrentSalaryCost { get; set; }
+    public int EmployeesWithoutPay { get; set; }
+    public string SalaryCostNote { get; set; } = string.Empty;
+
+    public List<ManpowerPlanningExitDto> RetirementsDue { get; set; } = new();
+    public List<ManpowerPlanningExitDto> ContractExpiriesDue { get; set; } = new();
+    public List<ManpowerPlanningExitDto> SeparationsInFlight { get; set; } = new();
+
+    /// <summary>Distinct employees across the three lists.</summary>
+    public int ExitsDueTotal { get; set; }
+    public int SuggestedPlannedTerminations => ExitsDueTotal;
+
+    public List<ManpowerPlanningPositionDto> Positions { get; set; } = new();
+}
+
+/// <summary>One person expected to leave in the period, and why.</summary>
+public class ManpowerPlanningExitDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public Guid PositionId { get; set; }
+    public string? PositionTitle { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary><c>Retirement</c>, <c>ContractExpiry</c> or <c>Separation</c>.</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Retirement date, contract end date, or the separation's last working day.</summary>
+    public DateOnly? Date { get; set; }
+
+    /// <summary>True when the date is already past and the person is still on strength — a backlog, not a projection.</summary>
+    public bool IsOverdue { get; set; }
+
+    /// <summary>A separation already raised for this person (so the sweep would skip them).</summary>
+    public bool HasSeparation { get; set; }
+    public string? SeparationNumber { get; set; }
+    public string? SeparationStatus { get; set; }
+}
+
+/// <summary>One post in the subtree: where it stands, and what the arithmetic suggests.</summary>
+/// <remarks>
+/// ⚠ <see cref="Gap"/> is <b>null, not zero, for an unestablished post</b>. Its
+/// <c>ExpectedHeadcount</c> is the column default (1 for 132 of 146 live positions) and means
+/// nothing; a gap computed from it would be a phantom. Only <c>EstablishmentApprovedOn</c> makes
+/// the number real — the same rule every enforcement path uses.
+/// </remarks>
+public class ManpowerPlanningPositionDto
+{
+    public Guid PositionId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Code { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+    public Guid? SalaryGradeId { get; set; }
+
+    public int Filled { get; set; }
+    public int ExpectedHeadcount { get; set; }
+    public bool IsEstablished { get; set; }
+    public int? Gap { get; set; }
+
+    /// <summary>People in this post who appear in the exits-due lists.</summary>
+    public int ExitsDue { get; set; }
+
+    /// <summary><c>max(0, Gap) + ExitsDue</c>: what it would take to be at establishment at the end of the period.</summary>
+    public int SuggestedNewHires { get; set; }
+}
+
 public class RejectManpowerBudgetDto
 {
     public string? Reason { get; set; }

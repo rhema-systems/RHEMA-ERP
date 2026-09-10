@@ -1105,6 +1105,63 @@ export interface PositionEstablishment {
   isEstablished: boolean;
 }
 
+/**
+ * The planning baseline (round 2b, R2): what the system knows about a unit's subtree before a
+ * budget is typed. The form pre-fills from it; the detail page shows it live.
+ */
+export interface ManpowerPlanningExit {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  positionId: string;
+  positionTitle?: string | null;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  kind: 'Retirement' | 'ContractExpiry' | 'Separation' | string;
+  date?: string | null;
+  isOverdue: boolean;
+  hasSeparation: boolean;
+  separationNumber?: string | null;
+  separationStatus?: string | null;
+}
+
+export interface ManpowerPlanningPosition {
+  positionId: string;
+  title: string;
+  code?: string | null;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  salaryGradeId?: string | null;
+  filled: number;
+  expectedHeadcount: number;
+  isEstablished: boolean;
+  /** ⚠ null for an unestablished post — its headcount is the column default and means nothing. */
+  gap?: number | null;
+  exitsDue: number;
+  suggestedNewHires: number;
+}
+
+export interface ManpowerPlanningBaseline {
+  organizationUnitId: string;
+  organizationUnitName: string;
+  periodStart: string;
+  periodEnd: string;
+  includesDescendantUnits: boolean;
+  unitIds: string[];
+  currentHeadcount: number;
+  /** An estimate — see `salaryCostNote`. */
+  currentSalaryCost: number;
+  employeesWithoutPay: number;
+  salaryCostNote: string;
+  retirementsDue: ManpowerPlanningExit[];
+  contractExpiriesDue: ManpowerPlanningExit[];
+  separationsInFlight: ManpowerPlanningExit[];
+  /** Distinct people across the three lists. */
+  exitsDueTotal: number;
+  suggestedPlannedTerminations: number;
+  positions: ManpowerPlanningPosition[];
+}
+
 /** One row of a batch assessment that did not land, and why. */
 export interface BatchAssessmentError {
   employeeCompetencyId?: string | null;

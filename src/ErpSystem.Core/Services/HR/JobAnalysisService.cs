@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -1936,6 +1937,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
     private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ILogger<ManpowerBudgetService> _logger;
 
     public ManpowerBudgetService(
@@ -1945,6 +1947,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         IWorkflowIntegrationService workflowIntegration,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         IUnitOfWork unitOfWork,
+        ICompanyHrPolicyProvider policyProvider,
         ILogger<ManpowerBudgetService> logger)
     {
         _budgetRepository = budgetRepository;
@@ -1953,6 +1956,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         _workflowIntegration = workflowIntegration;
         _workflowAdapters = workflowAdapters;
         _unitOfWork = unitOfWork;
+        _policyProvider = policyProvider;
         _logger = logger;
     }
 
@@ -2593,6 +2597,200 @@ public class ManpowerBudgetService : IManpowerBudgetService
         _logger.LogInformation("Manpower budget rejected: {BudgetNumber}", entity.BudgetNumber);
 
         return true;
+    }
+
+    // ── The planning baseline (round 2b, R2) ─────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<ManpowerPlanningBaselineDto> GetPlanningBaselineAsync(
+        Guid organizationUnitId, DateOnly periodStart, DateOnly periodEnd, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        if (periodEnd < periodStart)
+            throw JobArchitectureException.Invalid("The planning period must end after it starts.");
+
+        // The subtree, walked over ParentUnitId in memory: one read of the tenant's units rather
+        // than a query per level, and `Path` cannot be trusted on seeded rows (lane B1).
+        var units = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+            .AsNoTracking()
+            .Where(u => u.TenantId == tenantId && !u.IsDeleted)
+            .Select(u => new { u.Id, u.ParentUnitId, u.Name })
+            .ToListAsync(cancellationToken);
+        var root = units.FirstOrDefault(u => u.Id == organizationUnitId)
+            ?? throw JobArchitectureException.NotFound("The organisation unit does not exist in this organisation.");
+
+        var childrenOf = units.Where(u => u.ParentUnitId != null)
+            .GroupBy(u => u.ParentUnitId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(u => u.Id).ToList());
+        var unitIds = new List<Guid>();
+        var queue = new Queue<Guid>();
+        queue.Enqueue(root.Id);
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            if (unitIds.Contains(id)) continue;
+            unitIds.Add(id);
+            if (childrenOf.TryGetValue(id, out var kids))
+                foreach (var kid in kids) queue.Enqueue(kid);
+        }
+        var unitName = units.ToDictionary(u => u.Id, u => u.Name);
+
+        // Everyone on strength in the subtree — one predicate (HrServingEmployees).
+        var employees = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .AsNoTracking()
+            .Include(e => e.Position)
+            .Where(e => e.TenantId == tenantId
+                     && e.OrganizationUnitId != null && unitIds.Contains(e.OrganizationUnitId.Value))
+            .Where(HrServingEmployees.Predicate)
+            .ToListAsync(cancellationToken);
+        var employeeIds = employees.Select(e => e.Id).ToList();
+
+        // The placement in force today, per person — the same predicate the pay resolvers use.
+        var today = DateTime.Today;
+        var placements = await _unitOfWork.Repository<EmployeeSalaryAssignment>().GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.Grade).Include(a => a.Level).Include(a => a.Notch)
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted
+                     && employeeIds.Contains(a.EmployeeId)
+                     && a.WithdrawnAt == null
+                     && a.EffectiveDate <= today
+                     && (a.EffectiveTo == null || a.EffectiveTo >= today))
+            .ToListAsync(cancellationToken);
+        var placementOf = placements
+            .GroupBy(a => a.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.EffectiveDate).First());
+
+        decimal salaryCost = 0m;
+        var withoutPay = 0;
+        foreach (var e in employees)
+        {
+            placementOf.TryGetValue(e.Id, out var placement);
+            var (amount, _) = HrBasicPay.ResolveForPlanning(e, placement);
+            if (amount is > 0m) salaryCost += amount.Value; else withoutPay++;
+        }
+
+        // Exits due in the period.
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var todayDate = DateOnly.FromDateTime(today);
+
+        var separations = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted
+                     && employeeIds.Contains(s.EmployeeId)
+                     && s.Status != SeparationStatus.Cancelled
+                     && s.Status != SeparationStatus.Rejected
+                     && s.Status != SeparationStatus.Completed)
+            .Select(s => new { s.Id, s.EmployeeId, s.SeparationNumber, s.Status, s.LastWorkingDay, s.EffectiveDate, s.InitiatedOn })
+            .ToListAsync(cancellationToken);
+        var separationOf = separations.GroupBy(s => s.EmployeeId).ToDictionary(g => g.Key, g => g.First());
+
+        var contractEnds = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .AsNoTracking()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.IsCurrent
+                     && employeeIds.Contains(c.EmployeeId)
+                     && c.ContractEndDate != null
+                     && c.ContractEndDate <= periodEnd)
+            .Select(c => new { c.EmployeeId, c.ContractEndDate })
+            .ToListAsync(cancellationToken);
+        var contractEndOf = contractEnds.GroupBy(c => c.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.Min(c => c.ContractEndDate!.Value));
+
+        ManpowerPlanningExitDto Exit(Employee e, string kind, DateOnly? date)
+        {
+            separationOf.TryGetValue(e.Id, out var sep);
+            return new ManpowerPlanningExitDto
+            {
+                EmployeeId = e.Id,
+                EmployeeName = $"{e.FirstName} {e.LastName}".Trim(),
+                EmployeeNumber = e.EmployeeNumber,
+                PositionId = e.PositionId,
+                PositionTitle = e.Position?.Title,
+                OrganizationUnitId = e.OrganizationUnitId,
+                OrganizationUnitName = e.OrganizationUnitId is { } uid && unitName.TryGetValue(uid, out var n) ? n : null,
+                Kind = kind,
+                Date = date,
+                IsOverdue = date is { } d && d < todayDate,
+                HasSeparation = sep != null,
+                SeparationNumber = sep?.SeparationNumber,
+                SeparationStatus = sep?.Status.ToString(),
+            };
+        }
+
+        var retirements = new List<ManpowerPlanningExitDto>();
+        var expiries = new List<ManpowerPlanningExitDto>();
+        var inFlight = new List<ManpowerPlanningExitDto>();
+        foreach (var e in employees)
+        {
+            // A retirement date in the period — or already past for someone still on strength,
+            // which is an exit the plan must expect just as much.
+            if (HrPolicyCalculations.RetirementDate(settings, e) is { } retire && retire <= periodEnd
+                && (retire >= periodStart || retire < todayDate))
+                retirements.Add(Exit(e, "Retirement", retire));
+
+            if (contractEndOf.TryGetValue(e.Id, out var end) && (end >= periodStart || end < todayDate))
+                expiries.Add(Exit(e, "ContractExpiry", end));
+
+            if (separationOf.TryGetValue(e.Id, out var sep))
+                inFlight.Add(Exit(e, "Separation", sep.LastWorkingDay ?? sep.EffectiveDate ?? sep.InitiatedOn));
+        }
+        var exitingIds = retirements.Concat(expiries).Concat(inFlight).Select(x => x.EmployeeId).Distinct().ToList();
+
+        // Every live post in the subtree, against its establishment.
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .AsNoTracking()
+            // A position's unit is a non-nullable Guid (an employee's is nullable) - hence the two shapes.
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.IsActive
+                     && unitIds.Contains(p.OrganizationUnitId))
+            .Select(p => new { p.Id, p.Title, p.Code, p.OrganizationUnitId, p.SalaryGradeId, p.ExpectedHeadcount, p.EstablishmentApprovedOn })
+            .ToListAsync(cancellationToken);
+        var filledOf = employees.GroupBy(e => e.PositionId).ToDictionary(g => g.Key, g => g.Count());
+        var exitsOf = employees.Where(e => exitingIds.Contains(e.Id))
+            .GroupBy(e => e.PositionId).ToDictionary(g => g.Key, g => g.Count());
+
+        var positionRows = positions.Select(p =>
+        {
+            filledOf.TryGetValue(p.Id, out var filled);
+            exitsOf.TryGetValue(p.Id, out var exits);
+            var established = p.EstablishmentApprovedOn != null;
+            int? gap = established ? Math.Max(0, p.ExpectedHeadcount - filled) : null;
+            return new ManpowerPlanningPositionDto
+            {
+                PositionId = p.Id,
+                Title = p.Title,
+                Code = p.Code,
+                OrganizationUnitId = p.OrganizationUnitId,
+                OrganizationUnitName = unitName.TryGetValue(p.OrganizationUnitId, out var n) ? n : null,
+                SalaryGradeId = p.SalaryGradeId,
+                Filled = filled,
+                ExpectedHeadcount = p.ExpectedHeadcount,
+                IsEstablished = established,
+                Gap = gap,
+                ExitsDue = exits,
+                SuggestedNewHires = (gap ?? 0) + exits,
+            };
+        })
+        .OrderBy(p => p.OrganizationUnitName).ThenBy(p => p.Title)
+        .ToList();
+
+        return new ManpowerPlanningBaselineDto
+        {
+            OrganizationUnitId = root.Id,
+            OrganizationUnitName = root.Name,
+            PeriodStart = periodStart,
+            PeriodEnd = periodEnd,
+            UnitIds = unitIds,
+            CurrentHeadcount = employees.Count,
+            CurrentSalaryCost = salaryCost,
+            EmployeesWithoutPay = withoutPay,
+            SalaryCostNote = withoutPay == 0
+                ? "Monthly basic pay of everyone on strength, from their placement on the salary scale (notch, else level mid-point) or the flat figure on their record."
+                : $"Monthly basic pay of everyone on strength, from their placement on the salary scale or the flat figure on their record. {withoutPay} of {employees.Count} have no figure on record and contribute nothing — an estimate, not payroll's number.",
+            RetirementsDue = retirements.OrderBy(x => x.Date).ToList(),
+            ContractExpiriesDue = expiries.OrderBy(x => x.Date).ToList(),
+            SeparationsInFlight = inFlight.OrderBy(x => x.Date).ToList(),
+            ExitsDueTotal = exitingIds.Count,
+            Positions = positionRows,
+        };
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)

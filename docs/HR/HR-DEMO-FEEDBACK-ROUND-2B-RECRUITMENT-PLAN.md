@@ -1,6 +1,6 @@
 # HR demo feedback, round 2b — Recruitment: budget, establishment, requisition
 
-> **Status: LANE R1 DONE 2026-09-10 (36 ×2, `hr-jobarch/run-r1.mjs`); R2 next.** Source: the feedback document *HR Demo Meetings —
+> **Status: LANES R1 (36 ×2) and R2 (57 ×2, `hr-jobarch/run-r2.mjs`) DONE 2026-09-10; R3 next.** Source: the feedback document *HR Demo Meetings —
 > Changes and Additions 2* (2 pages, section RECRUITMENT), brought by the user on 2026-09-10 after
 > the round-2 HR demo, plus one follow-up from the user the same day (Finance must approve and
 > process requisition costs). Every bullet of the document is accounted for in § 2 — as a build
@@ -171,7 +171,25 @@ not a regression signal.
    left are pre-existing, in `medical/ClinicalRecordActions.tsx` and `types/finance.ts`) and the
    harness proves the API; nobody has clicked through the new edit page yet.
 
-### R2 — The planning baseline: headcount, salary cost, exits due · no migration
+### R2 — The planning baseline: headcount, salary cost, exits due · no migration · ✅ **DONE 2026-09-10** · 57 ×2
+
+Built as specified below, with these deviations and findings:
+
+- [x] `GET api/JobAnalysis/budgets/planning-baseline` (`ManpowerBudgetReadPolicy`), `ManpowerPlanningBaselineDto` + exit and position rows, `HrServingEmployees` (new file, its remark names the three older predicates), `HrBasicPay.ResolveForPlanning` (= `Resolve` with no payroll figure), `UpcomingRetirementDto.OrganizationUnitId/PositionId`.
+- [x] `PlanningBaselinePanel.tsx`; the form fetches the baseline once unit + period are set and pre-fills headcount, salary cost and planned terminations — **automatically once per result on the create page, by button on the edit page** (never over something typed); each of the three fields carries a "System: …" hint. The detail page hosts the panel live, "as of today", with drift badges against the budget's own typed headcount and terminations.
+- [x] Period defaults follow `CompanyHrPolicySettings.FiscalYearStartMonth` (`fiscalPeriodFor` in the form module; a fiscal year is labelled by the year it starts in).
+- [x] Harness `run-r2.mjs`: own structure + two levels + two units; one exit of each kind; an established and an unestablished post; the child unit alone; a quiet period; refusals; the retirement read's new ids. Regression after: R1 36, slice 7 47, slice 8 40, slice 12 41.
+
+**What the build changed from the plan, and what it found.**
+
+1. **The subtree is walked in memory** from one read of the tenant's units, not through the repository's recursive `GetDescendantsAsync` (a query per node).
+2. **A separation in flight counts whatever the period** — it is happening now, so it is an exit the plan must expect; the harness's "quiet period" asserts exactly that. Retirements and contract ends already PAST for someone still on strength are included and flagged `isOverdue` (a backlog, not a projection), the same reading the separation screen takes.
+3. **`SuggestedPlannedTerminations` is the distinct-people count** across the three lists — one person can be both retiring and under a separation.
+4. ⚠ **A position's `OrganizationUnitId` is a non-nullable `Guid`; an employee's is `Guid?`.** The first cut null-checked both and the build refused the position side. Two shapes, deliberately, in the same query.
+5. ⚠ **Patch-script trap, twice in one slice:** an insert whose block ends with its own anchor doubles the anchor — a doubled class header (build error) and a doubled interface (type error). The helper now strips it. **Read the join point of every insert before building.**
+6. **Not browser-walked.** The panel and the pre-fill type-check clean; nobody has watched the create form fill itself yet.
+
+The plan as written:
 
 `GET api/JobAnalysis/budgets/planning-baseline?organizationUnitId=&periodStart=&periodEnd=` →
 `ManpowerPlanningBaselineDto`: unit + subtree ids; `CurrentHeadcount` (D-6); `CurrentSalaryCost`

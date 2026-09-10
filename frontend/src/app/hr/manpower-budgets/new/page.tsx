@@ -1,15 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
+import { useQuery } from '@tanstack/react-query';
+import { policySettingsService } from '@/services/hr/policy-settings.service';
 import {
   ManpowerBudgetFormFields,
   emptyManpowerBudgetForm,
+  fiscalPeriodFor,
   manpowerBudgetFormIsComplete,
   manpowerBudgetPayload,
 } from '@/components/hr/manpower/ManpowerBudgetFormFields';
@@ -33,6 +36,22 @@ export default function NewManpowerBudgetPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => emptyManpowerBudgetForm(thisYear + 1));
+
+  // The empty form assumes a calendar year; once the tenant's fiscal start month is known the
+  // untouched default period follows it (R2). A period the user has already edited is left alone.
+  const { data: policy } = useQuery({
+    queryKey: ['hr', 'policy-settings'],
+    queryFn: () => policySettingsService.get(),
+    staleTime: 5 * 60 * 1000,
+  });
+  useEffect(() => {
+    if (!policy) return;
+    const calendar = fiscalPeriodFor(form.fiscalYear, 1);
+    if (form.periodStartDate !== calendar.start || form.periodEndDate !== calendar.end) return;
+    const fiscal = fiscalPeriodFor(form.fiscalYear, policy.fiscalYearStartMonth);
+    if (fiscal.start !== calendar.start) setForm((f) => ({ ...f, periodStartDate: fiscal.start, periodEndDate: fiscal.end }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policy]);
 
   const complete = manpowerBudgetFormIsComplete(form);
 
@@ -64,7 +83,7 @@ export default function NewManpowerBudgetPage() {
         }
       />
 
-      <ManpowerBudgetFormFields value={form} onChange={setForm} />
+      <ManpowerBudgetFormFields value={form} onChange={setForm} autoFillFromBaseline />
 
       <p className="text-sm text-muted-foreground">
         Add the budget lines — one per position — on the budget once it is saved. A budget with no

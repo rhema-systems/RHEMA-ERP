@@ -42,6 +42,7 @@ import type {
   JobValuationSummary,
   JobWorkingCondition,
   ManpowerBudget,
+  ManpowerPlanningBaseline,
   ManpowerBudgetLine,
   OrganisationCompetencyGap,
   PositionCompetency,
@@ -832,6 +833,18 @@ class JobArchitectureService {
 
   rejectBudgetOnWorkflow(id: string, reason?: string) {
     return apiService.post(`${this.jobs}/budgets/${id}/workflow/reject`, { reason });
+  }
+
+  /**
+   * The planning baseline for a unit's subtree over a period (round 2b, R2): serving headcount,
+   * estimated salary cost, exits due, each post against its establishment. Dates as `YYYY-MM-DD`.
+   */
+  getPlanningBaseline(organizationUnitId: string, periodStart: string, periodEnd: string) {
+    return apiService.get<ManpowerPlanningBaseline>(`${this.jobs}/budgets/planning-baseline`, {
+      organizationUnitId,
+      periodStart,
+      periodEnd,
+    });
   }
 
   // ── establishment (FR-HR-136) ──────────────────────────────────────────────
