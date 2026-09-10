@@ -1054,6 +1054,15 @@ without current C5 resolution. C13 tests passed 13/13, Core contract tests 2/2, 
 schema, migration, default or configured-database change occurred. Independent Sol High review is active;
 integration and Sales reissue remain gated.
 
+C13 independent Sol High review returned `CHANGES_REQUIRED` at exact clean `3c74a1a6` for one P1. The reversal
+preparer permits reuse of the original consumed owner-effect fingerprint, while C7 receipt authority uniquely
+owns tenant/participant/fingerprint and execution rejects reuse by another event. Such evidence could be
+prepared and approved but never executed. All other accounting, lineage, frozen-book, contract and scope review
+passed; 65 focused and 364 widened tests passed with 41 guarded SQL skips and two unrelated inherited failures.
+A narrow Sol Medium correction is active to reject equal canonical fingerprints before any reversal/audit
+mutation and prove same/different-action denials plus distinct compensating-effect success. No database or
+migration was touched; integration and Sales remain gated.
+
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
 `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c12` on branch
