@@ -114,6 +114,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         await FluentActions.Awaiting(() => fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("injected production posting audit failure");
 
+        fixture.Db.ChangeTracker.Entries().Should().OnlyContain(x => x.State == EntityState.Unchanged,
+            "C12 failure evidence is recorded only after the caller-owned owner transaction rolled back");
         fixture.Db.ChangeTracker.Clear();
         (await fixture.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().BeNull();
         (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(1, "only the seeded invoice authority is durable after rollback");
@@ -153,6 +155,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             await FluentActions.Awaiting(() => closed.Service.PostCreditNoteAsync(closed.CreditNote.Id))
                 .Should().ThrowAsync<InvalidOperationException>().WithMessage("*not open*");
 
+            closed.Db.ChangeTracker.Entries().Should().OnlyContain(x => x.State == EntityState.Unchanged,
+                "closed-period rejection must leave no pending owner or Finance mutation before reload");
             closed.Db.ChangeTracker.Clear();
             (await closed.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().BeNull();
             (await closed.Db.CreditNotes.SingleAsync()).UpdatedAt.Should().Be(originalUpdatedAt);
