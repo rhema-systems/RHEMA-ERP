@@ -833,15 +833,63 @@ public class ReturnOrderService : IReturnOrderService
             _unitOfWork.ClearTrackedChanges();
             creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
                 .FirstAsync(cancellationToken);
+            if (creditNote.CreditNoteStatus == CreditNoteStatus.Reversed)
+            {
+                var requestedDate = dto.ReversalDate?.Date;
+                if (!creditNote.ReversalJournalEntryId.HasValue || !creditNote.ReversalPostingEventId.HasValue
+                    || !string.Equals(creditNote.ReversalReason, dto.Reason.Trim(), StringComparison.Ordinal)
+                    || (requestedDate.HasValue && creditNote.ReversedAt?.Date != requestedDate))
+                    throw new InvalidOperationException("AR credit note reversal retry conflicts with the immutable reversal evidence.");
+
+                await RequireExactReversalReplayAsync(creditNote, cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
+                transactionStarted = false;
+                return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+            }
+
+            if (!creditNote.JournalEntryId.HasValue
+                || (creditNote.CreditNoteStatus != CreditNoteStatus.Approved && creditNote.CreditNoteStatus != CreditNoteStatus.Applied))
+                throw new InvalidOperationException("AR credit note reversal source state changed before execution.");
+
+            // Revalidate the posted source against C15 after the invoice-scoped lock.  Sales deliberately
+            // receives no book or representation detail; Finance owns that exact historical authority.
+            await RequireExactPostedReplayAsync(creditNote, cancellationToken);
             var lockedOriginal = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(e =>
                 e.TenantId == tenantId && e.Id == original.Id && e.OriginatingModuleCode == "SALES" &&
                 e.SourceDocumentType == "SalesCreditNote" && e.SourceDocumentId == creditNote.Id &&
                 e.PostingAction == "Post" && e.IdempotencyKey == SalesCreditNotePostingKey(creditNote) &&
                 e.Status == AccountingEventStatuses.Posted && !e.IsDeleted).SingleOrDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("AR credit note reversal source authority changed before execution.");
-            var lockedEffect = OwnerEffectFor(creditNote, "REVERSE", $"{lockedOriginal.Id:N}:{reversalDate:O}:{dto.Reason.Trim()}");
+            var lockedReversal = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(e =>
+                e.TenantId == tenantId && e.IdempotencyKey == SalesCreditNoteReversalKey(creditNote) && !e.IsDeleted)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (lockedReversal is not null && dto.ReversalDate.HasValue
+                && lockedReversal.EventDate.Date != dto.ReversalDate.Value.Date)
+                throw new InvalidOperationException("AR credit note reversal retry conflicts with the immutable reversal date.");
+            var lockedReversalDate = lockedReversal?.EventDate.Date ?? reversalDate;
+            var lockedEffect = OwnerEffectFor(creditNote, "REVERSE", $"{lockedOriginal.Id:N}:{lockedReversalDate:O}:{dto.Reason.Trim()}");
             if (!OwnerEffectsMatch(ownerEffect, lockedEffect))
                 throw new InvalidOperationException("AR credit note reversal owner authority changed before execution.");
+
+            // C13 is idempotent on the deterministic event/key pair. Rebuilding it after the locked reload
+            // confirms the durable original lineage, effective date, reason and owner receipt without
+            // reconstructing Finance posting lines or book selection in Sales.
+            var lockedPrepared = await reversals.PrepareReversalAsync(new PrepareProducerAccountingReversalDto
+            {
+                OriginalAccountingEventId = lockedOriginal.Id,
+                ReversalAccountingEventId = DeterministicGuid(creditNote.Id, "AR-CREDIT-NOTE-REVERSAL"),
+                IdempotencyKey = SalesCreditNoteReversalKey(creditNote),
+                ReversalDate = lockedReversalDate,
+                Reason = dto.Reason.Trim(),
+                ParticipantIdentity = lockedEffect.ParticipantCode,
+                ExpectedOwnerEffect = lockedEffect
+            }, cancellationToken);
+            if (lockedPrepared.AccountingEventId != prepared.AccountingEventId
+                || lockedPrepared.AccountingEventRequestFingerprint != prepared.AccountingEventRequestFingerprint)
+                throw new InvalidOperationException("AR credit note reversal prepared authority changed before execution.");
+            prepared = lockedPrepared;
+            ownerEffect = lockedEffect;
+            reversalDate = lockedReversalDate;
             var decision = await producer.GetAsync(prepared.AccountingEventId, cancellationToken);
             if (decision.Id != prepared.AccountingEventId || decision.RequestFingerprint != prepared.AccountingEventRequestFingerprint
                 || decision.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
