@@ -2987,6 +2987,56 @@ public class ManpowerBudgetService : IManpowerBudgetService
         }).OrderBy(r => r.PositionTitle).ToList();
     }
 
+    /// <inheritdoc />
+    public async Task<RecruitmentSpendDto> GetRecruitmentSpendAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        // Every cost on every requisition drawing down from one of this budget's lines. Cancelled
+        // and Rejected requisitions are out of the envelope with their costs; a Rejected COST is
+        // out too; a Recorded one is pending.
+        var costs = await _unitOfWork.Repository<Entities.HR.Requisition.StaffRequisitionCost>().GetQueryable().AsNoTracking()
+            .Where(c => c.TenantId == budget.TenantId && !c.IsDeleted
+                     && c.Requisition != null && !c.Requisition.IsDeleted
+                     && c.Requisition.Status != StaffRequisitionStatus.Cancelled
+                     && c.Requisition.Status != StaffRequisitionStatus.Rejected
+                     && c.Requisition.ManpowerBudgetLine != null
+                     && c.Requisition.ManpowerBudgetLine.ManpowerBudgetId == budget.Id
+                     && c.Status != StaffRequisitionCostStatus.Rejected)
+            .Select(c => new
+            {
+                c.RequisitionId,
+                c.Requisition!.RequisitionNumber,
+                PositionTitle = c.Requisition.Position != null ? c.Requisition.Position.Title : null,
+                c.Status,
+                c.AmountBaseCurrency,
+            })
+            .ToListAsync(cancellationToken);
+
+        var rows = costs.GroupBy(c => new { c.RequisitionId, c.RequisitionNumber, c.PositionTitle })
+            .Select(g => new RecruitmentSpendByRequisitionDto
+            {
+                RequisitionId = g.Key.RequisitionId,
+                RequisitionNumber = g.Key.RequisitionNumber,
+                PositionTitle = g.Key.PositionTitle,
+                Approved = g.Where(c => c.Status == StaffRequisitionCostStatus.Approved).Sum(c => c.AmountBaseCurrency),
+                Pending = g.Where(c => c.Status == StaffRequisitionCostStatus.Recorded).Sum(c => c.AmountBaseCurrency),
+            })
+            .OrderBy(r => r.RequisitionNumber)
+            .ToList();
+
+        return new RecruitmentSpendDto
+        {
+            BudgetId = budget.Id,
+            BudgetNumber = budget.BudgetNumber,
+            RecruitmentBudget = budget.RecruitmentBudget,
+            Approved = rows.Sum(r => r.Approved),
+            Pending = rows.Sum(r => r.Pending),
+            Mode = settings.BudgetEnforcementMode,
+            ByRequisition = rows,
+        };
+    }
+
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(id);

@@ -356,6 +356,11 @@ export interface RequisitionCost {
   approvedByName?: string | null;
   approvedOn?: string | null;
   approvalNote?: string | null;
+  // ── round 2b, R6: set on a WRITE response only ──
+  /** The budget whose recruitment envelope this cost counts against, when the requisition is linked. */
+  budgetNumber?: string | null;
+  /** Present when the cost takes the envelope past its limit under Warn (recording never refuses; approval refuses under Block). */
+  budgetWarning?: string | null;
 }
 
 export interface RequisitionCostForm {

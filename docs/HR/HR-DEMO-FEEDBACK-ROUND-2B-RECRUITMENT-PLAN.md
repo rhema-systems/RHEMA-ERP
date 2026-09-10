@@ -1,6 +1,6 @@
 # HR demo feedback, round 2b — Recruitment: budget, establishment, requisition
 
-> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2), R4a (60 ×2), R5 (70 ×2) and R7 (42 ×2, `hr-jobarch/run-r7.mjs`) DONE 2026-09-10; R6 next, then R4b; R8 on the Finance owner's answer.** Source: the feedback document *HR Demo Meetings —
+> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2), R4a (60 ×2), R5 (70 ×2), R7 (42 ×2) and R6 (57 ×2, `hr-jobarch/run-r6.mjs`) DONE 2026-09-10; R4b next; R8 on the Finance owner's answer.** Source: the feedback document *HR Demo Meetings —
 > Changes and Additions 2* (2 pages, section RECRUITMENT), brought by the user on 2026-09-10 after
 > the round-2 HR demo, plus one follow-up from the user the same day (Finance must approve and
 > process requisition costs). Every bullet of the document is accounted for in § 2 — as a build
@@ -98,7 +98,7 @@ same service require their own route* — which is the ask.
 | Use the establishment to initiate budget creation; export to Excel, edit, import back | `GET api/position-vacancies/establishment` (`PositionVacancyRepository.cs:65-132`); the establishment screens have no action rows and no export; ClosedXML toolkit in `EmployeeImportWorkbooks.cs`; no HR .xlsx export exists yet | D-3 | **R4a / R4b** |
 | Gaps → budget → requisitions; raise without budget?; approver must know; justify when no budget or no gap; establishment as at the time of the requisition | `StaffRequisition.IsBudgeted` (self-declared), `BudgetCode` (free text, **zero readers**); no `ManpowerBudgetLineId`; `BuildBudgetCheckAsync` (`StaffRequisitionService.cs:883`) matches by position + calendar year and reads the typed `CurrentFilled`; `CheckEstablishmentAsync` (`:855`) is **never surfaced** to the panel; `BudgetCheckPanel` only on Draft/Rejected/Submitted (`requisitions/[id]/page.tsx:238`) | D-2, D-4, D-8 | **R5** |
 | Flag set dynamically; budget code auto; hide the textbox | as above | `IsBudgeted` derived from the link; `BudgetCode` = budget number snapshot; the textbox becomes a budget-line picker | **R5** |
-| Validate requisition costs within the budget, vacancy costs within requisition costs | `StaffRequisitionCost` totals compared to nothing (`AddCostAsync :605`); `JobVacancy` has no costs | D-5 | **R6** |
+| Validate requisition costs within the budget, vacancy costs within requisition costs | `StaffRequisitionCost` totals compared to nothing (`AddCostAsync :605`); `JobVacancy` has no costs | D-5 | **R6** ✅ (vacancy half recorded, not built) |
 | *(user follow-up)* Finance approves and processes requisition costs; voucher details; currencies and rates from Finance; the estate invoice integration as the model | `StaffRequisitionCost.Currency` free text, `ExchangeRate` typed (`StaffRequisitionDTOs.cs:401/427`) — **the last caller-supplied rate in HR** (entity sweep row 68, decision 14, sequencing 1b); `PaymentVoucherNumber` free text, no readers; no payee; no status; `HrCurrencyBridge` (`HrCurrencyBridge.cs:35`) used by five areas but not here; `RequisitionCostsPanel.tsx:242-259` bare inputs; no HR read door for `Supplier` | D-10 | **R7** now, **R8** on the Finance owner's answer |
 
 ---
@@ -293,12 +293,43 @@ checkbox + textbox; exception textarea when needed; `BudgetCheckPanel` at every 
 preview endpoint on the create form (Q-R3); detail "Budget and establishment" card (snapshot vs
 live, drift badge). Harness `hr-recruitment/run-r5.mjs`; policy flipped and **restored in `finally`**.
 
-### R6 — Requisition costs within the budget · no migration
+### R6 — Requisition costs within the budget · no migration · ✅ **DONE 2026-09-10** · 57 ×2
 
 Approved costs (Q-R5) aggregated across every requisition on the budget vs
 `ManpowerBudget.RecruitmentBudget`, Warn/Block per the mode; `GET budgets/{id}/recruitment-spend`;
-`RequisitionCostsPanel` shows the figure and wires the existing `updateCost`. Vacancy half:
-recorded in the Finance backlog, not built. Harness `run-r6.mjs`.
+`RequisitionCostsPanel` shows the figure. Vacancy half: recorded in the Finance backlog, not built.
+Harness `run-r6.mjs`.
+
+**DONE 2026-09-10** — `dev-harness/hr-jobarch/run-r6.mjs` 57 ×2; regression after: R7 42, R5 70,
+R4a 60, R3 55, R2 57, R1 36, slice 7 47, slice 8 40, slice 12 41.
+
+- **The envelope bites at approval, not at recording.** A recorded cost is a fact about money that
+  moved; HR's approval (R7) is the commitment. So `AddCostAsync`/`UpdateCostAsync` never refuse —
+  the response carries `budgetNumber` and, when recorded + approved would pass the envelope, a
+  `budgetWarning` that says what approval will do ("refused" under Block, "warned" under Warn).
+  `DecideCostAsync(approve)` refuses with 422 under Block when approved + this cost > envelope,
+  naming the budget and the figures; under Warn it approves, sets `budgetWarning` and logs; under
+  Off it is silent. One private `EnvelopeAsync` on `StaffRequisitionService` computes approved /
+  pending across every live requisition (not Cancelled/Rejected) linked to a line of the same
+  budget, excluding Rejected costs and the cost in hand.
+- **An envelope of 0 constrains nothing.** A budget drafted from the establishment (R4a) leaves
+  the money to the holder, so `RecruitmentBudget = 0` is "not set", not "nothing may be spent".
+  `RecruitmentSpendDto.EnvelopeSet` says which; the harness approves 75,000 under Block on such a
+  budget.
+- **The read.** `GET api/JobAnalysis/budgets/{id}/recruitment-spend` → `RecruitmentSpendDto`
+  {budgetNumber, recruitmentBudget, envelopeSet, approved, pending, remaining, mode/modeName,
+  byRequisition[{requisitionId, requisitionNumber, positionTitle, approved, pending}]}. A READ:
+  `ActualSpent`/`Variance` are not written (D-5; the harness asserts `actualSpent` stays 0).
+- **Screens.** Budget detail: a "Recruitment spend" card on Approved/Active budgets (approved of
+  envelope, left/over, pending, mode, the per-requisition table linking to each requisition).
+  Costs panel: "Against MPB-… recruitment envelope: x of y approved across every requisition on
+  it, p pending · z left/over · approval over the envelope is refused/warned", read through the
+  same `['hr','requisition-budget',id]` query the check panel uses (one fetch) then the spend; a
+  record or approve that returns `budgetWarning` toasts it. Not browser-walked.
+- **Not built, recorded:** the vacancy half (`JobVacancy` carries no cost — backlog area 6 row);
+  the `updateCost` UI already existed since R7 (the plan's "wires the existing updateCost" was
+  stale). Recording is not constrained by the mode at all — if the demo wants a hard stop before
+  the money is even written down, that is a one-line change in `WithEnvelopeAsync`.
 
 ### R7 — Requisition costs read Finance's master data; HR approves a cost · migration `20260910205043_AddStaffRequisitionCostPayeeAndApproval` · ✅ **DONE 2026-09-10** · 42 ×2
 

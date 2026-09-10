@@ -133,6 +133,16 @@ export default function ManpowerBudgetDetailPage() {
     staleTime: 60 * 1000,
   });
 
+  // Round 2b, R6: what the requisitions on this budget have spent against its recruitment
+  // envelope. Approved costs count; recorded ones are shown as pending. Only meaningful once
+  // the budget is in force, so it is only asked for then.
+  const spend = useQuery({
+    queryKey: ['manpower-budget-spend', id],
+    queryFn: () => jobArchitectureService.getRecruitmentSpend(id),
+    enabled: !!budget && (budget.status === 'Approved' || budget.status === 'Active'),
+    staleTime: 30 * 1000,
+  });
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['manpower-budget', id] });
     qc.invalidateQueries({ queryKey: ['manpower-budgets'] });
@@ -262,6 +272,59 @@ export default function ManpowerBudgetDetailPage() {
         <Stat label="Salary budget" value={fmtMoney(budget.salaryBudget)} />
         <Stat label="Total budget" value={fmtMoney(budget.totalBudget)} hint="salary + benefits + recruitment + training" />
       </div>
+
+      {spend.data && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Recruitment spend</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {spend.data.envelopeSet ? (
+              <p>
+                <span className="font-semibold">{fmtMoney(spend.data.approved)}</span> approved of a{' '}
+                <span className="font-semibold">{fmtMoney(spend.data.recruitmentBudget)}</span> recruitment envelope
+                {' · '}
+                <span className={spend.data.remaining < 0 ? 'font-semibold text-destructive' : ''}>
+                  {spend.data.remaining < 0 ? `${fmtMoney(-spend.data.remaining)} over` : `${fmtMoney(spend.data.remaining)} left`}
+                </span>
+                {spend.data.pending > 0 && <> · {fmtMoney(spend.data.pending)} recorded, awaiting HR approval</>}
+                <span className="ml-2 text-xs text-muted-foreground">enforcement: {spend.data.modeName}</span>
+              </p>
+            ) : (
+              <p className="text-muted-foreground">
+                No recruitment envelope is set on this budget, so the costs below are not constrained by it.
+                {spend.data.approved > 0 && <> {fmtMoney(spend.data.approved)} has been approved so far.</>}
+              </p>
+            )}
+            {spend.data.byRequisition.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Requisition</TableHead>
+                    <TableHead>Position</TableHead>
+                    <TableHead className="text-right">Approved</TableHead>
+                    <TableHead className="text-right">Pending</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {spend.data.byRequisition.map((r) => (
+                    <TableRow key={r.requisitionId}>
+                      <TableCell>
+                        <a className="underline-offset-2 hover:underline" href={`/hr/recruitment/requisitions/${r.requisitionId}`}>{r.requisitionNumber}</a>
+                      </TableCell>
+                      <TableCell>{r.positionTitle ?? '—'}</TableCell>
+                      <TableCell className="text-right">{fmtMoney(r.approved)}</TableCell>
+                      <TableCell className="text-right">{r.pending > 0 ? fmtMoney(r.pending) : '—'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-xs text-muted-foreground">No requisition on this budget has recorded a cost yet.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Round 2b, lane R1: "the full details specified on the creation form don't display in the
           edit view". Every field the form takes is shown here, grouped the way the form groups

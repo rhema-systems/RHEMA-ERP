@@ -30,6 +30,7 @@ import { SupplierPicker } from '@/components/hr/common/SupplierPicker';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatMoney, humanizeEnum } from '@/lib/hr/attendance-format';
 import { hrCurrencyService } from '@/services/hr/hr-currency.service';
+import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { staffRequisitionService } from '@/services/hr/recruitment.service';
 import {
   REQUISITION_COST_CATEGORIES,
@@ -113,6 +114,22 @@ export function RequisitionCostsPanel({
     queryFn: () => staffRequisitionService.getTotalCost(requisitionId, 'Approved'),
     enabled: !!requisitionId,
   });
+  // Round 2b, R6: the envelope this requisition's costs count against — the linked budget's
+  // recruitment budget, shared with every other requisition on that budget. Read through the
+  // same budget-check the panel above uses (same query key, so one fetch), then the spend.
+  const check = useQuery({
+    queryKey: ['hr', 'requisition-budget', requisitionId],
+    queryFn: () => staffRequisitionService.checkBudget(requisitionId),
+    staleTime: 30 * 1000,
+  });
+  const linkedBudgetId = check.data?.linkedBudgetId ?? null;
+  const spend = useQuery({
+    queryKey: ['manpower-budget-spend', linkedBudgetId],
+    queryFn: () => jobArchitectureService.getRecruitmentSpend(linkedBudgetId!),
+    enabled: !!linkedBudgetId,
+    staleTime: 30 * 1000,
+  });
+
   const { data: currencies } = useQuery({
     queryKey: ['hr', 'currencies'],
     queryFn: () => hrCurrencyService.getActive(),
@@ -122,6 +139,7 @@ export function RequisitionCostsPanel({
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['hr', 'requisition-costs', requisitionId] });
     await queryClient.invalidateQueries({ queryKey: ['hr', 'requisition-costs-total', requisitionId] });
+    await queryClient.invalidateQueries({ queryKey: ['manpower-budget-spend'] });
   };
 
   const payload = (): RequisitionCostForm => ({
@@ -139,12 +157,13 @@ export function RequisitionCostsPanel({
       editing
         ? staffRequisitionService.updateCost(editing.id, payload())
         : staffRequisitionService.addCost(requisitionId, payload()),
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       await refresh();
       setOpen(false);
       setEditing(null);
       setForm(blank());
       toast({ title: editing ? 'Cost updated' : 'Cost recorded' });
+      if (saved?.budgetWarning) toast({ title: `Over ${saved.budgetNumber ?? 'the budget'}'s recruitment envelope`, description: saved.budgetWarning, variant: 'destructive' });
     },
     onError: (e: any) =>
       toast({ title: 'Refused', description: e?.body?.message ?? e?.message, variant: 'destructive' }),
@@ -157,9 +176,10 @@ export function RequisitionCostsPanel({
         ? staffRequisitionService.approveCost(deciding.cost.id, deciding.note.trim() || null)
         : staffRequisitionService.rejectCost(deciding.cost.id, deciding.note.trim() || null);
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       await refresh();
       toast({ title: deciding?.approve ? 'Cost approved' : 'Cost rejected' });
+      if (saved?.budgetWarning) toast({ title: `Over ${saved.budgetNumber ?? 'the budget'}'s recruitment envelope`, description: saved.budgetWarning, variant: 'destructive' });
       setDeciding(null);
     },
     onError: (e: any) =>
@@ -193,6 +213,22 @@ export function RequisitionCostsPanel({
             <p className="mt-1 text-sm text-muted-foreground">
               Total {formatMoney(total.data)} in base currency, at Finance&apos;s rate on each cost date
               {approvedTotal.data !== undefined && <> · approved by HR {formatMoney(approvedTotal.data)}</>}
+            </p>
+          )}
+          {spend.data && (
+            <p className={`mt-1 text-sm ${spend.data.envelopeSet && spend.data.remaining < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {spend.data.envelopeSet ? (
+                <>
+                  Against {spend.data.budgetNumber}&apos;s recruitment envelope: {formatMoney(spend.data.approved)} of {formatMoney(spend.data.recruitmentBudget)} approved across every requisition on it
+                  {spend.data.pending > 0 && <>, {formatMoney(spend.data.pending)} pending</>}
+                  {' · '}
+                  {spend.data.remaining < 0 ? `${formatMoney(-spend.data.remaining)} over` : `${formatMoney(spend.data.remaining)} left`}
+                  {spend.data.modeName === 'Block' && <> · approval over the envelope is refused</>}
+                  {spend.data.modeName === 'Warn' && <> · approval over the envelope is warned</>}
+                </>
+              ) : (
+                <>Linked to {spend.data.budgetNumber}, which sets no recruitment envelope.</>
+              )}
             </p>
           )}
         </div>

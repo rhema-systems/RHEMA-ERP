@@ -625,7 +625,60 @@ public class StaffRequisitionService : IStaffRequisitionService
         await ApplyCostMoneyAsync(entity, cancellationToken);
         await _costRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
+        return await WithEnvelopeAsync((await ReloadCostAsync(entity.Id, cancellationToken)).ToDto(), entity, false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Round 2b, R6 (decision D-5, Q-R5): the recruitment envelope is the linked budget's
+    /// <c>RecruitmentBudget</c>, drawn down by the APPROVED costs of every requisition on that
+    /// budget. Recording never refuses (a recorded cost is not signed); approving refuses under
+    /// Block and warns under Warn. An envelope of 0 means "not set" and constrains nothing.
+    /// Returns the approved total so far (excluding this cost), the envelope and the budget number,
+    /// or null when the requisition is not linked to a live budget.
+    /// </summary>
+    private async Task<(decimal Approved, decimal Pending, decimal Envelope, string BudgetNumber, BudgetEnforcementMode Mode)?> EnvelopeAsync(
+        StaffRequisitionCost cost, CancellationToken cancellationToken)
+    {
+        var requisition = await _unitOfWork.Repository<StaffRequisition>().GetQueryable().AsNoTracking()
+            .Include(r => r.ManpowerBudgetLine).ThenInclude(l => l!.ManpowerBudget)
+            .FirstOrDefaultAsync(r => r.Id == cost.RequisitionId, cancellationToken);
+        var budget = requisition?.ManpowerBudgetLine?.ManpowerBudget;
+        if (budget == null || budget.IsDeleted
+            || (budget.Status != ManpowerBudgetStatus.Approved && budget.Status != ManpowerBudgetStatus.Active))
+            return null;
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var others = await _unitOfWork.Repository<StaffRequisitionCost>().GetQueryable().AsNoTracking()
+            .Where(c => c.TenantId == cost.TenantId && !c.IsDeleted && c.Id != cost.Id
+                     && c.Requisition != null && !c.Requisition.IsDeleted
+                     && c.Requisition.Status != StaffRequisitionStatus.Cancelled
+                     && c.Requisition.Status != StaffRequisitionStatus.Rejected
+                     && c.Requisition.ManpowerBudgetLine != null
+                     && c.Requisition.ManpowerBudgetLine.ManpowerBudgetId == budget.Id
+                     && c.Status != StaffRequisitionCostStatus.Rejected)
+            .Select(c => new { c.Status, c.AmountBaseCurrency })
+            .ToListAsync(cancellationToken);
+        return (
+            others.Where(c => c.Status == StaffRequisitionCostStatus.Approved).Sum(c => c.AmountBaseCurrency),
+            others.Where(c => c.Status == StaffRequisitionCostStatus.Recorded).Sum(c => c.AmountBaseCurrency),
+            budget.RecruitmentBudget,
+            budget.BudgetNumber,
+            settings.BudgetEnforcementMode);
+    }
+
+    /// <summary>Decorates a cost's write response with the budget it counts against and a warning when the envelope would be passed.</summary>
+    private async Task<StaffRequisitionCostDto> WithEnvelopeAsync(StaffRequisitionCostDto dto, StaffRequisitionCost cost, bool approving, CancellationToken cancellationToken)
+    {
+        var env = await EnvelopeAsync(cost, cancellationToken);
+        if (env is null) return dto;
+        var (approved, pending, envelope, number, mode) = env.Value;
+        dto.BudgetNumber = number;
+        if (envelope <= 0 || mode == BudgetEnforcementMode.Off) return dto;
+        var projected = approved + cost.AmountBaseCurrency + (approving ? 0 : pending);
+        if (projected > envelope)
+            dto.BudgetWarning = approving
+                ? $"Approving this cost takes {number}'s recruitment spend to {projected:N2} against an envelope of {envelope:N2} ({approved:N2} already approved)."
+                : $"With this cost, {number}'s recorded and approved recruitment spend would be {projected:N2} against an envelope of {envelope:N2} ({approved:N2} approved, {pending:N2} pending). Approval will be {(mode == BudgetEnforcementMode.Block ? "refused" : "warned")}.";
+        return dto;
     }
 
     /// <summary>
@@ -671,6 +724,14 @@ public class StaffRequisitionService : IStaffRequisitionService
         // Two-actor rule: the person who recorded a cost does not approve it.
         if (entity.RecordedById == actorEmployeeId)
             throw new UnauthorizedAccessException("The person who recorded a cost cannot approve or reject it.");
+        // R6: the envelope is enforced at APPROVAL — the act that commits the money.
+        if (approve && await EnvelopeAsync(entity, cancellationToken) is { } env
+            && env.Envelope > 0 && env.Mode == BudgetEnforcementMode.Block
+            && env.Approved + entity.AmountBaseCurrency > env.Envelope)
+            throw new InvalidOperationException(
+                $"Approving this cost would take {env.BudgetNumber}'s recruitment spend to {env.Approved + entity.AmountBaseCurrency:N2} against an envelope of {env.Envelope:N2} " +
+                $"({env.Approved:N2} already approved). Budget enforcement is set to Block: revise the budget's recruitment envelope, or reject the cost.");
+
         entity.Status = approve ? StaffRequisitionCostStatus.Approved : StaffRequisitionCostStatus.Rejected;
         entity.ApprovedById = actorEmployeeId;
         entity.ApprovedOn = DateTime.UtcNow;
@@ -678,7 +739,20 @@ public class StaffRequisitionService : IStaffRequisitionService
         entity.UpdatedAt = DateTime.UtcNow;
         await _costRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
+        var dto = (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
+        if (!approve) return dto;
+        // After the save the cost is Approved, so "others" excludes it and the projection is exact.
+        var after = await EnvelopeAsync(entity, cancellationToken);
+        if (after is { } a)
+        {
+            dto.BudgetNumber = a.BudgetNumber;
+            if (a.Envelope > 0 && a.Mode == BudgetEnforcementMode.Warn && a.Approved + entity.AmountBaseCurrency > a.Envelope)
+            {
+                dto.BudgetWarning = $"{a.BudgetNumber}'s approved recruitment spend is now {a.Approved + entity.AmountBaseCurrency:N2} against an envelope of {a.Envelope:N2}. Budget enforcement is set to Warn.";
+                _logger.LogWarning("Recruitment cost {CostId} approved over the envelope of {Budget}: {Warning}", entity.Id, a.BudgetNumber, dto.BudgetWarning);
+            }
+        }
+        return dto;
     }
 
     public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
@@ -741,7 +815,7 @@ public class StaffRequisitionService : IStaffRequisitionService
         await _costRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
+        return await WithEnvelopeAsync((await ReloadCostAsync(entity.Id, cancellationToken)).ToDto(), entity, false, cancellationToken);
     }
 
     public async Task<bool> DeleteCostAsync(Guid costId, CancellationToken cancellationToken = default)

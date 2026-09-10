@@ -219,6 +219,21 @@ Master data is read canonically (rule 4): currency and rate through `HrCurrencyB
 supplier through `api/hr/suppliers`. **No HR-side payment status exists** (rule 2): `Status` is
 HR's own approval of the spend, and whether Finance has paid it is Finance's to say.
 
+**Budget control (round 2b R6, 2026-09-10).** The recruitment envelope is the linked manpower
+budget's `RecruitmentBudget`, drawn down by the **approved** base-currency costs of every
+requisition on that budget; `GET api/JobAnalysis/budgets/{id}/recruitment-spend` is the read.
+Approval is refused under Block / warned under Warn when it would pass the envelope; recording
+never refuses. An envelope of 0 is "not set". `ManpowerBudget.ActualSpent` is still **not
+written** by any of this — it stays the Finance actuals column (areas 17/18) and the spend read
+is what the screens show instead. When the AP hand-off (R8) lands, Finance's budget-control
+check on the vendor invoice is a second, independent gate; the two are not reconciled.
+
+**Vacancy costs (the PDF's "vacancy costs within requisition costs") — nothing to validate.**
+`JobVacancy` carries no cost field of any kind (only the advertised `SalaryRangeMin/Max`), so the
+second half of the bullet cannot be built until a vacancy has a cost estimate to compare. If it
+is wanted, the shape is a `JobVacancy.EstimatedCost` (or a per-vacancy cost line) validated at
+vacancy creation against the requisition's approved costs. Not scheduled.
+
 ### Cleanup owed at finalization (area 17/18, decision D-6)
 
 Harness residue that will appear in any register or report until it is removed, both created by

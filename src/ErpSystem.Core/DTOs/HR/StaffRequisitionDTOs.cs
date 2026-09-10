@@ -399,6 +399,15 @@ public class StaffRequisitionCostDto : BaseDto
     public DateTime? ApprovedOn { get; set; }
     public string? ApprovalNote { get; set; }
 
+    /// <summary>
+    /// Round 2b, R6: set on a write response when the cost takes the requisition's linked budget
+    /// past its recruitment envelope under Warn. Under Block the approval is refused instead;
+    /// recording is never refused (a recorded cost is not yet signed).
+    /// </summary>
+    public string? BudgetWarning { get; set; }
+    /// <summary>The budget whose envelope the cost counts against, when the requisition is linked.</summary>
+    public string? BudgetNumber { get; set; }
+
     public Guid TenantId { get; set; }
     public Guid RequisitionId { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;

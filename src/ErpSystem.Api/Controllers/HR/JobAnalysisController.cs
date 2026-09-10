@@ -810,6 +810,12 @@ public class JobAnalysisController : ControllerBase
         Guid positionId, [FromQuery] int? fiscalYear, CancellationToken cancellationToken)
         => Ok(await _manpowerBudgetService.GetLinesForPositionAsync(positionId, fiscalYear, cancellationToken));
 
+    /// <summary>Approved and pending recruitment costs against the budget's recruitment envelope (round 2b, R6).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("budgets/{id:guid}/recruitment-spend")]
+    public async Task<ActionResult<RecruitmentSpendDto>> GetRecruitmentSpend(Guid id, CancellationToken cancellationToken)
+        => Ok(await _manpowerBudgetService.GetRecruitmentSpendAsync(id, cancellationToken));
+
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
     [HttpGet("budgets/pending-approvals")]
     public async Task<ActionResult<IEnumerable<ManpowerBudgetSummaryDto>>> GetPendingBudgetApprovals()

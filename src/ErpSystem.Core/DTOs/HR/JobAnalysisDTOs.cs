@@ -1164,6 +1164,42 @@ public class AddLinesFromEstablishmentResultDto
     public List<ManpowerBudgetLineDto> Lines { get; set; } = new();
 }
 
+/// <summary>
+/// What has been spent, and asked to be spent, against a manpower budget's recruitment envelope
+/// (round 2b, R6, decision D-5): the approved recruitment costs on every requisition drawing down
+/// from the budget's lines, the costs recorded but not yet signed, and what is left.
+/// </summary>
+/// <remarks>
+/// ⚠ A read, not a write: <c>ManpowerBudget.ActualSpent</c> stays untouched — it is Finance's
+/// actuals to fill (HR-FINANCE-INTEGRATION-BACKLOG, area 17/18). An envelope of <b>0</b> means
+/// "not set" (a budget drafted from the establishment leaves the money for the holder), and such
+/// a budget constrains nothing.
+/// </remarks>
+public class RecruitmentSpendDto
+{
+    public Guid BudgetId { get; set; }
+    public string BudgetNumber { get; set; } = string.Empty;
+    public decimal RecruitmentBudget { get; set; }
+    public bool EnvelopeSet => RecruitmentBudget > 0;
+    /// <summary>Σ base-currency amount of Approved costs across the budget's requisitions.</summary>
+    public decimal Approved { get; set; }
+    /// <summary>Σ base-currency amount of Recorded (not yet decided) costs.</summary>
+    public decimal Pending { get; set; }
+    public decimal Remaining => RecruitmentBudget - Approved;
+    public BudgetEnforcementMode Mode { get; set; }
+    public string ModeName => Mode.ToString();
+    public List<RecruitmentSpendByRequisitionDto> ByRequisition { get; set; } = new();
+}
+
+public class RecruitmentSpendByRequisitionDto
+{
+    public Guid RequisitionId { get; set; }
+    public string RequisitionNumber { get; set; } = string.Empty;
+    public string? PositionTitle { get; set; }
+    public decimal Approved { get; set; }
+    public decimal Pending { get; set; }
+}
+
 public class RejectManpowerBudgetDto
 {
     public string? Reason { get; set; }

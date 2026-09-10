@@ -1232,3 +1232,28 @@ export interface BatchAssessmentResult {
   failed: number;
   errors: BatchAssessmentError[];
 }
+
+// ── round 2b, R6: recruitment spend against a budget's envelope ────────────────────────
+// A READ over approved/pending requisition costs; `actualSpent` on the budget stays Finance's.
+// `recruitmentBudget` of 0 means the envelope was never set and constrains nothing.
+
+export interface RecruitmentSpendByRequisition {
+  requisitionId: string;
+  requisitionNumber: string;
+  positionTitle?: string | null;
+  approved: number;
+  pending: number;
+}
+
+export interface RecruitmentSpend {
+  budgetId: string;
+  budgetNumber: string;
+  recruitmentBudget: number;
+  envelopeSet: boolean;
+  approved: number;
+  pending: number;
+  remaining: number;
+  mode: number;
+  modeName: 'Off' | 'Warn' | 'Block' | string;
+  byRequisition: RecruitmentSpendByRequisition[];
+}

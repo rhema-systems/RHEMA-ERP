@@ -66,6 +66,7 @@ import type {
   UpdateJobResponsibility,
   UpdateJobResponsibilityKpi,
   UpdateJobWorkingCondition,
+  RecruitmentSpend,
 } from '@/types/hr/job-architecture';
 
 /**
@@ -868,6 +869,11 @@ class JobArchitectureService {
       `${this.jobs}/budgets/${budgetId}/lines/from-establishment?includeUnestablished=${includeUnestablished}`,
       {},
     );
+  }
+
+  /** Approved and pending recruitment costs drawn against the budget's recruitment envelope (R6). */
+  getRecruitmentSpend(budgetId: string) {
+    return apiService.get<RecruitmentSpend>(`${this.jobs}/budgets/${budgetId}/recruitment-spend`);
   }
 
   /** Every position's establishment in one read — the admin screen's list (R4a). */

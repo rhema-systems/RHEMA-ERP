@@ -204,6 +204,9 @@ public interface IManpowerBudgetService
     /// <summary>Every position's establishment in one read — the admin screen's list (R4a).</summary>
     Task<IEnumerable<PositionEstablishmentResultDto>> GetEstablishmentListAsync(Guid? organizationUnitId, CancellationToken cancellationToken = default);
 
+    /// <summary>Approved and pending recruitment costs against the budget's recruitment envelope (round 2b, R6).</summary>
+    Task<RecruitmentSpendDto> GetRecruitmentSpendAsync(Guid budgetId, CancellationToken cancellationToken = default);
+
     Task<ManpowerPlanningBaselineDto> GetPlanningBaselineAsync(
         Guid organizationUnitId, DateOnly periodStart, DateOnly periodEnd, CancellationToken cancellationToken = default);
 
