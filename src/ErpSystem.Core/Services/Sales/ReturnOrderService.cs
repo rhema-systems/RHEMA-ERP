@@ -407,7 +407,25 @@ public class ReturnOrderService : IReturnOrderService
             .Include(c => c.OriginalInvoice)
             .Include(c => c.Lines)
             .FirstOrDefaultAsync();
-        return cn == null ? null : MapCreditNoteDetailDto(cn);
+        if (cn is null) return null;
+        var dto = MapCreditNoteDetailDto(cn);
+        var events = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(item =>
+            item.TenantId == tenantId && item.SourceDocumentId == cn.Id &&
+            (item.IdempotencyKey == SalesCreditNotePostingKey(cn) || item.IdempotencyKey == SalesCreditNoteReversalKey(cn)) &&
+            !item.IsDeleted).ToListAsync();
+        var original = events.SingleOrDefault(item => item.IdempotencyKey == SalesCreditNotePostingKey(cn));
+        var reversal = events.SingleOrDefault(item => item.IdempotencyKey == SalesCreditNoteReversalKey(cn));
+        if (original is not null)
+        {
+            dto.AccountingEventId = original.Id; dto.AccountingEventRequestFingerprint = original.RequestFingerprint;
+            dto.AccountingEventStatus = original.Status; dto.AccountingEventDecisionStatus = original.ProducerDecisionStatus;
+        }
+        if (reversal is not null)
+        {
+            dto.ReversalAccountingEventId = reversal.Id; dto.ReversalAccountingEventRequestFingerprint = reversal.RequestFingerprint;
+            dto.ReversalAccountingEventStatus = reversal.Status; dto.ReversalAccountingEventDecisionStatus = reversal.ProducerDecisionStatus;
+        }
+        return dto;
     }
 
     public async Task<PagedResult<CreditNoteSummaryDto>> GetCreditNotesAsync(
