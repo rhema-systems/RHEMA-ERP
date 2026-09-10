@@ -106,6 +106,20 @@ public class OrganizationUnit : TenantEntity
     [MaxLength(50)]
     public string Code { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The chart-of-accounts row this unit is charged to (round 2, lane B2; plan § 6.2). Null where
+    /// the unit has no code of its own.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b><see cref="AccountCode"/> below is a SNAPSHOT of this account's code</b>, rewritten by
+    /// the service on every save. It is not the source of truth and it is deliberately not kept in
+    /// step afterwards: the organogram and every report read a plain string, and joining HR reads
+    /// into Finance to resolve a label would put a Finance dependency on paths that have none.
+    /// A code renamed in Finance therefore leaves this unit showing the old string until the unit
+    /// is next saved — a stale label, never a wrong charge, because the id is what is stored.
+    /// </remarks>
+    public Guid? FinanceAccountId { get; set; }
+
     [MaxLength(100)]
     public string? AccountCode { get; set; }
 
@@ -248,6 +262,13 @@ public class Team : TenantEntity
     /// Default shift for shift-based teams.
     /// </summary>
     public Guid? ShiftId { get; set; }
+
+    /// <summary>
+    /// The chart-of-accounts row this team's costs are charged to (round 2, lane B2).
+    /// <see cref="CostCenterCode"/> below is its snapshot — see the note on
+    /// <c>OrganizationUnit.FinanceAccountId</c>.
+    /// </summary>
+    public Guid? FinanceAccountId { get; set; }
 
     [MaxLength(100)]
     public string? CostCenterCode { get; set; }

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { FinanceAccountPicker } from '@/components/hr/common/FinanceAccountPicker';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
@@ -35,6 +36,9 @@ export const organizationUnitSchema = z
     name: z.string().min(1, 'Name is required').max(200),
     code: z.string().max(50).optional().or(z.literal('')),
     accountCode: z.string().max(100).optional().or(z.literal('')),
+    // Round 2, lane B2. The ID is what is stored; accountCode above becomes the snapshot
+    // the server writes from the chosen account on every save.
+    financeAccountId: z.string().optional().or(z.literal('')),
     description: z.string().max(1000).optional().or(z.literal('')),
     organizationLevelId: z.string().min(1, 'Level is required'),
     parentUnitId: z.string().optional().or(z.literal('')),
@@ -63,6 +67,7 @@ export const emptyOrganizationUnit: OrganizationUnitFormValues = {
   name: '',
   code: '',
   accountCode: '',
+  financeAccountId: '',
   description: '',
   organizationLevelId: '',
   parentUnitId: '',
@@ -241,8 +246,17 @@ export function OrganizationUnitForm({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="accountCode">Account Code</Label>
-              <Input id="accountCode" placeholder="Optional" {...form.register('accountCode')} />
+              {/*
+                Round 2, lane B2. Was a free-text box; now Finance's chart decides what a valid code
+                is. The unit stores the account's ID and keeps its code as a display snapshot.
+              */}
+              <FinanceAccountPicker
+                id="financeAccountId"
+                label="Account code"
+                value={form.watch('financeAccountId') || null}
+                onChange={(id) => form.setValue('financeAccountId', id ?? '', { shouldDirty: true })}
+                description="The chart-of-accounts row this unit is charged to. Finance owns the chart."
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="sequence">Sequence</Label>

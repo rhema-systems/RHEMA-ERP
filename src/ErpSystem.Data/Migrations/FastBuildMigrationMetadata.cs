@@ -309,3 +309,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909161346_AddSalaryAssignmentWithdrawal")] partial class AddSalaryAssignmentWithdrawal { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909204655_AddSalaryStructurePolicy")] partial class AddSalaryStructurePolicy { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909225805_AddNamedSets")] partial class AddNamedSets { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260910001423_AddUnitFinanceAccount")] partial class AddUnitFinanceAccount { }

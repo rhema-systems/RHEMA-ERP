@@ -347,13 +347,22 @@ What the build changed from the plan, and what it found:
 - [x] `OrganizationUnitHistoryController`: `POST` (manual entry, `ChangeType = Other`, requires reason) and `PUT {id}` (dates, reason, notes only), both `EmployeeAdminPolicy`; `UnitChangeLog.tsx` gains an edit action and a "Record an entry" button.
 - [x] Harness `hr-organization/run-b1.mjs`: create → one history row with the given dates; parent at a lower level refused; level skipped accepted; location parent two levels up refused; manual entry; date edit; `EffectiveTo < EffectiveFrom` refused.
 
-**B2 — Account code from the chart of accounts** (§ 6.2). Migration: `FinanceAccountId` on `OrganizationUnit` and `Team`.
-- [ ] `HrFinanceAccountsController` (`GET api/hr/finance-accounts?search=&take=`), read-only projection `{id, accountCode, accountNumber, accountName, accountType, isActive}` — the `HrCurrenciesController` precedent, same justification comment.
-- [ ] `OrganizationUnit.FinanceAccountId` (Guid?, FK → `Account`, Restrict); `AccountCode` kept as the **snapshot** of `Account.AccountCode` written by the service on every save (the organogram and any report keep working); `Team.FinanceAccountId` + `CostCenterCode` snapshot the same way.
-- [ ] Service validation: account exists, `IsActive`, same tenant; a change is a history-worthy event? **No** — it is not parent or head; recorded on the unit's audit only.
-- [ ] `FinanceAccountPicker.tsx` (searchable combobox, the `TaxAccountPicker` shape from `TaxFormDialog.tsx:58-116`, storing the id); on `OrganizationUnitForm.tsx` and `TeamForm.tsx`; the organogram detail drawer shows code + name.
-- [ ] Register in `HR-MODULE-INTEGRATION-MAP.md` (new row HR → Finance, read-only) and § 7.2 (Finance owner: deactivating an account that HR references).
-- [ ] Harness `hr-organization/run-b2.mjs`: HR user reads the projection 200 (and `api/finance/accounts` 403, to prove why the projection exists); unknown id 400; inactive account 400; snapshot equals the account's code after save and after the account is renamed (a stale snapshot is by design — assert it).
+**B2 — Account code from the chart of accounts** (§ 6.2). ✅ **BUILT 2026-09-10 — 28 ×2, `hr-organization/run-b2.mjs`.** Migration `20260910001423_AddUnitFinanceAccount` (two nullable columns, two indexes, two Restrict FKs; guarded, listed). Regression after it: B1 140, C3 74, C1 36.
+- [x] `HrFinanceAccountsController` (`GET api/hr/finance-accounts?search=&take=&includeInactive=`), read-only projection `{id, accountCode, accountNumber, accountName, accountType, isActive}` — the `HrCurrenciesController` precedent, same justification comment.
+- [x] `OrganizationUnit.FinanceAccountId` and `Team.FinanceAccountId` (Guid?, FK → `Account`, Restrict, no navigation either way); `AccountCode` / `CostCenterCode` kept as the **snapshot**, written by the service on every save.
+- [x] Service validation: exists, same tenant, active. Not a history-worthy event — it is not parent or head.
+- [x] `FinanceAccountPicker.tsx` on `OrganizationUnitForm.tsx` and `TeamForm.tsx`, storing the id.
+- [x] Registered in `HR-MODULE-INTEGRATION-MAP.md` (master table) and `HR-FINANCE-ENTITY-SWEEP.md` § 2b, and § 7.2 updated now the FK is live.
+- [x] Harness as specified, including the 200/403 pair and the stale snapshot asserted as design.
+
+**What the build changed from the plan, and what it found.**
+
+1. **A by-id read was needed and is not in the plan** (`GET api/hr/finance-accounts/{id}`). Without it the picker cannot name the account a unit is ALREADY charged to when a search excludes it, or when Finance has since deactivated it — the box would render empty over a real value. It deliberately answers for an inactive account.
+2. **⚠ The two doors answered the same mistake with two status codes.** An account id typed wrongly inside a payload gave 400 on the unit door and **404** on the team door, because `TeamsController` documents `ArgumentException → 404`. Both now throw `InvalidOperationException` for an unknown account and answer **400**: a bad reference inside a payload is a bad request, not a missing resource. Caught by the harness, not by reading.
+3. **⚠ `Account.Status` SHADOWS `BusinessEntity.Status`** — a string on the base, an `AccountStatus` enum on `Account`. The first cut compared it as a string, which would not compile; had it compiled it would have been silently always-false and let inactive accounts straight through. `AccountDto.Status` *is* a string, so the read door's comparison is right and the service's is not — the same property name meaning two things across a boundary.
+4. **An inactive account is refused on assignment but never stripped** from a unit already holding it. Finance deactivating an account must not silently un-charge every unit pointed at it.
+5. **The legacy four** (`Division`/`Department`/`Section`/`Unit.AccountCode`) are untouched, as § 6.2 says: deprecated in favour of `OrganizationUnit`, and not extended.
+6. **The organogram drawer was not touched.** It reads `AccountCode`, which still holds the code — now Finance's rather than free text — so it keeps working unchanged. Showing code *and name* there needs a name the HR read does not carry, and inventing a field nothing fills is what X-3 was. Left as it is.
 
 **B3 — The picker sweep.** No migration. Replace every flat unit dropdown in § 6.1.3 with the shared picker, screen by screen, each with a screen-payload probe that the chosen id still reaches the API. Split into two halves if it runs long (HR/admin screens, then SHE/training/performance screens). Harness: extend each area's existing UI-payload probe rather than a new one.
 
@@ -1053,7 +1062,10 @@ needs). Items, in priority order:
 1. Deactivating or deleting a chart-of-accounts `Account` that an `OrganizationUnit` or `Team`
    references — Finance's delete guard should refuse or warn; HR's `Restrict` FK makes it fail
    loudly meanwhile. Record in `docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` as a request, not a
-   defect.
+   defect. **LIVE since 2026-09-10 (lane B2)** — the FK now exists, so this is no longer
+   hypothetical. HR's own half is done: an inactive account is refused on assignment and left
+   alone where it is already assigned, so Finance deactivating one cannot silently un-charge a
+   unit. What Finance still owes is the message: today a delete fails as a constraint error.
 2. If Finance ever marks cost-centre accounts (a type or a flag), `api/hr/finance-accounts` gains
    the filter; until then HR offers every active account (§ 6.2).
 
@@ -1083,7 +1095,7 @@ plan and the ledger flip in the same commit as the fix.
 
 | Q | Question | Default if unanswered | Lane |
 |---|---|---|---|
-| Q-1 | Offer every active Finance account in the unit's account picker, or only a subset (by `AccountType`/category)? | Every active account; Finance's chart decides | B2 |
+| Q-1 | ~~Offer every active Finance account in the unit's account picker, or only a subset (by `AccountType`/category)?~~ **DECIDED, BUILT B2**: every active account, no `AccountType` filter. Finance's chart decides what a departmental code is and HR does not second-guess it; if Finance later marks cost-centre accounts distinctly, the projection gains a filter and nothing else changes | Every active account; Finance's chart decides | B2 ✅ |
 | Q-2 | Reports-to outside the unit's ancestry: soft (filter with "show all") or hard (server refuses)? | Soft — matrix and dotted lines exist | C1 |
 | Q-3 | ~~Move the salary amount and payroll flags off the create form onto the Salary tab, leaving only the on-payroll switch and reason?~~ **DECIDED, BUILT E1**: the form sends neither; the create DTO keeps `Salary` for the import path; `NoPayBasis` is the posture until the tab is filled | Yes | E1 ✅ |
 | Q-4 | ~~Surface the dead `EmployeeContractType` lookup (seven TDC rows, with `Duration`) as the contract kind on the contract row, or delete the seed?~~ **DECIDED, BUILT D1**: surfaced, with full CRUD, a *People Reference Data → Contract Types* screen and an `IsActive` retire flag (there is no delete — contracts name their kind by FK). `Duration` defaults `ContractEndDate`. | Surface it; `Duration` gives `ContractEndDate` a default | D1 ✅ |

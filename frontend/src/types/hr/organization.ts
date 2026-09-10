@@ -72,6 +72,8 @@ export interface OrganizationUnit extends AuditFields {
   name: string;
   code: string;
   accountCode?: string | null;
+  /** Round 2, lane B2: the chart-of-accounts row; accountCode above is its snapshot. */
+  financeAccountId?: string | null;
   description?: string | null;
   organizationLevelId: string;
   levelName?: string | null;
@@ -108,6 +110,8 @@ export interface CreateOrganizationUnitRequest {
   name: string;
   code: string;
   accountCode?: string | null;
+  /** Round 2, lane B2: the chart-of-accounts row; accountCode above is its snapshot. */
+  financeAccountId?: string | null;
   description?: string | null;
   organizationLevelId: string;
   parentUnitId?: string | null;

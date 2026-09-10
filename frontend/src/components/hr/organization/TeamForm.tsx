@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { FinanceAccountPicker } from '@/components/hr/common/FinanceAccountPicker';
 import {
   Card,
   CardContent,
@@ -49,6 +50,8 @@ export const teamSchema = z
     teamLeadId: z.string().optional().or(z.literal('')),
     parentTeamId: z.string().optional().or(z.literal('')),
     costCenterCode: z.string().max(100).optional().or(z.literal('')),
+    // Round 2, lane B2 — see the note on the unit form.
+    financeAccountId: z.string().optional().or(z.literal('')),
     projectCode: z.string().max(50).optional().or(z.literal('')),
     teamEmail: z
       .string()
@@ -98,6 +101,7 @@ export const emptyTeam: TeamFormInput = {
   teamLeadId: '',
   parentTeamId: '',
   costCenterCode: '',
+  financeAccountId: '',
   projectCode: '',
   teamEmail: '',
   effectiveFrom: new Date().toISOString().slice(0, 10),
@@ -318,8 +322,14 @@ export function TeamForm({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="costCenterCode">Cost centre code</Label>
-            <Input id="costCenterCode" {...register('costCenterCode')} />
+            {/* Round 2, lane B2 — the chart of accounts decides, not free text. */}
+            <FinanceAccountPicker
+              id="financeAccountId"
+              label="Cost centre code"
+              value={watch('financeAccountId') || null}
+              onChange={(id) => setValue('financeAccountId', id ?? '', { shouldDirty: true })}
+              description="The chart-of-accounts row this team's costs are charged to."
+            />
           </div>
 
           <div className="space-y-2">
@@ -395,6 +405,7 @@ export function toCreateRequest(values: TeamFormValues): CreateTeamRequest {
     locationId: null,
     shiftId: null,
     costCenterCode: blankToNull(values.costCenterCode),
+    financeAccountId: blankToNull(values.financeAccountId),
     projectCode: blankToNull(values.projectCode),
     teamEmail: blankToNull(values.teamEmail),
     effectiveFrom: values.effectiveFrom,
@@ -418,6 +429,7 @@ export function toFormValues(team: {
   teamLeadId?: string | null;
   parentTeamId?: string | null;
   costCenterCode?: string | null;
+  financeAccountId?: string | null;
   projectCode?: string | null;
   teamEmail?: string | null;
   effectiveFrom: string;
@@ -437,6 +449,7 @@ export function toFormValues(team: {
     teamLeadId: team.teamLeadId ?? '',
     parentTeamId: team.parentTeamId ?? '',
     costCenterCode: team.costCenterCode ?? '',
+    financeAccountId: team.financeAccountId ?? '',
     projectCode: team.projectCode ?? '',
     teamEmail: team.teamEmail ?? '',
     // DateOnly serialises as YYYY-MM-DD, which is already what <input type="date"> wants. Slicing

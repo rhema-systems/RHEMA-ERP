@@ -86,6 +86,9 @@ export default function EditOrganizationUnitPage() {
         name: values.name,
         code: values.code ?? '',
         accountCode: values.accountCode || null,
+        // Round 2, lane B2 - the id is what is stored; the server rewrites accountCode
+        // above from the chosen account, so the two cannot disagree.
+        financeAccountId: values.financeAccountId || null,
         description: values.description || null,
         organizationLevelId: values.organizationLevelId,
         parentUnitId: values.parentUnitId || null,
@@ -162,6 +165,7 @@ export default function EditOrganizationUnitPage() {
                 name: unit.name,
                 code: unit.code ?? '',
                 accountCode: unit.accountCode ?? '',
+                financeAccountId: unit.financeAccountId ?? '',
                 description: unit.description ?? '',
                 organizationLevelId: unit.organizationLevelId,
                 parentUnitId: unit.parentUnitId ?? '',

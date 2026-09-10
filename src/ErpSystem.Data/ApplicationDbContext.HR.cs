@@ -10762,6 +10762,36 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ═══════════════════════════════════════════════════════════════════════════════════════
+        // HR → FINANCE: the account a unit or a team is charged to — round 2, lane B2 (plan § 6.2)
+        //
+        // ⚠ NO navigation property on either side, and NO inverse collection on Account. HR must not
+        // grow a queryable path into Finance's ledger: the id is stored, the code is snapshotted for
+        // display, and anything more is asked of Finance through its own API. The FK exists so the
+        // database refuses to delete an account a unit is standing on — Restrict, deliberately, and
+        // the loud failure is the right one until Finance builds its own delete guard (§ 7.2).
+        // ═══════════════════════════════════════════════════════════════════════════════════════
+
+        builder.Entity<OrganizationUnit>(entity =>
+        {
+            entity.HasIndex(x => x.FinanceAccountId).HasDatabaseName("IX_OrganizationUnits_FinanceAccountId");
+
+            entity.HasOne<ErpSystem.Core.Entities.Finance.Account>()
+                .WithMany()
+                .HasForeignKey(x => x.FinanceAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Team>(entity =>
+        {
+            entity.HasIndex(x => x.FinanceAccountId).HasDatabaseName("IX_Teams_FinanceAccountId");
+
+            entity.HasOne<ErpSystem.Core.Entities.Finance.Account>()
+                .WithMany()
+                .HasForeignKey(x => x.FinanceAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<OrganizationChartNode>(entity =>
         {
             entity.HasIndex(x => x.PositionId);

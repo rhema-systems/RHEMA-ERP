@@ -194,6 +194,12 @@ public class OrganizationUnitDto : BaseDto
     public string Name { get; set; } = string.Empty;
     public string Code { get; set; } = string.Empty;
     public string? AccountCode { get; set; }
+
+    /// <summary>
+    /// The chart-of-accounts row this unit is charged to (round 2, lane B2). <c>AccountCode</c>
+    /// above is its snapshot, taken when the unit was last saved.
+    /// </summary>
+    public Guid? FinanceAccountId { get; set; }
     public string? Description { get; set; }
     public Guid OrganizationLevelId { get; set; }
     public string? LevelName { get; set; }
@@ -220,6 +226,15 @@ public class CreateOrganizationUnitDto : CreateDtoBase
 
     [MaxLength(100)]
     public string? AccountCode { get; set; }
+    /// <summary>
+    /// The chart-of-accounts row to charge this unit to (round 2, lane B2; plan § 6.2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set the service OVERWRITES <c>AccountCode</c> with the account's own code, so
+    /// the two cannot disagree. Left null, <c>AccountCode</c> keeps whatever free text it is sent —
+    /// which is how every unit that predates this lane goes on working.
+    /// </remarks>
+    public Guid? FinanceAccountId { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
@@ -274,6 +289,15 @@ public class UpdateOrganizationUnitDto : UpdateDtoBase
 
     [MaxLength(100)]
     public string? AccountCode { get; set; }
+    /// <summary>
+    /// The chart-of-accounts row to charge this unit to (round 2, lane B2; plan § 6.2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set the service OVERWRITES <c>AccountCode</c> with the account's own code, so
+    /// the two cannot disagree. Left null, <c>AccountCode</c> keeps whatever free text it is sent —
+    /// which is how every unit that predates this lane goes on working.
+    /// </remarks>
+    public Guid? FinanceAccountId { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }

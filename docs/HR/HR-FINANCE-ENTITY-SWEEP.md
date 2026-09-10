@@ -201,6 +201,33 @@ built.
 
 ---
 
+## 2b. The one live HR → Finance FK (added 2026-09-10, round 2 lane B2)
+
+Everything else in this document is a *proposed* or *missing* link. This one exists:
+
+| HR side | Finance side | Behaviour |
+|---|---|---|
+| `OrganizationUnit.FinanceAccountId` (Guid?, indexed) | `Account.Id` | FK, **Restrict** |
+| `Team.FinanceAccountId` (Guid?, indexed) | `Account.Id` | FK, **Restrict** |
+
+- **No navigation property, on either side, in either direction.** The id is stored; the account's
+  code is copied onto the existing `AccountCode` / `CostCenterCode` columns as a **snapshot** at
+  save time. HR reads never join into Finance, and Finance's `Account` has no HR collection hung
+  off it. Anything richer is asked of Finance through its own API.
+- **The snapshot is deliberately not kept in step.** Rename an account in Finance and the unit goes
+  on showing the old string until it is next saved. That is a stale *label*, never a wrong charge,
+  because the identifier is what is stored — and it is what keeps the organogram and every report
+  reading a plain string with no Finance dependency.
+- **HR reads the chart through `api/hr/finance-accounts`**, a projection carrying code, number,
+  name, type and active — no balances, no posting rules, no segments. `api/finance/accounts` is
+  `ViewFinance`-gated by the convention map, so an HR user gets 403 and a picker fed from it would
+  render empty. Granting HR `ViewFinance` to fill a dropdown would have opened every Finance read.
+- **⚠ Owed by Finance:** a delete/deactivate guard for an account an HR unit or team references.
+  Until it exists the `Restrict` FK makes the delete fail at the database, which is the right
+  failure but not a good message. Recorded in the round-2 plan § 7.2.
+
+---
+
 ## 3. Narrative detail by functional area
 
 ### 3.1 Payroll — the one area with a working (if legacy) bridge to Finance

@@ -537,6 +537,60 @@ public class OrganizationUnitService : IOrganizationUnitService
         return entities.ToDtoList();
     }
 
+    /// <summary>
+    /// Validates the chosen chart-of-accounts row and writes the code SNAPSHOT (round 2, lane B2;
+    /// plan section 6.2). Null detaches: the id is cleared and whatever AccountCode the caller sent
+    /// stands, which is how a unit that predates this lane keeps its free-text code.
+    /// </summary>
+    /// <remarks>
+    /// Reads Finance's table directly rather than calling Finance's service. The three things asked
+    /// here - does it exist, is it this tenant's, is it active - are all on the row, and taking the
+    /// service would have pulled Finance's whole account DTO across a boundary this lane exists to
+    /// keep narrow.
+    ///
+    /// An INACTIVE account is refused on assignment but NOT stripped from a unit that already holds
+    /// it: Finance deactivating an account must not silently un-charge every unit pointed at it.
+    /// </remarks>
+    private async Task ApplyFinanceAccountAsync(
+        OrganizationUnit entity, Guid? financeAccountId, CancellationToken cancellationToken = default)
+    {
+        if (financeAccountId is null || financeAccountId == Guid.Empty)
+        {
+            entity.FinanceAccountId = null;
+            return;
+        }
+
+        var tenantId = GetTenantId();
+        var account = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.Account>()
+                          .GetQueryable()
+                          .AsNoTracking()
+                          .FirstOrDefaultAsync(a => a.Id == financeAccountId.Value
+                                                    && a.TenantId == tenantId
+                                                    && !a.IsDeleted, cancellationToken)
+                      // ⚠ InvalidOperationException, NOT ArgumentException, and the two doors are
+                      // why. TeamsController documents ArgumentException -> 404 ("the thing you
+                      // asked for is missing") and InvalidOperationException -> 400; the unit
+                      // controller answers 400. An account id the caller typed wrongly INSIDE a
+                      // payload is a bad request on both, not a missing resource on one and a bad
+                      // request on the other - one mistake, one status code.
+                      ?? throw new InvalidOperationException(
+                          $"No chart-of-accounts row was found with ID '{financeAccountId}'. "
+                          + "Choose an account from the chart.");
+
+        // Account.Status SHADOWS BusinessEntity's string Status with an AccountStatus enum - the
+        // string comparison the first cut used could not compile, and would have been a silent
+        // always-false if it had.
+        var unchanged = entity.FinanceAccountId == account.Id;
+        if (!unchanged && account.Status != ErpSystem.Core.Enums.AccountStatus.Active)
+            throw new InvalidOperationException(
+                $"Account '{account.AccountCode}' is {account.Status.ToString().ToLowerInvariant()} in the chart of "
+                + "accounts, so it cannot be charged to. Choose an active account, or have Finance reactivate it.");
+
+        entity.FinanceAccountId = account.Id;
+        // The snapshot. Rewritten on every save, deliberately never chased afterwards.
+        entity.AccountCode = account.AccountCode;
+    }
+
     public async Task<OrganizationUnitDto> CreateAsync(CreateOrganizationUnitDto createDto, CancellationToken cancellationToken = default)
     {
         // Validate level exists
@@ -582,6 +636,9 @@ public class OrganizationUnitService : IOrganizationUnitService
 
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+
+        // Round 2, lane B2 - before the insert, so a bad account stores nothing.
+        await ApplyFinanceAccountAsync(entity, createDto.FinanceAccountId, cancellationToken);
 
         // Build path
         if (createDto.ParentUnitId.HasValue)
@@ -731,6 +788,9 @@ public class OrganizationUnitService : IOrganizationUnitService
         var headChanged = previousHeadEmployeeId != updateDto.HeadEmployeeId;
 
         updateDto.UpdateEntity(entity);
+        // Round 2, lane B2. After the mapper because it rewrites AccountCode, which the mapper has
+        // just assigned from the DTO: the account's own code is the one that wins.
+        await ApplyFinanceAccountAsync(entity, updateDto.FinanceAccountId, cancellationToken);
 
         if (parentChanged)
             await RecordHistoryAsync(

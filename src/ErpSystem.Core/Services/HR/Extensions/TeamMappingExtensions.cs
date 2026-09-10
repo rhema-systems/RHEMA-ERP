@@ -41,6 +41,7 @@ public static class TeamMappingExtensions
             // entity rather than from the field's own label, which is the area-12 rule.
             ShiftName = entity.Shift?.ShiftName,
             CostCenterCode = entity.CostCenterCode,
+            FinanceAccountId = entity.FinanceAccountId,
             ProjectCode = entity.ProjectCode,
             TeamEmail = entity.TeamEmail,
             EffectiveFrom = entity.EffectiveFrom,
