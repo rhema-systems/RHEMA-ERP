@@ -1292,6 +1292,16 @@ re-review is active before integration. The relational fixture reached real post
 only the missing test-local AccountTransactions table; a discarded EnsureCreated experiment hit SQLite-incompatible
 DDL and made no production change. No configured database, schema, migration or remote state was touched.
 
+The production Sales relational fixture is now committed cleanly as `747cc26c`. It uses production
+AccountingEventService/FinancePostingEngine plus C7/C11/C12/C15, a caller-owned Serializable transaction, exact
+C15 retry, and injected pre-commit failure with rollback-before-separate-durable-failure recovery; current binaries
+build with zero errors and the fixture passes 2/2. Sol High review is active on that pinned commit while Terra adds
+real closed-period and same-invoice two-context gates in a follow-on commit. Separately, Sol High still requires
+governance correction `a56b59dc` to remove a tautological closed-period mock, complete C12/C15 receipt matching and
+canonical fingerprint binding, and compare full durable event/journal/balance/exposure row state on all denials.
+Neither evidence branch is integrated; no configured database, production schema, migration or remote state was
+touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
