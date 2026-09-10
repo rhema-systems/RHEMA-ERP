@@ -1230,6 +1230,14 @@ date retry coverage with C15 replay verification. Restore and diff gates pass, b
 a focused test verdict, so the commit is not integrated. Sol High static/test review is active while the production
 relational fixture continues independently; no database, schema, migration or remote state was touched.
 
+Sol High review requires changes to test-only `729d9e5a`: it disables 20 meaningful facts rather than migrating
+them, its source-tamper test uses a random event ID so the C15 callback is never reached, it replaces rather than
+adds reversal reason/date conflict coverage, and its lockdown does not yet prove C11 Approved consumption or forbid
+owner auto-approval/ALL_ACTIVE_BOOKS/applicability resolution. The governance task has resumed to preserve and
+rewrite every unique control. Separately, the production-engine SQLite substitution remains uncommitted while its
+minimal schema/seed is completed; no valid relational result or integration is claimed. No database, schema,
+migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
