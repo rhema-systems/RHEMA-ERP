@@ -178,7 +178,7 @@ built.
 | 65 | Consultant Client | `ClientEngagement.HourlyRate/.Currency/.BillingCycle/.MaxHoursPerWeek/.ContractValue/.PurchaseOrderNumber` (`ConsultantClientEntities.cs:159`) | Billing contract with an external client (T&M or capped) | REF | Feeds row 64; `Currency` not validated against Finance | ⚪ reference, ⚠ payee/customer gap |
 | 66 | Consultant Client | `ConsultantClient.Currency/.DefaultPaymentTermsDays/.TaxIdentificationNumber` + billing contact | An **AR customer master duplicated inside HR** | REF | Finance/Sales `Customer` or `BusinessPartner` — no link (see `HR-MODULE-INTEGRATION-MAP.md` row 25) | 🔲 not linked |
 | 67 | Recruitment | `JobOffer.BaseSalary/.SalaryGradeMin/.SalaryGradeMax/.SalaryLevelId/.SalaryNotchId/.Bonus/.Commission`, `JobOfferBenefit.MonetaryValue/.CurrencyCode`, `JobCandidate.ExpectedSalaryMin/Max/.ExpectedSalaryCurrency` | Offered compensation package; becomes `Employee.Salary` + pay components on hire | REF/EXP | Feeds payroll on hire; currency caller-supplied | ⚪ reference (the appendix wrongly said Recruitment carries no money) |
-| 68 | Recruitment | `StaffRequisition.IsBudgeted/.BudgetCode`; **`StaffRequisitionCost.Category/.Amount/.Currency/.ExchangeRate/.PaymentVoucherNumber`** (`StaffRequisitionEntities.cs:144-176`) | Recruitment spend per requisition (adverts, agency, tests) with a payment-voucher reference | EXP | **`ExchangeRate` is caller-supplied (default 1) — the one surviving master-data violation in HR**; the real overlap partner for `ManpowerBudget.RecruitmentBudget` (row 9) | 🔲 master-data gap; 🟡 no GL |
+| 68 | Recruitment | `StaffRequisition.IsBudgeted/.BudgetCode`; **`StaffRequisitionCost.Category/.Amount/.Currency/.ExchangeRate/.PaymentVoucherNumber`** (`StaffRequisitionEntities.cs:144-176`) | Recruitment spend per requisition (adverts, agency, tests) with a payment-voucher reference | EXP | ~~`ExchangeRate` is caller-supplied~~ **CLOSED 2026-09-10 (round 2b, R7)**: the rate is read from Finance through `HrCurrencyBridge` for the cost date, the base amount is stored, the currency is validated, the payee is a Procurement `Supplier` (or a named person), and HR approves the cost (`Status`). Still the overlap partner for `ManpowerBudget.RecruitmentBudget` (row 9) — R6 validates approved costs against it | ✅ master data; 🟡 no GL (R8 waits on the Finance owner) |
 | 69 | Core Employee | `Employee.Salary`, `.PayTax`, `.SSFund`, `.GrossUp`, `.Tier2Only`, `.Overtime`, **`.IsOnPayroll/.OffPayrollReason/.OffPayrollNote`** (lane 3f); `EmployeeContractDetail.Salary/.CurrencyCode/.PayFrequency/.TaxTreatmentType/.WithholdingTaxRate/.IsTaxExempt`; `EmployeeSalaryAssignment` (grade/level/notch placement); `EmployeeBankDetail.AllocationPercentage` | The master salary, the **payroll-membership switch** (decides whether anything posts for a person at all), contract tax treatment (PAYE vs WHT), net-pay split across accounts | REF | Feeds payroll; `IsOnPayroll` is HR's *should*, `PayrollEmployeeProfile.PayrollActive` is payroll's *is* — see `HR-PAYROLL-BOUNDARY.md` | ⚪ reference |
 | 70 | Medical | **`MedicalInsurancePremiumRecord`** (`TotalPremiumAmount`, `EmployerContribution`, `EmployeeContribution`, `CoveredLivesCount`, `Status`, `DueDate`, `PaymentDate`, `PaymentReference`, `PaymentMethod`, `MedicalEntities.cs:709`) | **The premium payable to the insurer — modelled, with status and payment fields** | PAY (AP) | Finance AP invoice/payment to the insurer once decision #7 models the payee | 🟡 recorded, not posted (row 29's "unmodelled" was wrong) |
 | 71 | Medical | **`MedicalInsuranceClaim`** (`PolicyId`, `MedicalExpenseClaimId`, `ClaimedAmount`, `ApprovedAmount`, `PaidAmount`, `CoPayAmount`, `PaymentDate/Reference`, `:570`) | A **second, distinct claim entity**: the recovery from the insurer against an employee's claim | REC (from insurer) | Finance AR/receipt from the insurer; pairs with row 30 | 🟡 HR-only |
@@ -431,9 +431,8 @@ across multiple rows at once — resolving one often closes several rows in §2:
 13. **Payroll's parallel FX master** *(added 2026-09-02)* — `PayrollExchangeRate` duplicates
     Finance's `ExchangeRate`. Raise with the payroll owner; HR does not edit that module. *Affects
     row 85.*
-14. **`StaffRequisitionCost.ExchangeRate`** *(added 2026-09-02)* — the last caller-supplied rate
-    in HR; route through `HrCurrencyBridge`. Not a decision, a fix; listed so it is not forgotten
-    now that row 50 is closed. *Affects row 68.*
+14. ~~**`StaffRequisitionCost.ExchangeRate`** *(added 2026-09-02)* — the last caller-supplied rate
+    in HR; route through `HrCurrencyBridge`.~~ **DONE 2026-09-10 (round 2b, R7).** *Row 68 closed.*
 
 ---
 
@@ -447,8 +446,7 @@ most other rows, and (c) already have the cleanest HR-side arithmetic to build o
    Unlocks the audit trail, idempotency and dimensions for every row that already routes through
    `PayrollJournalMapping` (11, 12, 15, 19, 20, 22–24). Raise FIN-INT-011 and the parallel FX
    table (row 85) in the same hand-off.
-1b. **Fix `StaffRequisitionCost.ExchangeRate`** (decision 14) — independent of everything else,
-   can go first.
+1b. ~~**Fix `StaffRequisitionCost.ExchangeRate`** (decision 14)~~ **DONE 2026-09-10 (round 2b, R7).**
 2. **Settle decision #1 (payroll vs. direct payment)** — the highest-leverage open question;
    closes the door on six rows at once.
 3. **Back-fill Medical claim payment** (row 30) as the reference implementation once #2 is

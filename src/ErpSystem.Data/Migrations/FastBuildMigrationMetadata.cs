@@ -316,3 +316,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260910043146_AddTeamApprovalRejectionReasons")] partial class AddTeamApprovalRejectionReasons { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260910163909_AddManpowerBudgetLineSalaryScale")] partial class AddManpowerBudgetLineSalaryScale { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260910201924_AddStaffRequisitionBudgetLink")] partial class AddStaffRequisitionBudgetLink { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260910205043_AddStaffRequisitionCostPayeeAndApproval")] partial class AddStaffRequisitionCostPayeeAndApproval { }

@@ -386,6 +386,19 @@ public class LinkStaffRequisitionToVacancyDto
 
 public class StaffRequisitionCostDto : BaseDto
 {
+    // Round 2b, R7
+    public DateOnly CostDate { get; set; }
+    public decimal AmountBaseCurrency { get; set; }
+    public Guid? SupplierId { get; set; }
+    public string? SupplierName { get; set; }
+    public string? PayeeName { get; set; }
+    public StaffRequisitionCostStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ApprovedOn { get; set; }
+    public string? ApprovalNote { get; set; }
+
     public Guid TenantId { get; set; }
     public Guid RequisitionId { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
@@ -404,6 +417,13 @@ public class StaffRequisitionCostDto : BaseDto
     public Guid RecordedById { get; set; }
     public string RecordedByName { get; set; } = string.Empty;
     public DateTime RecordedDate { get; set; }
+}
+
+/// <summary>HR's approve/reject of a recruitment cost (round 2b, R7).</summary>
+public class DecideStaffRequisitionCostDto
+{
+    [MaxLength(500)]
+    public string? Note { get; set; }
 }
 
 public class CreateStaffRequisitionCostDto : CreateDtoBase
@@ -425,8 +445,18 @@ public class CreateStaffRequisitionCostDto : CreateDtoBase
     [MaxLength(3)]
     public string Currency { get; set; } = "GHS";
 
-    [Range(0.000001, double.MaxValue)]
-    public decimal ExchangeRate { get; set; } = 1;
+    // ⚠ `ExchangeRate` is NO LONGER ACCEPTED (round 2b, R7): the server reads Finance's rate for
+    // the currency on the cost date. A client still sending one is ignored, not refused.
+
+    /// <summary>The day the money moved — the rate is read for this date. Defaults to today.</summary>
+    public DateOnly? CostDate { get; set; }
+
+    /// <summary>The payee, a Procurement supplier (optional).</summary>
+    public Guid? SupplierId { get; set; }
+
+    /// <summary>Required when there is no supplier: who was paid (a reimbursed candidate, say).</summary>
+    [MaxLength(200)]
+    public string? PayeeName { get; set; }
 
     [MaxLength(500)]
     public string? Description { get; set; }
@@ -451,8 +481,18 @@ public class UpdateStaffRequisitionCostDto : UpdateDtoBase
     [MaxLength(3)]
     public string Currency { get; set; } = "GHS";
 
-    [Range(0.000001, double.MaxValue)]
-    public decimal ExchangeRate { get; set; } = 1;
+    // ⚠ `ExchangeRate` is NO LONGER ACCEPTED (round 2b, R7): the server reads Finance's rate for
+    // the currency on the cost date. A client still sending one is ignored, not refused.
+
+    /// <summary>The day the money moved — the rate is read for this date. Defaults to today.</summary>
+    public DateOnly? CostDate { get; set; }
+
+    /// <summary>The payee, a Procurement supplier (optional).</summary>
+    public Guid? SupplierId { get; set; }
+
+    /// <summary>Required when there is no supplier: who was paid (a reimbursed candidate, say).</summary>
+    [MaxLength(200)]
+    public string? PayeeName { get; set; }
 
     [MaxLength(500)]
     public string? Description { get; set; }

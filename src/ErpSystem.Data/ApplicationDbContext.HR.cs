@@ -9366,6 +9366,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.RecordedById)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 2b, R7: the payee and HR's own approval. Restrict on both.
+            entity.HasIndex(x => x.SupplierId);
+            entity.HasIndex(x => x.Status);
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.HasOne(x => x.Supplier).WithMany().HasForeignKey(x => x.SupplierId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ApprovedBy).WithMany().HasForeignKey(x => x.ApprovedById).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<StaffRequisitionAttachment>(entity =>

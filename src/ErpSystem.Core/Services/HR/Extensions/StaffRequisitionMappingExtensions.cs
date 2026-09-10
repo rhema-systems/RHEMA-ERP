@@ -306,6 +306,16 @@ public static class StaffRequisitionMappingExtensions
             RecordedById         = entity.RecordedById,
             RecordedByName       = entity.RecordedBy?.FullName ?? string.Empty,
             RecordedDate         = entity.RecordedDate,
+            CostDate             = entity.CostDate,
+            AmountBaseCurrency   = entity.AmountBaseCurrency,
+            SupplierId           = entity.SupplierId,
+            SupplierName         = entity.Supplier?.Name,
+            PayeeName            = entity.PayeeName,
+            Status               = entity.Status,
+            ApprovedById         = entity.ApprovedById,
+            ApprovedByName       = entity.ApprovedBy?.FullName,
+            ApprovedOn           = entity.ApprovedOn,
+            ApprovalNote         = entity.ApprovalNote,
         };
     }
 
@@ -319,7 +329,11 @@ public static class StaffRequisitionMappingExtensions
             Purpose              = dto.Purpose,
             Amount               = dto.Amount,
             Currency             = dto.Currency,
-            ExchangeRate         = dto.ExchangeRate,
+            // ⚠ ExchangeRate / AmountBaseCurrency / PayeeName-from-supplier: written by the
+            // service (ApplyCostMoneyAsync) from Finance's masters, not from the caller.
+            CostDate             = dto.CostDate ?? DateOnly.FromDateTime(DateTime.UtcNow),
+            SupplierId           = dto.SupplierId,
+            PayeeName            = dto.PayeeName,
             Description          = dto.Description,
             PaymentVoucherNumber = dto.PaymentVoucherNumber,
             RecordedById         = recordedById,
@@ -333,7 +347,10 @@ public static class StaffRequisitionMappingExtensions
         entity.Purpose              = dto.Purpose;
         entity.Amount               = dto.Amount;
         entity.Currency             = dto.Currency;
-        entity.ExchangeRate         = dto.ExchangeRate;
+        // ⚠ ExchangeRate / AmountBaseCurrency: the service's ApplyCostMoneyAsync, not here.
+        if (dto.CostDate.HasValue) entity.CostDate = dto.CostDate.Value;
+        entity.SupplierId           = dto.SupplierId;
+        entity.PayeeName            = dto.PayeeName;
         entity.Description          = dto.Description;
         entity.PaymentVoucherNumber = dto.PaymentVoucherNumber;
         entity.UpdatedAt            = DateTime.UtcNow;

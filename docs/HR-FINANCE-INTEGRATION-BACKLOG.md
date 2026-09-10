@@ -203,8 +203,21 @@ clearest case in the whole register for the sweep to own**, rather than HR inven
 - `ManpowerBudget.TrainingBudget` and area 7's own training budget describe the same spend, and now
   so does succession development (recorded under area 13). That is a **three-way** double-count.
 - `ManpowerBudget.RecruitmentBudget` overlaps whatever recruitment cost area 6 tracks per
-  requisition. Decide once whether the manpower budget is the parent envelope that the others draw
-  down from, or a parallel plan.
+  requisition. ~~Decide once whether the manpower budget is the parent envelope that the others draw
+  down from, or a parallel plan.~~ **DECIDED 2026-09-10 (round 2b, D-5): the manpower budget is the
+  parent envelope; approved `StaffRequisitionCost` rows on requisitions linked to a budget draw it
+  down (lane R6). `ActualSpent` stays unwritten — the drawdown is a read.**
+
+### Area 6 — Recruitment costs (added 2026-09-10, round 2b R7; the R8 ask is `docs/HANDOFF-FINANCE-HR-RECRUITMENT-COST-AP.md`)
+
+| Money event | Where it lives | What it is |
+|---|---|---|
+| **Recruitment cost** | `StaffRequisitionCost` (`Amount`, `Currency`, `ExchangeRate` from Finance, `AmountBaseCurrency`, `CostDate`, `SupplierId`/`PayeeName`, `Status`, `ApprovedById/On`) | Spend on filling a requisition, paid to a Procurement supplier or a named person, approved by HR (`Recorded → Approved | Rejected`) |
+| **Payment voucher** | `StaffRequisitionCost.PaymentVoucherNumber` | ⚠ Still a **typed record**. The AP hand-off (HR-approved cost → `IVendorInvoiceService` vendor invoice → Finance approves and pays → HR reads the voucher back) is designed as lane R8 and **waits on the Finance owner's answers** (a producer route, a catalogue row, the authorising event, the non-supplier payee, the expense account). |
+
+Master data is read canonically (rule 4): currency and rate through `HrCurrencyBridge`, the
+supplier through `api/hr/suppliers`. **No HR-side payment status exists** (rule 2): `Status` is
+HR's own approval of the spend, and whether Finance has paid it is Finance's to say.
 
 ### Cleanup owed at finalization (area 17/18, decision D-6)
 

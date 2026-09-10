@@ -255,7 +255,7 @@ public class StaffRequisitionCostRepository : GenericRepository<StaffRequisition
     public async Task<IEnumerable<StaffRequisitionCost>> GetByRequisitionIdAsync(Guid requisitionId)
     {
         return await _dbSet
-            .Include(c => c.RecordedBy)
+            .Include(c => c.RecordedBy).Include(c => c.Supplier).Include(c => c.ApprovedBy)
             .Where(c => c.RequisitionId == requisitionId && !c.IsDeleted)
             .OrderBy(c => c.RecordedDate)
             .ToListAsync();

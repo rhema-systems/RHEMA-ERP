@@ -93,16 +93,27 @@ export const VACANCY_CLOSURE_REASONS = [
 ] as const;
 export type VacancyClosureReason = (typeof VACANCY_CLOSURE_REASONS)[number];
 
+/**
+ * ⚠ Mirrors `StaffRequisitionCostCategory` on the server — ALL TEN members, in the server's
+ * spelling. The previous list here had seven names, three of which (`Advertising`, `AgencyFees`,
+ * `Travel`) were not members at all, so the form's default and three of its options could never
+ * be saved (round 2b, R7).
+ */
 export const REQUISITION_COST_CATEGORIES = [
-  'Advertising',
-  'AgencyFees',
-  'Assessment',
-  'Travel',
-  'Relocation',
+  'RecruitmentAgencyFee',
+  'JobAdvertising',
   'BackgroundCheck',
+  'Assessment',
+  'Relocation',
+  'OnboardingMaterials',
+  'TrainingAndInduction',
+  'MedicalExamination',
+  'TravelAndInterview',
   'Other',
 ] as const;
 export type RequisitionCostCategory = (typeof REQUISITION_COST_CATEGORIES)[number];
+
+export type RequisitionCostStatus = 'Recorded' | 'Approved' | 'Rejected';
 
 // ── staff requisition ──────────────────────────────────────────────────────
 
@@ -325,12 +336,26 @@ export interface RequisitionCost {
   purpose: string;
   amount: number;
   currency: string;
+  /** Finance's rate for the cost date, read by the server (R7) — never typed. */
   exchangeRate: number;
   description?: string | null;
+  /** Still a typed record until the Finance AP hand-off (R8). */
   paymentVoucherNumber?: string | null;
   recordedById: string;
   recordedByName: string;
   recordedDate: string;
+  // ── round 2b, R7 ──
+  costDate: string;
+  amountBaseCurrency: number;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  payeeName?: string | null;
+  status: RequisitionCostStatus;
+  statusName?: string;
+  approvedById?: string | null;
+  approvedByName?: string | null;
+  approvedOn?: string | null;
+  approvalNote?: string | null;
 }
 
 export interface RequisitionCostForm {
@@ -338,7 +363,11 @@ export interface RequisitionCostForm {
   purpose: string;
   amount: number;
   currency: string;
-  exchangeRate: number;
+  /** `YYYY-MM-DD`; the day the money moved. The rate is Finance's for this date. */
+  costDate?: string | null;
+  supplierId?: string | null;
+  /** Required when there is no supplier. */
+  payeeName?: string | null;
   description?: string | null;
   paymentVoucherNumber?: string | null;
 }

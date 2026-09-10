@@ -1,6 +1,6 @@
 # HR demo feedback, round 2b — Recruitment: budget, establishment, requisition
 
-> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2), R4a (60 ×2) and R5 (70 ×2, `hr-jobarch/run-r5.mjs`) DONE 2026-09-10; R7 next.** Source: the feedback document *HR Demo Meetings —
+> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2), R4a (60 ×2), R5 (70 ×2) and R7 (42 ×2, `hr-jobarch/run-r7.mjs`) DONE 2026-09-10; R6 next, then R4b; R8 on the Finance owner's answer.** Source: the feedback document *HR Demo Meetings —
 > Changes and Additions 2* (2 pages, section RECRUITMENT), brought by the user on 2026-09-10 after
 > the round-2 HR demo, plus one follow-up from the user the same day (Finance must approve and
 > process requisition costs). Every bullet of the document is accounted for in § 2 — as a build
@@ -300,7 +300,24 @@ Approved costs (Q-R5) aggregated across every requisition on the budget vs
 `RequisitionCostsPanel` shows the figure and wires the existing `updateCost`. Vacancy half:
 recorded in the Finance backlog, not built. Harness `run-r6.mjs`.
 
-### R7 — Requisition costs read Finance's master data; HR approves a cost · migration `AddStaffRequisitionCostPayeeAndApproval`
+### R7 — Requisition costs read Finance's master data; HR approves a cost · migration `20260910205043_AddStaffRequisitionCostPayeeAndApproval` · ✅ **DONE 2026-09-10** · 42 ×2
+
+- [x] `StaffRequisitionCost.CostDate`, `AmountBaseCurrency`, `SupplierId` (→ Procurement `Supplier`, Restrict) + `PayeeName` snapshot, `Status {Recorded=1, Approved=2, Rejected=3}`, `ApprovedById/On/Note`. Migration rewritten with **three** scaffolded defaults corrected and a data half (status 1; cost date from `RecordedDate`; base amount from each row's typed rate).
+- [x] Write DTOs lose `ExchangeRate` (ignored if sent); `ApplyCostMoneyAsync`: currency validated by `HrCurrencyBridge`, rate read for the cost date, base amount stored; supplier tenant + active check with the name snapshotted; a payee name required when there is no supplier. **The last caller-supplied rate in HR is gone** (entity sweep row 68 / decision 14 / sequencing 1b closed).
+- [x] `POST costs/{id}/approve|reject` (`RecruitmentWritePolicy`; the recorder → 403); an Approved cost's money is fixed — only voucher and note follow it (422 otherwise); a Rejected one stays editable. `GET costs/total?status=` sums the STORED base amount.
+- [x] `HrSuppliersController` (`api/hr/suppliers`, `InternalOnly`, over `ISupplierRepository.GetQueryable()`, tenant-filtered, id/code/name/active), `hr-supplier.service.ts`, `SupplierPicker.tsx`; `RequisitionCostsPanel.tsx` rewritten: currency `Select` from Finance, no rate input, cost date, supplier picker with a payee-name fallback, status badge, approve/reject with a note, approved-only total, voucher/note-only edit on an approved cost.
+- [x] `HrCurrencyBridge.cs`'s "INVERTED" remark corrected: Finance PR #99 fixed it (USD reads 12.5); the harness asserts the direction against `GET api/finance/exchange-rates/current/USD`.
+- [x] Harness `run-r7.mjs` 42 ×2; regression R5 70, R4a 60, R3 55, R2 57, R1 36, slice 7 47, slice 8 40, slice 12 41.
+
+**What the build changed from the plan, and what it found.**
+
+1. ⚠ **Procurement's `GET /api/Suppliers` answers 400 "The operation is not valid for the current state of the object" to every caller, admin included.** The plan wanted the HR door because Procurement's was permission-gated; it is not (plain `[Authorize]`) — it is broken. Recorded as cross-module defect #26; the HR door does not depend on it, and the harness asserts the Procurement door is *not* usable so the fix shows up.
+2. ⚠ **The panel's category list had seven names, three of which (`Advertising`, `AgencyFees`, `Travel`) were not server members**, so the form's default and three options could never be saved — § 3 defect 9 was the visible tip. Replaced with the server's ten.
+3. **The two-actor rule answers 403** (`UnauthorizedAccessException`), the money/payee refusals **422** (`InvalidOperationException`) — this controller's conventions, asserted.
+4. **A Rejected cost stays editable** (it was never signed) and is re-rated by Finance on edit; only Approved fixes the money.
+5. **Not browser-walked.**
+
+The plan as written:
 
 `StaffRequisitionCost.SupplierId` (→ Procurement `Supplier`, Restrict) + `PayeeName` snapshot;
 `Status {Recorded=1, Approved=2, Rejected=3}` (migration default 1), `ApprovedById/On/Note`;

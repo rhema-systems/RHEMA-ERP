@@ -1490,6 +1490,41 @@ either register. Item 6 is a status-code mapping. Item 7 is a warm-up on startup
 queries for the heaviest list shapes.
 
 
+## 26. Procurement's supplier list answers 400 to every caller (2026-09-10)
+
+**Owner:** Procurement. **Severity:** blocks any picker fed from it; HR is not blocked (it built
+its own read door). **Status:** open.
+
+### What is broken
+
+`GET /api/Suppliers?page=1&pageSize=3` (`SuppliersController.GetSuppliers`, `[Authorize]` only)
+returns **400** `{"code":"INVALID_OPERATION","detail":"The operation is not valid for the current
+state of the object."}` for the SuperAdmin `admin` login and for an HR user alike. The controller
+delegates to `ISupplierRepository.GetSuppliersAsync(page, pageSize, search, status, supplierType,
+isActive, isPreferred)`; the `InvalidOperationException` comes from inside that call and is
+answered by the global middleware as a 400, so the endpoint cannot list suppliers at all.
+
+### What was proven
+
+Reproduced 2026-09-10 twice (admin, then a freshly minted HR user), API in Staging on the current
+`hrdev` build; both variants of the query string (`pageSize` only, `page` + `pageSize`) fail the
+same way. `dev-harness/hr-jobarch/run-r7.mjs` asserts the door is *not* usable so the day it is
+fixed shows up as a failed assertion rather than a silent change.
+
+### What it blocks
+
+Any screen that needs a supplier picker through Procurement's own endpoint. HR's recruitment
+costs (round 2b, R7) name a Procurement `Supplier` as the payee and read the master through a new
+narrow projection, `GET api/hr/suppliers` (`HrSuppliersController`, over `ISupplierRepository`'s
+queryable, tenant-filtered, id/code/name/active only) — the same shape and reason as
+`HrCurrenciesController`. That door stays even after this is fixed.
+
+### What a fix needs
+
+Look at `SupplierRepository.GetSuppliersAsync`'s paging/ordering path for the invalid-operation
+throw (a `Skip`/`Take` without an `OrderBy`, or a `Single` over several rows, are the usual
+shapes). Nothing on the HR side needs to change when it is fixed.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

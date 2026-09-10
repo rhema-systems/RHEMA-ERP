@@ -144,6 +144,12 @@ public interface IStaffRequisitionService
     /// <summary>Returns the total base-currency cost recorded against a requisition.</summary>
     Task<decimal> GetTotalCostAsync(Guid requisitionId, CancellationToken cancellationToken = default);
 
+    /// <summary>The stored base-currency total, optionally only costs in one status (round 2b, R7).</summary>
+    Task<decimal> GetTotalCostAsync(Guid requisitionId, StaffRequisitionCostStatus? status, CancellationToken cancellationToken = default);
+
+    /// <summary>HR approves or rejects a recorded cost; the recorder may not decide their own (R7).</summary>
+    Task<StaffRequisitionCostDto> DecideCostAsync(Guid costId, bool approve, string? note, Guid actorEmployeeId, CancellationToken cancellationToken = default);
+
     /// <summary>Returns cost entries for the given requisition filtered by category.</summary>
     Task<IEnumerable<StaffRequisitionCostDto>> GetCostsByCategoryAsync(Guid requisitionId, StaffRequisitionCostCategory category, CancellationToken cancellationToken = default);
 

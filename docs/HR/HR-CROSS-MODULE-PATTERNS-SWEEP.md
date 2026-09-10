@@ -129,7 +129,7 @@ Legend — **Priority**: 🔴 high-leverage/high-risk · 🟡 moderate · 🟢 n
 | 1 | Reminder → notification wiring | HR's own `IAppEventBus` topic pipeline (five engines already use it) | 🟡 5 of 8 engines deliver; **Probation, Separation, IdentificationExpiry log only** | 🔴 |
 | 2 | Optimistic concurrency (`RowVersion`) | Procurement 31% / Quantity Survey 35% coverage | 🔲 12 of 596 HR entities (≈2%) | 🔴 |
 | 3 | Budget commitment lifecycle (reserve→consume→release) | Finance (`IFinanceBudgetCommitmentService`, FIN-INT-015 — consumed by Finance AP; Procurement keeps its own reservation store) | 🔲 `ManpowerBudget`/`TrainingBudget`/`AwardBudget`/`StaffTravelBudget` are self-tracked only | 🔴 |
-| 4 | Exchange-rate resolution from Finance master | Finance (`IExchangeRateService` via `HrCurrencyBridge`) | 🟡 Travel/Assets/Letters/Separation/Succession done; **`StaffRequisitionCost.ExchangeRate` still caller-supplied** | 🟡 |
+| 4 | Exchange-rate resolution from Finance master | Finance (`IExchangeRateService` via `HrCurrencyBridge`) | ✅ Travel/Assets/Letters/Separation/Succession, and Recruitment costs since 2026-09-10 (round 2b, R7) | ✅ |
 | 5 | Semantic audit trail for sensitive changes | Finance (`IFinanceAuditService`) | 🔲 Only the generic EF interceptor; no HR-specific business-meaning log | 🟡 |
 | 6 | Reporting/export framework | Finance (`IFinanceReportExportService`) | ❓ HR has three of its own reporting patterns (Oracle payroll reports, `HrAwardsReportCatalogue` system reports, dashboards) but doesn't use Finance's — see [`HR-REPORTS-CATALOGUE.md`](HR-REPORTS-CATALOGUE.md) | 🟡 |
 | 7 | Adjustment/write-off with GL posting | Inventory (`IInventoryAdjustmentFinancePostingService`) | 🔲 `AssetSurcharge.WaiverReason` has no accounting treatment | 🟡 (shared with Finance sweep decision #2) |
@@ -297,7 +297,7 @@ through `HrCurrencyBridge` (`Services/HR/HrCurrencyBridge.cs`, injecting `ICurre
 `AssetsServices`, `AssetSurchargeService`, `HrLetterRequestService`, `SeparationService` and
 `SuccessionPlanServices`. **The Finance sweep's row 50 is stale**; it has been corrected there.
 
-**Where the master-data rule is still violated:** `StaffRequisitionCost.ExchangeRate`
+**Where the master-data rule is still violated:** nowhere in HR since 2026-09-10 — `StaffRequisitionCost.ExchangeRate` was the last (round 2b, R7)
 (`StaffRequisitionEntities.cs:170`, DTO default 1, mapped straight through at
 `StaffRequisitionMappingExtensions.cs:306/320`, summed at `StaffRequisitionService.cs:632`).
 `StaffRequisitionService` injects no currency or rate service. Fix = route it through
@@ -536,10 +536,9 @@ Ranked by (a) risk if left unaddressed, (b) how directly reusable the existing p
    Separation, Discipline, Awards, and the SHE approval-bearing ones). Additive migration, low
    risk, closes a genuine data-loss exposure. Payroll loans/advances are the payroll owner's
    (see `HR-PAYROLL-BOUNDARY.md`) — raise, don't edit.
-3. **Route `StaffRequisitionCost.ExchangeRate` through `HrCurrencyBridge`** instead of accepting
-   a caller-supplied rate — this is a master-data fix, not part of the deferred GL-posting sweep,
-   so it can proceed independently and immediately. *(Travel, the original target, was fixed in
-   area 12.)*
+3. ~~**Route `StaffRequisitionCost.ExchangeRate` through `HrCurrencyBridge`**~~ **DONE 2026-09-10
+   (round 2b, R7)** — and the payee is now a Procurement `Supplier`, read through `api/hr/suppliers`
+   (row 22's "unified payee" is closer by one entity).
 4. **Adopt `IFinanceBudgetCommitmentService`'s lifecycle** for `ManpowerBudget`/`TrainingBudget`/
    `AwardBudget`/`StaffTravelBudget` — highest-leverage reuse in this document, but sequence it
    *after* the Finance sweep's training/manpower budget-ownership decision (§4 of the Finance

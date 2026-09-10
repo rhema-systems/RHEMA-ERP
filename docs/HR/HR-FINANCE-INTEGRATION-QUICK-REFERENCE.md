@@ -104,10 +104,11 @@ governance message."
   practice. It can only be *correctly* populated from Finance's GL actuals, and the caller path
   should go once that feed exists. *(Corrected 2026-09-02; the earlier "no writer anywhere" was
   wrong.)*
-- **Master-data rule status:** Travel, Assets, Letters, Separation and Succession all read
-  Finance's rates through `HrCurrencyBridge`. The one HR violation left is
-  `StaffRequisitionCost.ExchangeRate` (caller-supplied, default 1). Payroll keeps its own
-  `PayrollExchangeRate` table — the payroll owner's to fix.
+- **Master-data rule status:** Travel, Assets, Letters, Separation, Succession **and Recruitment
+  costs (since 2026-09-10, round 2b R7)** all read Finance's rates through `HrCurrencyBridge`.
+  **No HR violation is left.** Payroll keeps its own `PayrollExchangeRate` table — the payroll
+  owner's to fix. Suppliers are read through `api/hr/suppliers` (Procurement's own list answers
+  400 to everyone — cross-module defect #26).
 - **Three-way training-budget double-count risk, unresolved:** `ManpowerBudget.TrainingBudget`
   vs. area-7's own `TrainingBudget` vs. `SuccessionDevelopmentActivity` cost. Settle ownership
   before wiring any of the three to Finance.

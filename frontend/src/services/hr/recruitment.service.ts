@@ -25,6 +25,7 @@ import type {
   RequisitionComment,
   RequisitionCost,
   RequisitionCostForm,
+  RequisitionCostStatus,
   RequisitionHistoryEntry,
   ShortlistingCriteria,
   ShortlistingCriteriaForm,
@@ -170,8 +171,18 @@ class StaffRequisitionService {
     return apiService.get<RequisitionCost[]>(`${this.baseUrl}/${id}/costs`);
   }
 
-  getTotalCost(id: string): Promise<number> {
-    return apiService.get<number>(`${this.baseUrl}/${id}/costs/total`);
+  /** The stored base-currency total; `status` narrows it (Approved = what HR has signed) (R7). */
+  getTotalCost(id: string, status?: RequisitionCostStatus | null): Promise<number> {
+    return apiService.get<number>(`${this.baseUrl}/${id}/costs/total`, status ? { status } : undefined);
+  }
+
+  /** HR approves a recorded cost — not the person who recorded it (R7). */
+  approveCost(costId: string, note?: string | null): Promise<RequisitionCost> {
+    return apiService.post<RequisitionCost>(`${this.baseUrl}/costs/${costId}/approve`, { note: note ?? null });
+  }
+
+  rejectCost(costId: string, note?: string | null): Promise<RequisitionCost> {
+    return apiService.post<RequisitionCost>(`${this.baseUrl}/costs/${costId}/reject`, { note: note ?? null });
   }
 
   addCost(id: string, payload: RequisitionCostForm): Promise<RequisitionCost> {

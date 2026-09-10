@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.Requisition;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -33,6 +34,7 @@ public class StaffRequisitionService : IStaffRequisitionService
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly HrCurrencyBridge _currency;
     private readonly ILogger<StaffRequisitionService> _logger;
 
     /// <summary>
@@ -53,8 +55,10 @@ public class StaffRequisitionService : IStaffRequisitionService
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
+        HrCurrencyBridge currency,
         ILogger<StaffRequisitionService> logger)
     {
+        _currency = currency;
         _requisitionRepository = requisitionRepository;
         _costRepository = costRepository;
         _attachmentRepository = attachmentRepository;
@@ -618,9 +622,63 @@ public class StaffRequisitionService : IStaffRequisitionService
         await GetOwnedAsync(createDto.RequisitionId);
 
         var entity = createDto.ToEntity(current, recordedByUserId);
+        await ApplyCostMoneyAsync(entity, cancellationToken);
         await _costRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
+    }
+
+    /// <summary>
+    /// Round 2b, R7: the money on a cost comes from Finance's masters. The currency must be one
+    /// Finance holds; the rate is Finance's for the cost date; the base-currency amount is stored
+    /// so the total does not move with the rate. The payee is a Procurement supplier (name
+    /// snapshotted) or, with none, a typed name. Refusals are <see cref="InvalidOperationException"/>
+    /// → 422 on this controller.
+    /// </summary>
+    private async Task ApplyCostMoneyAsync(StaffRequisitionCost entity, CancellationToken cancellationToken)
+    {
+        await _currency.RequireKnownCurrencyAsync(entity.Currency, cancellationToken);
+        entity.Currency = entity.Currency.Trim().ToUpperInvariant();
+        entity.ExchangeRate = await _currency.GetRateToBaseAsync(entity.Currency, entity.CostDate, cancellationToken);
+        entity.AmountBaseCurrency = Math.Round(entity.Amount * entity.ExchangeRate, 2);
+
+        if (entity.SupplierId is { } supplierId)
+        {
+            var supplier = await _unitOfWork.Repository<Supplier>().GetQueryable().AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == supplierId && s.TenantId == entity.TenantId && !s.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("The supplier named does not exist in this organisation.");
+            if (!supplier.IsActive)
+                throw new InvalidOperationException($"Supplier {supplier.Name} is inactive; choose an active supplier or name the payee.");
+            entity.PayeeName = supplier.Name;
+        }
+        else if (string.IsNullOrWhiteSpace(entity.PayeeName))
+        {
+            throw new InvalidOperationException("Say who was paid: choose a supplier, or name the payee.");
+        }
+    }
+
+    private async Task<StaffRequisitionCost> ReloadCostAsync(Guid id, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<StaffRequisitionCost>().GetQueryable().AsNoTracking()
+            .Include(c => c.Requisition).Include(c => c.RecordedBy).Include(c => c.Supplier).Include(c => c.ApprovedBy)
+            .FirstAsync(c => c.Id == id, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<StaffRequisitionCostDto> DecideCostAsync(Guid costId, bool approve, string? note, Guid actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCostAsync(costId);
+        if (entity.Status != StaffRequisitionCostStatus.Recorded)
+            throw new InvalidOperationException($"This cost is already {entity.Status}.");
+        // Two-actor rule: the person who recorded a cost does not approve it.
+        if (entity.RecordedById == actorEmployeeId)
+            throw new UnauthorizedAccessException("The person who recorded a cost cannot approve or reject it.");
+        entity.Status = approve ? StaffRequisitionCostStatus.Approved : StaffRequisitionCostStatus.Rejected;
+        entity.ApprovedById = actorEmployeeId;
+        entity.ApprovedOn = DateTime.UtcNow;
+        entity.ApprovalNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _costRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
     }
 
     public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsAsync(Guid requisitionId, CancellationToken cancellationToken = default)
@@ -632,11 +690,17 @@ public class StaffRequisitionService : IStaffRequisitionService
     }
 
     public async Task<decimal> GetTotalCostAsync(Guid requisitionId, CancellationToken cancellationToken = default)
+        => await GetTotalCostAsync(requisitionId, null, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<decimal> GetTotalCostAsync(Guid requisitionId, StaffRequisitionCostStatus? status, CancellationToken cancellationToken = default)
     {
         await GetOwnedAsync(requisitionId);
         var tenantId = GetTenantId();
         var entities = await _costRepository.GetByRequisitionIdAsync(requisitionId);
-        return entities.Where(e => e.TenantId == tenantId).Sum(e => e.Amount * e.ExchangeRate);
+        // The STORED base-currency figure (R7), not amount × a rate that may have moved since.
+        return entities.Where(e => e.TenantId == tenantId && (status == null || e.Status == status.Value))
+            .Sum(e => e.AmountBaseCurrency);
     }
 
     public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsByCategoryAsync(Guid requisitionId, StaffRequisitionCostCategory category, CancellationToken cancellationToken = default)
@@ -651,12 +715,33 @@ public class StaffRequisitionService : IStaffRequisitionService
     {
         var entity = await GetOwnedCostAsync(updateDto.Id);
 
-        entity.UpdateEntity(updateDto, updatedByUserId);
+        if (entity.Status == StaffRequisitionCostStatus.Approved)
+        {
+            // An approved cost is what HR signed; only the voucher and the note may follow it.
+            var moneyChanged = updateDto.Amount != entity.Amount
+                || !string.Equals(updateDto.Currency?.Trim(), entity.Currency, StringComparison.OrdinalIgnoreCase)
+                || updateDto.Category != entity.Category
+                || updateDto.Purpose != entity.Purpose
+                || updateDto.SupplierId != entity.SupplierId
+                || (updateDto.CostDate.HasValue && updateDto.CostDate.Value != entity.CostDate);
+            if (moneyChanged)
+                throw new InvalidOperationException(
+                    "This cost has been approved; its amount, currency, date, category, purpose and payee are fixed. Only the payment voucher and the note can be changed.");
+            entity.PaymentVoucherNumber = updateDto.PaymentVoucherNumber;
+            entity.Description = updateDto.Description;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = updatedByUserId.ToString();
+        }
+        else
+        {
+            entity.UpdateEntity(updateDto, updatedByUserId);
+            await ApplyCostMoneyAsync(entity, cancellationToken);
+        }
 
         await _costRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
     }
 
     public async Task<bool> DeleteCostAsync(Guid costId, CancellationToken cancellationToken = default)

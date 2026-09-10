@@ -6586,6 +6586,23 @@ public enum StaffReplacementReason
     Other = 8
 }
 
+/// <summary>
+/// HR's own approval of a recruitment cost (round 2b, R7). ⚠ This is a fact about HR's approval,
+/// NOT a payment status: nothing here says paid or unpaid. Whether Finance has paid it is Finance's
+/// to say (the R8 AP hand-off, when agreed) and is never recorded HR-side.
+/// </summary>
+public enum StaffRequisitionCostStatus
+{
+    [Description("Recorded")]
+    Recorded = 1,
+
+    [Description("Approved")]
+    Approved = 2,
+
+    [Description("Rejected")]
+    Rejected = 3
+}
+
 public enum StaffRequisitionCostCategory
 {
     [Description("Recruitment Agency Fee")]

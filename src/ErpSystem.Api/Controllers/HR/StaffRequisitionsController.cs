@@ -454,8 +454,28 @@ public class StaffRequisitionsController : ControllerBase
 
     [HttpGet("{id:guid}/costs/total")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
-    public async Task<ActionResult<decimal>> GetTotalCost(Guid id, CancellationToken ct)
-        => Ok(await _service.GetTotalCostAsync(id, ct));
+    public async Task<ActionResult<decimal>> GetTotalCost(Guid id, [FromQuery] StaffRequisitionCostStatus? status, CancellationToken ct)
+        => Ok(await _service.GetTotalCostAsync(id, status, ct));
+
+    /// <summary>HR approves a recorded cost (round 2b, R7). Not the person who recorded it.</summary>
+    [HttpPost("costs/{costId:guid}/approve")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<StaffRequisitionCostDto>> ApproveCost(Guid costId, [FromBody] DecideStaffRequisitionCostDto? dto, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        return Ok(await _service.DecideCostAsync(costId, approve: true, dto?.Note, employeeId.Value, ct));
+    }
+
+    /// <summary>HR rejects a recorded cost (round 2b, R7).</summary>
+    [HttpPost("costs/{costId:guid}/reject")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<StaffRequisitionCostDto>> RejectCost(Guid costId, [FromBody] DecideStaffRequisitionCostDto? dto, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        return Ok(await _service.DecideCostAsync(costId, approve: false, dto?.Note, employeeId.Value, ct));
+    }
 
     [HttpGet("{id:guid}/costs/category/{category}")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]

@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Trash2, Wallet } from 'lucide-react';
+import { CheckCircle2, Loader2, Pencil, Plus, Trash2, Wallet, XCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -25,34 +26,63 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { SupplierPicker } from '@/components/hr/common/SupplierPicker';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatMoney, humanizeEnum } from '@/lib/hr/attendance-format';
+import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { staffRequisitionService } from '@/services/hr/recruitment.service';
 import {
   REQUISITION_COST_CATEGORIES,
+  type RequisitionCost,
   type RequisitionCostCategory,
   type RequisitionCostForm,
 } from '@/types/hr/recruitment';
 
+const today = () => new Date().toISOString().slice(0, 10);
+
 const blank = (): RequisitionCostForm => ({
-  category: 'Advertising',
+  category: 'JobAdvertising',
   purpose: '',
   amount: 0,
   currency: 'GHS',
-  exchangeRate: 1,
+  costDate: today(),
+  supplierId: null,
+  payeeName: '',
   description: '',
   paymentVoucherNumber: '',
 });
 
+const fromCost = (c: RequisitionCost): RequisitionCostForm => ({
+  category: c.category,
+  purpose: c.purpose,
+  amount: c.amount,
+  currency: c.currency,
+  costDate: c.costDate?.slice(0, 10) ?? today(),
+  supplierId: c.supplierId ?? null,
+  payeeName: c.supplierId ? '' : c.payeeName ?? '',
+  description: c.description ?? '',
+  paymentVoucherNumber: c.paymentVoucherNumber ?? '',
+});
+
+const STATUS_TONE: Record<string, string> = {
+  Recorded: 'bg-slate-100 text-slate-700',
+  Approved: 'bg-emerald-100 text-emerald-800',
+  Rejected: 'bg-rose-100 text-rose-800',
+};
+
 /**
  * What it cost to fill this requisition — advertising, agency fees, assessments, travel.
  *
- * ⚠ The total the server reports is the sum of `amount × exchangeRate`, so a cost recorded in a
- * foreign currency contributes its converted value. The rate is per-row and entered here rather
- * than looked up, because the figure that belongs on the record is the one that was actually used
- * when the money moved.
- *
- * Recording costs is HR's — the buttons are hidden for anyone else, and the server refuses anyway.
+ * Round 2b, R7: the money reads Finance's masters and HR approves its own cost.
+ * - The currency is one Finance holds (`api/hr/currencies`), not a three-letter box.
+ * - The rate is **not typed**: the server reads Finance's rate for the cost date and stores the
+ *   base-currency amount, so the total does not move when the rate does. Before R7 this was the
+ *   last caller-supplied exchange rate in the HR module.
+ * - The payee is a Procurement supplier, or a named person when there is none.
+ * - A cost is Recorded, then Approved or Rejected by HR — never by the person who recorded it.
+ *   An approved cost's money is fixed; only the voucher and the note may follow it.
+ * ⚠ This is HR's own approval, not a payment status: whether Finance has paid it is Finance's to
+ * say, and the voucher number stays a typed record until the AP hand-off (R8) is agreed.
  */
 export function RequisitionCostsPanel({
   requisitionId,
@@ -64,18 +94,29 @@ export function RequisitionCostsPanel({
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<RequisitionCost | null>(null);
   const [form, setForm] = useState<RequisitionCostForm>(blank);
+  const [deciding, setDeciding] = useState<{ cost: RequisitionCost; approve: boolean; note: string } | null>(null);
 
   const costs = useQuery({
     queryKey: ['hr', 'requisition-costs', requisitionId],
     queryFn: () => staffRequisitionService.getCosts(requisitionId),
     enabled: !!requisitionId,
   });
-
   const total = useQuery({
     queryKey: ['hr', 'requisition-costs-total', requisitionId],
     queryFn: () => staffRequisitionService.getTotalCost(requisitionId),
     enabled: !!requisitionId,
+  });
+  const approvedTotal = useQuery({
+    queryKey: ['hr', 'requisition-costs-total', requisitionId, 'Approved'],
+    queryFn: () => staffRequisitionService.getTotalCost(requisitionId, 'Approved'),
+    enabled: !!requisitionId,
+  });
+  const { data: currencies } = useQuery({
+    queryKey: ['hr', 'currencies'],
+    queryFn: () => hrCurrencyService.getActive(),
+    staleTime: 5 * 60 * 1000,
   });
 
   const refresh = async () => {
@@ -83,22 +124,46 @@ export function RequisitionCostsPanel({
     await queryClient.invalidateQueries({ queryKey: ['hr', 'requisition-costs-total', requisitionId] });
   };
 
-  const add = useMutation({
+  const payload = (): RequisitionCostForm => ({
+    ...form,
+    purpose: form.purpose.trim(),
+    costDate: form.costDate || null,
+    supplierId: form.supplierId || null,
+    payeeName: form.supplierId ? null : form.payeeName?.trim() || null,
+    description: form.description?.trim() || null,
+    paymentVoucherNumber: form.paymentVoucherNumber?.trim() || null,
+  });
+
+  const save = useMutation({
     mutationFn: () =>
-      staffRequisitionService.addCost(requisitionId, {
-        ...form,
-        purpose: form.purpose.trim(),
-        description: form.description?.trim() || null,
-        paymentVoucherNumber: form.paymentVoucherNumber?.trim() || null,
-      }),
+      editing
+        ? staffRequisitionService.updateCost(editing.id, payload())
+        : staffRequisitionService.addCost(requisitionId, payload()),
     onSuccess: async () => {
       await refresh();
       setOpen(false);
+      setEditing(null);
       setForm(blank());
-      toast({ title: 'Cost recorded' });
+      toast({ title: editing ? 'Cost updated' : 'Cost recorded' });
     },
     onError: (e: any) =>
-      toast({ title: 'Could not record it', description: e?.message, variant: 'destructive' }),
+      toast({ title: 'Refused', description: e?.body?.message ?? e?.message, variant: 'destructive' }),
+  });
+
+  const decide = useMutation({
+    mutationFn: () => {
+      if (!deciding) throw new Error('Nothing to decide.');
+      return deciding.approve
+        ? staffRequisitionService.approveCost(deciding.cost.id, deciding.note.trim() || null)
+        : staffRequisitionService.rejectCost(deciding.cost.id, deciding.note.trim() || null);
+    },
+    onSuccess: async () => {
+      await refresh();
+      toast({ title: deciding?.approve ? 'Cost approved' : 'Cost rejected' });
+      setDeciding(null);
+    },
+    onError: (e: any) =>
+      toast({ title: 'Refused', description: e?.body?.message ?? e?.message, variant: 'destructive' }),
   });
 
   const remove = useMutation({
@@ -108,10 +173,16 @@ export function RequisitionCostsPanel({
       toast({ title: 'Cost removed' });
     },
     onError: (e: any) =>
-      toast({ title: 'Could not remove it', description: e?.message, variant: 'destructive' }),
+      toast({ title: 'Could not remove it', description: e?.body?.message ?? e?.message, variant: 'destructive' }),
   });
 
   const rows = costs.data ?? [];
+  const isApprovedEdit = !!editing && editing.status === 'Approved';
+  const canSave =
+    !!form.purpose.trim() && form.amount > 0 && !!form.currency && (!!form.supplierId || !!form.payeeName?.trim());
+
+  const openNew = () => { setEditing(null); setForm(blank()); setOpen(true); };
+  const openEdit = (c: RequisitionCost) => { setEditing(c); setForm(fromCost(c)); setOpen(true); };
 
   return (
     <Card>
@@ -120,12 +191,13 @@ export function RequisitionCostsPanel({
           <CardTitle className="text-base">Recruitment costs</CardTitle>
           {total.data !== undefined && (
             <p className="mt-1 text-sm text-muted-foreground">
-              Total {formatMoney(total.data)} — converted at each row&apos;s own rate.
+              Total {formatMoney(total.data)} in base currency, at Finance&apos;s rate on each cost date
+              {approvedTotal.data !== undefined && <> · approved by HR {formatMoney(approvedTotal.data)}</>}
             </p>
           )}
         </div>
         {canManage && (
-          <Button size="sm" onClick={() => setOpen(true)}>
+          <Button size="sm" onClick={openNew}>
             <Plus className="mr-2 h-4 w-4" /> Record a cost
           </Button>
         )}
@@ -149,11 +221,13 @@ export function RequisitionCostsPanel({
               <TableRow>
                 <TableHead>Category</TableHead>
                 <TableHead>Purpose</TableHead>
+                <TableHead>Payee</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="text-right">Rate</TableHead>
+                <TableHead className="text-right">In base currency</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Voucher</TableHead>
                 <TableHead>Recorded</TableHead>
-                {canManage && <TableHead className="w-10" />}
+                {canManage && <TableHead className="w-32" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -161,22 +235,42 @@ export function RequisitionCostsPanel({
                 <TableRow key={c.id}>
                   <TableCell>{humanizeEnum(c.category)}</TableCell>
                   <TableCell>{c.purpose}</TableCell>
+                  <TableCell>
+                    {c.payeeName || '—'}
+                    {c.supplierId && <div className="text-xs text-muted-foreground">supplier</div>}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {formatMoney(c.amount, c.currency)}
+                    <div className="text-xs text-muted-foreground">{formatDate(c.costDate)} · rate {c.exchangeRate}</div>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{c.exchangeRate}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatMoney(c.amountBaseCurrency)}</TableCell>
+                  <TableCell>
+                    <Badge className={STATUS_TONE[c.status] ?? ''}>{c.status}</Badge>
+                    {c.approvedByName && (
+                      <div className="text-xs text-muted-foreground">{c.approvedByName} · {formatDate(c.approvedOn)}</div>
+                    )}
+                    {c.approvalNote && <div className="text-xs text-muted-foreground">{c.approvalNote}</div>}
+                  </TableCell>
                   <TableCell>{c.paymentVoucherNumber || '—'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatDate(c.recordedDate)} · {c.recordedByName}
                   </TableCell>
                   {canManage && (
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => remove.mutate(c.id)}
-                        disabled={remove.isPending}
-                      >
+                    <TableCell className="whitespace-nowrap">
+                      {c.status === 'Recorded' && (
+                        <>
+                          <Button variant="ghost" size="icon" title="Approve" onClick={() => setDeciding({ cost: c, approve: true, note: '' })}>
+                            <CheckCircle2 className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" title="Reject" onClick={() => setDeciding({ cost: c, approve: false, note: '' })}>
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+                      <Button variant="ghost" size="icon" title={c.status === 'Approved' ? 'Voucher and note only' : 'Edit'} onClick={() => openEdit(c)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" title="Remove (Admin)" onClick={() => remove.mutate(c.id)} disabled={remove.isPending}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
@@ -188,106 +282,112 @@ export function RequisitionCostsPanel({
         )}
       </CardContent>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Record a recruitment cost</DialogTitle>
+            <DialogTitle>{editing ? 'Edit the cost' : 'Record a recruitment cost'}</DialogTitle>
             <DialogDescription>
-              Enter the amount in the currency it was paid in, with the rate that was used.
+              {isApprovedEdit
+                ? 'This cost has been approved: its money is fixed. Only the payment voucher and the note can change.'
+                : 'Enter the amount in the currency it was paid in. The rate is Finance’s for the cost date, read on save.'}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Category</Label>
-              <Select
-                value={form.category}
-                onValueChange={(v) => setForm({ ...form, category: v as RequisitionCostCategory })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {REQUISITION_COST_CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {humanizeEnum(c)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Category</Label>
+                <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as RequisitionCostCategory })} disabled={isApprovedEdit}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {REQUISITION_COST_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>{humanizeEnum(c)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="costDate">Cost date</Label>
+                <Input id="costDate" type="date" value={form.costDate ?? ''} onChange={(e) => setForm({ ...form, costDate: e.target.value })} disabled={isApprovedEdit} />
+              </div>
             </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="purpose">Purpose</Label>
-              <Input
-                id="purpose"
-                value={form.purpose}
-                onChange={(e) => setForm({ ...form, purpose: e.target.value })}
-                placeholder="e.g. Two Sunday adverts in the Daily Graphic"
-              />
+              <Input id="purpose" value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} placeholder="e.g. Two Sunday adverts in the Daily Graphic" disabled={isApprovedEdit} />
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="amount">Amount</Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  step="0.01"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: Number(e.target.value) || 0 })}
-                />
+                <Input id="amount" type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) || 0 })} disabled={isApprovedEdit} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="currency">Currency</Label>
-                <Input
-                  id="currency"
-                  value={form.currency}
-                  onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
-                  maxLength={3}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="exchangeRate">Rate</Label>
-                <Input
-                  id="exchangeRate"
-                  type="number"
-                  step="0.0001"
-                  value={form.exchangeRate}
-                  onChange={(e) => setForm({ ...form, exchangeRate: Number(e.target.value) || 1 })}
-                />
+                <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })} disabled={isApprovedEdit}>
+                  <SelectTrigger id="currency"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(currencies ?? []).map((c) => (
+                      <SelectItem key={c.code} value={c.code}>{c.code} — {c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Finance&apos;s currencies. The rate is read for the cost date; nobody types one.</p>
               </div>
             </div>
 
+            <SupplierPicker
+              id="costSupplier"
+              label="Paid to"
+              value={form.supplierId}
+              onChange={(id) => setForm({ ...form, supplierId: id, payeeName: id ? '' : form.payeeName })}
+              disabled={isApprovedEdit}
+            />
+            {!form.supplierId && (
+              <div className="space-y-1.5">
+                <Label htmlFor="payeeName">Payee name *</Label>
+                <Input id="payeeName" value={form.payeeName ?? ''} onChange={(e) => setForm({ ...form, payeeName: e.target.value })} placeholder="Who was paid, when they are not a supplier — a reimbursed candidate, say" disabled={isApprovedEdit} />
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="voucher">Payment voucher</Label>
-              <Input
-                id="voucher"
-                value={form.paymentVoucherNumber ?? ''}
-                onChange={(e) => setForm({ ...form, paymentVoucherNumber: e.target.value })}
-              />
+              <Input id="voucher" value={form.paymentVoucherNumber ?? ''} onChange={(e) => setForm({ ...form, paymentVoucherNumber: e.target.value })} />
+              <p className="text-xs text-muted-foreground">Finance&apos;s voucher number, as a record. Payment itself is Finance&apos;s to confirm.</p>
             </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="costDescription">Notes</Label>
-              <Textarea
-                id="costDescription"
-                rows={2}
-                value={form.description ?? ''}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
+              <Textarea id="costDescription" rows={2} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={() => save.mutate()} disabled={(!isApprovedEdit && !canSave) || save.isPending}>
+              {save.isPending ? 'Saving…' : editing ? 'Save' : 'Record'}
             </Button>
-            <Button
-              onClick={() => add.mutate()}
-              disabled={!form.purpose.trim() || form.amount <= 0 || add.isPending}
-            >
-              {add.isPending ? 'Saving…' : 'Record'}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deciding} onOpenChange={(o) => !o && setDeciding(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{deciding?.approve ? 'Approve this cost' : 'Reject this cost'}</DialogTitle>
+            <DialogDescription>
+              {deciding && `${humanizeEnum(deciding.cost.category)} · ${formatMoney(deciding.cost.amount, deciding.cost.currency)} to ${deciding.cost.payeeName ?? '—'}. `}
+              HR&apos;s own decision on the spend; not the person who recorded it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="decisionNote">Note</Label>
+            <Textarea id="decisionNote" rows={2} value={deciding?.note ?? ''} onChange={(e) => deciding && setDeciding({ ...deciding, note: e.target.value })} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeciding(null)}>Cancel</Button>
+            <Button variant={deciding?.approve ? 'default' : 'destructive'} onClick={() => decide.mutate()} disabled={decide.isPending}>
+              {decide.isPending ? 'Saving…' : deciding?.approve ? 'Approve' : 'Reject'}
             </Button>
           </DialogFooter>
         </DialogContent>
