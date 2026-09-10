@@ -12,16 +12,16 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 |---|---|
 | Phase | Stage B3 — Sales credit-note accounting-event cutover |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/sales_cutover` reissued after C13 |
-| Exact base | `45d254753d58c7e47e745c4f34cc77513205255c` |
-| Branch | `codex/sales-accounting-event-cutover-c13` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c13` |
+| Implementing task | Coordinator subagent `/root/sales_cutover` reissued after approved C13 bridge |
+| Exact base | `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9` |
+| Branch | `codex/sales-accounting-event-cutover-c13b` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c13b` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `45d254753d58c7e47e745c4f34cc77513205255c` |
+| Primary HEAD at activation | `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C13 approved and integrated; fresh exact-base Sales implementation active |
+| Review status | C13 bridge approved and integrated; final fresh exact-base Sales implementation active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -1137,6 +1137,13 @@ Adversarial self-consistent generic reversal substitution is denied by execution
 SQL and two unchanged baselines. The approved bridge commits were integrated locally as `50df96f4` and
 `c1ba6594` without conflict. No database, migration, schema or owner file changed. Sales can restart from a fresh
 exact primary base.
+
+Sales is reissued again from fresh exact base `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9` in clean worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c13b` on branch
+`codex/sales-accounting-event-cutover-c13b`. The approved C13/C12 ID-only bridge now keeps reversal snapshot
+reconstruction and provenance entirely inside Finance while exposing only owner receipt and compatibility
+evidence. The Terra Medium Sales packet is unchanged otherwise; owner edits may now proceed, followed by
+independent Sol High review. No database or migration was touched.
 
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
