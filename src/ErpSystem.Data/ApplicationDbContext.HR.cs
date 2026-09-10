@@ -1147,6 +1147,161 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ══ Slice F2: the minute book, the reviews, and the sweep's own record ═════════════════
+        //
+        // ⚠ RESTRICT throughout for the same two reasons as F1 above, with one exception per parent
+        // whose children are reachable only through it. A meeting's attendees and decisions are
+        // worthless without the meeting; a review's lines are worthless without the review.
+
+        builder.Entity<TeamMeeting>(entity =>
+        {
+            entity.ToTable("TeamMeetings");
+
+            entity.Property(e => e.Kind).HasConversion<int>();
+            entity.Property(e => e.Status).HasConversion<int>();
+
+            entity.HasIndex(e => new { e.TenantId, e.TeamId, e.Status })
+                .HasDatabaseName("IX_TeamMeeting_Tenant_Team_Status");
+
+            // "What is coming up" on the dashboard, and the sweep's meeting-tomorrow window.
+            entity.HasIndex(e => new { e.TenantId, e.ScheduledAt })
+                .HasDatabaseName("IX_TeamMeeting_Tenant_Scheduled");
+
+            entity.HasOne(e => e.Team)
+                .WithMany()
+                .HasForeignKey(e => e.TeamId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ChairMember)
+                .WithMany()
+                .HasForeignKey(e => e.ChairMemberId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TeamMeetingAttendee>(entity =>
+        {
+            entity.ToTable("TeamMeetingAttendees");
+
+            // ⚠ Filtered on IsDeleted: this store soft-deletes, so without it a member removed from
+            // the invitee list and added back would collide with their own tombstone.
+            entity.HasIndex(e => new { e.MeetingId, e.MemberId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_TeamMeetingAttendee_Meeting_Member");
+
+            entity.HasOne(e => e.Meeting)
+                .WithMany(m => m.Attendees)
+                .HasForeignKey(e => e.MeetingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Member)
+                .WithMany()
+                .HasForeignKey(e => e.MemberId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TeamMeetingDecision>(entity =>
+        {
+            entity.ToTable("TeamMeetingDecisions");
+
+            entity.HasIndex(e => new { e.MeetingId, e.DisplayOrder })
+                .HasDatabaseName("IX_TeamMeetingDecision_Meeting_Order");
+
+            entity.HasOne(e => e.Meeting)
+                .WithMany(m => m.Decisions)
+                .HasForeignKey(e => e.MeetingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.ResponsibleMember)
+                .WithMany()
+                .HasForeignKey(e => e.ResponsibleMemberId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ⚠ RaisedTaskId is deliberately NOT a configured relationship. TeamTask already points
+            // back at the decision through SourceMeetingDecisionId; configuring a second
+            // relationship between the same pair is how EF mints a shadow FK column beside one of
+            // them. The service keeps the two ends consistent.
+            entity.HasIndex(e => e.RaisedTaskId)
+                .HasDatabaseName("IX_TeamMeetingDecision_RaisedTaskId");
+        });
+
+        builder.Entity<TeamReview>(entity =>
+        {
+            entity.ToTable("TeamReviews");
+
+            entity.Property(e => e.Status).HasConversion<int>();
+
+            entity.HasIndex(e => new { e.TenantId, e.TeamId, e.PeriodEnd })
+                .HasDatabaseName("IX_TeamReview_Tenant_Team_Period");
+
+            entity.HasOne(e => e.Team)
+                .WithMany()
+                .HasForeignKey(e => e.TeamId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ReviewedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.AcknowledgedBy)
+                .WithMany()
+                .HasForeignKey(e => e.AcknowledgedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TeamReviewLine>(entity =>
+        {
+            entity.ToTable("TeamReviewLines");
+
+            // One line per objective per review.
+            entity.HasIndex(e => new { e.ReviewId, e.ObjectiveId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_TeamReviewLine_Review_Objective");
+
+            entity.HasOne(e => e.Review)
+                .WithMany(r => r.Lines)
+                .HasForeignKey(e => e.ReviewId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ RESTRICT, not Cascade: a review is a statement about objectives that existed at the
+            // time, and deleting an objective must not quietly rewrite last quarter's review. The
+            // objective service already refuses a delete while anything points at it.
+            entity.HasOne(e => e.Objective)
+                .WithMany()
+                .HasForeignKey(e => e.ObjectiveId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TeamReminderRun>(entity =>
+        {
+            entity.ToTable("TeamReminderRuns");
+
+            entity.HasIndex(e => new { e.TenantId, e.StartedAt })
+                .HasDatabaseName("IX_TeamReminderRun_Tenant_Started");
+        });
+
+        builder.Entity<TeamReminderDispatchLog>(entity =>
+        {
+            entity.ToTable("TeamReminderDispatchLogs");
+
+            // ⚠ THE SEND-ONCE GUARANTEE, not an optimisation. The sweep claims its keys in the same
+            // SaveChanges that records the run, so the nightly host and the run-now button cannot
+            // double-send even if they overlap.
+            entity.HasIndex(e => new { e.TenantId, e.DedupeKey })
+                .IsUnique()
+                .HasDatabaseName("IX_TeamReminderDispatch_Tenant_DedupeKey");
+
+            entity.HasIndex(e => new { e.TenantId, e.TeamId })
+                .HasDatabaseName("IX_TeamReminderDispatch_Tenant_Team");
+
+            entity.HasOne(e => e.Run)
+                .WithMany(r => r.DispatchLogs)
+                .HasForeignKey(e => e.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         builder.Entity<TeamMemberHistory>(entity =>
         {
             entity.ToTable("TeamMemberHistories");
@@ -4085,6 +4240,9 @@ private void ConfigureHREntities(ModelBuilder builder)
                 ProbationEndLeadDays           = 30,
                 // Round 2, lane C2 — the certification sweep's default lead time.
                 CertificationExpiryLeadDays    = 60,
+                // Round 2, lane F2 — a committee action item is a thing somebody does on Tuesday,
+                // not a date they plan a month around, so the lead time is days rather than weeks.
+                TeamTaskReminderLeadDays       = 3,
                 // Area 9c slice 7 — the employee-relations clocks.
                 //
                 // ⚠ These MUST be listed here. The seed is an ANONYMOUS TYPE, so EF matches it to

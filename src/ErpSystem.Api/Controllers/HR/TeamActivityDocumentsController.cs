@@ -36,6 +36,7 @@ namespace ErpSystem.Api.Controllers.HR;
 public class TeamActivityDocumentsController : ControllerBase
 {
     private readonly ITeamActivityService _service;
+    private readonly ITeamMeetingService _meetings;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
@@ -45,6 +46,7 @@ public class TeamActivityDocumentsController : ControllerBase
 
     public TeamActivityDocumentsController(
         ITeamActivityService service,
+        ITeamMeetingService meetings,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
@@ -53,6 +55,7 @@ public class TeamActivityDocumentsController : ControllerBase
         ILogger<TeamActivityDocumentsController> logger)
     {
         _service = service;
+        _meetings = meetings;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
@@ -138,6 +141,56 @@ public class TeamActivityDocumentsController : ControllerBase
                 document.FileSize, ct),
             cancellationToken: ct,
             category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    /// <summary>The signed minutes of a meeting (round 2, lane F2).</summary>
+    [HttpPost("meetings/{meetingId:guid}/minutes")]
+    [RequestSizeLimit(50_000_000)]
+    public async Task<IActionResult> UploadMeetingMinutes(
+        Guid meetingId, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        // ⚠ Entitlement first, storage second — the read throws 403 through the filter for a caller
+        // who is nothing to do with the team, and 404 for a meeting that is not there.
+        var meeting = await _meetings.GetMeetingAsync(meetingId, ct);
+        if (meeting is null) return NotFound(new { message = $"Meeting '{meetingId}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.TeamMeeting),
+            sourceRecordId: meetingId,
+            sourceLabel: "Team meeting minutes",
+            documentType: "TeamMeetingMinutes",
+            description: null,
+            persist: async (_, document) =>
+            {
+                await _meetings.AttachMinutesDocumentAsync(
+                    meetingId, document.FileUploadRecordId, document.DocumentRecordId,
+                    document.DocumentVersionId, document.OriginalFileName, document.ContentType,
+                    document.FileSize, ct);
+                return true;
+            },
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [HttpGet("meetings/{meetingId:guid}/minutes")]
+    public async Task<IActionResult> DownloadMeetingMinutes(Guid meetingId, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var reference = await _meetings.GetMinutesDocumentRefAsync(meetingId, ct);
+        if (reference is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            reference.DocumentRecordId, reference.DocumentVersionId, reference.FileUploadRecordId,
+            legacyPath: null,
+            reference.FileName ?? "minutes",
+            fallbackContentType: reference.MimeType,
+            inline: false, ct);
     }
 
     [HttpGet("tasks/attachments/{attachmentId:guid}")]

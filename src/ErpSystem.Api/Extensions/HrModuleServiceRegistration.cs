@@ -424,8 +424,16 @@ public static class HrModuleServiceRegistration
         // screens pick from (round 2, lane D2).
         services.AddScoped<IRelationshipTypeService, RelationshipTypeService>();
 
-        // Teams and committees: terms of reference, objectives and tasks (round 2, lane F1).
-        services.AddScoped<ITeamActivityService, TeamActivityService>();
+        // Teams and committees (round 2, lane F).
+        //
+        // ⚠ The access guard is registered FIRST and shared by both slices' services. It holds the
+        // whole authorisation story — HR acts on any team, lead/deputy on their own, a member only
+        // on a task assigned to them — and two copies of an authorisation rule is exactly what
+        // lane D2 measured the cost of.
+        services.AddScoped<ITeamAccessGuard, TeamAccessGuard>();
+        services.AddScoped<ITeamActivityService, TeamActivityService>();   // F1: charter, objectives, tasks
+        services.AddScoped<ITeamMeetingService, TeamMeetingService>();     // F2: meetings, reviews, dashboard
+        services.AddScoped<ITeamReminderService, TeamReminderService>();   // F2: the nightly sweep
         services.AddScoped<IEmployeeRelieverService, EmployeeRelieverService>();
         services.AddScoped<ILeaveYearEndService, LeaveYearEndService>();
         services.AddScoped<IEmolumentService, EmolumentService>();

@@ -31,6 +31,8 @@ public static class CompanyHrPolicyMappingExtensions
             ReviewDueLeadDays              = entity.ReviewDueLeadDays,
             ContractExpiryLeadDays         = entity.ContractExpiryLeadDays,
             ProbationEndLeadDays           = entity.ProbationEndLeadDays,
+            TeamTaskReminderLeadDays       = entity.TeamTaskReminderLeadDays,
+            CertificationExpiryLeadDays    = entity.CertificationExpiryLeadDays,
             GrievanceRungChaseDays         = entity.GrievanceRungChaseDays,
             ConcernTriageChaseDays         = entity.ConcernTriageChaseDays,
             GrievanceAgreementChaseDays    = entity.GrievanceAgreementChaseDays,
@@ -87,6 +89,8 @@ public static class CompanyHrPolicyMappingExtensions
         entity.ReviewDueLeadDays              = dto.ReviewDueLeadDays;
         entity.ContractExpiryLeadDays         = dto.ContractExpiryLeadDays;
         entity.ProbationEndLeadDays           = dto.ProbationEndLeadDays;
+        entity.TeamTaskReminderLeadDays       = dto.TeamTaskReminderLeadDays;
+        entity.CertificationExpiryLeadDays    = dto.CertificationExpiryLeadDays;
         entity.GrievanceRungChaseDays         = dto.GrievanceRungChaseDays;
         entity.ConcernTriageChaseDays         = dto.ConcernTriageChaseDays;
         entity.GrievanceAgreementChaseDays    = dto.GrievanceAgreementChaseDays;

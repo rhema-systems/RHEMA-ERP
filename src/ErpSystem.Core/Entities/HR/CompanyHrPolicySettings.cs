@@ -116,6 +116,22 @@ public class CompanyHrPolicySettings : TenantEntity
     /// DEFAULT, so no tenant's row is left at zero.</remarks>
     public int CertificationExpiryLeadDays { get; set; } = 60;
 
+    /// <summary>
+    /// How many days ahead of its due date a team task starts reminding its assignee
+    /// (round 2, lane F2).
+    /// </summary>
+    /// <remarks>
+    /// <para>Three, not thirty, and the difference is the point. A probation end is a date somebody
+    /// plans a month around; a committee action item is a thing somebody does on Tuesday. A lead
+    /// time long enough for the first would make the second a background hum nobody reads.</para>
+    ///
+    /// <para>⚠ Non-nullable with a real DEFAULT in the migration, like
+    /// <see cref="CertificationExpiryLeadDays"/> — otherwise every existing tenant's row sits at
+    /// zero and the sweep silently warns about nothing.</para>
+    /// </remarks>
+    [Range(0, 365)]
+    public int TeamTaskReminderLeadDays { get; set; } = 3;
+
     // ═══════════════════════════════════════════
     //  EMPLOYEE-RELATIONS CLOCKS (area 9c slice 7)
     // ═══════════════════════════════════════════

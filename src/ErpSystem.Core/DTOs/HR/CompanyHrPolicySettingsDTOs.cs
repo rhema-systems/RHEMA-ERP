@@ -38,6 +38,28 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int ContractExpiryLeadDays { get; set; }
     public int ProbationEndLeadDays { get; set; }
 
+    /// <summary>
+    /// How many days ahead of its due date a team task reminds its assignee (round 2, lane F2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Days, not weeks, and much shorter than every other lead time here. A probation end is a
+    /// date somebody plans a month around; a committee action item is a thing somebody does on
+    /// Tuesday.
+    /// </remarks>
+    public int TeamTaskReminderLeadDays { get; set; }
+
+    /// <summary>
+    /// How many days ahead of expiry a credential without its own lead days reminds (lane C2).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Closed by lane F2, not by C2. It existed on the ENTITY and the sweep read it, but it
+    /// reached neither DTO — a setting the engine honoured and nobody could change. F2 was wiring
+    /// its own lead-days field through the same four places and the screen card was already open,
+    /// so leaving the sibling dead would have meant it was never picked up again. It is the exact
+    /// shape the employee-relations note below warns about.
+    /// </remarks>
+    public int CertificationExpiryLeadDays { get; set; }
+
     // Employee-relations clocks (area 9c slice 7). ⚠ A setting the service reads is only
     // configurable if it reaches BOTH DTOs and BOTH mapping halves — miss one and it is a dead
     // field: the engine honours it and nobody can change it, which is the state slice 7 existed
@@ -113,6 +135,14 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(0, 3650)] public int ReviewDueLeadDays { get; set; } = 30;
     [Range(0, 3650)] public int ContractExpiryLeadDays { get; set; } = 60;
     [Range(0, 3650)] public int ProbationEndLeadDays { get; set; } = 30;
+
+    // Round 2, lane F2. Range matches the entity's — a task cannot usefully remind more than a
+    // year ahead, and 0 means "only once it is due".
+    [Range(0, 365)] public int TeamTaskReminderLeadDays { get; set; } = 3;
+
+    // Lane C2's, closed by F2. Default matches the entity's 60 — see the read DTO for why it is
+    // being added here rather than in its own lane.
+    [Range(0, 3650)] public int CertificationExpiryLeadDays { get; set; } = 60;
 
     // Employee-relations clocks (area 9c slice 7). Ranges match the entity's: a chase threshold of
     // 0 would make everything overdue the instant it is created.

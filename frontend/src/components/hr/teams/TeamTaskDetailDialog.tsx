@@ -32,6 +32,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { AttachFileDialog } from '@/components/hr/common/AttachFileDialog';
+import { hrDocumentService } from '@/services/hr/hr-document.service';
 import { teamActivityService } from '@/services/hr/team-activity.service';
 import { TEAM_TASK_STATUS_LABELS, type TeamTaskStatus } from '@/types/hr/team-activity';
 
@@ -199,9 +200,25 @@ export function TeamTaskDetailDialog({
                 {task.attachments.map((a) => (
                   <div key={a.id} className="flex items-center gap-2 text-sm">
                     <Paperclip className="h-3.5 w-3.5" />
-                    <a className="text-primary underline" href={teamActivityService.taskAttachmentUrl(a.id)}>
+                    {/*
+                      ⚠ Never a plain <a href>: the file sits behind a bearer-token endpoint, so a
+                      link would 401. It is fetched as a blob and handed to the browser, the same
+                      way every other gated HR download works.
+                    */}
+                    <button
+                      type="button"
+                      className="text-primary underline"
+                      onClick={() =>
+                        run('download that file', () =>
+                          hrDocumentService.download(
+                            teamActivityService.taskAttachmentUrl(a.id),
+                            a.fileName || a.title || 'attachment',
+                          ),
+                        )
+                      }
+                    >
                       {a.title || a.fileName || 'Attachment'}
-                    </a>
+                    </button>
                     {a.uploadedByName && (
                       <span className="text-muted-foreground text-xs">· {a.uploadedByName}</span>
                     )}

@@ -13,29 +13,22 @@ namespace ErpSystem.Core.Services.HR;
 public class TeamActivityService : ITeamActivityService
 {
     private readonly IUnitOfWork _unitOfWork;
-    private readonly ICurrentUserService _currentUser;
+    private readonly ITeamAccessGuard _access;
     private readonly ILogger<TeamActivityService> _logger;
 
     public TeamActivityService(
         IUnitOfWork unitOfWork,
-        ICurrentUserService currentUser,
+        ITeamAccessGuard access,
         ILogger<TeamActivityService> logger)
     {
         _unitOfWork = unitOfWork;
-        _currentUser = currentUser;
+        _access = access;
         _logger = logger;
     }
 
-    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
-    // TenantId auto-stamp are inert. Every read and write below scopes to the authenticated tenant
-    // explicitly, per the RHEMA convention.
-    private Guid GetTenantId()
-    {
-        var tenantId = _currentUser.TenantId;
-        if (tenantId is not Guid id || id == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
-        return id;
-    }
+    // Tenant scoping and the whole authorisation story live in ITeamAccessGuard, which slice F2's
+    // service shares. Two copies of an authorisation rule is the thing lane D2 measured the cost of.
+    private Guid GetTenantId() => _access.GetTenantId();
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
 
@@ -47,90 +40,50 @@ public class TeamActivityService : ITeamActivityService
     private IGenericRepository<TeamMember> Members => _unitOfWork.Repository<TeamMember>();
     private IGenericRepository<Team> Teams => _unitOfWork.Repository<Team>();
 
-    // ═══════════════════════════════════════════════════════════════════════════════════════════
-    //  Authorisation — vertical at the route, horizontal here.
+    // ── Authorisation ─────────────────────────────────────────────────────────
     //
-    //  ⚠ The controller can only ask "may this caller write HR records at all". It cannot ask "is
-    //  this caller anything to do with THIS team", because that needs the record. Without the
-    //  second question any HR-writing user could edit any team's charter, and any authenticated
-    //  employee could tick any team's checklist.
-    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // ⚠ All of it lives in ITeamAccessGuard, shared with slice F2's service. The controller can only
+    // ask "may this caller write HR records at all"; the horizontal question — is this caller
+    // anything to do with THIS team, and in what capacity — needs the record, so it is answered here
+    // on every method.
 
-    /// <remarks>
-    /// Both HR spellings are checked. The seeded role is renamed from "HR User" to "HR" on startup,
-    /// but a tenant that has not run that migration still holds the old name — the same helper the
-    /// assets area carries, for the same reason.
-    /// </remarks>
-    private bool IsHrDesk() =>
-        _currentUser.IsInRole(Constants.Roles.Hr)
-        || _currentUser.IsInRole(Constants.Roles.LegacyHrUser)
-        || _currentUser.IsInRole(Constants.Roles.SuperAdmin)
-        || _currentUser.IsInRole(Constants.Roles.TenantAdmin);
+    public Task<bool> CanReadTeamAsync(Guid teamId, CancellationToken cancellationToken = default)
+        => CanReadAsync(teamId, cancellationToken);
 
-    /// <summary>
-    /// The caller's own employee record, or null where their login is not linked to one.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Null is never a match. An unlinked login — <c>admin</c> is one — is nobody's member, so it
-    /// fails every membership check and passes only on the HR branch.
-    /// </remarks>
-    private Guid? CallerEmployeeId() =>
-        _currentUser.EmployeeId is { } id && id != Guid.Empty ? id : null;
-
-    /// <summary>The caller's ACTIVE membership of this team, if any.</summary>
-    private async Task<TeamMember?> CallerMembershipAsync(Guid teamId, CancellationToken ct)
+    private async Task<bool> CanReadAsync(Guid teamId, CancellationToken ct)
     {
-        if (CallerEmployeeId() is not Guid employeeId) return null;
-        var tenantId = GetTenantId();
-
-        return await Members.GetQueryable().AsNoTracking()
-            .FirstOrDefaultAsync(
-                m => m.TenantId == tenantId && !m.IsDeleted
-                  && m.TeamId == teamId && m.EmployeeId == employeeId && m.IsActive, ct);
+        if (_access.IsHrDesk()) return true;
+        return await _access.CallerMembershipAsync(teamId, ct) is not null;
     }
 
-    public async Task<bool> CanReadTeamAsync(Guid teamId, CancellationToken cancellationToken = default)
-        => IsHrDesk() || await CallerMembershipAsync(teamId, cancellationToken) is not null;
+    private Task RequireTeamReadAsync(Guid teamId, CancellationToken ct) => _access.RequireReadAsync(teamId, ct);
 
-    private async Task RequireTeamReadAsync(Guid teamId, CancellationToken ct)
-    {
-        if (await CanReadTeamAsync(teamId, ct)) return;
-        throw new UnauthorizedAccessException(
-            "You are not a member of this team, so you cannot see what it is working on.");
-    }
+    private Task RequireTeamWriteAsync(Guid teamId, CancellationToken ct) => _access.RequireWriteAsync(teamId, ct);
 
-    /// <summary>
-    /// HR, or the team's lead or deputy. The people who may charter, plan and assign.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ <c>TeamMemberRole.Coordinator</c> and <c>Secretary</c> are deliberately NOT here. They are
-    /// real roles on a committee, but administering the minute book is not the same authority as
-    /// rewriting the terms of reference, and the plan named lead and deputy.
-    /// </remarks>
-    private async Task RequireTeamWriteAsync(Guid teamId, CancellationToken ct)
-    {
-        if (IsHrDesk()) return;
+    private Guid? CallerEmployeeId() => _access.CallerEmployeeId();
 
-        var membership = await CallerMembershipAsync(teamId, ct);
-        if (membership is { Role: TeamMemberRole.TeamLead or TeamMemberRole.DeputyLead }) return;
+    private Task<Team> RequireTeamAsync(Guid teamId, CancellationToken ct) => _access.RequireTeamAsync(teamId, ct);
 
-        throw new UnauthorizedAccessException(
-            "Only HR or the team's lead or deputy can change what the team is working on.");
-    }
+    private Task<Guid?> ResolveMemberAsync(Guid teamId, Guid? memberId, string what, CancellationToken ct)
+        => _access.ResolveMemberAsync(teamId, memberId, what, ct);
+
+    private Task<Dictionary<Guid, string>> MemberNamesAsync(IEnumerable<Guid> memberIds, CancellationToken ct)
+        => _access.MemberNamesAsync(memberIds, ct);
 
     /// <summary>
-    /// The write authority above, OR the member the task is assigned to.
+    /// The write authority, OR the member the task is assigned to.
     /// </summary>
     /// <remarks>
-    /// ⚠ This is the whole reason <c>ChangeTaskStatusAsync</c> is its own door. Progressing work you
+    /// ⚠ Kept here rather than on the guard because it is about a TASK, not a team: it is the whole
+    /// reason <c>ChangeTaskStatusAsync</c> is a separate door from the update. Progressing work you
     /// were assigned is an ordinary part of being on a team; rewriting the task record — its title,
     /// its objective, who it belongs to — is not.
     /// </remarks>
     private async Task RequireTaskActorAsync(TeamTask task, CancellationToken ct)
     {
-        if (IsHrDesk()) return;
+        if (_access.IsHrDesk()) return;
 
-        var membership = await CallerMembershipAsync(task.TeamId, ct);
+        var membership = await _access.CallerMembershipAsync(task.TeamId, ct);
         if (membership is null)
             throw new UnauthorizedAccessException("You are not a member of this team.");
 
@@ -139,58 +92,6 @@ public class TeamActivityService : ITeamActivityService
 
         throw new UnauthorizedAccessException(
             "This task is not assigned to you, so only the team's lead or deputy can move it.");
-    }
-
-    private async Task<Team> RequireTeamAsync(Guid teamId, CancellationToken ct)
-    {
-        var tenantId = GetTenantId();
-        return await Teams.GetQueryable().AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Id == teamId && t.TenantId == tenantId && !t.IsDeleted, ct)
-            ?? throw new ArgumentException($"Team '{teamId}' was not found.");
-    }
-
-    /// <summary>
-    /// Resolves a member id against THIS team, so an objective owner or a task assignee is always
-    /// somebody actually on it.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Scoped to the team, not merely to the tenant. Without the team check a caller could assign
-    /// a task to a member of a different team entirely — the id would resolve, the name would
-    /// render, and the assignment would be meaningless.
-    /// </remarks>
-    private async Task<Guid?> ResolveMemberAsync(Guid teamId, Guid? memberId, string what, CancellationToken ct)
-    {
-        if (memberId is not Guid id) return null;
-        var tenantId = GetTenantId();
-
-        var member = await Members.GetQueryable().AsNoTracking()
-            .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId && !m.IsDeleted, ct)
-            ?? throw new ArgumentException($"Team member '{id}' was not found.");
-
-        if (member.TeamId != teamId)
-            throw new InvalidOperationException($"That person is not a member of this team, so they cannot be its {what}.");
-
-        if (!member.IsActive)
-            throw new InvalidOperationException($"That member has left the team and cannot be its {what}.");
-
-        return id;
-    }
-
-    private async Task<Dictionary<Guid, string>> MemberNamesAsync(
-        IEnumerable<Guid> memberIds, CancellationToken ct)
-    {
-        var ids = memberIds.Distinct().ToList();
-        if (ids.Count == 0) return new Dictionary<Guid, string>();
-
-        var tenantId = GetTenantId();
-        // No Include: the projection below does the join itself, and an Include beside a Select is
-        // discarded by EF with a warning.
-        var rows = await Members.GetQueryable().AsNoTracking()
-            .Where(m => m.TenantId == tenantId && ids.Contains(m.Id))
-            .Select(m => new { m.Id, m.EmployeeId, m.Employee.FirstName, m.Employee.LastName })
-            .ToListAsync(ct);
-
-        return rows.ToDictionary(r => r.Id, r => $"{r.FirstName} {r.LastName}".Trim());
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -915,7 +816,7 @@ public class TeamActivityService : ITeamActivityService
         {
             // ⚠ Resolved from the TOKEN, never from a caller-supplied member id. "Mine" that a
             // caller can define is not a filter, it is a way to read anyone's list.
-            var membership = await CallerMembershipAsync(teamId, cancellationToken);
+            var membership = await _access.CallerMembershipAsync(teamId, cancellationToken);
             if (membership is null) return Array.Empty<TeamTaskListDto>();
             query = query.Where(t => t.AssigneeMemberId == membership.Id);
         }

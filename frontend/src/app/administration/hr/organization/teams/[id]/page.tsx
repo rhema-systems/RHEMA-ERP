@@ -40,6 +40,9 @@ import { EditTeamMemberDialog } from '@/components/hr/organization/EditTeamMembe
 import { TeamTermsTab } from '@/components/hr/teams/TeamTermsTab';
 import { TeamObjectivesTab } from '@/components/hr/teams/TeamObjectivesTab';
 import { TeamTasksTab } from '@/components/hr/teams/TeamTasksTab';
+import { TeamDashboardTab } from '@/components/hr/teams/TeamDashboardTab';
+import { TeamMeetingsTab } from '@/components/hr/teams/TeamMeetingsTab';
+import { TeamReviewsTab } from '@/components/hr/teams/TeamReviewsTab';
 import { teamService } from '@/services/hr/team.service';
 import {
   type TeamMember,
@@ -61,6 +64,7 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const [tab, setTab] = useState('dashboard');
   const [submitting, setSubmitting] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<TeamMember | null>(null);
@@ -192,18 +196,38 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
       )}
 
       {/*
-        Round 2, lane F1: what the team is chartered to do, what it has undertaken, and who is
-        doing it. Meetings, reviews and the dashboard arrive with F2.
+        Round 2, lanes F1 and F2: what the team is chartered to do, what it has undertaken, who is
+        doing it, what it met about and how it has been reviewed.
+
+        ⚠ The dashboard opens first, and the tab is CONTROLLED for that reason. Whoever opens a team
+        wants "how is this going" before "who is on it", and the dashboard's own charter warning has
+        to be able to send the reader to the Terms tab — a `#terms` anchor would have looked like a
+        link and done nothing.
       */}
-      <Tabs defaultValue="members">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="members">Members ({current.length})</TabsTrigger>
           <TabsTrigger value="terms">Terms of Reference</TabsTrigger>
           <TabsTrigger value="objectives">Objectives</TabsTrigger>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
+          <TabsTrigger value="meetings">Meetings</TabsTrigger>
+          <TabsTrigger value="reviews">Reviews</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="dashboard" className="pt-4">
+          <TeamDashboardTab teamId={id} onGoToTerms={() => setTab('terms')} />
+        </TabsContent>
+
+        <TabsContent value="meetings" className="pt-4">
+          <TeamMeetingsTab teamId={id} />
+        </TabsContent>
+
+        <TabsContent value="reviews" className="pt-4">
+          <TeamReviewsTab teamId={id} />
+        </TabsContent>
 
         <TabsContent value="terms" className="pt-4">
           <TeamTermsTab teamId={id} />

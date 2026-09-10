@@ -536,6 +536,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<TeamTaskChecklistItem> TeamTaskChecklistItems { get; set; }
     public DbSet<TeamTaskAttachment> TeamTaskAttachments { get; set; }
 
+    // Slice F2 — the minute book, the reviews, and the sweep's own record. Same reason as above:
+    // without a DbSet these are discovered after ConfigureGlobalTenantRelationships and their
+    // tenant FK keeps CASCADE, which SQL Server rejects wherever a parent already cascades.
+    public DbSet<TeamMeeting> TeamMeetings { get; set; }
+    public DbSet<TeamMeetingAttendee> TeamMeetingAttendees { get; set; }
+    public DbSet<TeamMeetingDecision> TeamMeetingDecisions { get; set; }
+    public DbSet<TeamReview> TeamReviews { get; set; }
+    public DbSet<TeamReviewLine> TeamReviewLines { get; set; }
+    public DbSet<TeamReminderRun> TeamReminderRuns { get; set; }
+    public DbSet<TeamReminderDispatchLog> TeamReminderDispatchLogs { get; set; }
+
     public DbSet<OrganizationStructure> OrganizationStructures { get; set; }
     public DbSet<OrganizationLevel> OrganizationLevels { get; set; }
     public DbSet<OrganizationUnit> OrganizationUnits { get; set; }

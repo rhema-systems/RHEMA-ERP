@@ -582,7 +582,91 @@ creates the committees first and then charters them, which belongs with the orga
 rather than bolted onto this one. `TeamTaskAttachments` is marked `optional` because a real file
 has to go through the scanning gate and a scenario cannot fabricate one. Recorded, not fixed —
 the same disposition § 8 records for lane C2's six tables.
-**F2 — Meetings, reviews, dashboard, reminders, self-service.** Migration: `TeamMeeting`, `TeamMeetingAttendee`, `TeamMeetingDecision`, `TeamReview`, `TeamReviewLine`; `CompanyHrPolicySettings.TeamTaskReminderLeadDays`.
+**F2 — Meetings, reviews, dashboard, reminders.** **BUILT 2026-09-10 — `hr-teams/run-f2.mjs`, 98 ×2.**
+Migration `20260910031733_AddTeamMeetingsAndReviews` (guarded, listed): `TeamMeetings`,
+`TeamMeetingAttendees`, `TeamMeetingDecisions`, `TeamReviews`, `TeamReviewLines`,
+**`TeamReminderRuns`, `TeamReminderDispatchLogs`**, plus `CompanyHrPolicySettings.TeamTaskReminderLeadDays`
+(`DEFAULT (3)`). Regression after it: `run-f1.mjs` 117, `hr-jobarch/run-c2.mjs` 143 (run because
+this lane touched a C2 DTO — see the lead-days note below).
+
+**What the build changed from the design.**
+
+1. **Two tables beyond the plan — the sweep's own run log.** § 6.6 asked for a reminder sweep and
+   nothing else. Lane 1 of the closure work had just found that **two HR nightly sweeps in this
+   codebase had never run at all**, and nobody noticed because there was nothing to look at: no run
+   row, no dispatch row, no way to answer "did it fire last night?" except by reading a log file
+   nobody keeps. `TeamReminderRuns` and `TeamReminderDispatchLogs` make the sweep answerable, and
+   `run-f2.mjs` § 7 asserts not just that it runs but that it **finds** something — a sweep that
+   fires and finds nothing is indistinguishable from one that never fired. Both tables are
+   `excluded` in the coverage manifest: they are system-generated logs, like `TeamMemberHistories`.
+2. **`TeamMeetingDecision.RaisedTaskId` is a bare id with NO configured FK.** `TeamTask` already
+   carries `SourceMeetingDecisionId` pointing the other way (F1 added it as provenance for exactly
+   this); configuring a second relationship between the same pair would have EF mint a shadow FK
+   column. Same reasoning as `EF unpaired-navigation shadow FKs`. Both ends are written in one
+   save, and § 4 of the harness asserts both.
+3. **`TeamReview.ReviewedById` is an `Employee` FK, not a `TeamMember` one.** The whole point of a
+   review is that somebody from outside looks at the team — an internal auditor, the sponsoring
+   director. Constraining the reviewer to the roster would have made the feature refuse its main
+   use. The reviewer is taken from the token, never from the payload (asserted).
+4. **`TeamReviewLine.ProgressAtReview` is a SNAPSHOT the server takes**, and the upsert DTO has no
+   field for it. A review that quoted today's figure for last quarter's period would be worse than
+   no review; the harness moves the objective after the line is written and asserts the line does
+   **not** move with it.
+5. **`TeamMeetingAttendee.Attended` is `bool?` — three states, not two.** Null is "not yet known",
+   which is what every invitee is before the meeting happens, and is a different fact from "did not
+   come". A two-state column would have recorded the whole room as absent the moment a meeting was
+   scheduled, and `attendedCount` would have been a lie rather than a zero.
+6. **The invitee list is a replace set; the register is NOT.** They read alike and behave
+   oppositely, deliberately. An invitee list is a decision made once — omit somebody and they are
+   uninvited. A register is marked in passes: the chair ticks the room, then an apology arrives
+   late, and replacing the set on the second pass would wipe the first. Asserted both ways.
+   Re-holding an already-held meeting is therefore how a correction is made, not an error.
+7. **`ITeamAccessGuard` was extracted and F1's service moved onto it.** F1 answered the horizontal
+   question (*is this caller anything to do with THIS team, and in what capacity?*) inline; F2 needed
+   the same three capacities across seven more entities. One implementation, one place to be wrong.
+8. **The dashboard is ONE server read, not six client calls, and it is now the team page's first
+   tab.** The tiles have to agree with each other — an overdue count that contradicts the list below
+   it is worse than no tile — and they can only be guaranteed to if one query answers them at one
+   instant. Whoever opens a team wants "how is this going" before "who is on it".
+
+**What it found, beyond the plan.**
+
+- ⚠ **`AddAsync` then `UpdateAsync` on the same entity is a 500, not a no-op.** `UpsertReviewLine`
+  added the new line and then called update on it for the shared field-setting path; EF flips
+  `Added` → `Modified`, emits an UPDATE against a row that does not exist yet, and throws
+  `DbUpdateConcurrencyException: expected to affect 1 row(s), but actually affected 0`. Now
+  `var isNew = line is null` decides, and it adds **or** updates. Found by the harness's first run.
+- ⚠ **Two DTOs were mapped from a tracked entity whose navigation had never been loaded**, so
+  `decision.responsibleName` came back null on create and non-null on the next read — the shape
+  `HR ported list-read bugs` records, arriving fresh. Both now re-read through the same path the
+  list uses. A screen would have shown a blank name that fixed itself on refresh, which reads as a
+  caching bug.
+- ⚠ **A DTO mapped before the link it describes was written.** `RaiseTaskFromDecision` returned the
+  task it had just created, before `SourceMeetingDecisionId` was stamped on it, so
+  `raised.sourceMeetingDecisionId` was null in the response and correct in the database. The
+  provenance link existed and the caller could not see it.
+- ⚠ **Two dead lead-days settings, both closed — one of them lane C2's.**
+  `TeamTaskReminderLeadDays` reached the DTOs but stopped at the frontend; **lane C2's
+  `CertificationExpiryLeadDays` reached neither DTO**, and the C2 code comment recorded it as "a
+  different slice's work" because closing it needed the settings screen. F2 was wiring an identical
+  field through the same four places with that screen card already open, so the sibling went
+  through with it rather than staying dead — read DTO, update DTO, both mapping halves, the
+  TypeScript type, the zod schema, the payload and a field on "Alert lead times". **§ 8 of the
+  harness** round-trips both through the policy door and puts both back, because a figure the sweep
+  obeys but nobody can change is a setting in name only, and it is completely invisible from the
+  sweep's own tests. ⚠ **Out of lane F2's scope, deliberately** — flagged here because it touches a
+  C2 file.
+- ⚠ **F1's task-attachment link was a plain `<a href>` to a bearer-gated route**, so it would have
+  401'd on the first click. Fixed to the blob download every other gated HR file uses. Not caught by
+  the harness, which tests the API and not the anchor — the same "coverage of the API is not
+  coverage of the product" the assets area recorded.
+
+**⚠ STILL OWED ON F2 — demo seeding.** The five non-log tables are `required` in
+`demo-coverage-manifest.csv` with **no seeding scenario**, exactly as F1's five are, for the same
+reason: no scenario seeds a `Team` at all. Closing it means one scenario that creates the
+committees, charters them, and then holds a meeting — which belongs with the organisation scenario,
+not bolted onto this lane.
+
 **F3 — Workflow.** Entity types `HrTeamObjective`, `HrTeamTermsOfReference` through the four-step recipe; no migration beyond the status enums.
 
 Harness `hr-teams/run-f1..f3.mjs`. Details and assertions in § 6.6.

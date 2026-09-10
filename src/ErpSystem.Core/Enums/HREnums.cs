@@ -623,6 +623,50 @@ public enum TeamTaskStatus
     Cancelled = 5
 }
 
+/// <summary>What kind of gathering a team record is describing.</summary>
+/// <remarks>
+/// ⚠ A committee's work does not all happen in a meeting. A site visit and a workshop produce
+/// decisions and action items exactly as a meeting does, and filing them as "Meeting" would make
+/// the minute book lie about what actually happened.
+/// </remarks>
+public enum TeamMeetingKind
+{
+    Meeting = 1,
+
+    Workshop = 2,
+
+    SiteVisit = 3,
+
+    Other = 99
+}
+
+public enum TeamMeetingStatus
+{
+    Scheduled = 1,
+
+    Held = 2,
+
+    Cancelled = 3
+}
+
+/// <summary>
+/// Where a periodic review of a team stands.
+/// </summary>
+/// <remarks>
+/// ⚠ A SUBMITTED review is immutable, and the lead acknowledges it rather than approving it. A
+/// review is a record of what somebody found, not a request for permission — which is why this is
+/// not on the workflow engine (plan § 6.6.2). Acknowledgement says it was read, and nothing about
+/// whether the lead agreed.
+/// </remarks>
+public enum TeamReviewStatus
+{
+    Draft = 1,
+
+    Submitted = 2,
+
+    Acknowledged = 3
+}
+
 public enum WorkMode
 {
     OnSite = 1,

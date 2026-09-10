@@ -59,6 +59,10 @@ const schema = z
     contractExpiryLeadDays: z.coerce.number().int().min(0).max(3650),
     probationEndLeadDays: z.coerce.number().int().min(0).max(3650),
     retirementCountdownLeadDays: z.coerce.number().int().min(0).max(3650),
+    // ⚠ 365, not 3650, matching the entity and the update DTO — a committee task cannot usefully
+    // remind more than a year ahead.
+    teamTaskReminderLeadDays: z.coerce.number().int().min(0).max(365),
+    certificationExpiryLeadDays: z.coerce.number().int().min(0).max(3650),
 
     longServiceMilestoneYears: z
       .string()
@@ -167,6 +171,8 @@ export default function PolicySettingsPage() {
       contractExpiryLeadDays: data.contractExpiryLeadDays,
       probationEndLeadDays: data.probationEndLeadDays,
       retirementCountdownLeadDays: data.retirementCountdownLeadDays,
+      teamTaskReminderLeadDays: data.teamTaskReminderLeadDays,
+      certificationExpiryLeadDays: data.certificationExpiryLeadDays,
 
       longServiceMilestoneYears: data.longServiceMilestoneYears ?? '',
       defaultCurrencyCode: data.defaultCurrencyCode ?? 'GHS',
@@ -230,6 +236,8 @@ export default function PolicySettingsPage() {
         contractExpiryLeadDays: Number(v.contractExpiryLeadDays),
         probationEndLeadDays: Number(v.probationEndLeadDays),
         retirementCountdownLeadDays: Number(v.retirementCountdownLeadDays),
+        teamTaskReminderLeadDays: Number(v.teamTaskReminderLeadDays),
+        certificationExpiryLeadDays: Number(v.certificationExpiryLeadDays),
 
         longServiceMilestoneYears: v.longServiceMilestoneYears.trim(),
         defaultCurrencyCode: v.defaultCurrencyCode.trim().toUpperCase(),
@@ -473,12 +481,40 @@ export default function PolicySettingsPage() {
               <NumberField form={form} name="contractExpiryLeadDays" label="Contract expiry (days)" required />
               <NumberField form={form} name="probationEndLeadDays" label="Probation end (days)" required />
             </FieldRow>
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="retirementCountdownLeadDays"
+                label="Upcoming retirement (days)"
+                required
+              />
+              <NumberField
+                form={form}
+                name="teamTaskReminderLeadDays"
+                label="Committee task due (days)"
+                required
+              />
+            </FieldRow>
+            {/*
+              ⚠ Lane C2's field, wired through by F2. It was on the entity and read by the
+              certification expiry sweep, but reached neither DTO — the engine honoured it and
+              nobody could change it. A credential with its own lead days overrides this.
+            */}
             <NumberField
               form={form}
-              name="retirementCountdownLeadDays"
-              label="Upcoming retirement (days)"
+              name="certificationExpiryLeadDays"
+              label="Credential expiry (days)"
               required
             />
+            {/*
+              ⚠ Days, not weeks, on purpose — and said here because the figure looks wrong beside
+              its neighbours. A committee action item is something somebody does on Tuesday; the
+              others are dates people plan a month around.
+            */}
+            <p className="text-muted-foreground text-xs">
+              Committee task reminders default to 3 days, unlike the rest — an action item minuted
+              at a meeting is short-horizon work. Set it to 0 to remind only once a task is due.
+            </p>
           </CardContent>
         </Card>
 

@@ -37,6 +37,17 @@ export interface CompanyHrPolicySettings {
   contractExpiryLeadDays: number;
   probationEndLeadDays: number;
   retirementCountdownLeadDays: number;
+  /**
+   * Round 2, lane F2. Deliberately its own figure rather than sharing `reviewDueLeadDays`: a
+   * committee action item is something somebody does on Tuesday, not a date they plan a month
+   * around, so its default is 3 days where the others are weeks. 0 means "only once it is due".
+   */
+  teamTaskReminderLeadDays: number;
+  /**
+   * Lane C2's, wired through by F2. The fallback for a credential that carries no lead days of its
+   * own — `Certification.expiryNotificationLeadDays` overrides it per credential.
+   */
+  certificationExpiryLeadDays: number;
 
   // Org-wide defaults
   longServiceMilestoneYears: string;

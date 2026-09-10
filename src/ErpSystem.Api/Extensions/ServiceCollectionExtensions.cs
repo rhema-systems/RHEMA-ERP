@@ -2481,6 +2481,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // (IAssetReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.AssetReminderBackgroundService>();
 
+            // Team reminder engine (round 2, lane F2): daily sweep — a task due within the tenant's
+            // lead time, a task already overdue, an objective past its date, a meeting tomorrow, and
+            // terms of reference lapsing within thirty days. Sweep logic is scoped
+            // (ITeamReminderService) so run-now shares it.
+            // ⚠ Without THIS LINE the engine runs only when somebody presses the button — which is
+            // exactly what happened to two other HR sweeps here, unnoticed, for months.
+            services.AddHostedService<ErpSystem.Api.Services.HR.TeamReminderBackgroundService>();
+
             // Employee bulk-import committer: polls for sessions HR has confirmed and writes them
             // in batches, one fresh scope per batch. There is no job queue in this API, so the
             // session row IS the work item (Status = CommitRequested). Logic is scoped
