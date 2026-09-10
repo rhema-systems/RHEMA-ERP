@@ -1223,6 +1223,13 @@ and same-invoice serialization. In parallel, a separate clean-worktree Terra tas
 Sales unit/lockdown tests and adding explicit-date, locked-source and post-commit-audit coverage. No production
 schema, migration, configured database, remote or unrelated state is in scope.
 
+The parallel Sales governance migration is committed cleanly as test-only `729d9e5a` from exact checkpoint
+`6d631b4f`. It inverts the obsolete ReturnOrderService posting-engine lockdown to require C7/C11/C12/C13/C15,
+removes stale immediate-post expectations, and adds source-lock tamper, post-commit audit-fault and explicit changed-
+date retry coverage with C15 replay verification. Restore and diff gates pass, but shared build contention prevented
+a focused test verdict, so the commit is not integrated. Sol High static/test review is active while the production
+relational fixture continues independently; no database, schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
