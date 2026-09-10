@@ -1163,6 +1163,15 @@ service catch, yet the service immediately invokes the post-rollback Finance fai
 evidence must instead wait for the actual outer rollback and tracker cleanup. This is a production P1 correction,
 not accepted baseline debt.
 
+Sales committed clean ambient-boundary correction `a3600ae1`: when the service joins a caller-owned transaction
+that remains active after failure, it now propagates without falsely invoking Finance's post-rollback failure
+recorder. The remaining replay correction cannot safely be completed in Sales because exact retry authority depends
+on Finance-owned C10 representation selection and C13 lineage reconstruction. C15 is therefore active from exact
+production base `e4fd811882487d7755bffc379bc77bf83ebae161` on
+`codex/finance-producer-replay-verification-c15`, limited to an additive tenant-scoped, book-blind durable replay
+verification contract and adversarial tests. Sales integration stays blocked until C15 is independently approved,
+integrated and consumed; no schema, migration, database, default or remote action is authorized.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
