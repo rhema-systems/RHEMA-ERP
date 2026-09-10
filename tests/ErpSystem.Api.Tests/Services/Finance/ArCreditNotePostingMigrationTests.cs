@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AR;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
@@ -90,6 +91,89 @@ public sealed class ArCreditNotePostingMigrationTests
         first.JournalEntryId.Should().Be(journalId);
         second.JournalEntryId.Should().Be(journalId);
         execution.Verify(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task GovernedSalesCreditNote_MalformedCompatibilityEvidenceRollsBackOwnerEffectAndRecordsFailure(string returnedFingerprint)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var eventId = Guid.NewGuid();
+        const string fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        var prepared = new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved, RequestFingerprint = fingerprint };
+        var producer = new Mock<IFinanceProducerIntentService>();
+        producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(prepared);
+        producer.Setup(x => x.GetAsync(eventId, It.IsAny<CancellationToken>())).ReturnsAsync(prepared);
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        execution.Setup(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
+                It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(eventId, returnedFingerprint,
+                AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object,
+            Mock.Of<IFinanceProducerReversalPreparationService>());
+
+        var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note compatibility evidence does not bind to the prepared Finance event.");
+        db.ChangeTracker.Clear();
+        (await db.CreditNotes.SingleAsync(c => c.Id == fixture.CreditNote.Id)).JournalEntryId.Should().BeNull();
+        execution.Verify(x => x.RecordFailureAfterRollbackAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task GovernedSalesCreditNote_ReversalUsesIdOnlyExecutionAndAllowsOnlyExactRetry()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var originalEventId = Guid.NewGuid();
+        db.AccountingEvents.Add(new AccountingEvent
+        {
+            Id = originalEventId, TenantId = tenantId, OriginatingModuleCode = "SALES",
+            SourceDocumentType = "SalesCreditNote", SourceDocumentId = fixture.CreditNote.Id,
+            PostingAction = "Post", IdempotencyKey = $"AR:SalesCreditNote:{tenantId:N}:{fixture.CreditNote.Id:N}:Post",
+            Status = AccountingEventStatuses.Posted
+        });
+        fixture.CreditNote.JournalEntryId = Guid.NewGuid();
+        await db.SaveChangesAsync();
+
+        var reversalEventId = Guid.NewGuid();
+        const string fingerprint = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+        var producer = new Mock<IFinanceProducerIntentService>();
+        producer.Setup(x => x.GetAsync(reversalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            Id = reversalEventId, RequestFingerprint = fingerprint,
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved
+        });
+        var reversals = new Mock<IFinanceProducerReversalPreparationService>();
+        reversals.Setup(x => x.PrepareReversalAsync(It.IsAny<PrepareProducerAccountingReversalDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProducerAccountingReversalPreparationResultDto(reversalEventId, originalEventId, fingerprint,
+                AccountingEventStatuses.PendingApproval, ProducerIntentDecisionStatuses.Approved));
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        execution.Setup(x => x.ExecuteInAmbientTransactionAsync(reversalEventId, It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(reversalEventId, fingerprint,
+                AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object, reversals.Object);
+        var request = new ReverseCreditNoteDto { Reason = "Correct approved credit note", ReversalDate = new DateTime(2026, 7, 6) };
+
+        var first = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
+        var replay = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
+        var conflict = () => service.ReverseCreditNoteAsync(fixture.CreditNote.Id,
+            new ReverseCreditNoteDto { Reason = "Different correction", ReversalDate = request.ReversalDate });
+
+        replay.ReversalJournalEntryId.Should().Be(first.ReversalJournalEntryId);
+        await conflict.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note reversal retry conflicts with the immutable reversal evidence.");
+        execution.Verify(x => x.ExecuteInAmbientTransactionAsync(reversalEventId,
             It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
