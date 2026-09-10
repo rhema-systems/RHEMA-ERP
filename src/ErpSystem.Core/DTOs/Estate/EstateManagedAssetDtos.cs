@@ -205,6 +205,7 @@ public class EstateLandDemarcationDto
 {
     public Guid Id { get; set; }
     public Guid EstateManagedAssetId { get; set; }
+    public Guid? ParentDemarcationId { get; set; }
     public string LandReference { get; set; } = string.Empty;
     public int DemarcationNumber { get; set; }
     public string Description { get; set; } = string.Empty;
@@ -213,6 +214,27 @@ public class EstateLandDemarcationDto
     public decimal AreaSquareFeet { get; set; }
     public bool BoundaryVerified { get; set; }
     public bool IsAssignedToProject { get; set; }
+    public bool HasChildDemarcations { get; set; }
+    public string CostAllocationMethod { get; set; } = "NotSet";
+    public decimal? AllocatedCost { get; set; }
+    public decimal? CostPerAcre { get; set; }
+    public decimal? TargetSalePrice { get; set; }
+    public string? ParentLandAssetReference { get; set; }
+    public string? ParentFixedAssetReference { get; set; }
+    public string? ChildFixedAssetReference { get; set; }
+    public string FixedAssetPostingStatus { get; set; } = "NotReady";
+    public DateTime? FixedAssetPostedAt { get; set; }
+    public bool IsReadyForProjectManagement { get; set; }
+    public bool IsPublishedToExternalPortal { get; set; }
+    public string ExternalListingType { get; set; } = "None";
+    public string ExternalListingStatus { get; set; } = "Draft";
+    public decimal? ExternalListingPrice { get; set; }
+    public decimal? ExternalSalePrice { get; set; }
+    public decimal? ExternalMonthlyRent { get; set; }
+    public int? ExternalLeaseTermMonths { get; set; }
+    public string ExternalListingCurrency { get; set; } = "GHS";
+    public string? ExternalListingNotes { get; set; }
+    public DateTime? ExternalPublishedAt { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
 }
@@ -233,10 +255,33 @@ public class ProjectReadyLandDemarcationDto
 
 public class SaveEstateLandDemarcationDto
 {
+    public Guid? ParentDemarcationId { get; set; }
     public string Description { get; set; } = string.Empty;
     public int BeaconCount { get; set; }
     public string BoundaryCoordinates { get; set; } = string.Empty;
     public bool BoundaryVerified { get; set; }
+}
+
+public class UpdateEstateLandDemarcationDispositionDto
+{
+    public bool IsReadyForProjectManagement { get; set; }
+    public bool IsPublishedToExternalPortal { get; set; }
+    public string ExternalListingType { get; set; } = "None";
+    public string ExternalListingStatus { get; set; } = "Draft";
+    public decimal? ExternalListingPrice { get; set; }
+    public decimal? ExternalSalePrice { get; set; }
+    public decimal? ExternalMonthlyRent { get; set; }
+    public int? ExternalLeaseTermMonths { get; set; }
+    public string ExternalListingCurrency { get; set; } = "GHS";
+    public string? ExternalListingNotes { get; set; }
+}
+
+public class UpdateEstateLandDemarcationCostingDto
+{
+    public string CostAllocationMethod { get; set; } = "ByArea";
+    public decimal? AllocatedCost { get; set; }
+    public decimal? CostPerAcre { get; set; }
+    public decimal? TargetSalePrice { get; set; }
 }
 
 public class EstateManagedAssetQuery

@@ -179,12 +179,35 @@ public class EstateLandDemarcation : TenantEntity
 {
     public Guid EstateManagedAssetId { get; set; }
     public EstateManagedAsset EstateManagedAsset { get; set; } = null!;
+    public Guid? ParentDemarcationId { get; set; }
+    public EstateLandDemarcation? ParentDemarcation { get; set; }
+    public ICollection<EstateLandDemarcation> ChildDemarcations { get; set; } = new List<EstateLandDemarcation>();
     public int DemarcationNumber { get; set; }
     [Required, MaxLength(1000)] public string Description { get; set; } = string.Empty;
     public int BeaconCount { get; set; }
     [Required] public string BoundaryCoordinates { get; set; } = string.Empty;
     public decimal AreaSquareFeet { get; set; }
     public bool BoundaryVerified { get; set; }
+    [MaxLength(40)] public string CostAllocationMethod { get; set; } = "NotSet";
+    public decimal? AllocatedCost { get; set; }
+    public decimal? CostPerAcre { get; set; }
+    public decimal? TargetSalePrice { get; set; }
+    [MaxLength(120)] public string? ParentLandAssetReference { get; set; }
+    [MaxLength(120)] public string? ParentFixedAssetReference { get; set; }
+    [MaxLength(120)] public string? ChildFixedAssetReference { get; set; }
+    [MaxLength(40)] public string FixedAssetPostingStatus { get; set; } = "NotReady";
+    public DateTime? FixedAssetPostedAt { get; set; }
+    public bool IsReadyForProjectManagement { get; set; }
+    public bool IsPublishedToExternalPortal { get; set; }
+    [MaxLength(40)] public string ExternalListingType { get; set; } = "None";
+    [MaxLength(40)] public string ExternalListingStatus { get; set; } = "Draft";
+    public decimal? ExternalListingPrice { get; set; }
+    public decimal? ExternalSalePrice { get; set; }
+    public decimal? ExternalMonthlyRent { get; set; }
+    public int? ExternalLeaseTermMonths { get; set; }
+    [MaxLength(10)] public string ExternalListingCurrency { get; set; } = "GHS";
+    [MaxLength(2000)] public string? ExternalListingNotes { get; set; }
+    public DateTime? ExternalPublishedAt { get; set; }
 }
 
 public class EstateManagedAssetDocument : TenantEntity

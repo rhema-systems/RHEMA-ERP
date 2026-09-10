@@ -430,6 +430,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 demarcations,
                 item,
                 assignedLandReferences);
+            dto.HasChildDemarcations =
+                demarcations.Any(child => child.ParentDemarcationId == item.Id);
             return dto;
         }).ToList();
     }
@@ -477,7 +479,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && !item.EstateManagedAsset.IsDeleted
                 && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
                 && ((item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
-                        && item.EstateManagedAsset.IsReadyForProjectManagement
+                        && (item.IsReadyForProjectManagement || item.EstateManagedAsset.IsReadyForProjectManagement)
+                        && !item.IsPublishedToExternalPortal
                         && !item.EstateManagedAsset.IsPublishedToExternalPortal)
                     || (normalizedCurrentReference != null
                         && ((currentReferenceIsAssetId
@@ -501,6 +504,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 AssetIsPublishedToExternalPortal =
                     item.EstateManagedAsset.IsPublishedToExternalPortal,
                 DemarcationId = item.Id,
+                DemarcationIsReadyForProjectManagement = item.IsReadyForProjectManagement,
+                DemarcationIsPublishedToExternalPortal = item.IsPublishedToExternalPortal,
                 DemarcationNumber = item.DemarcationNumber,
                 Description = item.Description,
                 AreaSquareFeet = item.AreaSquareFeet,
@@ -527,8 +532,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     candidate,
                     currentReferenceSet);
                 var isAvailable = candidate.AssetStatus == EstateManagedAssetStatus.LandBank
-                    && candidate.AssetIsReadyForProjectManagement
+                    && (candidate.DemarcationIsReadyForProjectManagement || candidate.AssetIsReadyForProjectManagement)
                     && !candidate.AssetIsPublishedToExternalPortal
+                    && !candidate.DemarcationIsPublishedToExternalPortal
                     && !IsReadyLandCandidateAssignedToProject(
                         assetCandidates,
                         candidate,
@@ -574,10 +580,12 @@ public class EstateManagedAssetService : IEstateManagedAssetService
     {
         var asset = await RequireLandAssetAsync(assetId);
         EnsureDemarcationsCanBeChanged(asset);
-        var measurement = ValidateDemarcationRequest(asset, request);
+        var parent = await ResolveParentDemarcationAsync(assetId, request.ParentDemarcationId);
+        var measurement = ValidateDemarcationRequest(asset, request, parent);
         var repository = _unitOfWork.Repository<EstateLandDemarcation>();
         var existingBoundaries = await repository
             .GetQueryable(item => item.EstateManagedAssetId == assetId
+                && item.ParentDemarcationId == request.ParentDemarcationId
                 && item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted)
             .Select(item => item.BoundaryCoordinates)
@@ -602,7 +610,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         {
             TenantId = _currentUserProvider.TenantId,
             EstateManagedAssetId = assetId,
+            ParentDemarcationId = request.ParentDemarcationId,
             DemarcationNumber = lastDemarcationNumber + 1,
+            ParentLandAssetReference = asset.AssetCode,
+            ParentFixedAssetReference = BuildParentFixedAssetReference(asset, parent),
+            ChildFixedAssetReference = BuildChildFixedAssetReference(
+                BuildParentFixedAssetReference(asset, parent),
+                lastDemarcationNumber + 1),
             Description = request.Description.Trim(),
             BeaconCount = measurement.BeaconCount,
             BoundaryCoordinates = request.BoundaryCoordinates.Trim(),
@@ -613,7 +627,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         };
 
         await repository.AddAsync(demarcation);
-        await ResetProjectReadinessAsync(asset);
+        await ResetDemarcationReadinessAsync(asset, parent);
         await _unitOfWork.SaveChangesAsync();
         return MapDemarcationToDto(demarcation, asset.AssetCode);
     }
@@ -632,7 +646,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
     {
         var asset = await RequireLandAssetAsync(assetId);
         EnsureDemarcationsCanBeChanged(asset);
-        var measurement = ValidateDemarcationRequest(asset, request);
+        var parent = await ResolveParentDemarcationAsync(assetId, request.ParentDemarcationId);
+        var measurement = ValidateDemarcationRequest(asset, request, parent);
         var repository = _unitOfWork.Repository<EstateLandDemarcation>();
         var demarcation = await repository.FirstOrDefaultAsync(item =>
             item.Id == demarcationId
@@ -643,12 +658,21 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         {
             throw new InvalidOperationException("Land demarcation was not found.");
         }
+        if (request.ParentDemarcationId == demarcation.Id)
+        {
+            throw new InvalidOperationException("A demarcation cannot be its own parent parcel.");
+        }
 
         var activeDemarcations = (await repository.FindAsync(item =>
                 item.EstateManagedAssetId == assetId
                 && item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted))
             .ToList();
+        if (activeDemarcations.Any(item => item.ParentDemarcationId == demarcation.Id))
+        {
+            throw new InvalidOperationException(
+                "Edit child demarcations before changing this parent parcel.");
+        }
         var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
         if (IsDemarcationAssignedToProject(
                 asset,
@@ -663,23 +687,292 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var otherBoundaries = await repository
             .GetQueryable(item => item.EstateManagedAssetId == assetId
                 && item.Id != demarcationId
+                && item.ParentDemarcationId == request.ParentDemarcationId
                 && item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted)
             .Select(item => item.BoundaryCoordinates)
             .ToListAsync();
         EnsureDoesNotOverlap(request.BoundaryCoordinates, otherBoundaries);
 
+        var boundaryChanged =
+            !string.Equals(
+                demarcation.BoundaryCoordinates?.Trim(),
+                request.BoundaryCoordinates?.Trim(),
+                StringComparison.Ordinal) ||
+            demarcation.ParentDemarcationId != request.ParentDemarcationId;
+        demarcation.ParentDemarcationId = request.ParentDemarcationId;
         demarcation.Description = request.Description.Trim();
         demarcation.BeaconCount = measurement.BeaconCount;
         demarcation.BoundaryCoordinates = request.BoundaryCoordinates.Trim();
         demarcation.AreaSquareFeet = measurement.AreaSquareFeet;
         demarcation.BoundaryVerified = request.BoundaryVerified;
+        demarcation.ParentLandAssetReference = asset.AssetCode;
+        demarcation.ParentFixedAssetReference = BuildParentFixedAssetReference(asset, parent);
+        demarcation.ChildFixedAssetReference = BuildChildFixedAssetReference(
+            demarcation.ParentFixedAssetReference!,
+            demarcation.DemarcationNumber);
+        if (boundaryChanged)
+        {
+            demarcation.CostAllocationMethod = "NotSet";
+            demarcation.AllocatedCost = null;
+            demarcation.CostPerAcre = null;
+            demarcation.FixedAssetPostingStatus = "NotReady";
+            demarcation.FixedAssetPostedAt = null;
+        }
         demarcation.UpdatedAt = DateTime.UtcNow;
         demarcation.UpdatedBy = _currentUserProvider.Username;
         demarcation.LastModifiedById = _currentUserProvider.UserId;
 
         await repository.UpdateAsync(demarcation);
-        await ResetProjectReadinessAsync(asset);
+        await ResetDemarcationReadinessAsync(asset, parent);
+        await _unitOfWork.SaveChangesAsync();
+        return MapDemarcationToDto(demarcation, asset.AssetCode);
+    }
+
+    public Task<EstateLandDemarcationDto> UpdateLandDemarcationDispositionAsync(
+        Guid assetId,
+        Guid demarcationId,
+        UpdateEstateLandDemarcationDispositionDto request)
+        => ExecuteSerializableMutationAsync(
+            () => UpdateLandDemarcationDispositionCoreAsync(assetId, demarcationId, request));
+
+    private async Task<EstateLandDemarcationDto> UpdateLandDemarcationDispositionCoreAsync(
+        Guid assetId,
+        Guid demarcationId,
+        UpdateEstateLandDemarcationDispositionDto request)
+    {
+        var asset = await RequireLandAssetAsync(assetId);
+        var repository = _unitOfWork.Repository<EstateLandDemarcation>();
+        var demarcations = (await repository.FindAsync(item =>
+                item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted))
+            .ToList();
+        var demarcation = demarcations.FirstOrDefault(item => item.Id == demarcationId)
+            ?? throw new InvalidOperationException("Land demarcation was not found.");
+        var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
+        if (request.IsPublishedToExternalPortal &&
+            IsDemarcationAssignedToProject(asset, demarcations, demarcation, assignedLandReferences))
+        {
+            throw new InvalidOperationException("Demarcations assigned to a project cannot be sent to Portal Listings.");
+        }
+
+        if (request.IsReadyForProjectManagement && request.IsPublishedToExternalPortal)
+        {
+            throw new InvalidOperationException("Choose either Project Ready or Portal Listing for this demarcation, not both.");
+        }
+
+        if ((request.IsReadyForProjectManagement || request.IsPublishedToExternalPortal) &&
+            (!demarcation.BoundaryVerified || string.IsNullOrWhiteSpace(demarcation.BoundaryCoordinates)))
+        {
+            throw new InvalidOperationException("Verify this demarcation before changing its project or portal status.");
+        }
+
+        if ((request.IsReadyForProjectManagement || request.IsPublishedToExternalPortal) &&
+            demarcations.Any(item => item.ParentDemarcationId == demarcation.Id))
+        {
+            throw new InvalidOperationException(
+                "This demarcation has child parcels. Mark the child parcels project-ready or send them to Portal Listings instead.");
+        }
+        if (request.IsReadyForProjectManagement || request.IsPublishedToExternalPortal)
+        {
+            EnsureDemarcationCostingReconcilesForOutbound(asset, demarcations);
+            if (demarcation.AllocatedCost is not > 0m)
+            {
+                throw new InvalidOperationException(
+                    "Set the demarcation cost before making this parcel project-ready or sending it to Portal Listings.");
+            }
+        }
+
+        var listingType = NormalizeListingType(request.ExternalListingType);
+        if (request.IsPublishedToExternalPortal && listingType == "None")
+        {
+            throw new InvalidOperationException("Select Sale, Rent, or Sale and Rent before sending this demarcation to Portal Listings.");
+        }
+
+        var includesSale = listingType is "Sale" or "SaleAndRent";
+        var includesRent = listingType is "Rent" or "SaleAndRent";
+        var salePrice = includesSale
+            ? request.ExternalSalePrice ?? request.ExternalListingPrice
+            : null;
+        salePrice ??= includesSale ? demarcation.TargetSalePrice : null;
+        var monthlyRent = includesRent
+            ? request.ExternalMonthlyRent ?? (!includesSale ? request.ExternalListingPrice : null)
+            : null;
+        if (request.IsPublishedToExternalPortal && includesSale && salePrice is not > 0m)
+        {
+            throw new InvalidOperationException("Enter the sale price before listing this demarcation.");
+        }
+        if (request.IsPublishedToExternalPortal && includesRent && monthlyRent is not > 0m)
+        {
+            throw new InvalidOperationException("Enter the monthly rent before listing this demarcation.");
+        }
+
+        demarcation.IsReadyForProjectManagement = request.IsReadyForProjectManagement;
+        demarcation.IsPublishedToExternalPortal = request.IsPublishedToExternalPortal;
+        demarcation.ExternalListingType = listingType;
+        demarcation.ExternalListingStatus = request.IsPublishedToExternalPortal
+            ? NormalizeListingStatus(request.ExternalListingStatus)
+            : "Draft";
+        demarcation.ExternalSalePrice = salePrice;
+        demarcation.ExternalMonthlyRent = monthlyRent;
+        demarcation.ExternalLeaseTermMonths = includesRent && request.ExternalLeaseTermMonths > 0
+            ? request.ExternalLeaseTermMonths
+            : null;
+        demarcation.ExternalListingPrice = includesSale ? salePrice : monthlyRent;
+        demarcation.ExternalListingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
+            ? "GHS"
+            : request.ExternalListingCurrency.Trim().ToUpperInvariant();
+        demarcation.ExternalListingNotes = TrimOrNull(request.ExternalListingNotes);
+        if (salePrice is > 0m)
+        {
+            demarcation.TargetSalePrice = salePrice;
+        }
+        demarcation.ParentLandAssetReference = asset.AssetCode;
+        demarcation.ParentFixedAssetReference = BuildParentFixedAssetReference(
+            asset,
+            demarcations.FirstOrDefault(item => item.Id == demarcation.ParentDemarcationId));
+        demarcation.ChildFixedAssetReference = BuildChildFixedAssetReference(
+            demarcation.ParentFixedAssetReference!,
+            demarcation.DemarcationNumber);
+        demarcation.FixedAssetPostingStatus =
+            request.IsReadyForProjectManagement || request.IsPublishedToExternalPortal
+                ? "ReadyForPosting"
+                : demarcation.AllocatedCost is > 0m
+                    ? "Costed"
+                    : "NotReady";
+        demarcation.ExternalPublishedAt = request.IsPublishedToExternalPortal
+            ? demarcation.ExternalPublishedAt ?? DateTime.UtcNow
+            : null;
+        demarcation.UpdatedAt = DateTime.UtcNow;
+        demarcation.UpdatedBy = _currentUserProvider.Username;
+        demarcation.LastModifiedById = _currentUserProvider.UserId;
+
+        await repository.UpdateAsync(demarcation);
+        await _unitOfWork.SaveChangesAsync();
+        return MapDemarcationToDto(demarcation, asset.AssetCode);
+    }
+
+    public Task<EstateLandDemarcationDto> UpdateLandDemarcationCostingAsync(
+        Guid assetId,
+        Guid demarcationId,
+        UpdateEstateLandDemarcationCostingDto request)
+        => ExecuteSerializableMutationAsync(
+            () => UpdateLandDemarcationCostingCoreAsync(assetId, demarcationId, request));
+
+    private async Task<EstateLandDemarcationDto> UpdateLandDemarcationCostingCoreAsync(
+        Guid assetId,
+        Guid demarcationId,
+        UpdateEstateLandDemarcationCostingDto request)
+    {
+        var asset = await RequireLandAssetAsync(assetId);
+        var repository = _unitOfWork.Repository<EstateLandDemarcation>();
+        var demarcations = (await repository.FindAsync(item =>
+                item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted))
+            .ToList();
+        var demarcation = demarcations.FirstOrDefault(item => item.Id == demarcationId)
+            ?? throw new InvalidOperationException("Land demarcation was not found.");
+
+        var demarcationAcres = demarcation.AreaSquareFeet / 43560m;
+        if (demarcationAcres <= 0m)
+        {
+            throw new InvalidOperationException("The demarcation area must be available before costing.");
+        }
+
+        var method = NormalizeDemarcationCostMethod(request.CostAllocationMethod);
+        decimal? allocatedCost = null;
+        decimal? costPerAcre = null;
+        if (method == "ByArea")
+        {
+            if (demarcation.ParentDemarcationId.HasValue)
+            {
+                var parentDemarcation = demarcations.FirstOrDefault(item =>
+                    item.Id == demarcation.ParentDemarcationId.Value)
+                    ?? throw new InvalidOperationException("Parent demarcation was not found.");
+                if (parentDemarcation.AllocatedCost is not > 0m)
+                {
+                    throw new InvalidOperationException(
+                        "Set the parent parcel cost before calculating child parcel cost by area.");
+                }
+
+                var parentAcres = parentDemarcation.AreaSquareFeet / 43560m;
+                if (parentAcres <= 0m)
+                {
+                    throw new InvalidOperationException(
+                        "Record the parent parcel area before calculating child parcel cost by area.");
+                }
+
+                costPerAcre = decimal.Round(
+                    parentDemarcation.AllocatedCost.Value / parentAcres,
+                    2,
+                    MidpointRounding.AwayFromZero);
+                allocatedCost = decimal.Round(
+                    costPerAcre.Value * demarcationAcres,
+                    2,
+                    MidpointRounding.AwayFromZero);
+            }
+            else
+            {
+                var totalCost = asset.ValuationAmount ?? 0m;
+                if (totalCost <= 0m)
+                {
+                    throw new InvalidOperationException(
+                        "Record the land total valuation or capitalized cost before calculating demarcation cost by area.");
+                }
+
+                var totalAcres = GetAssetAreaInAcres(asset);
+                if (totalAcres <= 0m)
+                {
+                    throw new InvalidOperationException(
+                        "Record the land area before calculating demarcation cost by area.");
+                }
+
+                costPerAcre = decimal.Round(totalCost / totalAcres, 2, MidpointRounding.AwayFromZero);
+                allocatedCost = decimal.Round(costPerAcre.Value * demarcationAcres, 2, MidpointRounding.AwayFromZero);
+            }
+        }
+        else if (method == "Manual")
+        {
+            allocatedCost = request.AllocatedCost;
+            if (allocatedCost is not > 0m)
+            {
+                throw new InvalidOperationException("Enter the demarcation cost before saving manual costing.");
+            }
+
+            costPerAcre = request.CostPerAcre is > 0m
+                ? request.CostPerAcre
+                : decimal.Round(allocatedCost.Value / demarcationAcres, 2, MidpointRounding.AwayFromZero);
+        }
+
+        var targetSalePrice = request.TargetSalePrice is > 0m
+            ? request.TargetSalePrice
+            : null;
+        demarcation.CostAllocationMethod = method;
+        demarcation.AllocatedCost = allocatedCost;
+        demarcation.CostPerAcre = costPerAcre;
+        demarcation.TargetSalePrice = targetSalePrice;
+        demarcation.ParentLandAssetReference = asset.AssetCode;
+        demarcation.ParentFixedAssetReference = BuildParentFixedAssetReference(
+            asset,
+            demarcations.FirstOrDefault(item => item.Id == demarcation.ParentDemarcationId));
+        demarcation.ChildFixedAssetReference = BuildChildFixedAssetReference(
+            demarcation.ParentFixedAssetReference!,
+            demarcation.DemarcationNumber);
+        demarcation.FixedAssetPostingStatus = allocatedCost is > 0m
+            ? "Costed"
+            : "NotReady";
+        if (targetSalePrice is > 0m)
+        {
+            demarcation.ExternalSalePrice = demarcation.ExternalSalePrice ?? targetSalePrice;
+            demarcation.ExternalListingPrice = demarcation.ExternalListingPrice ?? targetSalePrice;
+        }
+        demarcation.UpdatedAt = DateTime.UtcNow;
+        demarcation.UpdatedBy = _currentUserProvider.Username;
+        demarcation.LastModifiedById = _currentUserProvider.UserId;
+
+        await repository.UpdateAsync(demarcation);
         await _unitOfWork.SaveChangesAsync();
         return MapDemarcationToDto(demarcation, asset.AssetCode);
     }
@@ -722,6 +1015,11 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         {
             throw new InvalidOperationException(
                 "Land demarcations assigned to a project cannot be deleted. Reassign the project land first.");
+        }
+        if (activeDemarcations.Any(item => item.ParentDemarcationId == demarcation.Id))
+        {
+            throw new InvalidOperationException(
+                "Delete child demarcations before deleting this parent parcel.");
         }
 
         demarcation.IsDeleted = true;
@@ -1560,7 +1858,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
 
     private static EstateBoundaryMeasurement ValidateDemarcationRequest(
         EstateManagedAsset asset,
-        SaveEstateLandDemarcationDto request)
+        SaveEstateLandDemarcationDto request,
+        EstateLandDemarcation? parentDemarcation = null)
     {
         if (string.IsNullOrWhiteSpace(request.Description))
         {
@@ -1578,8 +1877,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 "The main cadastral boundary must be recorded and verified before demarcation.");
         }
 
+        var containingBoundary = parentDemarcation?.BoundaryCoordinates ?? asset.BoundaryCoordinates;
         var measurement = EstateBoundaryGeometry.ValidateContained(
-            asset.BoundaryCoordinates,
+            containingBoundary,
             request.BoundaryCoordinates);
         if (request.BeaconCount != measurement.BeaconCount)
         {
@@ -1587,6 +1887,39 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
 
         return measurement;
+    }
+
+    private async Task<EstateLandDemarcation?> ResolveParentDemarcationAsync(
+        Guid assetId,
+        Guid? parentDemarcationId)
+    {
+        if (!parentDemarcationId.HasValue)
+        {
+            return null;
+        }
+
+        var parent = await _unitOfWork.Repository<EstateLandDemarcation>()
+            .FirstOrDefaultAsync(item =>
+                item.Id == parentDemarcationId.Value
+                && item.EstateManagedAssetId == assetId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted);
+        if (parent == null)
+        {
+            throw new InvalidOperationException("The parent demarcation was not found.");
+        }
+
+        if (!parent.BoundaryVerified)
+        {
+            throw new InvalidOperationException("Verify the parent demarcation before subdividing it.");
+        }
+
+        if (parent.IsReadyForProjectManagement || parent.IsPublishedToExternalPortal)
+        {
+            throw new InvalidOperationException("Clear the parent demarcation's project or portal status before subdividing it.");
+        }
+
+        return parent;
     }
 
     private static void EnsureDoesNotOverlap(
@@ -1610,12 +1943,159 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         await _unitOfWork.Repository<EstateManagedAsset>().UpdateAsync(asset);
     }
 
+    private async Task ResetDemarcationReadinessAsync(
+        EstateManagedAsset asset,
+        EstateLandDemarcation? parentDemarcation)
+    {
+        if (parentDemarcation == null)
+        {
+            await ResetProjectReadinessAsync(asset);
+            return;
+        }
+
+        parentDemarcation.IsReadyForProjectManagement = false;
+        parentDemarcation.IsPublishedToExternalPortal = false;
+        parentDemarcation.ExternalListingType = "None";
+        parentDemarcation.ExternalListingStatus = "Draft";
+        parentDemarcation.ExternalPublishedAt = null;
+        parentDemarcation.UpdatedAt = DateTime.UtcNow;
+        parentDemarcation.UpdatedBy = _currentUserProvider.Username;
+        parentDemarcation.LastModifiedById = _currentUserProvider.UserId;
+        await _unitOfWork.Repository<EstateLandDemarcation>().UpdateAsync(parentDemarcation);
+    }
+
     private static void EnsureDemarcationsCanBeChanged(EstateManagedAsset asset)
     {
         if (asset.IsPublishedToExternalPortal)
         {
             throw new InvalidOperationException(
                 "Withdraw the active external land listing before changing its demarcations.");
+        }
+    }
+
+    private static string NormalizeDemarcationCostMethod(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().Replace(" ", string.Empty);
+        return normalized.Equals("Manual", StringComparison.OrdinalIgnoreCase)
+            ? "Manual"
+            : normalized.Equals("NotSet", StringComparison.OrdinalIgnoreCase) ||
+              normalized.Equals("None", StringComparison.OrdinalIgnoreCase)
+                ? "NotSet"
+                : "ByArea";
+    }
+
+    private static decimal GetAssetAreaInAcres(EstateManagedAsset asset)
+    {
+        if (asset.AreaValue is > 0m)
+        {
+            var unit = (asset.AreaUnit ?? string.Empty).Trim().ToLowerInvariant();
+            if (unit.Contains("acre")) return asset.AreaValue.Value;
+            if (unit.Contains("hectare") || unit == "ha") return asset.AreaValue.Value * 2.4710538147m;
+            if (unit.Contains("square meter") || unit.Contains("sqm") || unit == "m2")
+                return asset.AreaValue.Value / 4046.8564224m;
+            if (unit.Contains("square feet") || unit.Contains("sq ft") || unit.Contains("sqft") || unit == "ft2")
+                return asset.AreaValue.Value / 43560m;
+
+            return asset.AreaValue.Value;
+        }
+
+        return asset.AreaSquareMeters is > 0m
+            ? asset.AreaSquareMeters.Value / 4046.8564224m
+            : 0m;
+    }
+
+    private static string BuildParentFixedAssetReference(
+        EstateManagedAsset asset,
+        EstateLandDemarcation? parent)
+        => parent?.ChildFixedAssetReference
+            ?? (parent == null
+                ? asset.AssetCode
+                : BuildChildFixedAssetReference(asset.AssetCode, parent.DemarcationNumber));
+
+    private static string BuildChildFixedAssetReference(string parentFixedAssetReference, int demarcationNumber)
+        => $"{parentFixedAssetReference}-D{demarcationNumber:000}";
+
+    private static IReadOnlyList<EstateLandDemarcation> GetLeafDemarcations(
+        IReadOnlyCollection<EstateLandDemarcation> demarcations)
+    {
+        var parentIds = demarcations
+            .Where(item => item.ParentDemarcationId.HasValue)
+            .Select(item => item.ParentDemarcationId!.Value)
+            .ToHashSet();
+        return demarcations
+            .Where(item => !parentIds.Contains(item.Id))
+            .ToList();
+    }
+
+    private static void EnsureDemarcationCostingReconcilesForOutbound(
+        EstateManagedAsset asset,
+        IReadOnlyCollection<EstateLandDemarcation> demarcations)
+    {
+        var expectedTotal = asset.ValuationAmount ?? 0m;
+        if (expectedTotal <= 0m)
+        {
+            throw new InvalidOperationException(
+                "Record the parent land capitalized value before pushing demarcations onward.");
+        }
+
+        var leafDemarcations = GetLeafDemarcations(demarcations);
+        if (leafDemarcations.Count == 0)
+        {
+            throw new InvalidOperationException("Add demarcations before pushing land onward.");
+        }
+
+        var missingCost = leafDemarcations
+            .Where(item => item.AllocatedCost is not > 0m)
+            .Select(item => $"Parcel {item.DemarcationNumber}")
+            .ToList();
+        if (missingCost.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Set costs for every final demarcated parcel before pushing onward. Missing: {string.Join(", ", missingCost)}.");
+        }
+
+        var parents = demarcations
+            .Where(parent => demarcations.Any(child => child.ParentDemarcationId == parent.Id))
+            .ToList();
+        foreach (var parent in parents)
+        {
+            if (parent.AllocatedCost is not > 0m)
+            {
+                throw new InvalidOperationException(
+                    $"Set the parent cost for parcel {parent.DemarcationNumber} before pushing child parcels onward.");
+            }
+
+            var directChildren = demarcations
+                .Where(child => child.ParentDemarcationId == parent.Id)
+                .ToList();
+            var missingChildCost = directChildren
+                .Where(child => child.AllocatedCost is not > 0m)
+                .Select(child => $"Parcel {child.DemarcationNumber}")
+                .ToList();
+            if (missingChildCost.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Set costs for every child parcel under parcel {parent.DemarcationNumber}. Missing: {string.Join(", ", missingChildCost)}.");
+            }
+
+            var childTotal = directChildren.Sum(child => child.AllocatedCost!.Value);
+            var childDifference = decimal.Round(
+                childTotal - parent.AllocatedCost.Value,
+                2,
+                MidpointRounding.AwayFromZero);
+            if (childDifference != 0m)
+            {
+                throw new InvalidOperationException(
+                    $"Child parcel costs must equal parent parcel {parent.DemarcationNumber}. Allocated {childTotal:N2}, parent value {parent.AllocatedCost.Value:N2}, difference {childDifference:N2}.");
+            }
+        }
+
+        var allocatedTotal = leafDemarcations.Sum(item => item.AllocatedCost!.Value);
+        var difference = decimal.Round(allocatedTotal - expectedTotal, 2, MidpointRounding.AwayFromZero);
+        if (difference != 0m)
+        {
+            throw new InvalidOperationException(
+                $"Demarcation costs must equal the parent land value. Allocated {allocatedTotal:N2}, parent value {expectedTotal:N2}, difference {difference:N2}.");
         }
     }
 
@@ -1720,6 +2200,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         public bool AssetIsReadyForProjectManagement { get; init; }
         public bool AssetIsPublishedToExternalPortal { get; init; }
         public Guid DemarcationId { get; init; }
+        public bool DemarcationIsReadyForProjectManagement { get; init; }
+        public bool DemarcationIsPublishedToExternalPortal { get; init; }
         public int DemarcationNumber { get; init; }
         public string Description { get; init; } = string.Empty;
         public decimal AreaSquareFeet { get; init; }
@@ -1732,6 +2214,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
     {
         Id = demarcation.Id,
         EstateManagedAssetId = demarcation.EstateManagedAssetId,
+        ParentDemarcationId = demarcation.ParentDemarcationId,
         LandReference = EstateLandDemarcationReference.Build(
             assetCode,
             demarcation.DemarcationNumber),
@@ -1741,6 +2224,27 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         BoundaryCoordinates = demarcation.BoundaryCoordinates,
         AreaSquareFeet = demarcation.AreaSquareFeet,
         BoundaryVerified = demarcation.BoundaryVerified,
+        HasChildDemarcations = demarcation.ChildDemarcations.Any(item => !item.IsDeleted),
+        CostAllocationMethod = demarcation.CostAllocationMethod,
+        AllocatedCost = demarcation.AllocatedCost,
+        CostPerAcre = demarcation.CostPerAcre,
+        TargetSalePrice = demarcation.TargetSalePrice,
+        ParentLandAssetReference = demarcation.ParentLandAssetReference,
+        ParentFixedAssetReference = demarcation.ParentFixedAssetReference,
+        ChildFixedAssetReference = demarcation.ChildFixedAssetReference,
+        FixedAssetPostingStatus = demarcation.FixedAssetPostingStatus,
+        FixedAssetPostedAt = demarcation.FixedAssetPostedAt,
+        IsReadyForProjectManagement = demarcation.IsReadyForProjectManagement,
+        IsPublishedToExternalPortal = demarcation.IsPublishedToExternalPortal,
+        ExternalListingType = demarcation.ExternalListingType,
+        ExternalListingStatus = demarcation.ExternalListingStatus,
+        ExternalListingPrice = demarcation.ExternalListingPrice,
+        ExternalSalePrice = demarcation.ExternalSalePrice,
+        ExternalMonthlyRent = demarcation.ExternalMonthlyRent,
+        ExternalLeaseTermMonths = demarcation.ExternalLeaseTermMonths,
+        ExternalListingCurrency = demarcation.ExternalListingCurrency,
+        ExternalListingNotes = demarcation.ExternalListingNotes,
+        ExternalPublishedAt = demarcation.ExternalPublishedAt,
         CreatedAt = demarcation.CreatedAt,
         CreatedBy = demarcation.CreatedBy
     };

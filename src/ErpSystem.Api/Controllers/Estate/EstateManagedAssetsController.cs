@@ -198,6 +198,42 @@ public sealed class EstateManagedAssetsController : ControllerBase
         }
     }
 
+    [HttpPatch("{id:guid}/demarcations/{demarcationId:guid}/disposition")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> UpdateLandDemarcationDisposition(
+        Guid id,
+        Guid demarcationId,
+        [FromBody] UpdateEstateLandDemarcationDispositionDto request)
+    {
+        try
+        {
+            var demarcation = await _managedAssetService.UpdateLandDemarcationDispositionAsync(id, demarcationId, request);
+            return Ok(new { success = true, data = demarcation, message = "Land demarcation status updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id:guid}/demarcations/{demarcationId:guid}/costing")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> UpdateLandDemarcationCosting(
+        Guid id,
+        Guid demarcationId,
+        [FromBody] UpdateEstateLandDemarcationCostingDto request)
+    {
+        try
+        {
+            var demarcation = await _managedAssetService.UpdateLandDemarcationCostingAsync(id, demarcationId, request);
+            return Ok(new { success = true, data = demarcation, message = "Land demarcation costing updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
     [HttpPatch("{id:guid}/external-listing")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager")]
     public async Task<IActionResult> UpdateExternalListing(Guid id, [FromBody] UpdateEstateManagedAssetListingDto request)

@@ -9272,7 +9272,23 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("EstateLandDemarcations");
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.DemarcationNumber })
                 .IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.ParentDemarcationId });
+            entity.HasIndex(item => new { item.TenantId, item.IsReadyForProjectManagement, item.IsPublishedToExternalPortal });
             entity.Property(item => item.AreaSquareFeet).HasPrecision(18, 4);
+            entity.Property(item => item.AllocatedCost).HasPrecision(18, 2);
+            entity.Property(item => item.CostPerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.TargetSalePrice).HasPrecision(18, 2);
+            entity.Property(item => item.ParentLandAssetReference).HasMaxLength(120);
+            entity.Property(item => item.ParentFixedAssetReference).HasMaxLength(120);
+            entity.Property(item => item.ChildFixedAssetReference).HasMaxLength(120);
+            entity.Property(item => item.FixedAssetPostingStatus).HasMaxLength(40);
+            entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalMonthlyRent).HasPrecision(18, 2);
+            entity.HasOne(item => item.ParentDemarcation)
+                .WithMany(item => item.ChildDemarcations)
+                .HasForeignKey(item => item.ParentDemarcationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<EstateGisConfiguration>(entity =>

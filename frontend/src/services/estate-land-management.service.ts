@@ -160,6 +160,7 @@ export interface CreateManualExistingLand {
 export interface EstateLandDemarcation {
   id: string;
   estateManagedAssetId: string;
+  parentDemarcationId?: string | null;
   landReference: string;
   demarcationNumber: number;
   description: string;
@@ -168,6 +169,27 @@ export interface EstateLandDemarcation {
   areaSquareFeet: number;
   boundaryVerified: boolean;
   isAssignedToProject: boolean;
+  hasChildDemarcations: boolean;
+  costAllocationMethod: string;
+  allocatedCost?: number | null;
+  costPerAcre?: number | null;
+  targetSalePrice?: number | null;
+  parentLandAssetReference?: string | null;
+  parentFixedAssetReference?: string | null;
+  childFixedAssetReference?: string | null;
+  fixedAssetPostingStatus: string;
+  fixedAssetPostedAt?: string | null;
+  isReadyForProjectManagement: boolean;
+  isPublishedToExternalPortal: boolean;
+  externalListingType: string;
+  externalListingStatus: string;
+  externalListingPrice?: number | null;
+  externalSalePrice?: number | null;
+  externalMonthlyRent?: number | null;
+  externalLeaseTermMonths?: number | null;
+  externalListingCurrency: string;
+  externalListingNotes?: string | null;
+  externalPublishedAt?: string | null;
   createdAt: string;
   createdBy?: string;
 }
@@ -186,10 +208,31 @@ export interface ProjectReadyLandDemarcation {
 }
 
 export interface SaveEstateLandDemarcation {
+  parentDemarcationId?: string | null;
   description: string;
   beaconCount: number;
   boundaryCoordinates: string;
   boundaryVerified: boolean;
+}
+
+export interface UpdateEstateLandDemarcationDisposition {
+  isReadyForProjectManagement: boolean;
+  isPublishedToExternalPortal: boolean;
+  externalListingType: string;
+  externalListingStatus: string;
+  externalListingPrice?: number | null;
+  externalSalePrice?: number | null;
+  externalMonthlyRent?: number | null;
+  externalLeaseTermMonths?: number | null;
+  externalListingCurrency: string;
+  externalListingNotes?: string | null;
+}
+
+export interface UpdateEstateLandDemarcationCosting {
+  costAllocationMethod: string;
+  allocatedCost?: number | null;
+  costPerAcre?: number | null;
+  targetSalePrice?: number | null;
 }
 
 export interface EstateManagedAssetDocument {
@@ -545,6 +588,48 @@ export class EstateLandManagementService {
     );
   }
 
+  async updateLandDemarcationDisposition(
+    assetId: string,
+    demarcationId: string,
+    payload: UpdateEstateLandDemarcationDisposition
+  ): Promise<EstateLandDemarcation> {
+    const response = await apiService.patch<{
+      success?: boolean;
+      data?: EstateLandDemarcation;
+      message?: string;
+    }>(
+      `/estate/managed-assets/${assetId}/demarcations/${demarcationId}/disposition`,
+      payload
+    );
+    if (!response.data) {
+      throw new Error(
+        response.message || 'Unable to update land demarcation status.'
+      );
+    }
+    return response.data;
+  }
+
+  async updateLandDemarcationCosting(
+    assetId: string,
+    demarcationId: string,
+    payload: UpdateEstateLandDemarcationCosting
+  ): Promise<EstateLandDemarcation> {
+    const response = await apiService.patch<{
+      success?: boolean;
+      data?: EstateLandDemarcation;
+      message?: string;
+    }>(
+      `/estate/managed-assets/${assetId}/demarcations/${demarcationId}/costing`,
+      payload
+    );
+    if (!response.data) {
+      throw new Error(
+        response.message || 'Unable to update land demarcation costing.'
+      );
+    }
+    return response.data;
+  }
+
   async getDocuments(assetId: string): Promise<EstateManagedAssetDocument[]> {
     const response = await apiService.get<{
       success?: boolean;
@@ -620,7 +705,7 @@ export class EstateLandManagementService {
     );
     if (!response.data)
       throw new Error(
-        response.message || 'Unable to publish document to Central DMS.'
+        response.message || 'Unable to file document in Central DMS.'
       );
     return response.data;
   }

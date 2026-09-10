@@ -13,6 +13,8 @@ public interface IEstateManagedAssetService
     Task<IReadOnlyList<ProjectReadyLandDemarcationDto>> GetProjectReadyLandDemarcationsAsync(Guid? projectId = null);
     Task<EstateLandDemarcationDto> CreateLandDemarcationAsync(Guid assetId, SaveEstateLandDemarcationDto request);
     Task<EstateLandDemarcationDto> UpdateLandDemarcationAsync(Guid assetId, Guid demarcationId, SaveEstateLandDemarcationDto request);
+    Task<EstateLandDemarcationDto> UpdateLandDemarcationDispositionAsync(Guid assetId, Guid demarcationId, UpdateEstateLandDemarcationDispositionDto request);
+    Task<EstateLandDemarcationDto> UpdateLandDemarcationCostingAsync(Guid assetId, Guid demarcationId, UpdateEstateLandDemarcationCostingDto request);
     Task DeleteLandDemarcationAsync(Guid assetId, Guid demarcationId);
     Task<EstateManagedAssetDto> MarkReadyForProjectManagementAsync(Guid assetId);
     Task<EstateManagedAssetDto> UpdateRegisterAsync(Guid assetId, UpdateEstateManagedAssetRegisterDto request);

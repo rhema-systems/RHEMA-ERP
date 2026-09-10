@@ -2,7 +2,16 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { Copy, Edit3, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
+import {
+  Copy,
+  DollarSign,
+  Edit3,
+  Loader2,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -21,6 +30,8 @@ import {
   type EstateLandDemarcation,
   type EstateManagedAsset,
   type SaveEstateLandDemarcation,
+  type UpdateEstateLandDemarcationCosting,
+  type UpdateEstateLandDemarcationDisposition,
 } from '@/services/estate-land-management.service';
 
 const LandBankMap = dynamic(() => import('./LandBankMap'), { ssr: false });
@@ -135,6 +146,15 @@ function formatArea(areaSquareFeet: number) {
   return `${areaSquareFeet.toLocaleString(undefined, { maximumFractionDigits: 2 })} sq ft (${acres.toLocaleString(undefined, { maximumFractionDigits: 4 })} acres)`;
 }
 
+function formatCurrency(value?: number | null, currency = 'GHS') {
+  if (value == null) return 'Not set';
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 export default function DemarcateLandDialog({
   asset,
   open,
@@ -154,11 +174,17 @@ export default function DemarcateLandDialog({
   >([]);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [description, setDescription] = React.useState('');
+  const [parentDemarcationId, setParentDemarcationId] = React.useState<
+    string | null
+  >(null);
   const [beacons, setBeacons] = React.useState<Beacon[]>(emptyBeacons);
   const [boundaryVerified, setBoundaryVerified] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = React.useState<string | null>(
+    null
+  );
   const demarcationsLocked = asset?.isPublishedToExternalPortal === true;
 
   const rejectLockedDemarcationChange = () => {
@@ -173,6 +199,7 @@ export default function DemarcateLandDialog({
   const resetEditor = React.useCallback(() => {
     setEditingId(null);
     setDescription('');
+    setParentDemarcationId(null);
     setBeacons(emptyBeacons());
     setBoundaryVerified(false);
   }, []);
@@ -228,8 +255,38 @@ export default function DemarcateLandDialog({
   const originalDemarcation = editingId
     ? demarcations.find((item) => item.id === editingId)
     : undefined;
+  const childCountByParentId = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    demarcations.forEach((item) => {
+      if (!item.parentDemarcationId) return;
+      counts.set(
+        item.parentDemarcationId,
+        (counts.get(item.parentDemarcationId) ?? 0) + 1
+      );
+    });
+    return counts;
+  }, [demarcations]);
+  const leafDemarcations = React.useMemo(
+    () =>
+      demarcations.filter(
+        (item) => (childCountByParentId.get(item.id) ?? 0) === 0
+      ),
+    [childCountByParentId, demarcations]
+  );
+  const allocatedCostTotal = React.useMemo(
+    () =>
+      leafDemarcations.reduce(
+        (total, item) => total + (item.allocatedCost ?? 0),
+        0
+      ),
+    [leafDemarcations]
+  );
+  const parentLandValue = asset?.valuationAmount ?? 0;
+  const allocationDifference = allocatedCostTotal - parentLandValue;
   const hasDraftValues = originalDemarcation
     ? description.trim() !== originalDemarcation.description.trim() ||
+      parentDemarcationId !==
+        (originalDemarcation.parentDemarcationId || null) ||
       boundaryCoordinates !== originalDemarcation.boundaryCoordinates.trim() ||
       boundaryVerified !== originalDemarcation.boundaryVerified
     : hasEditorValues;
@@ -287,6 +344,7 @@ export default function DemarcateLandDialog({
 
     setEditingId(demarcation.id);
     setDescription(demarcation.description);
+    setParentDemarcationId(demarcation.parentDemarcationId || null);
     setBeacons(parseBoundary(demarcation.boundaryCoordinates));
     setBoundaryVerified(demarcation.boundaryVerified);
   };
@@ -308,6 +366,7 @@ export default function DemarcateLandDialog({
       ...current,
       {
         id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        parentDemarcationId,
         description: description.trim(),
         beaconCount: beacons.length,
         boundaryCoordinates,
@@ -324,6 +383,7 @@ export default function DemarcateLandDialog({
       current.filter((pending) => pending.id !== item.id)
     );
     setEditingId(null);
+    setParentDemarcationId(item.parentDemarcationId || null);
     setDescription(item.description);
     setBeacons(parseBoundary(item.boundaryCoordinates));
     setBoundaryVerified(item.boundaryVerified);
@@ -383,6 +443,7 @@ export default function DemarcateLandDialog({
     const currentPayload: SaveEstateLandDemarcation | null = isIncomplete
       ? null
       : {
+          parentDemarcationId,
           description: description.trim(),
           beaconCount: beacons.length,
           boundaryCoordinates,
@@ -501,8 +562,163 @@ export default function DemarcateLandDialog({
     }
   };
 
+  const updateDisposition = async (
+    demarcation: EstateLandDemarcation,
+    mode: 'internal' | 'project-ready' | 'portal-listing'
+  ) => {
+    if (!asset) return;
+
+    const payload: UpdateEstateLandDemarcationDisposition = {
+      isReadyForProjectManagement: mode === 'project-ready',
+      isPublishedToExternalPortal: mode === 'portal-listing',
+      externalListingType:
+        mode === 'portal-listing'
+          ? demarcation.externalListingType === 'None'
+            ? 'Sale'
+            : demarcation.externalListingType
+          : 'None',
+      externalListingStatus: mode === 'portal-listing' ? 'Published' : 'Draft',
+      externalListingCurrency: demarcation.externalListingCurrency || 'GHS',
+      externalListingPrice: demarcation.externalListingPrice ?? null,
+      externalSalePrice:
+        demarcation.externalSalePrice ??
+        demarcation.externalListingPrice ??
+        demarcation.targetSalePrice ??
+        null,
+      externalMonthlyRent: demarcation.externalMonthlyRent ?? null,
+      externalLeaseTermMonths: demarcation.externalLeaseTermMonths ?? null,
+      externalListingNotes: demarcation.externalListingNotes ?? null,
+    };
+
+    if (mode === 'portal-listing') {
+      const salePrice = window.prompt(
+        'Sale price for this demarcated portion',
+        `${
+          payload.externalSalePrice ??
+          payload.externalListingPrice ??
+          demarcation.targetSalePrice ??
+          ''
+        }`
+      );
+      if (salePrice === null) return;
+      const parsed = Number(salePrice);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        toast.error('Enter a valid sale price before listing this portion.');
+        return;
+      }
+      payload.externalListingPrice = parsed;
+      payload.externalSalePrice = parsed;
+    }
+
+    if (
+      mode !== 'internal' &&
+      (demarcation.hasChildDemarcations ||
+        (childCountByParentId.get(demarcation.id) ?? 0) > 0)
+    ) {
+      toast.error(
+        'This parcel has child portions. Mark the child portions instead.'
+      );
+      return;
+    }
+
+    try {
+      setStatusUpdatingId(demarcation.id);
+      await estateLandManagementService.updateLandDemarcationDisposition(
+        asset.id,
+        demarcation.id,
+        payload
+      );
+      await loadDemarcations();
+      await onSaved();
+      toast.success(
+        mode === 'project-ready'
+          ? 'Demarcation marked project ready.'
+          : mode === 'portal-listing'
+            ? 'Demarcation sent to Portal Listings.'
+            : 'Demarcation kept internal.'
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to update demarcation status.'
+      );
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  };
+
+  const updateCosting = async (demarcation: EstateLandDemarcation) => {
+    if (!asset) return;
+    const methodInput = window.prompt(
+      'Cost method: type A to calculate by area, or M to enter cost manually. Parent parcels use this as the cost pool for their child parcels.',
+      demarcation.costAllocationMethod === 'Manual' ? 'M' : 'A'
+    );
+    if (methodInput === null) return;
+    const method = methodInput.trim().toUpperCase().startsWith('M')
+      ? 'Manual'
+      : 'ByArea';
+    const payload: UpdateEstateLandDemarcationCosting = {
+      costAllocationMethod: method,
+      allocatedCost: demarcation.allocatedCost ?? null,
+      costPerAcre: demarcation.costPerAcre ?? null,
+      targetSalePrice: demarcation.targetSalePrice ?? null,
+    };
+
+    if (method === 'Manual') {
+      const costInput = window.prompt(
+        'Manual cost allocated to this demarcation',
+        `${demarcation.allocatedCost ?? ''}`
+      );
+      if (costInput === null) return;
+      const cost = Number(costInput);
+      if (!Number.isFinite(cost) || cost <= 0) {
+        toast.error('Enter a valid demarcation cost.');
+        return;
+      }
+      payload.allocatedCost = cost;
+      payload.costPerAcre = null;
+    }
+
+    const targetInput = window.prompt(
+      'Target sale price for this demarcation',
+      `${demarcation.targetSalePrice ?? demarcation.externalSalePrice ?? ''}`
+    );
+    if (targetInput === null) return;
+    if (targetInput.trim()) {
+      const target = Number(targetInput);
+      if (!Number.isFinite(target) || target <= 0) {
+        toast.error('Enter a valid target sale price.');
+        return;
+      }
+      payload.targetSalePrice = target;
+    } else {
+      payload.targetSalePrice = null;
+    }
+
+    try {
+      setStatusUpdatingId(demarcation.id);
+      await estateLandManagementService.updateLandDemarcationCosting(
+        asset.id,
+        demarcation.id,
+        payload
+      );
+      await loadDemarcations();
+      await onSaved();
+      toast.success('Demarcation cost updated.');
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to update demarcation cost.'
+      );
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  };
+
   const handleOpenChange = (next: boolean) => {
-    if (saving || deletingId) return;
+    if (saving || deletingId || statusUpdatingId) return;
     if (
       !next &&
       (pendingDemarcations.length > 0 || hasDraftValues) &&
@@ -549,6 +765,43 @@ export default function DemarcateLandDialog({
           <div className="rounded-md border p-3">
             <p className="text-xs text-muted-foreground">Demarcations</p>
             <p className="mt-1 text-sm font-medium">{demarcations.length}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 rounded-md border bg-muted/30 p-3 text-sm sm:grid-cols-4">
+          <div>
+            <p className="text-xs text-muted-foreground">Parent land value</p>
+            <p className="mt-1 font-semibold">
+              {formatCurrency(parentLandValue || null, asset?.currency)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Leaf parcels costed</p>
+            <p className="mt-1 font-semibold">
+              {
+                leafDemarcations.filter((item) => (item.allocatedCost ?? 0) > 0)
+                  .length
+              }
+              /{leafDemarcations.length}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Allocated total</p>
+            <p className="mt-1 font-semibold">
+              {formatCurrency(allocatedCostTotal || null, asset?.currency)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Difference</p>
+            <p
+              className={`mt-1 font-semibold ${
+                Math.abs(allocationDifference) < 0.01
+                  ? 'text-emerald-700'
+                  : 'text-amber-700'
+              }`}
+            >
+              {formatCurrency(allocationDifference, asset?.currency)}
+            </p>
           </div>
         </div>
 
@@ -604,6 +857,7 @@ export default function DemarcateLandDialog({
                     <th className="px-4 py-3 font-medium">Parcel</th>
                     <th className="px-4 py-3 font-medium">Description</th>
                     <th className="px-4 py-3 font-medium">Area</th>
+                    <th className="px-4 py-3 font-medium">Cost</th>
                     <th className="px-4 py-3 font-medium">Beacons</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                     <th
@@ -613,10 +867,26 @@ export default function DemarcateLandDialog({
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {demarcations.map((demarcation) => (
+                  {demarcations.map((demarcation) => {
+                    const childCount =
+                      childCountByParentId.get(demarcation.id) ?? 0;
+                    const isParent = demarcation.hasChildDemarcations || childCount > 0;
+                    return (
                     <tr key={demarcation.id}>
                       <td className="px-4 py-3 font-medium">
-                        {demarcation.demarcationNumber}
+                        <div>
+                          Parcel {demarcation.demarcationNumber}
+                          {demarcation.parentDemarcationId ? (
+                            <span className="ml-2 rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                              Child
+                            </span>
+                          ) : null}
+                        </div>
+                        {isParent ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {childCount} child parcel{childCount === 1 ? '' : 's'}
+                          </p>
+                        ) : null}
                       </td>
                       <td className="max-w-xs px-4 py-3">
                         {demarcation.description}
@@ -624,15 +894,62 @@ export default function DemarcateLandDialog({
                       <td className="px-4 py-3 tabular-nums">
                         {formatArea(demarcation.areaSquareFeet)}
                       </td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-1">
+                          <p className="font-medium">
+                            {formatCurrency(
+                              demarcation.allocatedCost,
+                              asset?.currency
+                            )}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {demarcation.costAllocationMethod === 'ByArea'
+                              ? 'By area'
+                              : demarcation.costAllocationMethod === 'Manual'
+                                ? 'Manual'
+                                : 'Not costed'}
+                            {demarcation.costPerAcre
+                              ? ` / ${formatCurrency(
+                                  demarcation.costPerAcre,
+                                  asset?.currency
+                                )} per acre`
+                              : ''}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Target{' '}
+                            {formatCurrency(
+                              demarcation.targetSalePrice,
+                              asset?.currency
+                            )}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Parent GL asset{' '}
+                            {demarcation.parentFixedAssetReference || asset?.assetCode || 'Pending'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Sub asset{' '}
+                            {demarcation.childFixedAssetReference || 'Pending'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {demarcation.fixedAssetPostingStatus || 'NotReady'}
+                          </p>
+                        </div>
+                      </td>
                       <td className="px-4 py-3 tabular-nums">
                         {demarcation.beaconCount}
                       </td>
                       <td className="px-4 py-3">
-                        {demarcation.isAssignedToProject
-                          ? 'Assigned to project'
-                          : demarcation.boundaryVerified
-                            ? 'Verified'
-                            : 'Draft'}
+                        {isParent
+                          ? 'Parent parcel'
+                          : demarcation.isAssignedToProject
+                            ? 'Assigned to project'
+                            : demarcation.isPublishedToExternalPortal
+                              ? 'Portal listing'
+                              : demarcation.isReadyForProjectManagement
+                                ? 'Project ready'
+                                : demarcation.boundaryVerified
+                                  ? 'Verified'
+                                  : 'Draft'}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-1">
@@ -669,6 +986,8 @@ export default function DemarcateLandDialog({
                             disabled={
                               demarcationsLocked ||
                               demarcation.isAssignedToProject ||
+                              demarcation.isPublishedToExternalPortal ||
+                              demarcation.isReadyForProjectManagement ||
                               deletingId === demarcation.id
                             }
                             onClick={() => void remove(demarcation)}
@@ -679,10 +998,80 @@ export default function DemarcateLandDialog({
                               <Trash2 className="h-4 w-4" />
                             )}
                           </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={
+                              statusUpdatingId === demarcation.id
+                            }
+                            onClick={() => void updateCosting(demarcation)}
+                          >
+                            <DollarSign className="mr-1 h-3.5 w-3.5" />
+                            Cost
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={
+                              demarcation.isReadyForProjectManagement
+                                ? 'default'
+                                : 'outline'
+                            }
+                            disabled={
+                              statusUpdatingId === demarcation.id ||
+                              demarcation.isAssignedToProject ||
+                              isParent ||
+                              !demarcation.boundaryVerified
+                            }
+                            onClick={() =>
+                              void updateDisposition(
+                                demarcation,
+                                'project-ready'
+                              )
+                            }
+                          >
+                            Ready
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={
+                              demarcation.isPublishedToExternalPortal
+                                ? 'default'
+                                : 'outline'
+                            }
+                            disabled={
+                              statusUpdatingId === demarcation.id ||
+                              demarcation.isAssignedToProject ||
+                              isParent ||
+                              !demarcation.boundaryVerified
+                            }
+                            onClick={() =>
+                              void updateDisposition(
+                                demarcation,
+                                'portal-listing'
+                              )
+                            }
+                          >
+                            Portal
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={statusUpdatingId === demarcation.id}
+                            onClick={() =>
+                              void updateDisposition(demarcation, 'internal')
+                            }
+                          >
+                            Internal
+                          </Button>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                  })}
                   {pendingDemarcations.map((pending, index) => (
                     <tr key={pending.id}>
                       <td className="px-4 py-3 font-medium">
@@ -730,6 +1119,41 @@ export default function DemarcateLandDialog({
               No demarcations have been added.
             </div>
           )}
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="parent-demarcation" className="text-sm font-medium">
+            Subdivide parent parcel
+          </label>
+          <select
+            id="parent-demarcation"
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            value={parentDemarcationId || ''}
+            disabled={demarcationsLocked}
+            onChange={(event) =>
+              setParentDemarcationId(event.target.value || null)
+            }
+          >
+            <option value="">Main cadastral parcel</option>
+            {demarcations
+              .filter(
+                (item) =>
+                  item.id !== editingId &&
+                  item.boundaryVerified &&
+                  !item.isReadyForProjectManagement &&
+                  !item.isPublishedToExternalPortal &&
+                  !item.isAssignedToProject
+              )
+              .map((item) => (
+                <option key={item.id} value={item.id}>
+                  Parcel {item.demarcationNumber} - {item.description}
+                </option>
+              ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            Choose an existing verified parcel here when you want to subdivide
+            that portion instead of the main cadastral boundary.
+          </p>
         </div>
 
         <div className="space-y-2">

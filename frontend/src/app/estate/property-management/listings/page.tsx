@@ -62,6 +62,9 @@ function formatLeaseTerm(months?: number) {
 function commercialSummary(asset: EstateManagedAsset) {
   const currency = asset.externalListingCurrency || asset.currency;
   if (asset.externalListingType === 'Rent') {
+    if (asset.assetType === EstateManagedAssetType.Land) {
+      return `${formatMoney(asset.groundRentPayable, currency)} annual ground rent · ${formatLeaseTerm(asset.externalLeaseTermMonths)}`;
+    }
     return `${formatMoney(asset.externalMonthlyRent, currency)} / month · ${formatLeaseTerm(asset.externalLeaseTermMonths)}`;
   }
   if (asset.externalListingType === 'SaleAndRent') {
@@ -187,7 +190,10 @@ export default function EstatePropertyListingsPage() {
             ? ''
             : String(selected.externalSalePrice),
       externalMonthlyRent:
-        selected.externalMonthlyRent == null &&
+        selected.assetType === EstateManagedAssetType.Land &&
+        selected.groundRentPayable != null
+          ? String(selected.groundRentPayable)
+          : selected.externalMonthlyRent == null &&
         selected.externalListingType === 'Rent'
           ? selected.externalListingPrice == null
             ? ''
@@ -246,7 +252,9 @@ export default function EstatePropertyListingsPage() {
               ? Number(form.externalSalePrice)
               : null,
           externalMonthlyRent:
-            includesRent && form.externalMonthlyRent
+            includesRent && selected.assetType === EstateManagedAssetType.Land
+              ? selected.groundRentPayable ?? null
+              : includesRent && form.externalMonthlyRent
               ? Number(form.externalMonthlyRent)
               : null,
           externalLeaseTermMonths:
@@ -584,18 +592,29 @@ export default function EstatePropertyListingsPage() {
                     {includesRent ? (
                       <>
                         <div className="space-y-2">
-                          <Label>Rent per month</Label>
+                          <Label>
+                            {selected.assetType === EstateManagedAssetType.Land
+                              ? 'Annual ground rent'
+                              : 'Rent per month'}
+                          </Label>
                           <Input
                             type="number"
                             min="0"
                             value={form.externalMonthlyRent}
+                            readOnly={
+                              selected.assetType === EstateManagedAssetType.Land
+                            }
                             onChange={(event) =>
                               setForm((current) => ({
                                 ...current,
                                 externalMonthlyRent: event.target.value,
                               }))
                             }
-                            placeholder="Enter monthly rent"
+                            placeholder={
+                              selected.assetType === EstateManagedAssetType.Land
+                                ? 'Complete ground-rent assessment first'
+                                : 'Enter monthly rent'
+                            }
                           />
                         </div>
                         <div className="space-y-2">

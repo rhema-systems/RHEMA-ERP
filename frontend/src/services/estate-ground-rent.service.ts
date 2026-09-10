@@ -32,6 +32,12 @@ export interface GroundRentOptions {
   incomeAccounts: GroundRentIncomeAccountOption[];
 }
 
+export interface AssessGroundRent {
+  estateManagedAssetId: string;
+  ratePerAcre: number;
+  currencyCode: string;
+}
+
 export interface GroundRentCharge {
   id: string;
   periodStart: string;
@@ -179,6 +185,14 @@ class EstateGroundRentService {
       '/estate/ground-rent/accounts'
     );
     return unwrap(response, 'Unable to load ground-rent accounts.');
+  }
+
+  async assessAsset(payload: AssessGroundRent): Promise<GroundRentAssetOption> {
+    const response = await apiService.post<ApiResponse<GroundRentAssetOption>>(
+      '/estate/ground-rent/assessments',
+      payload
+    );
+    return unwrap(response, 'Unable to save the pre-listing ground-rent assessment.');
   }
 
   async saveAccount(

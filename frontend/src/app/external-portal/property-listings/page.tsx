@@ -68,6 +68,9 @@ function formatLeaseTerm(months?: number | null) {
 
 function listingPriceSummary(listing: ExternalEstateListing) {
   if (listing.externalListingType === 'Rent') {
+    if (isLandListing(listing)) {
+      return `${formatMoney(listing.groundRentPayable, listing.externalListingCurrency)} annual ground rent`;
+    }
     return `${formatMoney(listing.externalMonthlyRent, listing.externalListingCurrency)} / month`;
   }
   if (listing.externalListingType === 'SaleAndRent') {
@@ -641,6 +644,8 @@ export default function ExternalPropertyListingsPage() {
                     <div className="text-xs text-slate-500">
                       {activeRequestIntent === 'Sale'
                         ? 'Sale price'
+                        : isLandListing(selected)
+                          ? 'Annual ground rent'
                         : 'Rent per month'}
                     </div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">
@@ -648,6 +653,8 @@ export default function ExternalPropertyListingsPage() {
                         activeRequestIntent === 'Sale'
                           ? (selected.externalSalePrice ??
                               selected.externalListingPrice)
+                          : isLandListing(selected)
+                            ? selected.groundRentPayable
                           : (selected.externalMonthlyRent ??
                               selected.externalListingPrice),
                         selected.externalListingCurrency
