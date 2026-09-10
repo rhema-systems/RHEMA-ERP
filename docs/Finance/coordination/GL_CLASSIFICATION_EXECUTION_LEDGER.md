@@ -1302,6 +1302,16 @@ canonical fingerprint binding, and compare full durable event/journal/balance/ex
 Neither evidence branch is integrated; no configured database, production schema, migration or remote state was
 touched.
 
+Sales governance correction `29c69a4c` is clean atop `a56b59dc`: it completes C12 OwnerEntityType and C15
+module/nested-receipt matching, hashes the canonical full intent economics, compares identity/content snapshots
+including balances and exposures across denials, and renames the mocked period case to its honest approved-handoff
+scope. The exact suite remains 38/38 and Sol High review is active. The expanded production relational fixture adds
+clean commit `e5c03a5a` and passes 5/5, including real closed-period rejection/open recovery and same-invoice
+aggregate winner orders. However, Sol High rejected the earlier fixture evidence until concurrency-token claims,
+transaction-aware identity tracking, pre-clear tracker proof, exhaustive zero/all/C10/receipt/audit assertions,
+separate contexts and guarded SQL Server lock coverage are corrected. Terra continues those fixes; no configured
+database, production schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
