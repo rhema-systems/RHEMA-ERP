@@ -442,12 +442,19 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
     private static void RequireReversalOwnerAuthority(ProducerOwnerEffectIdentityDto? original,
         ProducerOwnerEffectIdentityDto reversal)
     {
+        var originalFingerprint = original?.EffectFingerprint?.Trim().ToUpperInvariant() ?? string.Empty;
         if (original is null
             || !string.Equals(original.ParticipantCode, reversal.ParticipantCode, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(original.OwnerEntityType, reversal.OwnerEntityType, StringComparison.OrdinalIgnoreCase)
             || original.OwnerEntityId != reversal.OwnerEntityId)
             throw new InvalidOperationException(
                 "ACCOUNTING_EVENT_REVERSAL_OWNER_AUTHORITY_CONFLICT: reversal owner lineage must retain the original participant, entity type and entity ID.");
+        // A reversal is a distinct compensating owner mutation. Reusing the original effect fingerprint
+        // could make the owner receipt look like an idempotent replay of the original effect, regardless
+        // of whether the caller retained or changed its action label.
+        if (string.Equals(originalFingerprint, reversal.EffectFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REVERSAL_EFFECT_REPLAY: reversal preparation requires a distinct compensating owner-effect fingerprint.");
     }
 
     private static ProducerFinancePostingRequestDto BuildExactReversalPosting(

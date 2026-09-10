@@ -67,6 +67,10 @@ public sealed class FinanceProducerReversalPreparationC13Tests
         await FluentActions.Awaiting(() => harness.Service.ApprovePreparedAsync(result.AccountingEventId,
             new DecideProducerAccountingIntentDto { Reason = "Reviewed exact reversal" })).Should()
             .ThrowAsync<InvalidOperationException>().WithMessage("*checker must differ*");
+        harness.User.SetupGet(value => value.UserId).Returns(Guid.NewGuid().ToString());
+        (await harness.Service.ApprovePreparedAsync(result.AccountingEventId,
+            new DecideProducerAccountingIntentDto { Reason = "Independent reversal review" }))
+            .ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Approved);
     }
 
     [Fact]
@@ -96,6 +100,26 @@ public sealed class FinanceProducerReversalPreparationC13Tests
                 .ThrowAsync<InvalidOperationException>();
         }
         (await harness.Db.AccountingEvents.CountAsync()).Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData("POST")]
+    [InlineData("REVERSE")]
+    public async Task OriginalEffectFingerprintReplay_FailsBeforeReversalOrAuditMutation(string ownerAction)
+    {
+        await using var harness = Harness();
+        var original = await SeedOriginalAsync(harness);
+        var request = ReversalRequest(original);
+        request.ExpectedOwnerEffect.OwnerAction = ownerAction;
+        request.ExpectedOwnerEffect.EffectFingerprint = $"  {Hash('c').ToLowerInvariant()}  ";
+
+        await FluentActions.Awaiting(() => harness.Service.PrepareReversalAsync(request)).Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*distinct compensating owner-effect fingerprint*");
+
+        (await harness.Db.AccountingEvents.CountAsync()).Should().Be(1);
+        harness.Audit.Verify(service => service.RecordAsync(
+            It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -192,7 +216,7 @@ public sealed class FinanceProducerReversalPreparationC13Tests
             audit.Object, Options.Create(new AccountingEventOptions { Enabled = true }));
         var service = new FinanceProducerIntentService(applicability.Object, events, events, db, user.Object,
             Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
-        return new TestHarness(service, db, tenantId, actor, applicability, audit);
+        return new TestHarness(service, db, tenantId, actor, user, applicability, audit);
     }
 
     private static async Task<OriginalEvidence> SeedOriginalAsync(TestHarness harness)
@@ -334,7 +358,8 @@ public sealed class FinanceProducerReversalPreparationC13Tests
 
     private sealed record OriginalEvidence(Guid EventId, Guid OwnerId, CreateAccountingEventDto Request);
     private sealed record TestHarness(FinanceProducerIntentService Service, ApplicationDbContext Db,
-        Guid TenantId, Guid Actor, Mock<IAccountingBookApplicabilityService> Applicability,
+        Guid TenantId, Guid Actor, Mock<ICurrentUserService> User,
+        Mock<IAccountingBookApplicabilityService> Applicability,
         Mock<IFinanceAuditService> Audit) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => Db.DisposeAsync();

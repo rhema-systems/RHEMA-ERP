@@ -53,6 +53,9 @@ public sealed class PrepareProducerAccountingReversalDto
     public DateTime ReversalDate { get; set; }
     public string Reason { get; set; } = string.Empty;
     public string ParticipantIdentity { get; set; } = string.Empty;
+    /// <summary>
+    /// Identity of the distinct compensating owner effect. Its fingerprint must not replay the original effect.
+    /// </summary>
     public ProducerOwnerEffectIdentityDto ExpectedOwnerEffect { get; set; } = new();
 }
 
