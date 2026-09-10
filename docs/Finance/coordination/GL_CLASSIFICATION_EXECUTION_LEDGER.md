@@ -1190,6 +1190,13 @@ C15 was integrated locally as `0230083f1d5339127baa876d633268d71d4ad880`; no con
 migration, owner or remote state was touched. Sales is authorized to consume this verifier and remove its weaker
 owner-side Finance authority reconstruction.
 
+Sales consumed approved C15 and committed clean correction `d28c27b1`. Ordinary and reversal exact retries now
+delegate immutable event/source/receipt/posting/journal validation to the Finance-owned replay verifier; Sales no
+longer reconstructs C10 default-book representation authority. This is an intermediate correction only. The
+compiler contention has cleared and Terra Medium execution has resumed to close the invoice-scoped concurrency,
+locked reversal rebuild/date conflict, production relational atomicity/recovery, post-commit audit and stale-test
+gates before final review. No database, migration, default, remote or unrelated state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
