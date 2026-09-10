@@ -647,7 +647,9 @@ public class ReturnOrderService : IReturnOrderService
         {
             if (transactionStarted)
                 await _unitOfWork.RollbackAsync(cancellationToken);
-            if (executionAttempted && !transactionCommitted && prepared is not null && intent is not null)
+            // A caller-owned ambient transaction remains open after UnitOfWork relinquishes its join.
+            // Finance failure evidence is valid only after the actual owner has ended that transaction.
+            if (executionAttempted && !transactionCommitted && !_unitOfWork.HasActiveTransaction && prepared is not null && intent is not null)
                 await execution.RecordFailureAfterRollbackAsync(prepared.Id, intent,
                     ReceiptFor(cn ?? throw new InvalidOperationException("Credit note was unavailable after rollback."), intent.ExpectedOwnerEffect), ex, cancellationToken);
             if (cn != null && prepared is null)
@@ -805,6 +807,9 @@ public class ReturnOrderService : IReturnOrderService
             var existingReversal = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(e =>
                 e.TenantId == tenantId && e.IdempotencyKey == SalesCreditNoteReversalKey(creditNote) && !e.IsDeleted)
                 .FirstOrDefaultAsync(cancellationToken);
+            if (existingReversal is not null && dto.ReversalDate.HasValue &&
+                existingReversal.EventDate.Date != dto.ReversalDate.Value.Date)
+                throw new InvalidOperationException("AR credit note reversal retry conflicts with the immutable reversal date.");
             var reversalDate = existingReversal?.EventDate.Date ?? (dto.ReversalDate ?? DateTime.UtcNow).Date;
             ownerEffect = OwnerEffectFor(creditNote, "REVERSE", $"{original.Id:N}:{reversalDate:O}:{dto.Reason.Trim()}");
             prepared = await reversals.PrepareReversalAsync(new PrepareProducerAccountingReversalDto
@@ -825,6 +830,15 @@ public class ReturnOrderService : IReturnOrderService
             _unitOfWork.ClearTrackedChanges();
             creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
                 .FirstAsync(cancellationToken);
+            var lockedOriginal = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(e =>
+                e.TenantId == tenantId && e.Id == original.Id && e.OriginatingModuleCode == "SALES" &&
+                e.SourceDocumentType == "SalesCreditNote" && e.SourceDocumentId == creditNote.Id &&
+                e.PostingAction == "Post" && e.IdempotencyKey == SalesCreditNotePostingKey(creditNote) &&
+                e.Status == AccountingEventStatuses.Posted && !e.IsDeleted).SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("AR credit note reversal source authority changed before execution.");
+            var lockedEffect = OwnerEffectFor(creditNote, "REVERSE", $"{lockedOriginal.Id:N}:{reversalDate:O}:{dto.Reason.Trim()}");
+            if (!OwnerEffectsMatch(ownerEffect, lockedEffect))
+                throw new InvalidOperationException("AR credit note reversal owner authority changed before execution.");
             var decision = await producer.GetAsync(prepared.AccountingEventId, cancellationToken);
             if (decision.Id != prepared.AccountingEventId || decision.RequestFingerprint != prepared.AccountingEventRequestFingerprint
                 || decision.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved)
@@ -873,7 +887,7 @@ public class ReturnOrderService : IReturnOrderService
             if (transactionStarted)
                 await _unitOfWork.RollbackAsync(cancellationToken);
 
-            if (executionAttempted && !transactionCommitted && prepared is not null && ownerEffect is not null)
+            if (executionAttempted && !transactionCommitted && !_unitOfWork.HasActiveTransaction && prepared is not null && ownerEffect is not null)
                 await execution.RecordFailureAfterRollbackAsync(prepared.AccountingEventId,
                     ReceiptFor(creditNote ?? throw new InvalidOperationException("Credit note was unavailable after rollback."), ownerEffect), ex, cancellationToken);
 
@@ -1186,7 +1200,9 @@ public class ReturnOrderService : IReturnOrderService
     private static string SalesCreditNoteReversalKey(CreditNote creditNote) =>
         $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Reverse";
     private static string CreditNoteExecutionLock(CreditNote creditNote) =>
-        $"SALES:CREDIT_NOTE:{creditNote.TenantId:N}:{creditNote.Id:N}:{creditNote.OriginalInvoiceId?.ToString("N") ?? "STANDALONE"}";
+        creditNote.OriginalInvoiceId.HasValue
+            ? $"SALES:CREDIT_NOTE:INVOICE:{creditNote.TenantId:N}:{creditNote.OriginalInvoiceId.Value:N}"
+            : $"SALES:CREDIT_NOTE:STANDALONE:{creditNote.TenantId:N}:{creditNote.Id:N}";
     private static Guid DeterministicGuid(Guid source, string purpose) =>
         new(SHA256.HashData(Encoding.UTF8.GetBytes($"{source:N}:{purpose}"))[..16]);
     private static ProducerOwnerEffectIdentityDto OwnerEffectFor(CreditNote creditNote, string action, string salt)
@@ -1202,6 +1218,10 @@ public class ReturnOrderService : IReturnOrderService
         TenantId = creditNote.TenantId, ParticipantCode = effect.ParticipantCode, OwnerEntityType = effect.OwnerEntityType,
         OwnerEntityId = effect.OwnerEntityId, OwnerAction = effect.OwnerAction, EffectFingerprint = effect.EffectFingerprint
     };
+    private static bool OwnerEffectsMatch(ProducerOwnerEffectIdentityDto expected, ProducerOwnerEffectIdentityDto actual) =>
+        expected.ParticipantCode == actual.ParticipantCode && expected.OwnerEntityType == actual.OwnerEntityType &&
+        expected.OwnerEntityId == actual.OwnerEntityId && expected.OwnerAction == actual.OwnerAction &&
+        expected.EffectFingerprint == actual.EffectFingerprint;
     private static void RequireApprovedPreparedAuthority(AccountingEventDto prepared, AccountingEventDto decision)
     {
         if (decision.Id != prepared.Id || decision.RequestFingerprint != prepared.RequestFingerprint
