@@ -33,6 +33,68 @@ public sealed class ArCreditNotePostingMigrationTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task GovernedSalesCreditNote_PreparesNeutralIntentWithoutAutoApprovalOrOwnerMutation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, taxAmount: 20m);
+        var producer = new Mock<IFinanceProducerIntentService>();
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        var reversal = new Mock<IFinanceProducerReversalPreparationService>();
+        ProducerAccountingIntentDto? captured = null;
+        var eventId = Guid.NewGuid();
+        producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
+            .Callback<ProducerAccountingIntentDto, CancellationToken>((intent, _) => captured = intent)
+            .ReturnsAsync(new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
+                ProducerDecisionStatus = ProducerIntentDecisionStatuses.Pending, RequestFingerprint = new string('A', 64) });
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object, reversal.Object);
+
+        var result = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        captured.Should().NotBeNull();
+        captured!.PostingRequest.SourceDocumentType.Should().Be("SalesCreditNote");
+        captured.PostingRequest.SourceDocumentId.Should().Be(fixture.CreditNote.Id);
+        captured.PostingRequest.PostingAction.Should().Be("Post");
+        captured.PostingRequest.IdempotencyKey.Should().Be($"AR:SalesCreditNote:{tenantId:N}:{fixture.CreditNote.Id:N}:Post");
+        captured.PostingRequest.Lines.Should().HaveCount(3);
+        captured.PostingRequest.Lines.Sum(line => line.DebitAmount).Should().Be(120m);
+        captured.PostingRequest.Lines.Sum(line => line.CreditAmount).Should().Be(120m);
+        result.JournalEntryId.Should().BeNull();
+        execution.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task GovernedSalesCreditNote_ApprovedCompatibilityBindingCompletesOnceAndExactRetryIsReadOnly()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
+        var producer = new Mock<IFinanceProducerIntentService>();
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        var eventId = Guid.NewGuid();
+        const string fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        var approved = new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved, RequestFingerprint = fingerprint };
+        producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(approved);
+        producer.Setup(x => x.GetAsync(eventId, It.IsAny<CancellationToken>())).ReturnsAsync(approved);
+        var postingId = Guid.NewGuid(); var journalId = Guid.NewGuid();
+        execution.Setup(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
+                It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(eventId, fingerprint, AccountingEventStatuses.Posted, postingId, journalId));
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object, Mock.Of<IFinanceProducerReversalPreparationService>());
+
+        var first = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        var second = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        first.JournalEntryId.Should().Be(journalId);
+        second.JournalEntryId.Should().Be(journalId);
+        execution.Verify(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "SalesReturns")]
     public async Task ReturnOrder_ShouldRejectDeliveryNoteFromAnotherSalesOrderForSameBusinessPartner()
     {
@@ -551,7 +613,10 @@ public sealed class ArCreditNotePostingMigrationTests
 
     private static (ReturnOrderService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateReturnOrderService(
         ApplicationDbContext db,
-        Guid tenantId)
+        Guid tenantId,
+        IFinanceProducerIntentService? producerIntents = null,
+        IFinanceProducerApprovedExecutionService? producerExecution = null,
+        IFinanceProducerReversalPreparationService? producerReversals = null)
     {
         var currentUserService = CreateCurrentUserService(tenantId);
         var currentUserProvider = CreateCurrentUserProvider(tenantId, currentUserService.Object.UserId!);
@@ -601,7 +666,10 @@ public sealed class ArCreditNotePostingMigrationTests
             workflowStatusAdapters,
             Mock.Of<ILogger<ReturnOrderService>>(),
             postingEngine,
-            auditService);
+            auditService,
+            producerIntents,
+            producerExecution,
+            producerReversals);
 
         return (service, subledgerPostingMock);
     }
