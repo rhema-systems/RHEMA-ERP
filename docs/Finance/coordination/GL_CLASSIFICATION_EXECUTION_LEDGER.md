@@ -1109,6 +1109,16 @@ disabled/default selector denial, compatibility binding, rollback-before-durable
 frozen-book reversal under C5 drift, then run widened/EF/migration gates. No database or migration was touched;
 independent review and integration remain gated.
 
+Sales now has six clean commits through `89af441c860335fcfe0ad14102b7c818f18d5625`: the governed owner
+conversion, pending/approved compatibility tests, reversal retry conflict guard, additional handoff evidence,
+legacy posting-engine dependency removal and fixture adaptation. Core and API test projects build with zero
+errors and five governed Sales tests pass. The candidate is not yet review-ready because this evidence still
+mocks the owner/C7 boundary and the legacy AR batch retains direct-post expectations. A fresh Terra Medium
+relational-harness task is active in the same clean worktree to use real C7/C11/C12/C13 services and prove shared-
+transaction rollback/recovery, durable failure, compatibility binding and frozen-book reversal under drift.
+Early Sol High static review is running in parallel; final approval remains gated. No database or migration was
+touched.
+
 Sales added partial evidence commit `cad7bbeb` atop production `ddf7ea48`, covering pending no-mutation and
 approved compatibility-bound one-time completion/read-only retry. The Core build and diff pass, but the API test
 assembly did not finish compiling in the task window and the required relational rollback/recovery, C13 drift,
