@@ -1121,6 +1121,15 @@ pre-commit failure recording, authoritative replay reconciliation, durable rever
 checker evidence, stale-test migration and relational concurrency/rollback gates. Integration remains blocked;
 no database or migration was touched.
 
+C14 shared transaction-lock provider correction is committed cleanly as
+`d2d7b65c51965121295957a133d12cfbbaf8f8d0` from exact base `d902e32b`. Active-transaction/resource guards
+remain universal; SQL Server retains checked transaction-owned `sp_getapplock`; SQLite and InMemory return only
+under their active provider transactions; unknown providers fail closed before dialect SQL. The interface,
+schema and migrations are unchanged. Provider tests passed 8/8, widened lock-consumer tests 71/71, Core/Data
+builds and EF/456-migration gates pass; one combined Sales failure is the documented retired legacy endpoint.
+Independent Sol High cross-module concurrency review is active. Sales relational execution remains gated on
+approval/integration; no configured database was accessed.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
