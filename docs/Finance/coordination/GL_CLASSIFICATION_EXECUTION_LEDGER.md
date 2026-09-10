@@ -1121,6 +1121,14 @@ pre-commit failure recording, authoritative replay reconciliation, durable rever
 checker evidence, stale-test migration and relational concurrency/rollback gates. Integration remains blocked;
 no database or migration was touched.
 
+Sales correction added clean commits `c2be313e`, `c7213486` and `dc677181`: in-transaction canonical intent
+revalidation, post-commit failure separation, durable reversal-date reuse, book-blind checker handoff fields and
+the real relational fixture scaffold. The candidate still is not review-ready because the fixture has not run
+after shared compiler contention, and checked SQL Server locking/two-context credit authority, exact mutable-link
+reconciliation, post-commit audit fault, C13 drift/authority cases and stale legacy-test migration remain
+incomplete. The Terra owner task has been continued with those exact gates and may not hand off again until the
+focused relational suite actually executes. No database, migration or unrelated file was touched.
+
 Sales now has six clean commits through `89af441c860335fcfe0ad14102b7c818f18d5625`: the governed owner
 conversion, pending/approved compatibility tests, reversal retry conflict guard, additional handoff evidence,
 legacy posting-engine dependency removal and fixture adaptation. Core and API test projects build with zero
