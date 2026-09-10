@@ -563,6 +563,7 @@ public class ReturnOrderService : IReturnOrderService
         ProducerAccountingIntentDto? intent = null;
         AccountingEventDto? prepared = null;
         var transactionStarted = false;
+        var transactionCommitted = false;
         var executionAttempted = false;
 
         try
@@ -589,6 +590,11 @@ public class ReturnOrderService : IReturnOrderService
                 return await GetCreditNoteByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
             }
 
+            // Preparation is intentionally outside this transaction. Rebuild the producer intent after
+            // the Serializable reload so source status, invoice availability and prior-credit limits are
+            // rechecked under the owner transaction; C12 will reject any snapshot/fingerprint conflict.
+            intent = await BuildSalesCreditNoteProducerIntentAsync(cn, cancellationToken);
+            intent.AccountingEventId = prepared.Id;
             var decision = await producer.GetAsync(prepared.Id, cancellationToken);
             RequireApprovedPreparedAuthority(prepared, decision);
             // This tracked, rollback-safe Sales mutation is the deterministic owner effect acknowledged by C12.
@@ -605,6 +611,7 @@ public class ReturnOrderService : IReturnOrderService
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
             transactionStarted = false;
+            transactionCommitted = true;
 
             await RecordArCreditNoteAuditAsync(FinanceAuditEvents.ArCreditNotePosted, cn,
                 postingEventId: result.FinancePostingEventId, journalEntryId: result.JournalEntryId,
@@ -616,7 +623,7 @@ public class ReturnOrderService : IReturnOrderService
         {
             if (transactionStarted)
                 await _unitOfWork.RollbackAsync(cancellationToken);
-            if (executionAttempted && prepared is not null && intent is not null)
+            if (executionAttempted && !transactionCommitted && prepared is not null && intent is not null)
                 await execution.RecordFailureAfterRollbackAsync(prepared.Id, intent,
                     ReceiptFor(cn ?? throw new InvalidOperationException("Credit note was unavailable after rollback."), intent.ExpectedOwnerEffect), ex, cancellationToken);
             if (cn != null && prepared is null)
@@ -728,6 +735,7 @@ public class ReturnOrderService : IReturnOrderService
         ProducerAccountingReversalPreparationResultDto? prepared = null;
         ProducerOwnerEffectIdentityDto? ownerEffect = null;
         var transactionStarted = false;
+        var transactionCommitted = false;
         var executionAttempted = false;
         try
         {
@@ -767,13 +775,19 @@ public class ReturnOrderService : IReturnOrderService
                     !e.IsDeleted)
                 .FirstOrDefaultAsync(cancellationToken)
                 ?? throw new InvalidOperationException("The original governed AR credit note event was not found for this tenant.");
-            ownerEffect = OwnerEffectFor(creditNote, "REVERSE", $"{original.Id:N}:{dto.ReversalDate?.Date:O}:{dto.Reason.Trim()}");
+            // A retry/restart must retain the first durable C13 event date rather than sampling a
+            // new UTC day after midnight under the same deterministic reversal key.
+            var existingReversal = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(e =>
+                e.TenantId == tenantId && e.IdempotencyKey == SalesCreditNoteReversalKey(creditNote) && !e.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+            var reversalDate = existingReversal?.EventDate.Date ?? (dto.ReversalDate ?? DateTime.UtcNow).Date;
+            ownerEffect = OwnerEffectFor(creditNote, "REVERSE", $"{original.Id:N}:{reversalDate:O}:{dto.Reason.Trim()}");
             prepared = await reversals.PrepareReversalAsync(new PrepareProducerAccountingReversalDto
             {
                 OriginalAccountingEventId = original.Id,
                 ReversalAccountingEventId = DeterministicGuid(creditNote.Id, "AR-CREDIT-NOTE-REVERSAL"),
                 IdempotencyKey = SalesCreditNoteReversalKey(creditNote),
-                ReversalDate = (dto.ReversalDate ?? DateTime.UtcNow).Date,
+                ReversalDate = reversalDate,
                 Reason = dto.Reason.Trim(), ParticipantIdentity = ownerEffect.ParticipantCode,
                 ExpectedOwnerEffect = ownerEffect
             }, cancellationToken);
@@ -801,12 +815,13 @@ public class ReturnOrderService : IReturnOrderService
             creditNote.CreditNoteStatus = CreditNoteStatus.Reversed;
             creditNote.ReversalJournalEntryId = result.JournalEntryId;
             creditNote.ReversalPostingEventId = result.FinancePostingEventId;
-            creditNote.ReversedAt = dto.ReversalDate?.Date ?? DateTime.UtcNow.Date;
+            creditNote.ReversedAt = reversalDate;
             creditNote.ReversalReason = dto.Reason.Trim();
             await _creditNoteRepo.UpdateAsync(creditNote);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await _unitOfWork.CommitAsync(cancellationToken);
             transactionStarted = false;
+            transactionCommitted = true;
 
             await RecordArCreditNoteAuditAsync(
                 FinanceAuditEvents.ArCreditNoteReversed,
@@ -831,7 +846,7 @@ public class ReturnOrderService : IReturnOrderService
             if (transactionStarted)
                 await _unitOfWork.RollbackAsync(cancellationToken);
 
-            if (executionAttempted && prepared is not null && ownerEffect is not null)
+            if (executionAttempted && !transactionCommitted && prepared is not null && ownerEffect is not null)
                 await execution.RecordFailureAfterRollbackAsync(prepared.AccountingEventId,
                     ReceiptFor(creditNote ?? throw new InvalidOperationException("Credit note was unavailable after rollback."), ownerEffect), ex, cancellationToken);
 
