@@ -711,11 +711,6 @@ public sealed class ArCreditNotePostingMigrationTests
             {
                 HttpContext = new DefaultHttpContext { TraceIdentifier = "trace-ar-credit-note-posting" }
             });
-        var postingEngine = new FinancePostingEngine(
-            db,
-            currentUserService.Object,
-            Mock.Of<ILogger<FinancePostingEngine>>(),
-            auditService);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
         var workflowMock = new Mock<IWorkflowIntegrationService>();
         workflowMock.Setup(x => x.ProcessApprovalAsync(
@@ -749,11 +744,10 @@ public sealed class ArCreditNotePostingMigrationTests
             workflowMock.Object,
             workflowStatusAdapters,
             Mock.Of<ILogger<ReturnOrderService>>(),
-            postingEngine,
-            auditService,
-            producerIntents,
-            producerExecution,
-            producerReversals);
+            financeAuditService: auditService,
+            financeProducerIntents: producerIntents,
+            financeProducerExecution: producerExecution,
+            financeProducerReversals: producerReversals);
 
         return (service, subledgerPostingMock);
     }
