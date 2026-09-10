@@ -67,4 +67,28 @@ public sealed class FinanceProducerApprovedExecutionContractTests
                 name.Contains("Book", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("Line", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void ReplayVerificationContract_IsReadOnlyBookBlindAndDataOnly()
+    {
+        typeof(IFinanceProducerReplayVerificationService).IsPublic.Should().BeTrue();
+        var methods = typeof(IFinanceProducerReplayVerificationService).GetMethods();
+        methods.Should().ContainSingle();
+        methods[0].Name.Should().Be(nameof(IFinanceProducerReplayVerificationService.VerifyPostedAsync));
+        methods[0].ReturnType.Should().Be(typeof(Task<FinanceProducerReplayVerificationResultDto>));
+        methods[0].GetParameters().Select(parameter => parameter.ParameterType).Should().ContainInOrder(
+            typeof(Guid), typeof(FinanceProducerReplayVerificationRequestDto), typeof(CancellationToken));
+
+        foreach (var type in new[]
+                 {
+                     typeof(FinanceProducerReplayVerificationRequestDto),
+                     typeof(FinanceProducerReplayVerificationResultDto)
+                 })
+        {
+            type.GetProperties().Select(property => property.Name).Should().NotContain(name =>
+                name.Contains("Book", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Line", StringComparison.OrdinalIgnoreCase)
+                || name.Contains("Selector", StringComparison.OrdinalIgnoreCase));
+        }
+    }
 }

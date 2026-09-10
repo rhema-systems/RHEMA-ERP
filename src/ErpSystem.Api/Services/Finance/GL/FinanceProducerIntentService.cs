@@ -18,7 +18,8 @@ namespace ErpSystem.Api.Services.Finance.GL;
 /// C6 maker/checker state; book choice and per-book execution remain entirely inside Finance.
 /// </summary>
 public sealed partial class FinanceProducerIntentService : IFinanceProducerIntentService, IFinanceProducerApprovedExecution,
-    IFinanceProducerApprovedExecutionService, IFinanceProducerReversalPreparationService
+    IFinanceProducerApprovedExecutionService, IFinanceProducerReversalPreparationService,
+    IFinanceProducerReplayVerificationService
 {
     private readonly IAccountingBookApplicabilityService _applicability;
     private readonly IAccountingEventService _events;
@@ -242,6 +243,99 @@ public sealed partial class FinanceProducerIntentService : IFinanceProducerInten
         await ((IFinanceProducerApprovedExecutionService)this).RecordFailureAfterRollbackAsync(
             accountingEventId, intent, receipt, failure, cancellationToken);
     }
+
+    async Task<FinanceProducerReplayVerificationResultDto>
+        IFinanceProducerReplayVerificationService.VerifyPostedAsync(
+            Guid accountingEventId, FinanceProducerReplayVerificationRequestDto request,
+            CancellationToken cancellationToken)
+    {
+        RequireEnabled();
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.OwnerEffectReceipt);
+        if (accountingEventId == Guid.Empty || request.SourceDocumentId == Guid.Empty
+            || request.FinancePostingEventId == Guid.Empty || request.JournalEntryId == Guid.Empty)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REPLAY_IDENTITY_REQUIRED: exact event, source, posting and journal identities are required.");
+
+        var tenantId = _currentUser.GetRequiredFinanceTenantId();
+        if (request.OwnerEffectReceipt.TenantId != tenantId)
+            throw new KeyNotFoundException("AccountingEvent was not found for this tenant.");
+
+        var snapshot = await ReconstructPreparedRequestAsync(accountingEventId, cancellationToken);
+        var accountingEvent = await _db.AccountingEvents.AsNoTracking()
+            .Include(item => item.Postings)
+            .Include(item => item.ProducerReceipt)
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Id == accountingEventId
+                && !item.IsDeleted, cancellationToken)
+            ?? throw new KeyNotFoundException("AccountingEvent was not found for this tenant.");
+
+        if (accountingEvent.EventKind == AccountingEventKinds.Reversal)
+            _ = await ReconstructApprovedC13ReversalIntentAsync(accountingEventId, cancellationToken);
+
+        if (accountingEvent.Status != AccountingEventStatuses.Posted
+            || accountingEvent.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved
+            || !accountingEvent.ProducerDecidedByUserId.HasValue
+            || accountingEvent.ProducerDecidedByUserId == accountingEvent.PreparedByUserId
+            || string.IsNullOrWhiteSpace(accountingEvent.ProducerDecisionReason))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REPLAY_NOT_POSTED: replay verification requires independently approved posted C7 authority.");
+
+        var source = FinancePreparedIdentityNormalizer.Normalize(
+            request.OriginatingModuleCode, request.SourceDocumentType, request.PostingAction);
+        var participant = CanonicalParticipant(request.ParticipantIdentity);
+        var suppliedReceipt = CanonicalOwnerEffect(request.OwnerEffectReceipt, participant);
+        var expectedReceipt = CanonicalOwnerEffect(snapshot.ExpectedOwnerEffect, snapshot.ProducerParticipantIdentity);
+        var durableReceipt = accountingEvent.ProducerReceipt;
+        if (!string.Equals(request.AccountingEventRequestFingerprint,
+                accountingEvent.RequestFingerprint, StringComparison.Ordinal)
+            || !string.Equals(source.OriginatingModuleCode,
+                accountingEvent.OriginatingModuleCode, StringComparison.Ordinal)
+            || !string.Equals(source.SourceDocumentType,
+                accountingEvent.SourceDocumentType, StringComparison.Ordinal)
+            || request.SourceDocumentId != accountingEvent.SourceDocumentId
+            || !string.Equals(source.PostingAction, accountingEvent.PostingAction, StringComparison.Ordinal)
+            || !string.Equals(participant, accountingEvent.ProducerParticipantIdentity, StringComparison.Ordinal)
+            || durableReceipt is null
+            || durableReceipt.TenantId != tenantId
+            || durableReceipt.AccountingEventId != accountingEvent.Id
+            || !OwnerEffectEquals(expectedReceipt, suppliedReceipt)
+            || !OwnerEffectEquals(expectedReceipt, durableReceipt)
+            || !string.Equals(durableReceipt.RequestFingerprint,
+                accountingEvent.RequestFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REPLAY_AUTHORITY_CONFLICT: source, fingerprint, participant or owner receipt differs from durable Finance authority.");
+
+        var compatibility = await FinanceProducerCompatibilityAuthority.ResolveAsync(
+            _db, tenantId, AccountingEventService.Map(accountingEvent), cancellationToken);
+        if (compatibility.FinancePostingEventId != request.FinancePostingEventId
+            || compatibility.JournalEntryId != request.JournalEntryId)
+            throw new InvalidOperationException(
+                "ACCOUNTING_EVENT_REPLAY_REPRESENTATION_CONFLICT: expected posting or journal identity differs from the Finance-selected compatibility representation.");
+
+        return new FinanceProducerReplayVerificationResultDto(
+            accountingEvent.Id,
+            accountingEvent.RequestFingerprint,
+            durableReceipt.EffectFingerprint,
+            accountingEvent.Status,
+            compatibility.FinancePostingEventId,
+            compatibility.JournalEntryId);
+    }
+
+    private static bool OwnerEffectEquals(ProducerOwnerEffectIdentityDto expected,
+        ProducerOwnerEffectIdentityDto actual) =>
+        string.Equals(expected.ParticipantCode, actual.ParticipantCode, StringComparison.Ordinal)
+        && string.Equals(expected.OwnerEntityType, actual.OwnerEntityType, StringComparison.Ordinal)
+        && expected.OwnerEntityId == actual.OwnerEntityId
+        && string.Equals(expected.OwnerAction, actual.OwnerAction, StringComparison.Ordinal)
+        && string.Equals(expected.EffectFingerprint, actual.EffectFingerprint, StringComparison.Ordinal);
+
+    private static bool OwnerEffectEquals(ProducerOwnerEffectIdentityDto expected,
+        AccountingEventProducerReceipt actual) =>
+        string.Equals(expected.ParticipantCode, actual.ParticipantCode, StringComparison.Ordinal)
+        && string.Equals(expected.OwnerEntityType, actual.OwnerEntityType, StringComparison.Ordinal)
+        && expected.OwnerEntityId == actual.OwnerEntityId
+        && string.Equals(expected.OwnerAction, actual.OwnerAction, StringComparison.Ordinal)
+        && string.Equals(expected.EffectFingerprint, actual.EffectFingerprint, StringComparison.Ordinal);
 
     internal async Task<CreateAccountingEventDto> BuildRequestAsync(ProducerAccountingIntentDto intent, CancellationToken ct)
     {
