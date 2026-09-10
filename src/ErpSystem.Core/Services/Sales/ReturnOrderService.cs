@@ -51,7 +51,6 @@ public class ReturnOrderService : IReturnOrderService
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<ReturnOrderService> logger,
-        IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IFinanceProducerIntentService? financeProducerIntents = null,
         IFinanceProducerApprovedExecutionService? financeProducerExecution = null,
@@ -67,7 +66,6 @@ public class ReturnOrderService : IReturnOrderService
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _logger = logger;
-        // Keep the obsolete engine constructor slot source-compatible while C7 owns this path.
         _documentNumberingService = documentNumberingService;
         _financeAuditService = financeAuditService;
         _financeProducerIntents = financeProducerIntents;
