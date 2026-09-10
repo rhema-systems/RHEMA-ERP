@@ -423,6 +423,9 @@ public static class HrModuleServiceRegistration
         // The relationship catalogue the referee, guarantor, next-of-kin and candidate-referee
         // screens pick from (round 2, lane D2).
         services.AddScoped<IRelationshipTypeService, RelationshipTypeService>();
+
+        // Teams and committees: terms of reference, objectives and tasks (round 2, lane F1).
+        services.AddScoped<ITeamActivityService, TeamActivityService>();
         services.AddScoped<IEmployeeRelieverService, EmployeeRelieverService>();
         services.AddScoped<ILeaveYearEndService, LeaveYearEndService>();
         services.AddScoped<IEmolumentService, EmolumentService>();

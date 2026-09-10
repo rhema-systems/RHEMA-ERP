@@ -516,6 +516,26 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     /// used to spell out separately (round 2, lane D2).</summary>
     public DbSet<RelationshipType> RelationshipTypes { get; set; }
 
+    // ── Teams and committees: the activity sub-module (round 2, lane F1) ────────────────────
+    //
+    // ⚠ THESE DbSets ARE LOAD-BEARING, not decoration. An entity that EF first discovers inside
+    // `ConfigureHrModule` is discovered AFTER `ConfigureGlobalTenantRelationships` has run, so its
+    // Tenant foreign key is minted by convention afterwards and keeps the convention's CASCADE.
+    // For a table that also cascades from a parent — a checklist item from its task — that is two
+    // cascade paths to Tenants, and SQL Server refuses the constraint outright:
+    //
+    //     Introducing FOREIGN KEY constraint 'FK_TeamTaskChecklistItems_Tenants_TenantId' ...
+    //     may cause cycles or multiple cascade paths.
+    //
+    // A DbSet makes EF discover the entity before OnModelCreating's body runs, so the global pass
+    // catches it and sets Restrict. The same omission also made the first scaffold name the tables
+    // in the SINGULAR, after the entity rather than the set. Both symptoms, one cause.
+    public DbSet<TeamTermsOfReference> TeamTermsOfReferences { get; set; }
+    public DbSet<TeamObjective> TeamObjectives { get; set; }
+    public DbSet<TeamTask> TeamTasks { get; set; }
+    public DbSet<TeamTaskChecklistItem> TeamTaskChecklistItems { get; set; }
+    public DbSet<TeamTaskAttachment> TeamTaskAttachments { get; set; }
+
     public DbSet<OrganizationStructure> OrganizationStructures { get; set; }
     public DbSet<OrganizationLevel> OrganizationLevels { get; set; }
     public DbSet<OrganizationUnit> OrganizationUnits { get; set; }

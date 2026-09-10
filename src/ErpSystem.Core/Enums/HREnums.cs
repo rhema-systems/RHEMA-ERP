@@ -528,6 +528,101 @@ public enum TeamMemberRole
     Secretary = 5
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//  Teams and committees — the activity sub-module (round 2, lane F; plan § 1.4, § 6.6).
+//
+//  ⚠ These sit on the EXISTING Team record, whose TeamType already distinguishes a Committee from
+//  a project team. SafetyCommittee and AwardCommittee stay separate on purpose: they are bounded
+//  contexts with their own rules (meeting quorum, scoring), and merging them would break two
+//  closed areas.
+//
+//  Every member is APPENDED and never renumbered — an existing row's meaning must not shift.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Where a team's terms of reference are in their life.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Approved"/> is IMMUTABLE. Changing approved terms means a new version — the row is
+/// cloned to <c>Draft</c> at version + 1 and the old one becomes <see cref="Superseded"/> when the
+/// new one is approved. Editing in place would rewrite what a committee was actually chartered to
+/// do, which is the one thing terms of reference exist to record.
+/// </remarks>
+public enum TeamTorStatus
+{
+    Draft = 1,
+
+    PendingApproval = 2,
+
+    Approved = 3,
+
+    Superseded = 4
+}
+
+/// <summary>What a team has undertaken to achieve, and where it has got to.</summary>
+public enum TeamObjectiveStatus
+{
+    Draft = 1,
+
+    PendingApproval = 2,
+
+    Active = 3,
+
+    OnHold = 4,
+
+    Completed = 5,
+
+    Cancelled = 6
+}
+
+/// <summary>
+/// Whether an objective's progress is counted from its tasks or typed by hand.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="FromTasks"/> makes <c>ProgressPercent</c> a DERIVED column the service recomputes
+/// on every task change — a caller cannot set it. <see cref="Manual"/> is for an objective whose
+/// progress is not a count of anything ("stakeholder confidence restored"), and there the typed
+/// figure is the only truth there is.
+/// </remarks>
+public enum TeamObjectiveProgressMode
+{
+    FromTasks = 1,
+
+    Manual = 2
+}
+
+public enum TeamTaskPriority
+{
+    Low = 1,
+
+    Normal = 2,
+
+    High = 3,
+
+    Urgent = 4
+}
+
+/// <summary>
+/// Where a team task stands.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Blocked"/> requires a reason. A board full of blocked cards that cannot say what
+/// is blocking them tells a lead nothing, and the whole point of the monitoring half of this
+/// sub-module is that the lead can see where the work has stopped.
+/// </remarks>
+public enum TeamTaskStatus
+{
+    NotStarted = 1,
+
+    InProgress = 2,
+
+    Blocked = 3,
+
+    Completed = 4,
+
+    Cancelled = 5
+}
+
 public enum WorkMode
 {
     OnSite = 1,

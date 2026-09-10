@@ -96,7 +96,12 @@ class TeamService {
     return apiService.get<TeamMemberHistoryEntry[]>(`${this.baseUrl}/${teamId}/member-history`);
   }
 
-  /** Every team an employee belongs to. Routed off the employee, not the team. */
+  /**
+   * Every team an employee belongs to. Routed off the employee, not the team.
+   *
+   * ⚠ `/me/teams` passes the caller's OWN id from the auth context, never one from the page. The
+   * route is by-employee because the employee profile needs it too.
+   */
   getForEmployee(employeeId: string, currentOnly = true): Promise<TeamMember[]> {
     return apiService.get<TeamMember[]>(`/hr/employees/${employeeId}/teams`, { currentOnly });
   }

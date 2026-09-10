@@ -554,7 +554,34 @@ Not in the original plan. It came out of explaining E1's "same-day placement edg
 
 ### Lane F — Teams and committees sub-module · 3 slices (§ 6.6)
 
-**F1 — Terms of reference, objectives, tasks.** Migration: `TeamTermsOfReference`, `TeamObjective`, `TeamTask`, `TeamTaskChecklistItem`, `TeamTaskAttachment`.
+**F1 — Terms of reference, objectives, tasks.** **BUILT 2026-09-10 — `hr-teams/run-f1.mjs`** (new folder). Migration `20260910023951_AddTeamTermsObjectivesAndTasks` (guarded, listed): `TeamTermsOfReferences`, `TeamObjectives`, `TeamTasks`, `TeamTaskChecklistItems`, `TeamTaskAttachments`. Q-7 taken as defaulted (a flat tick list, no template engine).
+
+**What the build changed from the design.**
+
+1. **The controller's gate is deliberately thin, and the service is the authority.** § 6.6.2 said writes are HR *or* the team's lead or deputy — and a lead is very often not an HR user, so `EmployeeWritePolicy` on the routes would lock the one person who most needs them out of their own team's plan. The vertical gate is therefore `InternalOnly` and every service method opens with the horizontal question, which is the only place it can be asked: *is this caller anything to do with THIS team, and in what capacity?* Three capacities: HR acts on any team, the lead or deputy on their own, an ordinary member may move, tick and attach only on a task assigned to them. A non-member gets **403 from the read**, not an empty list — an empty list would say "this team has no objectives", which is a different and untrue statement. Said loudly in both files, because a reviewer scanning for `[Authorize(Policy = ...)]` would otherwise read it as ungated.
+2. **Refusals are 422, through a tenth `*BusinessRulesAttribute`.** That is what the other nine areas do. D2 had just measured the cost of the alternative — the same rule answering 400 or 422 depending on which door raised it — so a new controller joins the majority rather than the legacy hand-rolled mapping.
+3. **`ProgressPercent` under `FromTasks` refuses a supplied figure** rather than ignoring it, and cancelled tasks leave **both** sides of the fraction — counting them in the denominator would make progress FALL when a task nobody is doing any more is cancelled, which reads as the team going backwards for tidying up.
+4. **Completing an objective below 100 % requires an outcome summary**, which is the feedback's "whether they have done it, and how they did it" made enforceable. Cancelling requires a reason.
+5. **The weight rule is advisory and the harness asserts that it does NOT refuse.** A team mid-planning has every right to a half-built set; a rule blocking the second objective until the tenth is written is one nobody can work with.
+6. **The signed charter is not cloned into a new version.** It belongs to the version that was signed; carrying the ids forward would make two versions claim one PDF and the new draft would look signed before anyone had read it.
+
+**What it found, beyond the plan.**
+
+- ⚠ **THE DEFECT, caught by § 5 of the harness on its first run: every derived progress figure was exactly ONE ACTION STALE.** `RecomputeForTaskAsync` counts an objective's tasks with a QUERY, and a query goes to the database — which does not yet hold a change sitting only in the change tracker. Completing the first of two tasks left the objective reading 0 %; completing the second read 50 %; moving a task to another objective left the old one still quoting it. Fixed at all four write sites by saving before recomputing, at the cost of a second `SaveChangesAsync` per task write. **On a screen this would have looked like a caching bug, and nobody would have found the ordering.**
+- ⚠ **The five entities' missing `DbSet`s cost three scaffolds and one failed apply, and the symptom was remote from the cause twice over.** An entity EF first discovers inside `ConfigureHrModule` is discovered AFTER `ConfigureGlobalTenantRelationships` — the pass whose whole job is forcing every tenant FK to `Restrict` "to avoid multiple cascade paths in SQL Server". Its tenant FK is then minted afterwards and keeps the convention's CASCADE; for a table that also cascades from a parent that is two paths to `Tenants`, and SQL Server rejects the constraint. The **same** omission made the first scaffold name the tables in the SINGULAR, after the entity rather than after the set. One cause, two unrelated-looking symptoms. Recorded on the migration.
+- ⚠ **`dotnet ef migrations remove` is not reliably a rollback.** It deleted the migration file but left the snapshot holding the singular tables, so the next `add` diffed singular→plural and emitted five `RenameTable`s for tables nothing had ever created — a chain that would fail on any fresh database. Repaired by checking `__EFMigrationsHistory` and `sys.tables` first (both clean — EF had rolled the failed apply back entirely), then restoring the snapshot from HEAD. **Check what the database actually holds before repairing a migration; the file system is not the state.**
+- **Teams held NO rows at all on this database**, which is why the first endpoint probe 404'd on an empty team id. The harness mints its own committee, a second team to make every cross-team refusal non-vacuous, and five actors with different standing.
+- ⚠ A cross-team fixture must be built by someone entitled to build it: the harness's first run had the *lead* creating an objective on the other team and got a correct 403, which stopped the run before the refusal under test was reached.
+
+**⚠ STILL OWED ON F1 — demo seeding.** The five new tables are in `demo-coverage-manifest.csv` as
+`required` and **none of them has a seeding scenario**, so the UAT rebuild gate reports all five as
+empty. That is not a new gap this lane opened on its own: **no scenario seeds a `Team` at all**, so
+`Teams` and `TeamMembers` were already reported empty before F1 existed — which is why the first
+probe of the new endpoints 404'd on an empty team id. Closing it properly means a scenario that
+creates the committees first and then charters them, which belongs with the organisation scenario
+rather than bolted onto this one. `TeamTaskAttachments` is marked `optional` because a real file
+has to go through the scanning gate and a scenario cannot fabricate one. Recorded, not fixed —
+the same disposition § 8 records for lane C2's six tables.
 **F2 — Meetings, reviews, dashboard, reminders, self-service.** Migration: `TeamMeeting`, `TeamMeetingAttendee`, `TeamMeetingDecision`, `TeamReview`, `TeamReviewLine`; `CompanyHrPolicySettings.TeamTaskReminderLeadDays`.
 **F3 — Workflow.** Entity types `HrTeamObjective`, `HrTeamTermsOfReference` through the four-step recipe; no migration beyond the status enums.
 

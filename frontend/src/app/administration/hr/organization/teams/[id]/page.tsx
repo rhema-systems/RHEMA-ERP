@@ -37,6 +37,9 @@ import {
 } from '@/components/hr/organization/TeamForm';
 import { AddTeamMemberDialog } from '@/components/hr/organization/AddTeamMemberDialog';
 import { EditTeamMemberDialog } from '@/components/hr/organization/EditTeamMemberDialog';
+import { TeamTermsTab } from '@/components/hr/teams/TeamTermsTab';
+import { TeamObjectivesTab } from '@/components/hr/teams/TeamObjectivesTab';
+import { TeamTasksTab } from '@/components/hr/teams/TeamTasksTab';
 import { teamService } from '@/services/hr/team.service';
 import {
   type TeamMember,
@@ -188,12 +191,31 @@ export default function TeamDetailPage({ params }: { params: Promise<{ id: strin
         </Alert>
       )}
 
+      {/*
+        Round 2, lane F1: what the team is chartered to do, what it has undertaken, and who is
+        doing it. Meetings, reviews and the dashboard arrive with F2.
+      */}
       <Tabs defaultValue="members">
         <TabsList>
           <TabsTrigger value="members">Members ({current.length})</TabsTrigger>
+          <TabsTrigger value="terms">Terms of Reference</TabsTrigger>
+          <TabsTrigger value="objectives">Objectives</TabsTrigger>
+          <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="terms" className="pt-4">
+          <TeamTermsTab teamId={id} />
+        </TabsContent>
+
+        <TabsContent value="objectives" className="pt-4">
+          <TeamObjectivesTab teamId={id} />
+        </TabsContent>
+
+        <TabsContent value="tasks" className="pt-4">
+          <TeamTasksTab teamId={id} />
+        </TabsContent>
 
         <TabsContent value="members" className="space-y-4 pt-4">
           <Card>

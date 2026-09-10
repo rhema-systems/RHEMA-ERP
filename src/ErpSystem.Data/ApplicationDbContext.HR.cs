@@ -989,6 +989,164 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ══ Teams and committees: the activity sub-module (round 2, lane F; plan § 6.6) ═════════
+        //
+        // ⚠ RESTRICT throughout, matching Team → Members above rather than introducing cascades
+        // into a store that soft-deletes. Two reasons, and the second is the one that bites:
+        // a soft delete never fires a foreign key at all, so a cascade here would be decoration;
+        // and `TeamObjective` and `TeamTask` are both reachable from `Team` AND from each other,
+        // so cascading either would give SQL Server two paths to the same row and it refuses the
+        // schema outright. The services do the cleaning up, and say so when they will not.
+
+        builder.Entity<TeamTermsOfReference>(entity =>
+        {
+            // ⚠ Named explicitly. Without a DbSet, EF takes the table name from the ENTITY and
+            // produces the singular "TeamTermsOfReference" — beside Teams, TeamMembers and
+            // TeamMemberHistories, which carries its own ToTable for exactly this reason.
+            entity.ToTable("TeamTermsOfReferences");
+
+            entity.Property(e => e.Status).HasConversion<int>();
+
+            entity.HasIndex(e => new { e.TenantId, e.TeamId, e.Status })
+                .HasDatabaseName("IX_TeamTor_Tenant_Team_Status");
+
+            // ⚠ Filtered on IsDeleted: this store soft-deletes, so without the filter a discarded
+            // draft would hold version 2 for ever and the next "new version" would fail with an
+            // opaque 500 — the trap the Team code index above documents at length.
+            entity.HasIndex(e => new { e.TenantId, e.TeamId, e.Version })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_TeamTor_Tenant_Team_Version");
+
+            entity.HasOne(e => e.Team)
+                .WithMany()
+                .HasForeignKey(e => e.TeamId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.PreviousVersion)
+                .WithMany()
+                .HasForeignKey(e => e.PreviousVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(e => e.ApprovedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TeamObjective>(entity =>
+        {
+            entity.ToTable("TeamObjectives");
+
+            entity.Property(e => e.Status).HasConversion<int>();
+            entity.Property(e => e.ProgressMode).HasConversion<int>();
+
+            entity.HasIndex(e => new { e.TenantId, e.TeamId, e.Status })
+                .HasDatabaseName("IX_TeamObjective_Tenant_Team_Status");
+
+            // The dashboard's "overdue" tile reads this.
+            entity.HasIndex(e => new { e.TenantId, e.DueDate })
+                .HasDatabaseName("IX_TeamObjective_Tenant_Due");
+
+            // ⚠ Filtered twice over: on IsDeleted for the soft-delete reason above, and on
+            // Code IS NOT NULL because the code is optional and an unfiltered unique index would
+            // let exactly one objective per team go without one.
+            entity.HasIndex(e => new { e.TenantId, e.TeamId, e.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Code] IS NOT NULL")
+                .HasDatabaseName("IX_TeamObjective_Tenant_Team_Code");
+
+            entity.HasOne(e => e.Team)
+                .WithMany()
+                .HasForeignKey(e => e.TeamId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.OwnerMember)
+                .WithMany()
+                .HasForeignKey(e => e.OwnerMemberId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TeamTask>(entity =>
+        {
+            entity.ToTable("TeamTasks");
+
+            entity.Property(e => e.Status).HasConversion<int>();
+            entity.Property(e => e.Priority).HasConversion<int>();
+
+            entity.HasIndex(e => new { e.TenantId, e.TeamId, e.Status })
+                .HasDatabaseName("IX_TeamTask_Tenant_Team_Status");
+
+            // "My tasks" on /me/teams, and the assignee's reminder sweep.
+            entity.HasIndex(e => new { e.TenantId, e.AssigneeMemberId, e.Status })
+                .HasDatabaseName("IX_TeamTask_Tenant_Assignee_Status");
+
+            // The overdue and due-this-week tiles, and the nightly sweep's window.
+            entity.HasIndex(e => new { e.TenantId, e.DueDate })
+                .HasDatabaseName("IX_TeamTask_Tenant_Due");
+
+            entity.HasIndex(e => e.ObjectiveId)
+                .HasDatabaseName("IX_TeamTask_ObjectiveId");
+
+            entity.HasOne(e => e.Team)
+                .WithMany()
+                .HasForeignKey(e => e.TeamId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Objective)
+                .WithMany(o => o.Tasks)
+                .HasForeignKey(e => e.ObjectiveId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.AssigneeMember)
+                .WithMany()
+                .HasForeignKey(e => e.AssigneeMemberId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ⚠ SourceMeetingDecisionId is deliberately NOT configured as a relationship. It is a
+            // bare provenance id pointing at a table slice F2 has not created yet; giving it a
+            // navigation here would make F1 depend forward on F2.
+        });
+
+        builder.Entity<TeamTaskChecklistItem>(entity =>
+        {
+            entity.ToTable("TeamTaskChecklistItems");
+
+            entity.HasIndex(e => new { e.TaskId, e.DisplayOrder })
+                .HasDatabaseName("IX_TeamTaskChecklistItem_Task_Order");
+
+            // Cascade is safe HERE and nowhere else in this block: a checklist item is reachable
+            // only through its task, so there is exactly one path to it. A tick list without its
+            // task is not worth keeping.
+            entity.HasOne(e => e.Task)
+                .WithMany(t => t.ChecklistItems)
+                .HasForeignKey(e => e.TaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.DoneBy)
+                .WithMany()
+                .HasForeignKey(e => e.DoneById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<TeamTaskAttachment>(entity =>
+        {
+            entity.ToTable("TeamTaskAttachments");
+
+            entity.HasIndex(e => e.TaskId)
+                .HasDatabaseName("IX_TeamTaskAttachment_TaskId");
+
+            entity.HasOne(e => e.Task)
+                .WithMany(t => t.Attachments)
+                .HasForeignKey(e => e.TaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.UploadedBy)
+                .WithMany()
+                .HasForeignKey(e => e.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<TeamMemberHistory>(entity =>
         {
             entity.ToTable("TeamMemberHistories");
