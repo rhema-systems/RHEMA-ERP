@@ -600,6 +600,8 @@ public class ReturnOrderService : IReturnOrderService
 
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             transactionStarted = true;
+            await _unitOfWork.AcquireTransactionLockAsync(CreditNoteExecutionLock(cn), cancellationToken);
+            _unitOfWork.ClearTrackedChanges();
             cn = await LoadCreditNoteForPostingAsync(id, cancellationToken);
             if (cn.JournalEntryId.HasValue)
             {
@@ -814,6 +816,8 @@ public class ReturnOrderService : IReturnOrderService
 
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             transactionStarted = true;
+            await _unitOfWork.AcquireTransactionLockAsync(CreditNoteExecutionLock(creditNote), cancellationToken);
+            _unitOfWork.ClearTrackedChanges();
             creditNote = await _creditNoteRepo.GetQueryable(c => c.TenantId == tenantId && c.Id == id && !c.IsDeleted)
                 .FirstAsync(cancellationToken);
             var decision = await producer.GetAsync(prepared.AccountingEventId, cancellationToken);
@@ -1176,6 +1180,8 @@ public class ReturnOrderService : IReturnOrderService
         $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Post";
     private static string SalesCreditNoteReversalKey(CreditNote creditNote) =>
         $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Reverse";
+    private static string CreditNoteExecutionLock(CreditNote creditNote) =>
+        $"SALES:CREDIT_NOTE:{creditNote.TenantId:N}:{creditNote.Id:N}:{creditNote.OriginalInvoiceId?.ToString("N") ?? "STANDALONE"}";
     private static Guid DeterministicGuid(Guid source, string purpose) =>
         new(SHA256.HashData(Encoding.UTF8.GetBytes($"{source:N}:{purpose}"))[..16]);
     private static ProducerOwnerEffectIdentityDto OwnerEffectFor(CreditNote creditNote, string action, string salt)
