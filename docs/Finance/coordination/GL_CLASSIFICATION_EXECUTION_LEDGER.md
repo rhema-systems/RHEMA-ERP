@@ -1197,6 +1197,14 @@ compiler contention has cleared and Terra Medium execution has resumed to close 
 locked reversal rebuild/date conflict, production relational atomicity/recovery, post-commit audit and stale-test
 gates before final review. No database, migration, default, remote or unrelated state was touched.
 
+Sales added clean locked-reversal correction `6d631b4f` atop its C15 consumption. Under the Serializable invoice
+lock it now revalidates original C15 replay authority, reloads the durable C13 effective date, re-prepares the
+deterministic reversal and rejects stale owner/source state. The candidate remains blocked from review: the first
+real relational production-path fact hangs and is aborted by the 20-second VSTest blame-hang gate, while a subsequent
+targeted Core compile also stalled in the invoking Roslyn process. Terra is diagnosing the exact transaction wait
+from the blame artifacts before retrying; Sol High is independently tracing the fixture and locked authority path.
+No passing relational claim, integration, database, migration or remote action has been made.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
