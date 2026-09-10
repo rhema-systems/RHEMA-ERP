@@ -1247,6 +1247,15 @@ zero rows; disabling test concurrency metadata did not change the result. The fi
 SQL/entity/key mismatch and will correct only test-local schema/model/seed. No production, database, schema,
 migration or remote state was touched.
 
+The Sales owner-guard migration is now clean at `05b9cb23` atop restored-test correction `0fafcad1`. Seventeen
+approval/source, tenant/account/postability, invoice single/cumulative limit, application/over-settlement, void and
+exact-duplicate facts use governed producer mocks and pass 17/17; denial paths assert zero prepare/execute and the
+unrelated PaymentService coverage is preserved. Sol High review is active before integration. The relational SQL
+diagnosis also found the exact fixture mismatch: EF treated a new non-default-GUID
+`AccountingEventPosting` selection row as Modified and issued a zero-row UPDATE instead of INSERT. Terra is
+correcting only test-local tracking for that new graph and rerunning current binaries. No production, schema,
+migration, configured database or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
