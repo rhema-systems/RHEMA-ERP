@@ -151,14 +151,17 @@ public sealed class LegacyPostingPathLockdownTests
             Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "FixedAssets", "FixedAssetDepreciationService.cs"),
             Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "FixedAssets", "AssetValuationService.cs"),
             Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "FixedAssets", "AssetDisposalService.cs"),
-            Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinancePurchaseOrderController.cs"),
-            Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "SupplierReturnsController.cs")
+            Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "FinancePurchaseOrderController.cs")
         };
 
         foreach (var path in expectedPostingEngineFiles)
         {
             File.ReadAllText(path).Should().Contain("PostAsync", $"posting-capable file {Path.GetRelativePath(root, path)} should call IFinancePostingEngine");
         }
+
+        // This inherited controller is a quarantined compatibility surface, not a posting producer.
+        File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "SupplierReturnsController.cs"))
+            .Should().NotContain("ISubledgerPostingService");
     }
 
     [Fact]
@@ -174,6 +177,8 @@ public sealed class LegacyPostingPathLockdownTests
             .And.Contain("IFinanceProducerReversalPreparationService") // C13 reversal
             .And.Contain("IFinanceProducerReplayVerificationService") // C15 replay
             .And.Contain("PrepareAsync(")
+            .And.Contain("GetAsync(prepared.Id")
+            .And.Contain("decision.ProducerDecisionStatus != ProducerIntentDecisionStatuses.Approved")
             .And.Contain("ExecuteInAmbientTransactionAsync(")
             .And.Contain("PrepareReversalAsync(")
             .And.Contain("VerifyPostedAsync(");
@@ -183,6 +188,9 @@ public sealed class LegacyPostingPathLockdownTests
             .And.NotContain("AccountingBook")
             .And.NotContain("BookCode")
             .And.NotContain("GetActiveBooks")
+            .And.NotContain("ALL_ACTIVE_BOOKS")
+            .And.NotContain("DecideProducerAccountingIntentDto")
+            .And.NotContain("ProducerDecisionStatuses.Approved =")
             .And.NotContain(".PostAsync(");
     }
 

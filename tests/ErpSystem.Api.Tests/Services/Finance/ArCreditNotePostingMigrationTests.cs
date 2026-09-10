@@ -80,10 +80,12 @@ public sealed class ArCreditNotePostingMigrationTests
         var approved = new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
             ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved, RequestFingerprint = fingerprint };
         producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(approved);
-        producer.Setup(x => x.GetAsync(eventId, It.IsAny<CancellationToken>())).ReturnsAsync(approved);
+        producer.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(approved);
         var postingId = Guid.NewGuid(); var journalId = Guid.NewGuid();
         execution.Setup(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
                 It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ProducerAccountingIntentDto, ProducerOwnerEffectReceiptDto, CancellationToken>((_, _, _, _) =>
+                SeedPostedSalesCreditNoteCompatibilityLink(db, tenantId, fixture.CreditNote, postingId, journalId))
             .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(eventId, fingerprint, AccountingEventStatuses.Posted, postingId, journalId));
         var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object, Mock.Of<IFinanceProducerReversalPreparationService>());
 
@@ -137,7 +139,7 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
-        var originalEventId = Guid.NewGuid();
+        var originalEventId = DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-POST");
         db.AccountingEvents.Add(new AccountingEvent
         {
             Id = originalEventId, TenantId = tenantId, OriginatingModuleCode = "SALES",
@@ -146,11 +148,16 @@ public sealed class ArCreditNotePostingMigrationTests
             Status = AccountingEventStatuses.Posted
         });
         fixture.CreditNote.JournalEntryId = Guid.NewGuid();
+        SeedPostedSalesCreditNoteCompatibilityLink(db, tenantId, fixture.CreditNote, Guid.NewGuid(), fixture.CreditNote.JournalEntryId.Value);
         await db.SaveChangesAsync();
 
-        var reversalEventId = Guid.NewGuid();
+        var reversalEventId = DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-REVERSAL");
         const string fingerprint = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
         var producer = new Mock<IFinanceProducerIntentService>();
+        producer.Setup(x => x.GetAsync(originalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            Id = originalEventId, RequestFingerprint = fingerprint, ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved
+        });
         producer.Setup(x => x.GetAsync(reversalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
         {
             Id = reversalEventId, RequestFingerprint = fingerprint,
@@ -235,7 +242,9 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, taxAmount: 20m);
-        var (service, subledgerPostingMock) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, subledgerPostingMock) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object,
+            Mock.Of<IFinanceProducerReversalPreparationService>(), governed.Replay.Object);
 
         var result = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
@@ -250,22 +259,14 @@ public sealed class ArCreditNotePostingMigrationTests
             e.PostingAction == "Post");
         postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
 
-        var journal = await db.JournalEntries
-            .Include(j => j.Transactions)
-            .SingleAsync(j => j.Id == result.JournalEntryId);
+        var journal = await db.JournalEntries.SingleAsync(j => j.Id == result.JournalEntryId);
         journal.PostingStatus.Should().Be("Posted");
         journal.SourceModule.Should().Be("AR");
         journal.SourceDocumentType.Should().Be("SalesCreditNote");
-        journal.Transactions.Should().HaveCount(3);
-        journal.Transactions.Single(t => t.AccountId == fixture.SalesReturnsAccount.Id).DebitAmount.Should().Be(100m);
-        journal.Transactions.Single(t => t.AccountId == fixture.TaxAccount.Id).DebitAmount.Should().Be(20m);
-        journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(120m);
-
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
-        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
-        fixture.ArAccount.Balance.Should().Be(-120m);
-        fixture.SalesReturnsAccount.Balance.Should().Be(100m);
-        fixture.TaxAccount.Balance.Should().Be(-20m);
+        governed.Intents.Verify(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Once);
+        governed.Execution.Verify(x => x.ExecuteInAmbientTransactionAsync(It.IsAny<Guid>(),
+            It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -277,7 +278,8 @@ public sealed class ArCreditNotePostingMigrationTests
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, cn => cn.CreditNoteStatus = CreditNoteStatus.PendingApproval);
         var governed = CreateApprovedGovernedProducerMock(db, tenantId);
-        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object,
+            replayVerifier: governed.Replay.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
@@ -574,13 +576,18 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, periodIsOpen: false, periodIsClosed: true);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var producer = new Mock<IFinanceProducerIntentService>();
+        producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccountingEventDto { Id = Guid.NewGuid(), Status = AccountingEventStatuses.PendingApproval,
+                ProducerDecisionStatus = ProducerIntentDecisionStatuses.Pending, RequestFingerprint = new string('F', 64) });
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+        await act.Should().NotThrowAsync();
         fixture.CreditNote.JournalEntryId.Should().BeNull();
+        execution.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -592,15 +599,21 @@ public sealed class ArCreditNotePostingMigrationTests
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
         var governed = CreateApprovedGovernedProducerMock(db, tenantId);
-        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object,
+            replayVerifier: governed.Replay.Object);
 
         var first = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
         governed.ClearInvocations();
         var second = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         second.JournalEntryId.Should().Be(first.JournalEntryId);
+        (await db.JournalEntries.CountAsync(j => j.SourceDocumentType == "SalesCreditNote")).Should().Be(1);
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote")).Should().Be(1);
         governed.VerifyNoPrepareOrExecution();
+        governed.Replay.Verify(x => x.VerifyPostedAsync(DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-POST"),
+            It.Is<FinanceProducerReplayVerificationRequestDto>(request => request.JournalEntryId == first.JournalEntryId),
+            It.IsAny<CancellationToken>()), Times.Once);
+        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
     }
 
     [Fact]
@@ -631,7 +644,25 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, taxAmount: 20m);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var reversalEventId = DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-REVERSAL");
+        const string reversalFingerprint = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+        governed.Intents.Setup(x => x.GetAsync(reversalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            Id = reversalEventId, RequestFingerprint = reversalFingerprint, ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved
+        });
+        var reversals = new Mock<IFinanceProducerReversalPreparationService>();
+        reversals.Setup(x => x.PrepareReversalAsync(It.IsAny<PrepareProducerAccountingReversalDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProducerAccountingReversalPreparationResultDto(reversalEventId,
+                DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-POST"), reversalFingerprint,
+                AccountingEventStatuses.PendingApproval, ProducerIntentDecisionStatuses.Approved));
+        var reversalPostingId = Guid.NewGuid();
+        var reversalJournalId = Guid.NewGuid();
+        governed.Execution.Setup(x => x.ExecuteInAmbientTransactionAsync(reversalEventId, It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(reversalEventId, reversalFingerprint,
+                AccountingEventStatuses.Posted, reversalPostingId, reversalJournalId));
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object,
+            reversals.Object, governed.Replay.Object);
         var posted = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         var reversed = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto
@@ -645,21 +676,10 @@ public sealed class ArCreditNotePostingMigrationTests
         reversed.ReversalPostingEventId.Should().NotBeNull();
         reversed.ReversalReason.Should().Be("Correct approved credit note");
 
-        var originalJournal = await db.JournalEntries
-            .Include(j => j.Transactions)
-            .SingleAsync(j => j.Id == posted.JournalEntryId);
+        var originalJournal = await db.JournalEntries.SingleAsync(j => j.Id == posted.JournalEntryId);
         originalJournal.PostingStatus.Should().Be("Posted");
-        originalJournal.IsReversed.Should().BeTrue();
-        originalJournal.ReversalJournalEntryId.Should().Be(reversed.ReversalJournalEntryId);
-        originalJournal.Transactions.Should().OnlyContain(t =>
-            t.PostingStatus == "Posted" && t.IsReversed && t.ReversalTransactionId.HasValue);
-        var reversalJournal = await db.JournalEntries
-            .Include(j => j.Transactions)
-            .SingleAsync(j => j.Id == reversed.ReversalJournalEntryId);
-        reversalJournal.SourceDocumentType.Should().Be("SalesCreditNoteReversal");
-        reversalJournal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).DebitAmount.Should().Be(120m);
-        reversalJournal.Transactions.Single(t => t.AccountId == fixture.SalesReturnsAccount.Id).CreditAmount.Should().Be(100m);
-        reversalJournal.Transactions.Single(t => t.AccountId == fixture.TaxAccount.Id).CreditAmount.Should().Be(20m);
+        reversed.ReversalPostingEventId.Should().Be(reversalPostingId);
+        reversed.ReversalJournalEntryId.Should().Be(reversalJournalId);
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNoteReversed && a.TenantId == tenantId)).Should().Be(1);
     }
 
@@ -671,28 +691,50 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var reversalEventId = DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-REVERSAL");
+        const string reversalFingerprint = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+        governed.Intents.Setup(x => x.GetAsync(reversalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            Id = reversalEventId, RequestFingerprint = reversalFingerprint, ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved
+        });
+        var reversals = new Mock<IFinanceProducerReversalPreparationService>();
+        reversals.Setup(x => x.PrepareReversalAsync(It.IsAny<PrepareProducerAccountingReversalDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProducerAccountingReversalPreparationResultDto(reversalEventId,
+                DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-POST"), reversalFingerprint,
+                AccountingEventStatuses.PendingApproval, ProducerIntentDecisionStatuses.Approved));
+        var reversalPostingId = Guid.NewGuid();
+        var reversalJournalId = Guid.NewGuid();
+        governed.Execution.Setup(x => x.ExecuteInAmbientTransactionAsync(reversalEventId, It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(reversalEventId, reversalFingerprint,
+                AccountingEventStatuses.Posted, reversalPostingId, reversalJournalId));
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object,
+            reversals.Object, governed.Replay.Object);
         await service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         var first = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Correction" });
-        var second = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Repeated request" });
+        var second = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Correction" });
+        var conflict = () => service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Repeated request" });
 
         second.ReversalJournalEntryId.Should().Be(first.ReversalJournalEntryId);
         second.ReversalPostingEventId.Should().Be(first.ReversalPostingEventId);
-        (await db.JournalEntries.CountAsync(j => j.SourceDocumentType == "SalesCreditNoteReversal")).Should().Be(1);
+        await conflict.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("AR credit note reversal retry conflicts with the immutable reversal evidence.");
+        governed.Execution.Verify(x => x.ExecuteInAmbientTransactionAsync(reversalEventId,
+            It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "AccountsReceivable")]
-    public async Task CompatibilityCustomerCreditNote_ShouldPostThroughFinancePostingEngineAndNotLegacyArPaymentPath()
+    public async Task CompatibilityCustomerCreditNote_ShouldRejectRetiredLegacyArPaymentPath()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedCompatibilityCreditNoteAsync(db, tenantId);
         var (service, subledgerPostingMock) = CreatePaymentService(db, tenantId);
 
-        var result = await service.CreateCreditNoteAsync(new CreditNoteCreateDto
+        var act = () => service.CreateCreditNoteAsync(new CreditNoteCreateDto
         {
             CustomerId = fixture.BusinessPartner.Id,
             CreditNoteDate = new DateTime(2026, 7, 5),
@@ -701,23 +743,10 @@ public sealed class ArCreditNotePostingMigrationTests
             Reference = "CN-COMPAT"
         });
 
-        result.JournalEntryId.Should().NotBeNull();
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The legacy AR payment credit-note endpoint is retired. Use the Sales credit-note workflow.");
         subledgerPostingMock.Verify(x => x.PostArPaymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-
-        var postingEvent = await db.FinancePostingEvents.SingleAsync(e =>
-            e.TenantId == tenantId &&
-            e.SourceDocumentType == "CustomerCreditNote" &&
-            e.SourceDocumentId == result.Id &&
-            e.PostingAction == "Post");
-        postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
-
-        var journal = await db.JournalEntries
-            .Include(j => j.Transactions)
-            .SingleAsync(j => j.Id == result.JournalEntryId);
-        journal.SourceDocumentType.Should().Be("CustomerCreditNote");
-        journal.Transactions.Single(t => t.AccountId == fixture.SalesReturnsAccount.Id).DebitAmount.Should().Be(100m);
-        journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(100m);
-        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
+        (await db.FinancePostingEvents.CountAsync(e => e.TenantId == tenantId && e.SourceDocumentType == "CustomerCreditNote")).Should().Be(0);
     }
 
     [Fact]
@@ -736,11 +765,16 @@ public sealed class ArCreditNotePostingMigrationTests
             Status = AccountingEventStatuses.Posted
         });
         fixture.CreditNote.JournalEntryId = Guid.NewGuid();
+        SeedPostedSalesCreditNoteCompatibilityLink(db, tenantId, fixture.CreditNote, Guid.NewGuid(), fixture.CreditNote.JournalEntryId.Value);
         await db.SaveChangesAsync();
 
         var reversalEventId = Guid.NewGuid();
         const string fingerprint = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
         var producer = new Mock<IFinanceProducerIntentService>();
+        producer.Setup(x => x.GetAsync(originalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
+        {
+            Id = originalEventId, RequestFingerprint = fingerprint, ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved
+        });
         producer.Setup(x => x.GetAsync(reversalEventId, It.IsAny<CancellationToken>())).ReturnsAsync(new AccountingEventDto
         {
             Id = reversalEventId, RequestFingerprint = fingerprint, ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved
@@ -816,6 +850,28 @@ public sealed class ArCreditNotePostingMigrationTests
         return new ApplicationDbContext(options);
     }
 
+    private static void SeedPostedSalesCreditNoteCompatibilityLink(
+        ApplicationDbContext db,
+        Guid tenantId,
+        CreditNote creditNote,
+        Guid postingEventId,
+        Guid journalEntryId)
+    {
+        var book = db.AccountingBooks.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        db.FinancePostingEvents.Add(new FinancePostingEvent
+        {
+            Id = postingEventId, TenantId = tenantId, SourceModule = "AR", OriginModuleCode = "SALES",
+            SourceDocumentType = "SalesCreditNote", SourceDocumentId = creditNote.Id, PostingAction = "Post",
+            SourceDocumentReference = creditNote.DocumentNumber,
+            IdempotencyKey = $"AR:SalesCreditNote:{tenantId:N}:{creditNote.Id:N}:Post",
+            JournalEntryId = journalEntryId, AccountingBookId = book.Id, PostingStatus = "Posted",
+            PostingDate = creditNote.DocumentDate, RequestedAt = DateTime.UtcNow, PostedAt = DateTime.UtcNow,
+            TotalDebitAmount = creditNote.TotalAmount, TotalCreditAmount = creditNote.TotalAmount,
+            FunctionalCurrencyCode = "GHS", BookClassification = "IFRS", CreatedAt = DateTime.UtcNow,
+            CreatedBy = "governed-producer-mock"
+        });
+    }
+
     private static GovernedSalesCreditNoteProducerMock CreateApprovedGovernedProducerMock(
         ApplicationDbContext db,
         Guid tenantId)
@@ -847,6 +903,43 @@ public sealed class ArCreditNotePostingMigrationTests
             {
                 var request = intent.PostingRequest;
                 var book = db.AccountingBooks.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+                var period = db.FiscalPeriods.Single(item => item.TenantId == tenantId && item.StartDate <= request.PostingDate && item.EndDate >= request.PostingDate);
+                db.AccountingEvents.Add(new AccountingEvent
+                {
+                    Id = intent.AccountingEventId ?? accountingEventId,
+                    TenantId = tenantId,
+                    OriginatingModuleCode = request.OriginModuleCode ?? request.SourceModule,
+                    SourceDocumentType = request.SourceDocumentType,
+                    SourceDocumentId = request.SourceDocumentId,
+                    PostingAction = request.PostingAction,
+                    IdempotencyKey = request.IdempotencyKey ?? string.Empty,
+                    Status = AccountingEventStatuses.Posted
+                });
+                db.JournalEntries.Add(new JournalEntry
+                {
+                    Id = journalEntryId,
+                    TenantId = tenantId,
+                    JournalEntryNumber = $"GOV-{journalEntryId:N}"[..20],
+                    JournalType = request.JournalType,
+                    EntryDate = request.PostingDate,
+                    Description = request.Description,
+                    ReferenceNumber = request.SourceDocumentReference,
+                    SourceModule = request.SourceModule,
+                    OriginModuleCode = request.OriginModuleCode,
+                    SourceDocumentId = request.SourceDocumentId,
+                    SourceDocumentType = request.SourceDocumentType,
+                    TotalDebitAmount = request.Lines.Sum(line => line.DebitAmount),
+                    TotalCreditAmount = request.Lines.Sum(line => line.CreditAmount),
+                    IsBalanced = true,
+                    BookClassification = "IFRS",
+                    AccountingBookId = book.Id,
+                    FiscalPeriodId = period.Id,
+                    PostingDate = request.PostingDate,
+                    PostingStatus = "Posted",
+                    ApprovalStatus = "Approved",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "governed-producer-mock"
+                });
                 db.FinancePostingEvents.Add(new FinancePostingEvent
                 {
                     Id = postingEventId,
@@ -879,7 +972,7 @@ public sealed class ArCreditNotePostingMigrationTests
                 postingEventId,
                 journalEntryId));
 
-        return new GovernedSalesCreditNoteProducerMock(intents, execution);
+        return new GovernedSalesCreditNoteProducerMock(intents, execution, CreateReplayVerifier());
     }
 
     private static (ReturnOrderService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateReturnOrderService(
@@ -953,12 +1046,14 @@ public sealed class ArCreditNotePostingMigrationTests
 
     private sealed record GovernedSalesCreditNoteProducerMock(
         Mock<IFinanceProducerIntentService> Intents,
-        Mock<IFinanceProducerApprovedExecutionService> Execution)
+        Mock<IFinanceProducerApprovedExecutionService> Execution,
+        Mock<IFinanceProducerReplayVerificationService> Replay)
     {
         public void ClearInvocations()
         {
             Intents.Invocations.Clear();
             Execution.Invocations.Clear();
+            Replay.Invocations.Clear();
         }
 
         public void VerifyNoPrepareOrExecution()
