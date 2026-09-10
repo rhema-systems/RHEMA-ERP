@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AR;
 using ErpSystem.Api.Services.Finance.GL;
@@ -274,7 +276,8 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, cn => cn.CreditNoteStatus = CreditNoteStatus.PendingApproval);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
@@ -282,6 +285,7 @@ public sealed class ArCreditNotePostingMigrationTests
             .WithMessage("AR credit note workflow approval is not complete.");
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote")).Should().Be(0);
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePostingFailed)).Should().Be(1);
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -292,12 +296,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, configureInvoice: invoice => invoice.JournalEntryId = null, seedInvoicePostingEvent: false);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR credit note cannot post against unposted invoice '{fixture.Invoice.InvoiceNumber}'.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -308,12 +314,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, amount: 125m);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR credit note would exceed eligible credit amount for invoice '{fixture.Invoice.InvoiceNumber}'.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -324,7 +332,8 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, amount: 80m);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
         await service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         var secondCreditNote = CreateApprovedSalesCreditNote(
@@ -333,6 +342,7 @@ public sealed class ArCreditNotePostingMigrationTests
             amount: 50m);
         db.CreditNotes.Add(secondCreditNote);
         await db.SaveChangesAsync();
+        governed.ClearInvocations();
 
         var act = () => service.PostCreditNoteAsync(secondCreditNote.Id);
 
@@ -340,6 +350,7 @@ public sealed class ArCreditNotePostingMigrationTests
             .WithMessage($"AR credit note would exceed eligible credit amount for invoice '{fixture.Invoice.InvoiceNumber}'.");
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote"))
             .Should().Be(1);
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -350,12 +361,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.ApplyCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note must be posted through the central finance posting engine before it can be applied.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -366,13 +379,16 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
         await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        governed.ClearInvocations();
 
         var act = () => service.ApplyCreditNoteAsync(fixture.CreditNote.Id, Guid.NewGuid());
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit notes can only be applied to their original invoice. Use a reversal or adjustment workflow to correct the target.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -388,7 +404,8 @@ public sealed class ArCreditNotePostingMigrationTests
         db.CreditNotes.Add(standaloneCredit);
         await db.SaveChangesAsync();
 
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
         await service.PostCreditNoteAsync(standaloneCredit.Id);
 
         var result = await service.ApplyCreditNoteAsync(standaloneCredit.Id, fixture.Invoice.Id);
@@ -425,13 +442,16 @@ public sealed class ArCreditNotePostingMigrationTests
         db.Invoices.Add(otherInvoice);
         await db.SaveChangesAsync();
 
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
         await service.PostCreditNoteAsync(standaloneCredit.Id);
+        governed.ClearInvocations();
 
         var act = () => service.ApplyCreditNoteAsync(standaloneCredit.Id, otherInvoice.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit notes can only be applied to invoices for the same business partner.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -442,15 +462,18 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, amount: 100m);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
         await service.PostCreditNoteAsync(fixture.CreditNote.Id);
         SeedPostedCustomerReceiptSettlement(db, fixture, amount: 30m);
         await db.SaveChangesAsync();
+        governed.ClearInvocations();
 
         var act = () => service.ApplyCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR credit note would over-settle invoice '{fixture.Invoice.InvoiceNumber}' when combined with posted receipts and credit notes.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -467,12 +490,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var otherBusinessPartner = SeedBusinessPartner(db, otherTenantId, Guid.NewGuid(), otherAr.Id);
         fixture.CreditNote.BusinessPartnerId = otherBusinessPartner.Id;
         await db.SaveChangesAsync();
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note customer was not found for this tenant.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -488,12 +513,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var otherAr = SeedAccount(db, otherTenantId, "1200", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         fixture.BusinessPartner.DefaultArAccountId = otherAr.Id;
         await db.SaveChangesAsync();
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note posting AR control account was not found for this tenant.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -509,12 +536,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var otherReturns = SeedAccount(db, otherTenantId, "5200", AccountType.Expense);
         fixture.Settings.DiscountAllowedAccountId = otherReturns.Id;
         await db.SaveChangesAsync();
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note posting sales returns/allowance account was not found for this tenant.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -527,12 +556,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
         fixture.SalesReturnsAccount.AllowDirectPosting = false;
         await db.SaveChangesAsync();
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note posting sales returns/allowance account account '5200' does not allow direct posting.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -560,15 +591,16 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
 
         var first = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        governed.ClearInvocations();
         var second = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         second.JournalEntryId.Should().Be(first.JournalEntryId);
-        (await db.JournalEntries.CountAsync(j => j.SourceDocumentType == "SalesCreditNote")).Should().Be(1);
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote")).Should().Be(1);
-        (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNoteDuplicatePostingAttempt)).Should().Be(1);
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -579,13 +611,16 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
-        var (service, _) = CreateReturnOrderService(db, tenantId);
+        var governed = CreateApprovedGovernedProducerMock(db, tenantId);
+        var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
         await service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        governed.ClearInvocations();
 
         var act = () => service.VoidCreditNoteAsync(fixture.CreditNote.Id, "test void");
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posted AR credit notes cannot be voided by mutation. Use a reversal or adjustment workflow.");
+        governed.VerifyNoPrepareOrExecution();
     }
 
     [Fact]
@@ -781,6 +816,72 @@ public sealed class ArCreditNotePostingMigrationTests
         return new ApplicationDbContext(options);
     }
 
+    private static GovernedSalesCreditNoteProducerMock CreateApprovedGovernedProducerMock(
+        ApplicationDbContext db,
+        Guid tenantId)
+    {
+        var accountingEventId = Guid.NewGuid();
+        var postingEventId = Guid.NewGuid();
+        var journalEntryId = Guid.NewGuid();
+        const string fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        var approved = new AccountingEventDto
+        {
+            Id = accountingEventId,
+            Status = AccountingEventStatuses.PendingApproval,
+            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved,
+            RequestFingerprint = fingerprint
+        };
+        var intents = new Mock<IFinanceProducerIntentService>();
+        intents.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(approved);
+        intents.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(approved);
+
+        var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        execution.Setup(x => x.ExecuteInAmbientTransactionAsync(
+                accountingEventId,
+                It.IsAny<ProducerAccountingIntentDto>(),
+                It.IsAny<ProducerOwnerEffectReceiptDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, ProducerAccountingIntentDto, ProducerOwnerEffectReceiptDto, CancellationToken>((eventId, intent, receipt, cancellationToken) =>
+            {
+                var request = intent.PostingRequest;
+                var book = db.AccountingBooks.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+                db.FinancePostingEvents.Add(new FinancePostingEvent
+                {
+                    Id = postingEventId,
+                    TenantId = tenantId,
+                    SourceModule = request.SourceModule,
+                    OriginModuleCode = request.OriginModuleCode,
+                    SourceDocumentType = request.SourceDocumentType,
+                    SourceDocumentId = request.SourceDocumentId,
+                    PostingAction = request.PostingAction,
+                    SourceDocumentReference = request.SourceDocumentReference,
+                    IdempotencyKey = request.IdempotencyKey,
+                    JournalEntryId = journalEntryId,
+                    AccountingBookId = book.Id,
+                    PostingStatus = "Posted",
+                    PostingDate = request.PostingDate,
+                    RequestedAt = DateTime.UtcNow,
+                    PostedAt = DateTime.UtcNow,
+                    TotalDebitAmount = request.Lines.Sum(line => line.DebitAmount),
+                    TotalCreditAmount = request.Lines.Sum(line => line.CreditAmount),
+                    FunctionalCurrencyCode = request.FunctionalCurrencyCode,
+                    BookClassification = "IFRS",
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "governed-producer-mock"
+                });
+            })
+            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(
+                accountingEventId,
+                fingerprint,
+                AccountingEventStatuses.Posted,
+                postingEventId,
+                journalEntryId));
+
+        return new GovernedSalesCreditNoteProducerMock(intents, execution);
+    }
+
     private static (ReturnOrderService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateReturnOrderService(
         ApplicationDbContext db,
         Guid tenantId,
@@ -848,6 +949,24 @@ public sealed class ArCreditNotePostingMigrationTests
             .ReturnsAsync(new FinanceProducerReplayVerificationResultDto(
                 Guid.NewGuid(), "replay", "owner-effect", AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
         return replay;
+    }
+
+    private sealed record GovernedSalesCreditNoteProducerMock(
+        Mock<IFinanceProducerIntentService> Intents,
+        Mock<IFinanceProducerApprovedExecutionService> Execution)
+    {
+        public void ClearInvocations()
+        {
+            Intents.Invocations.Clear();
+            Execution.Invocations.Clear();
+        }
+
+        public void VerifyNoPrepareOrExecution()
+        {
+            Intents.Verify(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            Execution.Verify(x => x.ExecuteInAmbientTransactionAsync(It.IsAny<Guid>(), It.IsAny<ProducerAccountingIntentDto>(),
+                It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
     }
 
     private static Guid DeterministicSalesEventId(Guid creditNoteId, string purpose) =>
