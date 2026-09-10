@@ -428,6 +428,14 @@ export interface CandidateReferee {
   email: string;
   phone: string;
   relationship: string;
+  /**
+   * The relationship-catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save — so this
+   * is for re-opening the dropdown, not for display. PROFESSIONAL and OTHER values only: a
+   * candidate may name a pastor or a family friend, not their mother.
+   */
+  relationshipTypeId?: string | null;
   yearsKnown: number;
 }
 

@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { employeeService } from '@/services/hr/employee.service';
 import type { EmployeeWorkHistory } from '@/types/hr/employee-subresources';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
+import { AddressCascadeField } from './address-fields';
 import {
   DateField,
   FieldRow,
@@ -14,12 +15,23 @@ import {
   TextareaField,
 } from './fields';
 
+/**
+ * ⚠ Three of these maxima used to exceed their columns (finding X-5, and two more found with it):
+ * companyAddress said 300 against a 200 column, jobTitle 200 against 100, jobDescription 2000
+ * against 1000. The form accepted a value, the create refused it with a 400 the user could not
+ * have predicted, and the update — whose DTO carried no lengths at all until this lane — reached
+ * SQL Server and failed as a truncation 500. All three now state what the column actually holds.
+ */
 const schema = z
   .object({
     companyName: z.string().min(1, 'Company name is required').max(200),
-    companyAddress: z.string().max(300).optional().or(z.literal('')),
-    jobTitle: z.string().min(1, 'Job title is required').max(200),
-    jobDescription: z.string().max(2000).optional().or(z.literal('')),
+    companyAddress: z.string().max(200).optional().or(z.literal('')),
+    countryId: z.string().optional().or(z.literal('')),
+    city: z.string().max(100).optional().or(z.literal('')),
+    region: z.string().max(100).optional().or(z.literal('')),
+    geoAreaId: z.string().optional().or(z.literal('')),
+    jobTitle: z.string().min(1, 'Job title is required').max(100),
+    jobDescription: z.string().max(1000).optional().or(z.literal('')),
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().optional().or(z.literal('')),
     salary: z.string().optional().or(z.literal('')),
@@ -38,6 +50,10 @@ type FormValues = z.infer<typeof schema>;
 const empty: FormValues = {
   companyName: '',
   companyAddress: '',
+  countryId: '',
+  city: '',
+  region: '',
+  geoAreaId: '',
   jobTitle: '',
   jobDescription: '',
   startDate: '',
@@ -53,6 +69,11 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   employeeId,
   companyName: v.companyName,
   companyAddress: v.companyAddress || null,
+  countryId: v.countryId || null,
+  city: v.city || null,
+  region: v.region || null,
+  // ⚠ Null CLEARS the link on the update DTO — its address fields are all full-replace.
+  geoAreaId: v.geoAreaId || null,
   jobTitle: v.jobTitle,
   jobDescription: v.jobDescription || null,
   startDate: v.startDate,
@@ -81,6 +102,7 @@ export function WorkHistoryTab({ employeeId }: { employeeId: string }) {
       remove={employeeService.removeWorkHistory.bind(employeeService)}
       columns={[
         { header: 'Company', cell: (w) => w.companyName },
+        { header: 'Where', cell: (w) => [w.city, w.region].filter(Boolean).join(', ') || '—' },
         { header: 'Job title', cell: (w) => w.jobTitle },
         { header: 'From', cell: (w) => w.startDate?.slice(0, 10) || '—' },
         { header: 'To', cell: (w) => w.endDate?.slice(0, 10) || 'Present' },
@@ -97,6 +119,10 @@ export function WorkHistoryTab({ employeeId }: { employeeId: string }) {
       toForm={(w) => ({
         companyName: w.companyName,
         companyAddress: w.companyAddress ?? '',
+        countryId: w.countryId ?? '',
+        city: w.city ?? '',
+        region: w.region ?? '',
+        geoAreaId: w.geoAreaId ?? '',
         jobTitle: w.jobTitle,
         jobDescription: w.jobDescription ?? '',
         startDate: w.startDate?.slice(0, 10) ?? '',
@@ -114,6 +140,18 @@ export function WorkHistoryTab({ employeeId }: { employeeId: string }) {
             <TextField form={form} name="jobTitle" label="Job title" required />
           </FieldRow>
           <TextField form={form} name="companyAddress" label="Company address" />
+          {/*
+            Where the employer is. Until round 2 the address was one free-text line with no
+            country, city or geography at all (register row E-6) — so "every engineer who worked at
+            a Tema firm" was unanswerable.
+          */}
+          <AddressCascadeField
+            form={form}
+            countryName="countryId"
+            geoAreaName="geoAreaId"
+            cityName="city"
+            regionName="region"
+          />
           <TextareaField form={form} name="jobDescription" label="Job description" />
           <FieldRow>
             <DateField form={form} name="startDate" label="Start date" required />

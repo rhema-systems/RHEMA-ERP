@@ -12,7 +12,9 @@ import { employeeService } from '@/services/hr/employee.service';
 import { employeeDocumentService } from '@/services/hr/employee-document.service';
 import { hrDocumentService } from '@/services/hr/hr-document.service';
 import { REFEREE_TYPE_OPTIONS, type EmployeeReferee } from '@/types/hr/employee-subresources';
+import { RELATIONSHIP_SCOPES } from '@/types/hr/relationship-type';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
+import { RelationshipField } from './address-fields';
 import { FieldRow, SelectField, SwitchField, TextField } from './fields';
 
 const schema = z.object({
@@ -21,6 +23,7 @@ const schema = z.object({
   organization: z.string().max(200).optional().or(z.literal('')),
   positionOrTitle: z.string().max(100).optional().or(z.literal('')),
   relationship: z.string().min(1, 'Relationship is required').max(200),
+  relationshipTypeId: z.string().optional().or(z.literal('')),
   phoneNumber: z.string().min(1, 'Phone number is required').max(50),
   emailAddress: z.string().email('Enter a valid email').optional().or(z.literal('')),
   isPrimary: z.boolean(),
@@ -35,6 +38,7 @@ const empty: FormValues = {
   organization: '',
   positionOrTitle: '',
   relationship: '',
+  relationshipTypeId: '',
   phoneNumber: '',
   emailAddress: '',
   isPrimary: false,
@@ -48,6 +52,12 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   organization: v.organization || null,
   positionOrTitle: v.positionOrTitle || null,
   relationship: v.relationship,
+  // ⚠ When an id is sent the server OVERWRITES `relationship` with the catalogue row's name.
+  relationshipTypeId: v.relationshipTypeId || null,
+  // ⚠ Nulls mean "not supplied" on the referee UPDATE DTO, so unlinking has to say so explicitly.
+  // The tab sends the whole form every save, and without this an emptied dropdown would save
+  // successfully and change nothing.
+  clearRelationshipType: !v.relationshipTypeId,
   phoneNumber: v.phoneNumber,
   emailAddress: v.emailAddress || null,
   isPrimary: v.isPrimary,
@@ -153,6 +163,7 @@ export function RefereesTab({ employeeId }: { employeeId: string }) {
           organization: r.organization ?? '',
           positionOrTitle: r.positionOrTitle ?? '',
           relationship: r.relationship,
+          relationshipTypeId: r.relationshipTypeId ?? '',
           phoneNumber: r.phoneNumber,
           emailAddress: r.emailAddress ?? '',
           isPrimary: r.isPrimary,
@@ -174,11 +185,20 @@ export function RefereesTab({ employeeId }: { employeeId: string }) {
               <TextField form={form} name="organization" label="Organization" />
               <TextField form={form} name="positionOrTitle" label="Position / title" />
             </FieldRow>
-            <TextField
+            {/*
+              ⚠ The accepted set depends on the referee TYPE, watched live: a personal referee may
+              be a relative or a family friend; a professional or academic one may not. Switching
+              the type clears a selection the new kind does not accept — see RelationshipField.
+            */}
+            <RelationshipField
               form={form}
-              name="relationship"
-              label="Relationship"
-              placeholder="Former manager"
+              typeIdName="relationshipTypeId"
+              textName="relationship"
+              categories={
+                form.watch('refereeType') === 'Personal'
+                  ? RELATIONSHIP_SCOPES.personalReferee
+                  : RELATIONSHIP_SCOPES.professionalReferee
+              }
               required
             />
             <FieldRow>

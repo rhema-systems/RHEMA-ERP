@@ -6,13 +6,14 @@ import { useQuery } from '@tanstack/react-query';
 import { Camera, Paperclip } from 'lucide-react';
 import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { Badge } from '@/components/ui/badge';
-import { countryService } from '@/services/hr/country.service';
 import { employeeService } from '@/services/hr/employee.service';
 import { identificationTypeService } from '@/services/hr/lookup.service';
 import { GENDER_OPTIONS } from '@/types/hr/employee';
 import type { Gender } from '@/types/hr/employee';
 import type { EmployeeGuarantor } from '@/types/hr/employee-subresources';
+import { RELATIONSHIP_SCOPES } from '@/types/hr/relationship-type';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
+import { AddressCascadeField, RelationshipField } from './address-fields';
 import { GuarantorFilesDialog } from './GuarantorFilesDialog';
 import {
   DateField,
@@ -30,12 +31,15 @@ const schema = z.object({
   lastName: z.string().min(1, 'Last name is required').max(100),
   title: z.string().max(50).optional().or(z.literal('')),
   relationship: z.string().min(1, 'Relationship is required').max(100),
+  relationshipTypeId: z.string().optional().or(z.literal('')),
   gender: z.string().optional().or(z.literal('')),
   dateOfBirth: z.string().optional().or(z.literal('')),
-  address: z.string().min(1, 'Address is required').max(300),
+  address: z.string().min(1, 'Address is required').max(500),
   city: z.string().max(100).optional().or(z.literal('')),
-  digitalAddress: z.string().max(30).optional().or(z.literal('')),
+  region: z.string().max(100).optional().or(z.literal('')),
+  digitalAddress: z.string().max(50).optional().or(z.literal('')),
   countryId: z.string().optional().or(z.literal('')),
+  geoAreaId: z.string().optional().or(z.literal('')),
   phoneNumber: z.string().max(30).optional().or(z.literal('')),
   emailAddress: z.string().email('Enter a valid email').optional().or(z.literal('')),
   jobTitle: z.string().max(200).optional().or(z.literal('')),
@@ -66,12 +70,15 @@ const empty: FormValues = {
   lastName: '',
   title: '',
   relationship: '',
+  relationshipTypeId: '',
   gender: '',
   dateOfBirth: '',
   address: '',
   city: '',
+  region: '',
   digitalAddress: '',
   countryId: '',
+  geoAreaId: '',
   phoneNumber: '',
   emailAddress: '',
   jobTitle: '',
@@ -97,6 +104,15 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   employeeId,
   isPrimary: v.isPrimary,
   relationship: v.relationship,
+  // ⚠ When an id is sent the server OVERWRITES `relationship` with the catalogue row's name.
+  // A guarantor accepts all three categories — an employer, a brother and a landlord can each
+  // stand surety.
+  relationshipTypeId: v.relationshipTypeId || null,
+  // ⚠ Nulls mean "not supplied" on the guarantor UPDATE DTO, so unlinking has to say so
+  // explicitly. The tab sends the whole form every save; without these an emptied picker would
+  // save successfully and change nothing.
+  clearRelationshipType: !v.relationshipTypeId,
+  clearGeoArea: !v.geoAreaId,
   firstName: v.firstName,
   middleName: v.middleName || null,
   lastName: v.lastName,
@@ -105,8 +121,10 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   dateOfBirth: v.dateOfBirth || null,
   address: v.address,
   city: v.city || null,
+  region: v.region || null,
   digitalAddress: v.digitalAddress || null,
   countryId: v.countryId || null,
+  geoAreaId: v.geoAreaId || null,
   phoneNumber: v.phoneNumber || null,
   emailAddress: v.emailAddress || null,
   jobTitle: v.jobTitle || null,
@@ -135,12 +153,15 @@ const toForm = (g: EmployeeGuarantor): FormValues => ({
   lastName: g.lastName,
   title: g.title ?? '',
   relationship: g.relationship,
+  relationshipTypeId: g.relationshipTypeId ?? '',
   gender: g.gender ?? '',
   dateOfBirth: g.dateOfBirth?.slice(0, 10) ?? '',
   address: g.address ?? '',
   city: g.city ?? '',
+  region: g.region ?? '',
   digitalAddress: g.digitalAddress ?? '',
   countryId: g.countryId ?? '',
+  geoAreaId: g.geoAreaId ?? '',
   phoneNumber: g.phoneNumber ?? '',
   emailAddress: g.emailAddress ?? '',
   jobTitle: g.jobTitle ?? '',
@@ -175,11 +196,6 @@ const toForm = (g: EmployeeGuarantor): FormValues => ({
 export function GuarantorsTab({ employeeId }: { employeeId: string }) {
   const [filesFor, setFilesFor] = useState<EmployeeGuarantor | null>(null);
 
-  const { data: countries } = useQuery({
-    queryKey: ['hr', 'countries', 'active'],
-    queryFn: () => countryService.getActive(),
-  });
-
   // Only currencies Finance actually holds — the server refuses anything else, so a free-text box
   // would be offering a way to fail. Same read the succession development panel uses.
   const { data: currencies } = useQuery({
@@ -193,7 +209,6 @@ export function GuarantorsTab({ employeeId }: { employeeId: string }) {
     queryFn: () => identificationTypeService.getActive(),
   });
 
-  const countryOptions = (countries ?? []).map((c) => ({ value: c.id, label: c.name }));
   const idTypeOptions = (idTypes ?? []).map((t) => ({ value: t.id, label: t.name }));
 
   return (
@@ -300,35 +315,42 @@ export function GuarantorsTab({ employeeId }: { employeeId: string }) {
               <TextField form={form} name="middleName" label="Middle name" />
               <TextField form={form} name="title" label="Title" placeholder="Mr / Mrs / Dr" />
             </FieldRow>
-            <FieldRow>
-              <TextField form={form} name="relationship" label="Relationship" required />
-              <SelectField
-                form={form}
-                name="gender"
-                label="Gender"
-                options={GENDER_OPTIONS}
-                allowEmpty
-              />
-            </FieldRow>
+            {/*
+              ⚠ All three categories, unlike the referee and next-of-kin screens: an employer, a
+              brother and a landlord can each stand surety, and refusing any of them would be
+              inventing a rule the business does not have.
+            */}
+            <RelationshipField
+              form={form}
+              typeIdName="relationshipTypeId"
+              textName="relationship"
+              categories={RELATIONSHIP_SCOPES.guarantor}
+              required
+            />
+            <SelectField
+              form={form}
+              name="gender"
+              label="Gender"
+              options={GENDER_OPTIONS}
+              allowEmpty
+            />
             {form.watch('gender') === 'Other' && (
               <TextField form={form} name="genderDescription" label="Describe gender" />
             )}
             <DateField form={form} name="dateOfBirth" label="Date of birth" />
             <TextField form={form} name="address" label="Address" required />
-            <FieldRow>
-              <TextField form={form} name="city" label="City" />
-              <TextField form={form} name="digitalAddress" label="Digital address" />
-            </FieldRow>
-            <FieldRow>
-              <SelectField
-                form={form}
-                name="countryId"
-                label="Country"
-                options={countryOptions}
-                allowEmpty
-              />
-              <TextField form={form} name="phoneNumber" label="Phone" type="tel" />
-            </FieldRow>
+            <AddressCascadeField
+              form={form}
+              countryName="countryId"
+              geoAreaName="geoAreaId"
+              cityName="city"
+              regionName="region"
+            >
+              <FieldRow>
+                <TextField form={form} name="digitalAddress" label="Digital address" />
+                <TextField form={form} name="phoneNumber" label="Phone" type="tel" />
+              </FieldRow>
+            </AddressCascadeField>
             <TextField form={form} name="emailAddress" label="Email" type="email" />
             <FieldRow>
               <TextField form={form} name="jobTitle" label="Job title" />

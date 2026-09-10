@@ -1153,6 +1153,10 @@ public class JobCandidateRefereeDto : BaseDto
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The catalogue row behind <see cref="Relationship"/>, for re-opening the dropdown.</summary>
+    public Guid? RelationshipTypeId { get; set; }
+
     public int YearsKnown { get; set; }
 }
 
@@ -1182,9 +1186,20 @@ public class CreateJobCandidateRefereeDto : CreateDtoBase
     [MaxLength(20)]
     public string Phone { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ PROFESSIONAL and OTHER only. A candidate may name a pastor or a family friend (both
+    /// other); they may not name their mother. Null on the update CLEARS the link — every field on
+    /// these DTOs is full-replace.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Range(0, 60)]
     public int YearsKnown { get; set; }
@@ -1213,9 +1228,20 @@ public class UpdateJobCandidateRefereeDto : UpdateDtoBase
     [MaxLength(20)]
     public string Phone { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ PROFESSIONAL and OTHER only. A candidate may name a pastor or a family friend (both
+    /// other); they may not name their mother. Null on the update CLEARS the link — every field on
+    /// these DTOs is full-replace.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Range(0, 60)]
     public int YearsKnown { get; set; }

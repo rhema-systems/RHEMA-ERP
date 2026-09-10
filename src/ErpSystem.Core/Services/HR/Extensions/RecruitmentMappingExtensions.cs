@@ -1098,6 +1098,7 @@ public static class RecruitmentMappingExtensions
             Email = entity.Email,
             Phone = entity.Phone,
             Relationship = entity.Relationship,
+            RelationshipTypeId = entity.RelationshipTypeId,
             YearsKnown = entity.YearsKnown,
         };
     }
@@ -1114,6 +1115,7 @@ public static class RecruitmentMappingExtensions
             Email = dto.Email,
             Phone = dto.Phone,
             Relationship = dto.Relationship,
+            RelationshipTypeId = dto.RelationshipTypeId,
             YearsKnown = dto.YearsKnown,
             CreatedBy = userId.ToString(),
         };
@@ -1127,6 +1129,8 @@ public static class RecruitmentMappingExtensions
         entity.Email = dto.Email;
         entity.Phone = dto.Phone;
         entity.Relationship = dto.Relationship;
+        // Full replace, like every other field on this DTO: null clears the catalogue link.
+        entity.RelationshipTypeId = dto.RelationshipTypeId;
         entity.YearsKnown = dto.YearsKnown;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();

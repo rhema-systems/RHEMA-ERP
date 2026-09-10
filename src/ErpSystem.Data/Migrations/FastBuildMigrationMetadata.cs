@@ -310,3 +310,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909204655_AddSalaryStructurePolicy")] partial class AddSalaryStructurePolicy { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260909225805_AddNamedSets")] partial class AddNamedSets { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260910001423_AddUnitFinanceAccount")] partial class AddUnitFinanceAccount { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260910013025_AddSubRecordGeographyAndRelationshipTypes")] partial class AddSubRecordGeographyAndRelationshipTypes { }

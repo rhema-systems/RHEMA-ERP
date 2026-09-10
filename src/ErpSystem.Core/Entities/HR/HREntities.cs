@@ -1145,6 +1145,21 @@ public class EmployeeContact : TenantEntity
  
     public Guid? CountryId { get; set; }
     public virtual Country? Country { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> above become DISPLAY
+    /// SNAPSHOTS written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null
+    /// area leaves both exactly as they were; most rows predate the tree and the free text is the
+    /// only address they have.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
  
     public bool IsPrimary { get; set; }
 }
@@ -1152,7 +1167,7 @@ public class EmployeeContact : TenantEntity
 /// <summary>
 /// Represents emergency contacts for employees
 /// </summary>
-public class EmployeeEmergencyContact : TenantEntity
+public class EmployeeEmergencyContact : TenantEntity, IRelationshipTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1167,9 +1182,34 @@ public class EmployeeEmergencyContact : TenantEntity
     [MaxLength(100)]
     public string LastName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// How this person is tied to the employee, as words.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Widened from 50 to 100 in round 2 lane D2, to match the guarantor's column and the
+    /// catalogue's <c>RelationshipType.Name</c>. It had been the narrowest of the four columns
+    /// spelling out the same idea, while its DTO carried no length at all and the screen's schema
+    /// allowed 100 — so a 51-character relationship reached SQL Server and failed as a truncation
+    /// 500 rather than a refusal.
+    /// </remarks>
     [Required]
-    [MaxLength(50)]
+    [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register rows E-11a,
+    /// E-11b).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The free-text <c>Relationship</c> above is kept and MIRRORED from this row's name
+    /// whenever the id is set, so rows written before the catalogue keep their wording and every
+    /// consumer that reads the string keeps working. Nullable: a tie nobody has catalogued may
+    /// still be typed.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
 
     public EmergencyContactType ContactType { get; set; } = EmergencyContactType.EmergencyContact;
 
@@ -1187,10 +1227,29 @@ public class EmployeeEmergencyContact : TenantEntity
     [MaxLength(500)]
     public string? Address { get; set; }
 
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
     [MaxLength(100)]
     public string? City { get; set; }
 
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> become DISPLAY SNAPSHOTS
+    /// written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null area
+    /// leaves both exactly as they were.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
@@ -1428,8 +1487,48 @@ public class EmployeeWorkHistory : TenantEntity
     [MaxLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The employer's street address, as one line.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 200, and the screen's schema said 300 until round 2 lane D2 (finding X-5) — so a 201-to-300
+    /// character address passed the form, was refused by the create with a 400 the user could not
+    /// have predicted, and reached SQL Server as a truncation 500 on the update, whose DTO carried
+    /// no length at all. The country, area and city below are where the structured part now lives.
+    /// </remarks>
     [MaxLength(200)]
     public string? CompanyAddress { get; set; }
+
+    /// <summary>
+    /// The country the employer is in. Added in round 2 lane D2 (register row E-6): the work
+    /// history was one free-text line with no country, city or geography at all.
+    /// </summary>
+    public Guid? CountryId { get; set; }
+
+    [ForeignKey(nameof(CountryId))]
+    public virtual Country? Country { get; set; }
+
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> become DISPLAY SNAPSHOTS
+    /// written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null area
+    /// leaves both exactly as they were.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1818,7 +1917,7 @@ public class EmployeeSalaryAssignment : TenantEntity
 /// <summary>
 /// Represents referees provided by an employee/applicant
 /// </summary>
-public class EmployeeReferee : TenantEntity
+public class EmployeeReferee : TenantEntity, IRelationshipTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1841,6 +1940,21 @@ public class EmployeeReferee : TenantEntity
     [Required]
     [MaxLength(200)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register rows E-11a,
+    /// E-11b).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The free-text <c>Relationship</c> above is kept and MIRRORED from this row's name
+    /// whenever the id is set, so rows written before the catalogue keep their wording and every
+    /// consumer that reads the string keeps working. Nullable: a tie nobody has catalogued may
+    /// still be typed.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
 
     [Required]
     [MaxLength(50)]
@@ -1883,7 +1997,7 @@ public class EmployeeReferee : TenantEntity
 /// <summary>
 /// Represents guarantors for employees (if required)
 /// </summary>
-public class EmployeeGuarantor : TenantEntity
+public class EmployeeGuarantor : TenantEntity, IRelationshipTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1899,6 +2013,21 @@ public class EmployeeGuarantor : TenantEntity
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register rows E-11a,
+    /// E-11b).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The free-text <c>Relationship</c> above is kept and MIRRORED from this row's name
+    /// whenever the id is set, so rows written before the catalogue keep their wording and every
+    /// consumer that reads the string keeps working. Nullable: a tie nobody has catalogued may
+    /// still be typed.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1926,13 +2055,32 @@ public class EmployeeGuarantor : TenantEntity
     [MaxLength(500)]
     public string Address { get; set; } = string.Empty;
 
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
     [MaxLength(100)]
     public string? City { get; set; }
+
+    /// <summary>⚠ A DISPLAY SNAPSHOT when <see cref="GeoAreaId"/> is set — see that field.</summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
 
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the shared administrative-geography tree (round 2, lane D2 —
+    /// register row E-3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When this is set, <see cref="City"/> and <see cref="Region"/> become DISPLAY SNAPSHOTS
+    /// written from the tree — the <c>Employee.City</c>/<c>State</c> convention. A null area
+    /// leaves both exactly as they were.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     [MaxLength(50)]
     public string? PhoneNumber { get; set; }

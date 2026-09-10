@@ -13,6 +13,8 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
+import { RelationshipField } from '@/components/hr/employee/tabs/address-fields';
+import { RELATIONSHIP_SCOPES } from '@/types/hr/relationship-type';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import { qualificationService } from '@/services/hr/lookup.service';
 import { skillService } from '@/services/hr/skill.service';
@@ -235,6 +237,7 @@ const refereeSchema = z.object({
   email: z.string().min(1, 'Email is required').email('Enter a valid email'),
   phone: z.string().min(1, 'Phone is required').max(20),
   relationship: z.string().min(1, 'Relationship is required').max(100),
+  relationshipTypeId: z.string().optional().or(z.literal('')),
   yearsKnown: z.coerce.number().int().min(0).max(60),
 });
 type RefereeForm = z.infer<typeof refereeSchema>;
@@ -277,6 +280,7 @@ export function CandidateRefereesTab({ candidateId }: { candidateId: string }) {
         email: '',
         phone: '',
         relationship: '',
+        relationshipTypeId: '',
         yearsKnown: 0,
       }}
       toForm={(r) => ({
@@ -286,6 +290,7 @@ export function CandidateRefereesTab({ candidateId }: { candidateId: string }) {
         email: r.email,
         phone: r.phone,
         relationship: r.relationship,
+        relationshipTypeId: r.relationshipTypeId ?? '',
         yearsKnown: r.yearsKnown,
       })}
       renderFields={(form) => (
@@ -294,10 +299,18 @@ export function CandidateRefereesTab({ candidateId }: { candidateId: string }) {
             <TextField form={form} name="fullName" label="Full name" required />
             <TextField form={form} name="position" label="Position" required />
           </FieldRow>
-          <FieldRow>
-            <TextField form={form} name="organization" label="Organization" required />
-            <TextField form={form} name="relationship" label="Relationship" required />
-          </FieldRow>
+          <TextField form={form} name="organization" label="Organization" required />
+          {/*
+            ⚠ Professional and other only (round 2, lane D2). A candidate may name a pastor, a
+            lecturer or a family friend; they may not name their mother, and the server refuses it.
+          */}
+          <RelationshipField
+            form={form}
+            typeIdName="relationshipTypeId"
+            textName="relationship"
+            categories={RELATIONSHIP_SCOPES.professionalReferee}
+            required
+          />
           <FieldRow>
             <TextField form={form} name="email" label="Email" type="email" required />
             <TextField form={form} name="phone" label="Phone" type="tel" required />

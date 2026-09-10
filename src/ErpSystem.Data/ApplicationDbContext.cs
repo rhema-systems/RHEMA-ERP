@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
@@ -511,6 +511,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<StaffLevel> StaffLevels { get; set; }
     public DbSet<WorkStation> WorkStations { get; set; }
     public DbSet<EmployeeContractType> EmployeeContractTypes { get; set; }
+
+    /// <summary>How one person is tied to another — the catalogue four free-text columns
+    /// used to spell out separately (round 2, lane D2).</summary>
+    public DbSet<RelationshipType> RelationshipTypes { get; set; }
 
     public DbSet<OrganizationStructure> OrganizationStructures { get; set; }
     public DbSet<OrganizationLevel> OrganizationLevels { get; set; }

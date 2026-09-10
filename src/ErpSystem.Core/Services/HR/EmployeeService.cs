@@ -103,25 +103,117 @@ public class EmployeeService : IEmployeeService
     /// predates the tree and has only the free text; blanking it here would destroy the only
     /// address those rows have.</para>
     /// </remarks>
+    /// <remarks>
+    /// ⚠ The employee's region column is called <c>State</c>, which is the whole reason the shared
+    /// helper takes setters rather than reading property names. The rule itself has lived in
+    /// <see cref="GeoAddressSnapshot"/> since round 2 lane D2, where four more tables gained the
+    /// same column and the four private copies of this method had already drifted apart.
+    /// </remarks>
     private async Task ApplyGeoAreaSnapshotAsync(Employee employee, CancellationToken cancellationToken)
     {
-        if (employee.GeoAreaId is not { } areaId) return;
+        employee.CountryId = await GeoAddressSnapshot.ReconcileCountryAsync(
+            _geography, employee.GeoAreaId, employee.CountryId, "employee", cancellationToken);
 
-        var (region, city) = await _geography.GetAddressSnapshotAsync(areaId, cancellationToken);
-
-        // (null, null) means the area could not be read — another tenant's, or deleted between the
-        // form loading and the save. Leave what the record said rather than blanking it.
-        if (region is null && city is null)
-        {
-            _logger.LogWarning(
-                "Employee {EmployeeId} references geo area {GeoAreaId}, which could not be resolved; "
-                + "the address snapshot was left unchanged.", employee.Id, areaId);
-            return;
-        }
-
-        if (region is not null) employee.State = region;
-        if (city is not null) employee.City = city;
+        await GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, employee.GeoAreaId,
+            r => employee.State = r, c => employee.City = c,
+            "employee", employee.Id, cancellationToken);
     }
+
+    /// <summary>
+    /// The same two rules for a sub-record of an employee — an address, a next of kin, a guarantor,
+    /// a previous employer.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Called AFTER the DTO has been applied to the entity, never before: the tree wins over
+    /// whatever spelling the caller sent, and running it first would let the payload overwrite the
+    /// snapshot it is supposed to lose to.
+    /// </remarks>
+    private async Task ApplySubRecordGeoAsync(
+        Guid? geoAreaId,
+        Func<Guid?> readCountry,
+        Action<Guid?> writeCountry,
+        Action<string> setRegion,
+        Action<string> setCity,
+        string subject,
+        Guid recordId,
+        CancellationToken cancellationToken)
+    {
+        writeCountry(await GeoAddressSnapshot.ReconcileCountryAsync(
+            _geography, geoAreaId, readCountry(), subject, cancellationToken));
+
+        await GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, geoAreaId, setRegion, setCity, subject, recordId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves a relationship-catalogue id for a screen, and mirrors its name into the record's
+    /// free-text column.
+    /// </summary>
+    /// <remarks>
+    /// <para>Returns the words to store. A null id leaves <paramref name="typedRelationship"/>
+    /// standing — a tie nobody has catalogued may still be typed, and every row written before the
+    /// catalogue keeps its wording.</para>
+    ///
+    /// <para><b>⚠ The category set is the point.</b> A next-of-kin screen that offered "Former
+    /// manager" and a referee screen that offered "Nephew" would be the same defect as the free
+    /// text this catalogue replaces. Each caller states what it accepts; a value outside that set
+    /// is refused with a sentence naming both, not silently dropped.</para>
+    /// </remarks>
+    private async Task<string> ResolveRelationshipAsync(
+        Guid? relationshipTypeId,
+        string typedRelationship,
+        RelationshipCategory[] allowed,
+        string screen,
+        CancellationToken cancellationToken)
+    {
+        if (relationshipTypeId is not Guid id) return typedRelationship;
+
+        var tenantId = GetTenantId();
+        var type = await _unitOfWork.Repository<RelationshipType>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId && !t.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Relationship type '{id}' was not found.");
+
+        if (!type.IsActive)
+            throw new InvalidOperationException(
+                $"Relationship type '{type.Name}' is retired and cannot be chosen for a new record.");
+
+        if (!allowed.Contains(type.Category))
+            throw new InvalidOperationException(
+                $"'{type.Name}' is a {type.Category.ToString().ToLowerInvariant()} relationship, and "
+                + $"{screen} accepts {DescribeCategories(allowed)}.");
+
+        return type.Name;
+    }
+
+    private static string DescribeCategories(RelationshipCategory[] allowed)
+    {
+        var words = allowed.Select(c => c.ToString().ToLowerInvariant()).ToArray();
+        return words.Length switch
+        {
+            1 => $"only {words[0]} ones",
+            _ => string.Join(" and ", new[] { string.Join(", ", words[..^1]), words[^1] }) + " ones",
+        };
+    }
+
+    // What each screen offers, per plan § 6.9. Stated here rather than at the call sites so the
+    // four doors cannot drift apart the way the four free-text columns did.
+    private static readonly RelationshipCategory[] FamilialOrOther =
+        { RelationshipCategory.Familial, RelationshipCategory.Other };
+
+    private static readonly RelationshipCategory[] ProfessionalOrOther =
+        { RelationshipCategory.Professional, RelationshipCategory.Other };
+
+    private static readonly RelationshipCategory[] AnyRelationship =
+        { RelationshipCategory.Familial, RelationshipCategory.Professional, RelationshipCategory.Other };
+
+    /// <summary>
+    /// A referee's acceptable categories, which depend on what KIND of referee they are: a personal
+    /// referee may be a relative or a family friend, a professional or academic one may not.
+    /// </summary>
+    private static RelationshipCategory[] RefereeCategories(RefereeType type)
+        => type == RefereeType.Personal ? FamilialOrOther : ProfessionalOrOther;
 
     private Guid GetTenantId()
     {
@@ -1151,6 +1243,11 @@ public class EmployeeService : IEmployeeService
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
         entity.TenantId = GetTenantId();
 
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "address", entity.Id, cancellationToken);
+
         if (entity.IsPrimary)
         {
             var existing = await repo.FindAsync(x => x.EmployeeId == dto.EmployeeId && x.IsPrimary);
@@ -1176,6 +1273,12 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException($"Contact '{dto.Id}' not found.");
 
         dto.Apply(entity);
+
+        // ⚠ AFTER Apply — the tree wins over whatever spelling the payload sent.
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "address", entity.Id, cancellationToken);
 
         if (entity.IsPrimary)
         {
@@ -1250,6 +1353,16 @@ public class EmployeeService : IEmployeeService
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
         entity.TenantId = GetTenantId();
 
+        // ⚠ Familial and other only: a next of kin is not a former manager.
+        entity.Relationship = await ResolveRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, FamilialOrOther,
+            "a next of kin", cancellationToken);
+
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "emergency contact", entity.Id, cancellationToken);
+
         if (entity.IsPrimary)
         {
             // Ensure single primary per employee
@@ -1276,6 +1389,16 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException($"Emergency contact '{dto.Id}' not found.");
 
         dto.Apply(entity);
+
+        entity.Relationship = await ResolveRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, FamilialOrOther,
+            "a next of kin", cancellationToken);
+
+        // ⚠ AFTER Apply — the tree wins over whatever spelling the payload sent.
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "emergency contact", entity.Id, cancellationToken);
 
         if (entity.IsPrimary)
         {
@@ -1920,6 +2043,11 @@ public class EmployeeService : IEmployeeService
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
         entity.TenantId = GetTenantId();
 
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "previous employer", entity.Id, cancellationToken);
+
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1934,6 +2062,13 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException("Work history not found.");
 
         dto.Apply(entity);
+
+        // ⚠ AFTER Apply — the tree wins over whatever spelling the payload sent.
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "previous employer", entity.Id, cancellationToken);
+
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -2709,6 +2844,12 @@ public class EmployeeService : IEmployeeService
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
         entity.TenantId = GetTenantId();
 
+        // ⚠ What is accepted depends on the KIND of referee. A personal referee may be a relative
+        // or a family friend; a professional or academic one may not.
+        entity.Relationship = await ResolveRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, RefereeCategories(entity.RefereeType),
+            $"a {entity.RefereeType.ToString().ToLowerInvariant()} referee", cancellationToken);
+
         if (entity.IsPrimary)
         {
             var others = await repo.FindAsync(x => x.EmployeeId == dto.EmployeeId && x.IsPrimary);
@@ -2733,6 +2874,14 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException("Referee not found.");
 
         dto.Apply(entity);
+
+        // ⚠ Read from the ENTITY, not the DTO: an edit that changes only the referee type has to
+        // re-check the relationship already on the row against the new kind, and one that changes
+        // only the relationship has to check it against the kind already stored.
+        entity.Relationship = await ResolveRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, RefereeCategories(entity.RefereeType),
+            $"a {entity.RefereeType.ToString().ToLowerInvariant()} referee", cancellationToken);
+
         if (entity.IsPrimary)
         {
             var others = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.Id != entity.Id && x.IsPrimary);
@@ -2861,6 +3010,16 @@ public class EmployeeService : IEmployeeService
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
         entity.TenantId = GetTenantId();
 
+        // ⚠ All three categories: an employer, a brother and a landlord can each stand surety.
+        entity.Relationship = await ResolveRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, AnyRelationship,
+            "a guarantor", cancellationToken);
+
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "guarantor", entity.Id, cancellationToken);
+
         if (entity.IsPrimary)
         {
             var others = await repo.FindAsync(x => x.EmployeeId == dto.EmployeeId && x.IsPrimary);
@@ -2889,6 +3048,17 @@ public class EmployeeService : IEmployeeService
         if (entity == null) throw new ArgumentException("Guarantor not found.");
 
         dto.Apply(entity);
+
+        entity.Relationship = await ResolveRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, AnyRelationship,
+            "a guarantor", cancellationToken);
+
+        // ⚠ AFTER Apply — the tree wins over whatever spelling the payload sent.
+        await ApplySubRecordGeoAsync(
+            entity.GeoAreaId, () => entity.CountryId, c => entity.CountryId = c,
+            r => entity.Region = r, c => entity.City = c,
+            "guarantor", entity.Id, cancellationToken);
+
         if (entity.IsPrimary)
         {
             var others = await repo.FindAsync(x => x.EmployeeId == entity.EmployeeId && x.Id != entity.Id && x.IsPrimary);

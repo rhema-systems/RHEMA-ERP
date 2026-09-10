@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Medical;
@@ -52,21 +52,15 @@ public class HealthcareFacilityService : IHealthcareFacilityService
     /// Rewrites <c>City</c> from the facility's administrative area. A null area leaves the text as
     /// it was — most of the register predates the tree.
     /// </summary>
-    private async Task ApplyGeoAreaSnapshotAsync(HealthcareFacility entity, CancellationToken ct)
-    {
-        if (entity.GeoAreaId is not { } areaId) return;
-
-        var (_, city) = await _geography.GetAddressSnapshotAsync(areaId, ct);
-        if (city is null)
-        {
-            _logger.LogWarning(
-                "Healthcare facility references geo area {GeoAreaId}, which could not be resolved to a "
-                + "city; the address was left unchanged.", areaId);
-            return;
-        }
-
-        entity.City = city;
-    }
+    /// <remarks>
+    /// ⚠ No region setter: the facility register has no region column. The rule itself lives in
+    /// <see cref="ErpSystem.Core.Services.Reference.GeoAddressSnapshot"/> since round 2 lane D2.
+    /// </remarks>
+    private Task ApplyGeoAreaSnapshotAsync(HealthcareFacility entity, CancellationToken ct)
+        => ErpSystem.Core.Services.Reference.GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, entity.GeoAreaId,
+            setRegion: null, setCity: c => entity.City = c,
+            "healthcare facility", entity.Id, ct);
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
     // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,

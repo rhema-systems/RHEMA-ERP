@@ -419,6 +419,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IReasonCodeService, ReasonCodeService>();
         // Round-2 lane D1 (Q-4): the seeded contract-kind vocabulary, which had no service at all.
         services.AddScoped<IEmployeeContractTypeService, EmployeeContractTypeService>();
+
+        // The relationship catalogue the referee, guarantor, next-of-kin and candidate-referee
+        // screens pick from (round 2, lane D2).
+        services.AddScoped<IRelationshipTypeService, RelationshipTypeService>();
         services.AddScoped<IEmployeeRelieverService, EmployeeRelieverService>();
         services.AddScoped<ILeaveYearEndService, LeaveYearEndService>();
         services.AddScoped<IEmolumentService, EmolumentService>();

@@ -518,6 +518,15 @@ public class EmployeeContactDto
     public string? Region { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the administrative-geography tree. Round 2, lane D2.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When it is set, <c>City</c> and <c>Region</c> above are SNAPSHOTS the server wrote from
+    /// the tree, not values a caller can decide. The form reads this to re-open the cascade.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
     public bool IsPrimary { get; set; }
 }
 
@@ -547,6 +556,17 @@ public class CreateEmployeeContactDto
     public string? DigitalAddress { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree, and fills in <c>CountryId</c> when none was stated.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ An area outside the stated country is REFUSED — the snapshots would otherwise contradict
+    /// the country on the same row. Silence is not a contradiction: a record with an area and no
+    /// country is given the area's country rather than being refused.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
 
     public bool IsPrimary { get; set; }
 }
@@ -578,6 +598,24 @@ public class UpdateEmployeeContactDto
 
     public Guid? CountryId { get; set; }
 
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree, and fills in <c>CountryId</c> when none was stated.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ An area outside the stated country is REFUSED — the snapshots would otherwise contradict
+    /// the country on the same row. Silence is not a contradiction: a record with an area and no
+    /// country is given the area's country rather than being refused.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <remarks>
+    /// ⚠ On THIS DTO a null area CLEARS the link, because its address fields are already
+    /// full-replace — <c>City</c>, <c>Region</c> and <c>AddressLine1</c> are all written straight
+    /// from the payload. The guarantor and referee DTOs, whose fields mean "not supplied" when
+    /// null, carry an explicit <c>ClearGeoArea</c> flag instead. The tab sends the whole form on
+    /// every save either way.
+    /// </remarks>
     public bool? IsPrimary { get; set; }
 }
 
@@ -598,11 +636,20 @@ public class EmployeeEmergencyContactDto
     public string? EmailAddress { get; set; }
     public string? Address { get; set; }
     public string? City { get; set; }
+    public string? Region { get; set; }
     public Guid? CountryId { get; set; }
+    public Guid? GeoAreaId { get; set; }
     public string? DigitalAddress { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsActive { get; set; } = true;
     public string? Notes { get; set; }
+
+    /// <summary>The tie, from the relationship catalogue, where one was chosen (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ <c>Relationship</c> above already carries the catalogue row's NAME — the service mirrors it
+    /// on every save. This id is for re-opening the form's dropdown, not for display.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 }
 
 /// <summary>
@@ -620,22 +667,61 @@ public class CreateEmployeeEmergencyContactDto
 
     public string LastName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tie, as words. Ignored — and overwritten — when <see cref="RelationshipTypeId"/> names a
+    /// catalogue row, so a caller that sends only the id still stores a readable relationship.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Length stated since round 2 lane D2. It had none, while the column was 50 and the screen's
+    /// schema allowed 100 — so a 51-character relationship reached SQL Server and failed as a
+    /// truncation 500. The column is now 100 and this refuses anything longer with a 400.
+    /// </remarks>
     [Required]
+    [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue.</summary>
+    /// <remarks>⚠ A next of kin accepts FAMILIAL and OTHER ties only; a professional one is refused.</remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     public EmergencyContactType ContactType { get; set; }
 
     [Required]
+    [MaxLength(50)]
     public string PhoneNumber { get; set; } = string.Empty;
 
+    [MaxLength(50)]
     public string? AlternatePhoneNumber { get; set; }
+
+    [MaxLength(200)]
+    [EmailAddress]
     public string? EmailAddress { get; set; }
+
+    [MaxLength(500)]
     public string? Address { get; set; }
+
+    [MaxLength(100)]
     public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree, and fills in <c>CountryId</c> when none was stated; an area outside a stated country
+    /// is refused.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
     public bool IsPrimary { get; set; }
     public bool IsActive { get; set; } = true;
+
+    [MaxLength(500)]
     public string? Notes { get; set; }
 }
 
@@ -649,17 +735,48 @@ public class UpdateEmployeeEmergencyContactDto
     public string FirstName { get; set; } = string.Empty;
     public string? MiddleName { get; set; }
     public string LastName { get; set; } = string.Empty;
+
+    [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the catalogue. Null CLEARS the link, matching this DTO's other address
+    /// fields, which are full-replace; the free-text <see cref="Relationship"/> then stands alone.
+    /// </summary>
+    public Guid? RelationshipTypeId { get; set; }
+
     public EmergencyContactType? ContactType { get; set; }
+
+    [MaxLength(50)]
     public string? PhoneNumber { get; set; }
+
+    [MaxLength(50)]
     public string? AlternatePhoneNumber { get; set; }
+
+    [MaxLength(200)]
     public string? EmailAddress { get; set; }
+
+    [MaxLength(500)]
     public string? Address { get; set; }
+
+    [MaxLength(100)]
     public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     public Guid? CountryId { get; set; }
+
+    /// <summary>The area. Null clears it — see <see cref="RelationshipTypeId"/>.</summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
     public bool? IsPrimary { get; set; }
     public bool? IsActive { get; set; }
+
+    [MaxLength(500)]
     public string? Notes { get; set; }
 }
 
@@ -1520,6 +1637,14 @@ public class EmployeeWorkHistoryListDto
 public class EmployeeWorkHistoryDetailDto : EmployeeWorkHistoryListDto
 {
     public string? CompanyAddress { get; set; }
+
+    // ── The employer's address, round 2 lane D2 (register row E-6) ──────────────────────────
+    // ⚠ City and Region are SNAPSHOTS written from GeoAreaId, not values a caller decides.
+    public Guid? CountryId { get; set; }
+    public string? City { get; set; }
+    public string? Region { get; set; }
+    public Guid? GeoAreaId { get; set; }
+
     public string? JobDescription { get; set; }
     public decimal? Salary { get; set; }
     public string? ReasonForLeaving { get; set; }
@@ -1537,8 +1662,31 @@ public class CreateEmployeeWorkHistoryDto
     [MaxLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The employer's street address, as one line.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 200 — and the screen's schema said 300 until round 2 lane D2 (finding X-5), so a longer
+    /// address passed the form and was refused here with a 400 the user could not have predicted.
+    /// The structured part of the address is the country, area and city below.
+    /// </remarks>
     [MaxLength(200)]
     public string? CompanyAddress { get; set; }
+
+    /// <summary>The country the employer is in. Round 2, lane D2 (register row E-6).</summary>
+    public Guid? CountryId { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// The area the employer sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree and fills in <c>CountryId</c>; an area outside a stated country is refused.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1564,21 +1712,57 @@ public class CreateEmployeeWorkHistoryDto
     public bool CanContact { get; set; } = true;
 }
 
+/// <remarks>
+/// ⚠ Every length here was ADDED in round 2 lane D2 (finding X-5). This DTO carried none, so where
+/// the create refused an over-long value with a 400, the update let it through to SQL Server and
+/// failed as a truncation 500 — the same payload, two different answers, neither of them the
+/// screen's. The numbers match the create DTO and the columns exactly.
+/// </remarks>
 public class UpdateEmployeeWorkHistoryDto
 {
     [Required]
     public Guid Id { get; set; }
 
+    [MaxLength(200)]
     public string? CompanyName { get; set; }
+
+    [MaxLength(200)]
     public string? CompanyAddress { get; set; }
+
+    /// <summary>The country the employer is in. Round 2, lane D2 (register row E-6).</summary>
+    public Guid? CountryId { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// The area. Null CLEARS the link, matching this DTO's other address fields, which are
+    /// full-replace.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [MaxLength(100)]
     public string? JobTitle { get; set; }
+
+    [MaxLength(1000)]
     public string? JobDescription { get; set; }
+
     public DateOnly? StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public decimal? Salary { get; set; }
+
+    [MaxLength(1000)]
     public string? ReasonForLeaving { get; set; }
+
+    [MaxLength(200)]
     public string? SupervisorName { get; set; }
+
+    [MaxLength(50)]
     public string? SupervisorPhone { get; set; }
+
     public bool? CanContact { get; set; }
 }
 
@@ -2029,6 +2213,14 @@ public class EmployeeRefereeListDto
     public string? Organization { get; set; }
     public string? PositionOrTitle { get; set; }
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the relationship catalogue, where one was chosen (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ <c>Relationship</c> above already carries the row's NAME — the service mirrors it on every
+    /// save. This id is for re-opening the form's dropdown, not for display.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
     public string PhoneNumber { get; set; } = string.Empty;
     public string? EmailAddress { get; set; }
     public bool IsPrimary { get; set; }
@@ -2076,9 +2268,20 @@ public class CreateEmployeeRefereeDto
     [MaxLength(100)]
     public string? PositionOrTitle { get; set; }
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(200)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue.</summary>
+    /// <remarks>
+    /// ⚠ Which values are accepted depends on <see cref="RefereeType"/>: a PERSONAL referee may be
+    /// a relative or a family friend (familial, other); a PROFESSIONAL or ACADEMIC one may not
+    /// (professional, other). The refusal names both the value's category and the kind of referee.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Required]
     [MaxLength(50)]
@@ -2102,6 +2305,18 @@ public class UpdateEmployeeRefereeDto
     public string? Organization { get; set; }
     public string? PositionOrTitle { get; set; }
     public string? Relationship { get; set; }
+
+    /// <summary>
+    /// The tie, from the catalogue. Null means NOT SUPPLIED on this DTO, matching every other field
+    /// on it; send <see cref="ClearRelationshipType"/> to unlink.
+    /// </summary>
+    public Guid? RelationshipTypeId { get; set; }
+
+    /// <summary>
+    /// Unlinks the catalogue row, leaving the free-text <see cref="Relationship"/> standing. Wins
+    /// over <see cref="RelationshipTypeId"/> if both are sent — the <c>ClearNationalIdType</c> shape.
+    /// </summary>
+    public bool ClearRelationshipType { get; set; }
     public string? PhoneNumber { get; set; }
     public string? EmailAddress { get; set; }
     public bool? IsContacted { get; set; }
@@ -2135,6 +2350,13 @@ public class EmployeeGuarantorListDto
     /// <summary>The national ID kind from the catalogue, where one was chosen.</summary>
     public Guid? NationalIdTypeId { get; set; }
     public string? NationalIdTypeName { get; set; }
+
+    /// <summary>The tie, from the relationship catalogue, where one was chosen (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ <c>Relationship</c> above already carries the row's NAME — the service mirrors it on every
+    /// save. This id is for re-opening the form's dropdown, not for display.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 }
 
 public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
@@ -2144,9 +2366,13 @@ public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
     public Gender? Gender { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public string Address { get; set; } = string.Empty;
+
+    // ⚠ City and Region are SNAPSHOTS written from GeoAreaId, not values a caller decides.
     public string? City { get; set; }
+    public string? Region { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+    public Guid? GeoAreaId { get; set; }
 
     public string? JobTitle { get; set; }
     public string? EmployerName { get; set; }
@@ -2192,9 +2418,20 @@ public class CreateEmployeeGuarantorDto
 
     public bool IsPrimary { get; set; }
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue.</summary>
+    /// <remarks>
+    /// ⚠ A guarantor accepts ALL THREE categories, unlike the referee and next-of-kin screens: an
+    /// employer, a brother and a landlord can each stand surety, and refusing any of them would be
+    /// inventing a rule the business does not have.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -2220,10 +2457,19 @@ public class CreateEmployeeGuarantorDto
     [MaxLength(100)]
     public string? City { get; set; }
 
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree and fills in <c>CountryId</c>; an area outside a stated country is refused.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
 
     [MaxLength(50)]
     public string? PhoneNumber { get; set; }
@@ -2300,6 +2546,16 @@ public class UpdateEmployeeGuarantorDto
 
     public bool? IsPrimary { get; set; }
     public string? Relationship { get; set; }
+
+    /// <summary>
+    /// The tie, from the catalogue. Null means NOT SUPPLIED on this DTO; send
+    /// <see cref="ClearRelationshipType"/> to unlink.
+    /// </summary>
+    public Guid? RelationshipTypeId { get; set; }
+
+    /// <summary>Unlinks the catalogue row, leaving the free-text <see cref="Relationship"/> standing.</summary>
+    public bool ClearRelationshipType { get; set; }
+
     public string? FirstName { get; set; }
     public string? MiddleName { get; set; }
     public string? LastName { get; set; }
@@ -2308,8 +2564,21 @@ public class UpdateEmployeeGuarantorDto
     public DateOnly? DateOfBirth { get; set; }
     public string? Address { get; set; }
     public string? City { get; set; }
+    public string? Region { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area. Null means NOT SUPPLIED on this DTO; send <see cref="ClearGeoArea"/> to unlink.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <summary>
+    /// Removes the guarantor's area. Wins over <see cref="GeoAreaId"/> if both are sent. The
+    /// snapshot columns are left as they are — the record still has to say where they live.
+    /// </summary>
+    public bool ClearGeoArea { get; set; }
+
     public string? PhoneNumber { get; set; }
     public string? EmailAddress { get; set; }
     public string? JobTitle { get; set; }

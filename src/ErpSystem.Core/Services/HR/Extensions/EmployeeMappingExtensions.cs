@@ -531,7 +531,10 @@ public static class EmployeeMappingExtensions
             EmailAddress = e.EmailAddress,
             Address = e.Address,
             City = e.City,
+            Region = e.Region,
             CountryId = e.CountryId,
+            GeoAreaId = e.GeoAreaId,
+            RelationshipTypeId = e.RelationshipTypeId,
             DigitalAddress = e.DigitalAddress,
             IsPrimary = e.IsPrimary,
             IsActive = e.IsActive,
@@ -552,7 +555,10 @@ public static class EmployeeMappingExtensions
             EmailAddress = dto.EmailAddress,
             Address = dto.Address,
             City = dto.City,
+            Region = dto.Region,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
+            RelationshipTypeId = dto.RelationshipTypeId,
             DigitalAddress = dto.DigitalAddress,
             IsPrimary = dto.IsPrimary,
             IsActive = dto.IsActive,
@@ -571,7 +577,12 @@ public static class EmployeeMappingExtensions
         e.EmailAddress = dto.EmailAddress;
         e.Address = dto.Address;
         e.City = dto.City;
+        e.Region = dto.Region;
         if (dto.CountryId.HasValue) e.CountryId = dto.CountryId;
+        // ⚠ Full replace, unlike CountryId above: this DTO's own address fields are full-replace,
+        // so emptying the cascade on the form has to clear the link. See the DTO's remark.
+        e.GeoAreaId = dto.GeoAreaId;
+        e.RelationshipTypeId = dto.RelationshipTypeId;
         e.DigitalAddress = dto.DigitalAddress;
         if (dto.IsPrimary.HasValue) e.IsPrimary = dto.IsPrimary.Value;
         if (dto.IsActive.HasValue) e.IsActive = dto.IsActive.Value;
@@ -594,6 +605,7 @@ public static class EmployeeMappingExtensions
             Region = e.Region,
             DigitalAddress = e.DigitalAddress,
             CountryId = e.CountryId,
+            GeoAreaId = e.GeoAreaId,
             IsPrimary = e.IsPrimary
         };
 
@@ -608,6 +620,7 @@ public static class EmployeeMappingExtensions
             Region = dto.Region,
             DigitalAddress = dto.DigitalAddress,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
             IsPrimary = dto.IsPrimary
         };
 
@@ -620,6 +633,8 @@ public static class EmployeeMappingExtensions
         e.Region = dto.Region;
         e.DigitalAddress = dto.DigitalAddress;
         if (dto.CountryId.HasValue) e.CountryId = dto.CountryId;
+        // ⚠ Full replace, unlike CountryId above — see the DTO's remark.
+        e.GeoAreaId = dto.GeoAreaId;
         if (dto.IsPrimary.HasValue) e.IsPrimary = dto.IsPrimary.Value;
     }
 
@@ -1023,6 +1038,10 @@ public static class EmployeeMappingExtensions
             EmployeeId = w.EmployeeId,
             CompanyName = w.CompanyName,
             CompanyAddress = w.CompanyAddress,
+            CountryId = w.CountryId,
+            City = w.City,
+            Region = w.Region,
+            GeoAreaId = w.GeoAreaId,
             JobTitle = w.JobTitle,
             JobDescription = w.JobDescription,
             StartDate = w.StartDate,
@@ -1040,6 +1059,10 @@ public static class EmployeeMappingExtensions
             EmployeeId = dto.EmployeeId,
             CompanyName = dto.CompanyName,
             CompanyAddress = dto.CompanyAddress,
+            CountryId = dto.CountryId,
+            City = dto.City,
+            Region = dto.Region,
+            GeoAreaId = dto.GeoAreaId,
             JobTitle = dto.JobTitle,
             JobDescription = dto.JobDescription,
             StartDate = dto.StartDate,
@@ -1055,6 +1078,12 @@ public static class EmployeeMappingExtensions
     {
         if (!string.IsNullOrWhiteSpace(dto.CompanyName)) w.CompanyName = dto.CompanyName.Trim();
         w.CompanyAddress = dto.CompanyAddress;
+        w.City = dto.City;
+        w.Region = dto.Region;
+        if (dto.CountryId.HasValue) w.CountryId = dto.CountryId;
+        // ⚠ Full replace, unlike CountryId above: this DTO's address fields are full-replace, so
+        // emptying the cascade on the form has to clear the link.
+        w.GeoAreaId = dto.GeoAreaId;
         if (!string.IsNullOrWhiteSpace(dto.JobTitle)) w.JobTitle = dto.JobTitle.Trim();
         w.JobDescription = dto.JobDescription;
         if (dto.StartDate.HasValue) w.StartDate = dto.StartDate.Value;
@@ -1368,6 +1397,7 @@ public static class EmployeeMappingExtensions
             Organization = r.Organization,
             PositionOrTitle = r.PositionOrTitle,
             Relationship = r.Relationship,
+            RelationshipTypeId = r.RelationshipTypeId,
             PhoneNumber = r.PhoneNumber,
             EmailAddress = r.EmailAddress,
             IsPrimary = r.IsPrimary,
@@ -1391,6 +1421,7 @@ public static class EmployeeMappingExtensions
             Organization = r.Organization,
             PositionOrTitle = r.PositionOrTitle,
             Relationship = r.Relationship,
+            RelationshipTypeId = r.RelationshipTypeId,
             PhoneNumber = r.PhoneNumber,
             EmailAddress = r.EmailAddress,
             IsPrimary = r.IsPrimary,
@@ -1415,6 +1446,7 @@ public static class EmployeeMappingExtensions
             Organization = dto.Organization,
             PositionOrTitle = dto.PositionOrTitle,
             Relationship = dto.Relationship,
+            RelationshipTypeId = dto.RelationshipTypeId,
             PhoneNumber = dto.PhoneNumber,
             EmailAddress = dto.EmailAddress,
             IsPrimary = dto.IsPrimary,
@@ -1428,6 +1460,11 @@ public static class EmployeeMappingExtensions
         if (dto.Organization != null) r.Organization = dto.Organization;
         if (dto.PositionOrTitle != null) r.PositionOrTitle = dto.PositionOrTitle;
         if (dto.Relationship != null) r.Relationship = dto.Relationship;
+        // ⚠ Clear-flag rather than a bare null, because every field on this DTO means "not
+        // supplied" when null — the ClearNationalIdType shape. The service overwrites Relationship
+        // from the catalogue row AFTER this runs, so the order here does not matter.
+        if (dto.ClearRelationshipType) r.RelationshipTypeId = null;
+        else if (dto.RelationshipTypeId.HasValue) r.RelationshipTypeId = dto.RelationshipTypeId;
         if (dto.PhoneNumber != null) r.PhoneNumber = dto.PhoneNumber;
         if (dto.EmailAddress != null) r.EmailAddress = dto.EmailAddress;
         if (dto.IsContacted.HasValue) r.IsContacted = dto.IsContacted.Value;
@@ -1456,6 +1493,7 @@ public static class EmployeeMappingExtensions
             // every row, which is the stale-navigation shape met sixteen times in this module.
             NationalIdTypeId = g.NationalIdTypeId,
             NationalIdTypeName = g.NationalIdTypeRef?.Name,
+            RelationshipTypeId = g.RelationshipTypeId,
             DocumentCount = g.Documents?.Count(d => !d.IsDeleted) ?? 0
         };
 
@@ -1474,8 +1512,11 @@ public static class EmployeeMappingExtensions
             DateOfBirth = g.DateOfBirth,
             Address = g.Address,
             City = g.City,
+            Region = g.Region,
             DigitalAddress = g.DigitalAddress,
             CountryId = g.CountryId,
+            GeoAreaId = g.GeoAreaId,
+            RelationshipTypeId = g.RelationshipTypeId,
             PhoneNumber = g.PhoneNumber,
             EmailAddress = g.EmailAddress,
             JobTitle = g.JobTitle,
@@ -1521,8 +1562,11 @@ public static class EmployeeMappingExtensions
             DateOfBirth = dto.DateOfBirth,
             Address = dto.Address,
             City = dto.City,
+            Region = dto.Region,
             DigitalAddress = dto.DigitalAddress,
             CountryId = dto.CountryId,
+            GeoAreaId = dto.GeoAreaId,
+            RelationshipTypeId = dto.RelationshipTypeId,
             PhoneNumber = dto.PhoneNumber,
             EmailAddress = dto.EmailAddress,
             JobTitle = dto.JobTitle,
@@ -1556,8 +1600,14 @@ public static class EmployeeMappingExtensions
         if (dto.DateOfBirth.HasValue) g.DateOfBirth = dto.DateOfBirth;
         if (dto.Address != null) g.Address = dto.Address;
         if (dto.City != null) g.City = dto.City;
+        if (dto.Region != null) g.Region = dto.Region;
         if (dto.DigitalAddress != null) g.DigitalAddress = dto.DigitalAddress;
         if (dto.CountryId.HasValue) g.CountryId = dto.CountryId;
+        // ⚠ Clear-flags, not bare nulls: every field on this DTO means "not supplied" when null.
+        if (dto.ClearGeoArea) g.GeoAreaId = null;
+        else if (dto.GeoAreaId.HasValue) g.GeoAreaId = dto.GeoAreaId;
+        if (dto.ClearRelationshipType) g.RelationshipTypeId = null;
+        else if (dto.RelationshipTypeId.HasValue) g.RelationshipTypeId = dto.RelationshipTypeId;
         if (dto.PhoneNumber != null) g.PhoneNumber = dto.PhoneNumber;
         if (dto.EmailAddress != null) g.EmailAddress = dto.EmailAddress;
         if (dto.JobTitle != null) g.JobTitle = dto.JobTitle;

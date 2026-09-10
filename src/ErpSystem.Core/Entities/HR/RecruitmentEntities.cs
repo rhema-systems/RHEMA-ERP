@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
@@ -982,7 +982,7 @@ public class JobCandidateWorkHistory : TenantEntity
     public string? ReasonForLeaving { get; set; }
 }
 
-public class JobCandidateReferee : TenantEntity
+public class JobCandidateReferee : TenantEntity, ErpSystem.Core.Entities.HR.IRelationshipTypeConsumer
 {
     public Guid JobCandidateId { get; set; }
  
@@ -1007,7 +1007,23 @@ public class JobCandidateReferee : TenantEntity
 
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
-	
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register row E-11a).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ The free-text <see cref="Relationship"/> above is kept and MIRRORED from this row's
+    /// name whenever the id is set, so candidates recorded before the catalogue keep their wording.</para>
+    ///
+    /// <para>⚠ The referee screen accepts <c>Professional</c> and <c>Other</c> only. A candidate
+    /// may name a pastor or a family friend (both <c>Other</c>); they may not name their mother.
+    /// The rule is the service's, not this column's.</para>
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
+
 	public int YearsKnown { get; set; }
 }
 

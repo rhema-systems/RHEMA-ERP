@@ -1331,6 +1331,23 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(e => e.CountryId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 2, lane D2 — this address on the shared administrative-geography tree.
+            //
+            // ⚠ .WithMany() with no inverse collection, spelt out: GeoArea deliberately has no
+            // navigation back to its consumers, and an unpaired navigation left to convention mints
+            // a shadow FK (GeoAreaId1) beside this column.
+            //
+            // ⚠ Restrict, and a probe in GeoAreaConsumers.cs. The FK only fires on a HARD delete and
+            // geography deletes are SOFT, so the constraint alone gives this column no protection at
+            // all — a column added here without a probe registered there is unguarded.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_EmployeeContact_Tenant_GeoArea");
         });
 
         builder.Entity<EmployeeEmergencyContact>(entity =>
@@ -1347,6 +1364,31 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(e => e.Country)
                 .WithMany()
                 .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 2, lane D2 — this address on the shared administrative-geography tree.
+            //
+            // ⚠ .WithMany() with no inverse collection, spelt out: GeoArea deliberately has no
+            // navigation back to its consumers, and an unpaired navigation left to convention mints
+            // a shadow FK (GeoAreaId1) beside this column.
+            //
+            // ⚠ Restrict, and a probe in GeoAreaConsumers.cs. The FK only fires on a HARD delete and
+            // geography deletes are SOFT, so the constraint alone gives this column no protection at
+            // all — a column added here without a probe registered there is unguarded.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_EmployeeEmergencyContact_Tenant_GeoArea");
+
+            // The tie, from the catalogue. Restrict, so a value in use cannot be deleted from under
+            // a next of kin — the service refuses it first, with a count.
+            entity.HasIndex(e => e.RelationshipTypeId);
+            entity.HasOne(e => e.RelationshipTypeRef)
+                .WithMany()
+                .HasForeignKey(e => e.RelationshipTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -1459,6 +1501,31 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(e => e.WorkHistories)
                 .HasForeignKey(e => e.EmployeeId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Round 2, lane D2 (register row E-6): the employer's address was one free-text line
+            // with no country at all.
+            entity.HasIndex(e => e.CountryId);
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 2, lane D2 — this address on the shared administrative-geography tree.
+            //
+            // ⚠ .WithMany() with no inverse collection, spelt out: GeoArea deliberately has no
+            // navigation back to its consumers, and an unpaired navigation left to convention mints
+            // a shadow FK (GeoAreaId1) beside this column.
+            //
+            // ⚠ Restrict, and a probe in GeoAreaConsumers.cs. The FK only fires on a HARD delete and
+            // geography deletes are SOFT, so the constraint alone gives this column no protection at
+            // all — a column added here without a probe registered there is unguarded.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_EmployeeWorkHistory_Tenant_GeoArea");
         });
 
         builder.Entity<EmployeeContractDetail>(entity =>
@@ -2112,6 +2179,14 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(e => e.Referees)
                 .HasForeignKey(e => e.EmployeeId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // The tie, from the catalogue (round 2, lane D2). Restrict: a value a referee still
+            // names cannot be deleted from under it.
+            entity.HasIndex(e => e.RelationshipTypeId);
+            entity.HasOne(e => e.RelationshipTypeRef)
+                .WithMany()
+                .HasForeignKey(e => e.RelationshipTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<EmployeeGuarantor>(entity =>
@@ -2146,6 +2221,53 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(e => e.NationalIdTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Round 2, lane D2 — the guarantor's address on the shared administrative-geography
+            // tree, and the tie from the relationship catalogue.
+            //
+            // ⚠ .WithMany() with no inverse collection, spelt out: GeoArea deliberately has no
+            // navigation back to its consumers, and an unpaired navigation left to convention mints
+            // a shadow FK (GeoAreaId1) beside this column.
+            //
+            // ⚠ Restrict, and a probe in GeoAreaConsumers.cs. The FK only fires on a HARD delete and
+            // geography deletes are SOFT, so the constraint alone gives this column no protection.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_EmployeeGuarantor_Tenant_GeoArea");
+
+            entity.HasIndex(e => e.RelationshipTypeId);
+            entity.HasOne(e => e.RelationshipTypeRef)
+                .WithMany()
+                .HasForeignKey(e => e.RelationshipTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── The relationship catalogue itself (round 2, lane D2 — register rows E-11a, E-11b) ──
+        builder.Entity<RelationshipType>(entity =>
+        {
+            entity.Property(e => e.Category).HasConversion<int>();
+            entity.Property(e => e.MapsToDependentRelationship).HasConversion<int?>();
+
+            // Name unique per tenant: two rows called "Spouse" would make the mirrored free text
+            // ambiguous and put the same word twice in every dropdown.
+            entity.HasIndex(e => new { e.TenantId, e.Name })
+                .IsUnique()
+                .HasDatabaseName("IX_RelationshipType_Tenant_Name");
+
+            // ⚠ Filtered on Code IS NOT NULL: the code is optional, and an unfiltered unique index
+            // would let exactly one row have no code.
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasFilter("[Code] IS NOT NULL")
+                .HasDatabaseName("IX_RelationshipType_Tenant_Code");
+
+            // The pickers all read "active, of these categories, in order".
+            entity.HasIndex(e => new { e.TenantId, e.Category, e.IsActive })
+                .HasDatabaseName("IX_RelationshipType_Tenant_Category_Active");
         });
 
         builder.Entity<EmployeeGuarantorDocument>(e =>
@@ -7592,6 +7714,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.JobCandidate)
                 .WithMany(x => x.Referees)
                 .HasForeignKey(x => x.JobCandidateId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The tie, from the catalogue (round 2, lane D2). Restrict: a value a referee still
+            // names cannot be deleted from under it.
+            entity.HasIndex(x => x.RelationshipTypeId).HasDatabaseName("IX_CandidateReferee_RelationshipTypeId");
+            entity.HasOne(x => x.RelationshipTypeRef)
+                .WithMany()
+                .HasForeignKey(x => x.RelationshipTypeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

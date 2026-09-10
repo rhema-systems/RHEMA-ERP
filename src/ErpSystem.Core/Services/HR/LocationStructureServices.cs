@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
@@ -650,24 +650,16 @@ public class LocationService : ILocationService
     /// structured link cannot disagree. A null area leaves the text exactly as it was — most sites
     /// predate the tree and that text is the only address they have.
     /// </summary>
-    private async Task ApplyGeoAreaSnapshotAsync(Location entity, CancellationToken cancellationToken)
-    {
-        if (entity.GeoAreaId is not { } areaId) return;
-
-        var (_, city) = await _geography.GetAddressSnapshotAsync(areaId, cancellationToken);
-
-        // (null, null) means the area could not be read — another tenant's, or removed between the
-        // form loading and the save. Leave what the record said rather than blanking it.
-        if (city is null)
-        {
-            _logger.LogWarning(
-                "Location {LocationId} references geo area {GeoAreaId}, which could not be resolved to a "
-                + "city; the address was left unchanged.", entity.Id, areaId);
-            return;
-        }
-
-        entity.City = city;
-    }
+    /// <remarks>
+    /// ⚠ No region setter: <c>Location</c> has no region column, which is what the helper's
+    /// nullable setters exist for. The rule itself lives in <see cref="ErpSystem.Core.Services.Reference.GeoAddressSnapshot"/> since
+    /// round 2 lane D2.
+    /// </remarks>
+    private Task ApplyGeoAreaSnapshotAsync(Location entity, CancellationToken cancellationToken)
+        => ErpSystem.Core.Services.Reference.GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, entity.GeoAreaId,
+            setRegion: null, setCity: c => entity.City = c,
+            "location", entity.Id, cancellationToken);
 
     public async Task<LocationDto> UpdateAsync(UpdateLocationDto updateDto, CancellationToken cancellationToken = default)
     {

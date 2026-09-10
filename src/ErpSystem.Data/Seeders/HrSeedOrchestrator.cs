@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Reference;
 using Microsoft.EntityFrameworkCore;
@@ -139,6 +139,17 @@ public class HrSeedOrchestrator
             "Qualifications",
             ct => _context.Set<Qualification>().AnyAsync(x => x.TenantId == tenantId, ct),
             ct => new QualificationSeeder(_context, Log<QualificationSeeder>()).SeedAsync(tenantId)),
+
+        // The relationship vocabulary the referee, guarantor, next-of-kin and candidate-referee
+        // screens pick from (round 2, lane D2). Depends on nothing. The probe asks for a row THIS
+        // seed creates rather than for a non-empty table — see the job-architecture step below for
+        // why that distinction is not pedantry.
+        new SeedStep(
+            "Relationship types (familial, professional, other)",
+            ct => _context.Set<RelationshipType>()
+                          .AnyAsync(x => x.TenantId == tenantId
+                                      && x.Code == RelationshipTypeSeeder.ProbeCode, ct),
+            ct => new RelationshipTypeSeeder(_context, Log<RelationshipTypeSeeder>()).SeedAsync(tenantId, ct)),
 
         new SeedStep(
             "Skills",

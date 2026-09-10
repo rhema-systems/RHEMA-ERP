@@ -1064,6 +1064,18 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
                                ErpSystem.Core.Services.HR.HealthcareFacilityGeoAreaConsumer>();
 
+            // Round 2, lane D2 — the addresses hanging off an employee. The employee's own address
+            // was covered from the start; these four were not, and a soft-deleted area would have
+            // taken a next of kin's address, a guarantor's and a previous employer's with it.
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeContactGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeEmergencyContactGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeGuarantorGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeWorkHistoryGeoAreaConsumer>();
+
             // The company seal and signature, versioned rather than overwritten.
             services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
                                ErpSystem.Core.Services.HR.CompanySealAssetService>();

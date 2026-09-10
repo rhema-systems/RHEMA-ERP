@@ -262,6 +262,31 @@ public enum ProbationSource
     Override = 3
 }
 
+/// <summary>
+/// Which kind of tie a <c>RelationshipType</c> describes, so a screen can offer only the values
+/// that make sense on it.
+/// </summary>
+/// <remarks>
+/// <para>The demo feedback asked for this in as many words (register row E-11b): "differentiate
+/// familial from professional relationships, to know which values to populate". A next-of-kin
+/// dropdown offering "Former manager" and a referee dropdown offering "Nephew" are the same
+/// defect — a list that is technically complete and practically useless.</para>
+///
+/// <para><b>Other</b> is not a dumping ground. It is the tie that is neither blood nor work —
+/// family friend, landlord, pastor — and both the next-of-kin and the referee screens accept it,
+/// which is the whole reason it is a third value rather than a null.</para>
+///
+/// <para>Stored as an int; members are APPENDED and never renumbered.</para>
+/// </remarks>
+public enum RelationshipCategory
+{
+    Familial = 1,
+
+    Professional = 2,
+
+    Other = 3
+}
+
 public enum DependentRelationship
 {
     Spouse = 1,
@@ -5565,7 +5590,23 @@ public enum ProficiencyLevel
     Expert = 5
 }
 
-public enum RelationshipType
+/// <summary>
+/// The reach of a working relationship on a job description — who the post deals with, and how far
+/// outside the organisation that reaches.
+/// </summary>
+/// <remarks>
+/// <para>⚠ <b>Renamed from <c>RelationshipType</c> in round 2 lane D2.</b> It collided with the new
+/// <c>Entities.HR.RelationshipType</c> table (how one PERSON is tied to another — a next of kin, a
+/// referee, a guarantor), and the two are unrelated ideas that would have forced a <c>using</c>
+/// alias into every file touching either. Renaming was free: this enum had <b>no typed consumer
+/// anywhere</b> — no property, no parameter, no column, no frontend reference — so nothing was
+/// serialized against the old name and no data carries it. Verified 2026-09-10.</para>
+///
+/// <para>The name it has now is what its members actually describe. Job descriptions record their
+/// working relationships through <see cref="ReportingRelationshipType"/> instead, which is why
+/// this one was never wired up.</para>
+/// </remarks>
+public enum WorkingRelationshipScope
 {
     [Description("Internal - Same Department")]
     InternalSameDepartment = 1,

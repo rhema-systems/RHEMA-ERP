@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
@@ -110,6 +110,41 @@ public class JobCandidateService : IJobCandidateService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Referee with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>
+    /// Resolves a relationship-catalogue id for the candidate referee screen, and returns the words
+    /// to mirror into the row's free-text <c>Relationship</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Round 2, lane D2. ⚠ PROFESSIONAL and OTHER only. A candidate may name a pastor, a
+    /// lecturer or a family friend; they may not name their mother, and a referee list that let
+    /// them would be worth nothing to the people reading it.</para>
+    ///
+    /// <para>A null id leaves the typed words standing — a tie nobody has catalogued may still be
+    /// typed, and every referee recorded before the catalogue keeps its wording.</para>
+    /// </remarks>
+    private async Task<string> ResolveRefereeRelationshipAsync(
+        Guid? relationshipTypeId, string typed, CancellationToken cancellationToken)
+    {
+        if (relationshipTypeId is not Guid id) return typed;
+
+        var tenantId = GetTenantId();
+        var type = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.RelationshipType>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId && !t.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Relationship type '{id}' was not found.");
+
+        if (!type.IsActive)
+            throw new InvalidOperationException(
+                $"Relationship type '{type.Name}' is retired and cannot be chosen for a new record.");
+
+        if (type.Category == RelationshipCategory.Familial)
+            throw new InvalidOperationException(
+                $"'{type.Name}' is a familial relationship, and a referee accepts professional and "
+                + "other ones.");
+
+        return type.Name;
     }
 
     private async Task<JobCandidateSkill> GetOwnedSkillAsync(Guid id)
@@ -781,6 +816,8 @@ public class JobCandidateService : IJobCandidateService
 
         await GetOwnedCandidateAsync(createDto.JobCandidateId);
         var entity = createDto.ToEntity(current, createdByUserId);
+        entity.Relationship = await ResolveRefereeRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, cancellationToken);
         await _refereeRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
@@ -798,6 +835,8 @@ public class JobCandidateService : IJobCandidateService
         var entity = await GetOwnedRefereeAsync(updateDto.Id);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        entity.Relationship = await ResolveRefereeRelationshipAsync(
+            entity.RelationshipTypeId, entity.Relationship, cancellationToken);
         await _refereeRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();

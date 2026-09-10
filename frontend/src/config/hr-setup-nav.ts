@@ -56,6 +56,7 @@ import {
   UserRoundCheck,
   Users,
   Users2,
+  HeartHandshake,
   Workflow,
   Wrench,
   type LucideIcon,
@@ -302,6 +303,17 @@ export const hrSetupGroups: HrSetupGroup[] = [
         icon: FileSignature,
         description:
           'The kinds of engagement contracts are written under — and how long each normally runs.',
+      },
+      {
+        // Round 2, lane D2. Four columns spelt this out in free text — the referee's, the
+        // guarantor's, the next of kin's and the candidate referee's — and never agreed with each
+        // other. The CATEGORY is what makes it useful: it is what decides which screens offer a
+        // value, so a next-of-kin dropdown never offers "Former manager".
+        title: 'Relationship Types',
+        href: '/administration/hr/relationship-types',
+        icon: HeartHandshake,
+        description:
+          'How one person is tied to another — what the referee, guarantor and next-of-kin screens pick from.',
       },
       {
         title: 'Identification Types',

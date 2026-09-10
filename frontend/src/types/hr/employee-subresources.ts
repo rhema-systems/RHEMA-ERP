@@ -113,6 +113,13 @@ export interface EmployeeContact {
   region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  /**
+   * The administrative area this address sits in (round 2, lane D2).
+   *
+   * ⚠ When it is set, `city` and `region` above are SNAPSHOTS the server wrote from the tree, not
+   * values a caller decides. Read it to re-open the cascade.
+   */
+  geoAreaId?: string | null;
   isPrimary: boolean;
 }
 
@@ -125,6 +132,11 @@ export interface CreateEmployeeContactRequest {
   region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
   isPrimary: boolean;
 }
 
@@ -149,11 +161,26 @@ export interface EmployeeEmergencyContact {
   emailAddress?: string | null;
   address?: string | null;
   city?: string | null;
+  region?: string | null;
   countryId?: string | null;
+  /**
+   * The administrative area this address sits in (round 2, lane D2).
+   *
+   * ⚠ When it is set, `city` and `region` above are SNAPSHOTS the server wrote from the tree, not
+   * values a caller decides. Read it to re-open the cascade.
+   */
+  geoAreaId?: string | null;
   digitalAddress?: string | null;
   isPrimary: boolean;
   isActive: boolean;
   notes?: string | null;
+  /**
+   * The catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save. This is
+   * for re-opening the dropdown, not for display.
+   */
+  relationshipTypeId?: string | null;
 }
 
 export interface CreateEmployeeEmergencyContactRequest {
@@ -168,11 +195,19 @@ export interface CreateEmployeeEmergencyContactRequest {
   emailAddress?: string | null;
   address?: string | null;
   city?: string | null;
+  region?: string | null;
   countryId?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
   digitalAddress?: string | null;
   isPrimary: boolean;
   isActive: boolean;
   notes?: string | null;
+  /** The catalogue row. ⚠ FAMILIAL and OTHER only — a next of kin is not a former manager. */
+  relationshipTypeId?: string | null;
 }
 
 export interface UpdateEmployeeEmergencyContactRequest
@@ -435,6 +470,18 @@ export interface EmployeeWorkHistory {
   startDate: string;
   endDate?: string | null;
   companyAddress?: string | null;
+  // The employer's address, round 2 lane D2 (register row E-6). ⚠ city and region are SNAPSHOTS
+  // written from geoAreaId, not values a caller decides.
+  countryId?: string | null;
+  city?: string | null;
+  region?: string | null;
+  /**
+   * The administrative area this address sits in (round 2, lane D2).
+   *
+   * ⚠ When it is set, `city` and `region` above are SNAPSHOTS the server wrote from the tree, not
+   * values a caller decides. Read it to re-open the cascade.
+   */
+  geoAreaId?: string | null;
   jobDescription?: string | null;
   salary?: number | null;
   reasonForLeaving?: string | null;
@@ -447,6 +494,14 @@ export interface CreateEmployeeWorkHistoryRequest {
   employeeId: string;
   companyName: string;
   companyAddress?: string | null;
+  countryId?: string | null;
+  city?: string | null;
+  region?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
   jobTitle: string;
   jobDescription?: string | null;
   startDate: string;
@@ -753,6 +808,13 @@ export interface EmployeeReferee {
   organization?: string | null;
   positionOrTitle?: string | null;
   relationship: string;
+  /**
+   * The catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save. This is
+   * for re-opening the dropdown, not for display.
+   */
+  relationshipTypeId?: string | null;
   phoneNumber: string;
   emailAddress?: string | null;
   isPrimary: boolean;
@@ -776,6 +838,13 @@ export interface CreateEmployeeRefereeRequest {
   organization?: string | null;
   positionOrTitle?: string | null;
   relationship: string;
+  /**
+   * The catalogue row.
+   *
+   * ⚠ What is accepted depends on `refereeType`: a PERSONAL referee may be a relative or a family
+   * friend (familial, other); a PROFESSIONAL or ACADEMIC one may not (professional, other).
+   */
+  relationshipTypeId?: string | null;
   phoneNumber: string;
   emailAddress?: string | null;
   isPrimary: boolean;
@@ -787,6 +856,8 @@ export interface UpdateEmployeeRefereeRequest extends Partial<CreateEmployeeRefe
   isContacted?: boolean;
   contactedDate?: string | null;
   referenceNotes?: string | null;
+  /** A null id means "not supplied" on this DTO, so unlinking has to say so explicitly. */
+  clearRelationshipType?: boolean;
 }
 
 // ── Guarantors ──────────────────────────────────────────────────────────────────
@@ -809,9 +880,19 @@ export interface EmployeeGuarantor {
   /** DateOnly */
   dateOfBirth?: string | null;
   address?: string;
+  // ⚠ city and region are SNAPSHOTS written from geoAreaId, not values a caller decides.
   city?: string | null;
+  region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  geoAreaId?: string | null;
+  /**
+   * The catalogue row behind `relationship` (round 2, lane D2).
+   *
+   * ⚠ `relationship` already carries the row's NAME — the server mirrors it on every save. This is
+   * for re-opening the dropdown, not for display.
+   */
+  relationshipTypeId?: string | null;
   phoneNumber?: string | null;
   emailAddress?: string | null;
   jobTitle?: string | null;
@@ -860,8 +941,16 @@ export interface CreateEmployeeGuarantorRequest {
   dateOfBirth?: string | null;
   address: string;
   city?: string | null;
+  region?: string | null;
   digitalAddress?: string | null;
   countryId?: string | null;
+  /**
+   * The area. Supplying it rewrites `city` and `region` from the tree and fills in `countryId`;
+   * an area outside a stated country is refused with a 400.
+   */
+  geoAreaId?: string | null;
+  /** The catalogue row. ⚠ ALL THREE categories — a guarantor may be anyone. */
+  relationshipTypeId?: string | null;
   phoneNumber?: string | null;
   emailAddress?: string | null;
   jobTitle?: string | null;
@@ -891,6 +980,10 @@ export interface UpdateEmployeeGuarantorRequest extends Partial<CreateEmployeeGu
   id: string;
   /** A null id means "not supplied" on the update DTO, so unlinking has to say so explicitly. */
   clearNationalIdType?: boolean;
+  /** Same convention, for the area. */
+  clearGeoArea?: boolean;
+  /** Same convention, for the relationship catalogue row. */
+  clearRelationshipType?: boolean;
 }
 
 /** Body for POST .../guarantors/{id}/verify. verifiedDate is a DateTime. */
