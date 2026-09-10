@@ -76,7 +76,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
 
         var retry = await fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
         retry.JournalEntryId.Should().Be(posted.JournalEntryId);
-        (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(1, "an exact retry is Finance and owner read-only");
+        (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(2, "an exact retry is Finance and owner read-only; the fixture also carries the original invoice authority");
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
 
         fixture.Db.ChangeTracker.Clear();
         (await fixture.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().BeNull();
-        (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(0);
+        (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(1, "only the seeded invoice authority is durable after rollback");
         (await fixture.Db.JournalEntries.CountAsync()).Should().Be(0);
         var failed = await fixture.Db.AccountingEvents.Include(x => x.Attempts).SingleAsync();
         failed.Status.Should().Be(AccountingEventStatuses.Failed);
@@ -112,6 +112,80 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         repaired.JournalEntryId.Should().NotBeNull();
         (await fixture.Db.AccountingEvents.Include(x => x.Attempts).SingleAsync()).Attempts
             .Count(x => x.Status == AccountingEventStatuses.Failed).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task ClosedBookPeriod_RejectsApprovedExecutionWithoutOwnerOrFinanceMutation_AndFreshOpenScenarioPosts()
+    {
+        await using (var closed = await Fixture.CreateAsync(postingPeriodOpen: false))
+        {
+            await closed.Service.PostCreditNoteAsync(closed.CreditNote.Id);
+            var eventId = (await closed.Db.AccountingEvents.SingleAsync()).Id;
+            closed.UseChecker();
+            await closed.Producer.ApprovePreparedAsync(eventId, new DecideProducerAccountingIntentDto { Reason = "Independent checker approval" });
+            closed.UseMaker();
+
+            var selectionCount = await closed.Db.AccountingBookSelectionEvidence.CountAsync();
+            var ownerReceiptCount = await closed.Db.AccountingEventProducerReceipts.CountAsync();
+            var postingCount = await closed.Db.FinancePostingEvents.CountAsync();
+            var journalCount = await closed.Db.JournalEntries.CountAsync();
+            var balanceCount = await closed.Db.AccountBalances.CountAsync();
+            var originalUpdatedAt = (await closed.Db.CreditNotes.SingleAsync()).UpdatedAt;
+
+            await FluentActions.Awaiting(() => closed.Service.PostCreditNoteAsync(closed.CreditNote.Id))
+                .Should().ThrowAsync<InvalidOperationException>().WithMessage("*not open*");
+
+            closed.Db.ChangeTracker.Clear();
+            (await closed.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().BeNull();
+            (await closed.Db.CreditNotes.SingleAsync()).UpdatedAt.Should().Be(originalUpdatedAt);
+            (await closed.Db.AccountingBookSelectionEvidence.CountAsync()).Should().Be(selectionCount, "C5 evidence is immutable through a failed approved execution");
+            (await closed.Db.AccountingEventProducerReceipts.CountAsync()).Should().Be(ownerReceiptCount);
+            (await closed.Db.FinancePostingEvents.CountAsync()).Should().Be(postingCount);
+            (await closed.Db.JournalEntries.CountAsync()).Should().Be(journalCount);
+            (await closed.Db.AccountBalances.CountAsync()).Should().Be(balanceCount);
+        }
+
+        // Recovery is an independently prepared scenario; the rejected C11 authority is never
+        // altered or reused after a closed-period decision.
+        await using var reopenedScenario = await Fixture.CreateAsync(postingPeriodOpen: true);
+        await reopenedScenario.Service.PostCreditNoteAsync(reopenedScenario.CreditNote.Id);
+        var freshEventId = (await reopenedScenario.Db.AccountingEvents.SingleAsync()).Id;
+        reopenedScenario.UseChecker();
+        await reopenedScenario.Producer.ApprovePreparedAsync(freshEventId, new DecideProducerAccountingIntentDto { Reason = "Independent checker approval" });
+        reopenedScenario.UseMaker();
+        (await reopenedScenario.Service.PostCreditNoteAsync(reopenedScenario.CreditNote.Id)).JournalEntryId.Should().NotBeNull();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task InvoiceScopedSerialization_PreventsOverCreditInEitherWinnerOrder(bool reverseWinnerOrder)
+    {
+        await using var fixture = await Fixture.CreateAsync(creditAmount: 60m);
+        var second = await fixture.AddCreditNoteAsync(60m, "SCN-R2");
+        var first = fixture.CreditNote;
+        var ordered = reverseWinnerOrder ? new[] { second, first } : new[] { first, second };
+
+        // Both independent C11 approvals exist before either owner acquires the invoice-scoped
+        // Serializable lock. SQLite serializes writers, so execute deterministically in each
+        // winner order and assert the second fresh reload observes the first durable credit.
+        foreach (var credit in ordered)
+            await fixture.Service.PostCreditNoteAsync(credit.Id);
+        fixture.UseChecker();
+        foreach (var eventId in await fixture.Db.AccountingEvents.OrderBy(x => x.CreatedAt).Select(x => x.Id).ToListAsync())
+            await fixture.Producer.ApprovePreparedAsync(eventId, new DecideProducerAccountingIntentDto { Reason = "Independent checker approval" });
+        fixture.UseMaker();
+
+        (await fixture.Service.PostCreditNoteAsync(ordered[0].Id)).JournalEntryId.Should().NotBeNull();
+        await FluentActions.Awaiting(() => fixture.Service.PostCreditNoteAsync(ordered[1].Id))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*exceed eligible credit amount*");
+
+        fixture.Db.ChangeTracker.Clear();
+        (await fixture.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "SalesCreditNote" && x.PostingStatus == "Posted"))
+            .Should().Be(1);
+        (await fixture.Db.CreditNotes.SingleAsync(x => x.Id == ordered[1].Id)).JournalEntryId.Should().BeNull();
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -133,7 +207,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             Mock<ICurrentUserService> currentUser, Guid maker, Guid checker)
         { _connection = connection; Db = db; CreditNote = creditNote; Service = service; Producer = producer; Audit = audit; Sql = sql; State = state; _currentUser = currentUser; _maker = maker; _checker = checker; }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool postingPeriodOpen = true, decimal creditAmount = 100m)
         {
             // Named shared memory makes each role scope capable of opening a separate relational
             // connection while the fixture's keeper connection preserves the database lifetime.
@@ -148,20 +222,23 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             user.SetupGet(x => x.UserName).Returns("sales-maker"); user.SetupGet(x => x.IsAuthenticated).Returns(true);
             var book = new AccountingBook { Id = Guid.NewGuid(), TenantId = tenant, Code = "IFRS", Name = "IFRS", IsDefault = true, IsActive = true, AllowsPosting = true, BookType = AccountingBookType.PrimaryFull, FunctionalCurrencyCode = "GHS" };
             var fiscalYear = new FiscalYear { Id = Guid.NewGuid(), TenantId = tenant, FiscalYearName = "FY 2026", FiscalYearCode = "2026", Year = 2026, StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31), TotalDays = 365, Status = "Open", IsActive = true };
-            var fiscalPeriod = new FiscalPeriod { Id = Guid.NewGuid(), TenantId = tenant, FiscalYearId = fiscalYear.Id, PeriodName = "September 2026", PeriodCode = "2026-09", PeriodNumber = 9, StartDate = new DateTime(2026, 9, 1), EndDate = new DateTime(2026, 9, 30), PeriodDays = 30, PeriodStatus = "Open", IsOpen = true };
-            var bookPeriod = new AccountingBookPeriod { Id = Guid.NewGuid(), TenantId = tenant, AccountingBookId = book.Id, FiscalPeriodId = fiscalPeriod.Id, PeriodStatus = AccountingBookPeriodStatus.Open };
+            var fiscalPeriod = new FiscalPeriod { Id = Guid.NewGuid(), TenantId = tenant, FiscalYearId = fiscalYear.Id, PeriodName = "September 2026", PeriodCode = "2026-09", PeriodNumber = 9, StartDate = new DateTime(2026, 9, 1), EndDate = new DateTime(2026, 9, 30), PeriodDays = 30, PeriodStatus = postingPeriodOpen ? "Open" : "Closed", IsOpen = postingPeriodOpen, IsClosed = !postingPeriodOpen };
+            var bookPeriod = new AccountingBookPeriod { Id = Guid.NewGuid(), TenantId = tenant, AccountingBookId = book.Id, FiscalPeriodId = fiscalPeriod.Id, PeriodStatus = postingPeriodOpen ? AccountingBookPeriodStatus.Open : AccountingBookPeriodStatus.Closed };
             var ar = Account(tenant, "1200", AccountType.Asset, true, false); var returns = Account(tenant, "5200", AccountType.Expense, false, true);
             var arBook = new AccountAccountingBook { Id = Guid.NewGuid(), TenantId = tenant, AccountId = ar.Id, AccountingBookId = book.Id, IsEnabled = true };
             var returnsBook = new AccountAccountingBook { Id = Guid.NewGuid(), TenantId = tenant, AccountId = returns.Id, AccountingBookId = book.Id, IsEnabled = true };
             var partner = new BusinessPartner { Id = Guid.NewGuid(), TenantId = tenant, PartnerCode = "C1", PartnerName = "Relational customer", PartnerType = "Customer", IsActive = true, DefaultArAccountId = ar.Id };
-            var credit = new CreditNote { Id = Guid.NewGuid(), TenantId = tenant, BusinessPartnerId = partner.Id, DocumentNumber = "SCN-R1", DocumentDate = new DateTime(2026, 9, 1), Currency = "GHS", ExchangeRate = 1, CreditNoteStatus = CreditNoteStatus.Approved, TotalAmount = 100, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" };
-            credit.Lines.Add(new CreditNoteLine { Id = Guid.NewGuid(), TenantId = tenant, CreditNoteId = credit.Id, Description = "Return", Quantity = 1, UnitPrice = 100, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" });
+            var invoiceJournalId = Guid.NewGuid();
+            var invoice = new Invoice { Id = Guid.NewGuid(), TenantId = tenant, BusinessPartnerId = partner.Id, InvoiceNumber = "SI-R1", CustomerName = partner.PartnerName, InvoiceDate = new DateTime(2026, 9, 1), CurrencyCode = "GHS", ExchangeRate = 1, TotalAmount = 100m, BaseCurrencyAmount = 100m, JournalEntryId = invoiceJournalId, Status = InvoiceStatus.Approved };
+            var invoicePosting = new FinancePostingEvent { Id = Guid.NewGuid(), TenantId = tenant, SourceModule = "AR", OriginModuleCode = "SALES", SourceDocumentType = "CustomerInvoice", SourceDocumentId = invoice.Id, PostingAction = "Post", PostingStatus = "Posted", PostingDate = invoice.InvoiceDate, PostedAt = DateTime.UtcNow, JournalEntryId = invoiceJournalId, AccountingBookId = book.Id, BookClassification = book.Code, FunctionalCurrencyCode = "GHS" };
+            var credit = new CreditNote { Id = Guid.NewGuid(), TenantId = tenant, BusinessPartnerId = partner.Id, OriginalInvoiceId = invoice.Id, DocumentNumber = "SCN-R1", DocumentDate = new DateTime(2026, 9, 1), Currency = "GHS", ExchangeRate = 1, CreditNoteStatus = CreditNoteStatus.Approved, TotalAmount = creditAmount, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" };
+            credit.Lines.Add(new CreditNoteLine { Id = Guid.NewGuid(), TenantId = tenant, CreditNoteId = credit.Id, Description = "Return", Quantity = 1, UnitPrice = creditAmount, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" });
             var selection = new AccountingBookSelectionEvidence { Id = Guid.NewGuid(), TenantId = tenant, EffectiveDate = credit.DocumentDate,
                 OriginatingModuleCode = "SALES", SourceDocumentType = "AR_CREDIT_NOTE", PostingAction = "POST_CREDIT_NOTE", IdempotencyKey = $"AR-CN-{credit.Id:N}",
                 CalculationInputHash = Hash('A'), SelectionFingerprint = Hash('B'), FrozenByUserId = maker, FrozenAtUtc = DateTime.UtcNow };
             selection.Books.Add(new AccountingBookSelectionEvidenceBook { Id = Guid.NewGuid(), TenantId = tenant, AccountingBookSelectionEvidenceId = selection.Id,
                 AccountingBookId = book.Id, SelectionOrder = 1, AccountingBookCodeSnapshot = book.Code, AuthorityFingerprint = Hash('C') });
-            db.AddRange(new Tenant { Id = tenant, Code = "REL", Name = "Relational fixture", BaseCurrency = "GHS" }, fiscalYear, fiscalPeriod, book, bookPeriod, ar, returns, arBook, returnsBook, partner, credit, selection, new FinanceSettings { Id = Guid.NewGuid(), TenantId = tenant, BaseCurrency = "GHS", ControlAccountArId = ar.Id, DiscountAllowedAccountId = returns.Id });
+            db.AddRange(new Tenant { Id = tenant, Code = "REL", Name = "Relational fixture", BaseCurrency = "GHS" }, fiscalYear, fiscalPeriod, book, bookPeriod, ar, returns, arBook, returnsBook, partner, invoice, invoicePosting, credit, selection, new FinanceSettings { Id = Guid.NewGuid(), TenantId = tenant, BaseCurrency = "GHS", ControlAccountArId = ar.Id, DiscountAllowedAccountId = returns.Id });
             await db.SaveChangesAsync();
             var applicability = new Mock<IAccountingBookApplicabilityService>();
             var frozen = new AccountingBookSelectionDto { SelectionEvidenceId = selection.Id, EffectiveDate = credit.DocumentDate, OriginatingModuleCode = "SALES", SourceDocumentType = "AR_CREDIT_NOTE", PostingAction = "POST_CREDIT_NOTE", CalculationInputHash = Hash('A'), SelectionFingerprint = Hash('B'), Books = [new AccountingBookSelectionBookDto { AccountingBookId = book.Id, AccountingBookCode = book.Code, SelectionOrder = 1, AuthorityFingerprint = Hash('C') }] };
@@ -183,6 +260,15 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
 
         public void UseChecker() => _currentUser.SetupGet(x => x.UserId).Returns(_checker.ToString());
         public void UseMaker() => _currentUser.SetupGet(x => x.UserId).Returns(_maker.ToString());
+        public async Task<CreditNote> AddCreditNoteAsync(decimal amount, string number)
+        {
+            var template = await Db.CreditNotes.Include(x => x.Lines).SingleAsync(x => x.Id == CreditNote.Id);
+            var additional = new CreditNote { Id = Guid.NewGuid(), TenantId = template.TenantId, BusinessPartnerId = template.BusinessPartnerId, OriginalInvoiceId = template.OriginalInvoiceId, DocumentNumber = number, DocumentDate = template.DocumentDate, Currency = template.Currency, ExchangeRate = template.ExchangeRate, CreditNoteStatus = CreditNoteStatus.Approved, TotalAmount = amount, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" };
+            additional.Lines.Add(new CreditNoteLine { Id = Guid.NewGuid(), TenantId = additional.TenantId, CreditNoteId = additional.Id, Description = "Return", Quantity = 1, UnitPrice = amount, CreatedAt = DateTime.UtcNow, CreatedBy = "seed" });
+            Db.Add(additional);
+            await Db.SaveChangesAsync();
+            return additional;
+        }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await _connection.DisposeAsync(); }
     }
 
@@ -245,7 +331,15 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
                 if (rowVersion is not null)
                     rowVersion.ValueGenerated = ValueGenerated.Never;
                 foreach (var property in entity.GetProperties())
+                {
                     property.IsConcurrencyToken = false;
+                    // EF's SQLite provider rejects SUM(decimal), while the production SQL
+                    // Server provider executes the authoritative invoice-credit aggregate.
+                    // This local relational model stores decimals as doubles only so that the
+                    // unmodified production LINQ query can run under the C14 provider harness.
+                    if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
+                        property.SetProviderClrType(typeof(double));
+                }
             }
         }
 
