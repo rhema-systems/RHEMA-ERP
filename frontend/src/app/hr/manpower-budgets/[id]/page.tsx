@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Banknote, CheckCircle2, Loader2, Pencil, Plus, Send, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, Banknote, CheckCircle2, Download, Loader2, Pencil, Plus, Send, Trash2, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -37,6 +38,7 @@ import {
   type BudgetLineFormState,
 } from '@/components/hr/manpower/BudgetLineDialog';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
+import type { ManpowerBudgetWorkbookImportResult } from '@/types/hr/job-architecture';
 import { staffRequisitionService } from '@/services/hr/recruitment.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { workflowApiService } from '@/services/workflow-api.service';
@@ -143,6 +145,31 @@ export default function ManpowerBudgetDetailPage() {
     staleTime: 30 * 1000,
   });
 
+  // Round 2b, R4b: the establishment round-trip through Excel. The export is a download; the
+  // import answers 200 (applied) or 422 (nothing written, rows named) with the same shape, and
+  // both land in the result dialog.
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [importResult, setImportResult] = useState<ManpowerBudgetWorkbookImportResult | null>(null);
+  const [importing, setImporting] = useState(false);
+  const onWorkbookChosen = async (file: File | null) => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const r = await jobArchitectureService.importEstablishmentWorkbook(id, file);
+      setImportResult(r);
+      toast.success(r.message);
+      qc.invalidateQueries({ queryKey: ['manpower-budget', id] });
+      qc.invalidateQueries({ queryKey: ['manpower-budget', id, 'lines'] });
+    } catch (e: any) {
+      const body = e?.response;
+      if (body && typeof body === 'object' && 'applied' in body) setImportResult(body as ManpowerBudgetWorkbookImportResult);
+      else toast.error(body?.message ?? e?.message ?? 'The workbook could not be imported.');
+    } finally {
+      setImporting(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  };
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['manpower-budget', id] });
     qc.invalidateQueries({ queryKey: ['manpower-budgets'] });
@@ -196,6 +223,34 @@ export default function ManpowerBudgetDetailPage() {
                 <Pencil className="mr-2 h-4 w-4" />
                 Edit
               </Button>
+            )}
+            <Button
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() =>
+                jobArchitectureService.exportEstablishmentWorkbook(id, budget.budgetNumber)
+                  .catch((e: any) => toast.error(e?.response?.message ?? e?.message ?? 'The export failed.'))
+              }
+              title="The unit's establishment with this budget's lines, as an Excel workbook"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export to Excel
+            </Button>
+            {canEdit && (
+              <>
+                <input
+                  ref={fileInput}
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  className="hidden"
+                  onChange={(e) => onWorkbookChosen(e.target.files?.[0] ?? null)}
+                />
+                <Button variant="outline" disabled={busy !== null || importing} onClick={() => fileInput.current?.click()}
+                  title="Import the workbook exported from this budget, with the yellow columns edited">
+                  {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                  Import from Excel
+                </Button>
+              </>
             )}
             {isDraft && (
               <Button variant="outline" disabled={busy !== null} onClick={() => setRemovingBudget(true)}>
@@ -624,6 +679,45 @@ export default function ManpowerBudgetDetailPage() {
           setAddingFromEstablishment(false);
         }}
       />
+
+      <Dialog open={importResult !== null} onOpenChange={(o) => { if (!o) setImportResult(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{importResult?.applied ? 'Workbook imported' : 'Workbook not imported'}</DialogTitle>
+            <DialogDescription>{importResult?.message}</DialogDescription>
+          </DialogHeader>
+          {importResult && importResult.applied && (
+            <p className="text-sm">
+              {importResult.created} line(s) added · {importResult.updated} updated · {importResult.unchanged} unchanged · {importResult.skipped} row(s) left alone
+            </p>
+          )}
+          {importResult && importResult.errors.length > 0 && (
+            <div className="max-h-80 overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">Row</TableHead>
+                    <TableHead className="w-40">Column</TableHead>
+                    <TableHead>Problem</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {importResult.errors.map((e, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{e.row}</TableCell>
+                      <TableCell>{e.column ?? '—'}</TableCell>
+                      <TableCell>{e.message}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setImportResult(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmationDialog
         open={removingBudget}

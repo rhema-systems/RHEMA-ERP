@@ -1,3 +1,5 @@
+using ErpSystem.Api.Services.HR;
+using ErpSystem.Api.Services.Spreadsheets;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
@@ -802,6 +804,60 @@ public class JobAnalysisController : ControllerBase
     public async Task<ActionResult<AddLinesFromEstablishmentResultDto>> AddLinesFromEstablishment(
         Guid id, [FromQuery] bool includeUnestablished = true, CancellationToken cancellationToken = default)
         => Ok(await _manpowerBudgetService.AddLinesFromEstablishmentAsync(id, includeUnestablished, cancellationToken));
+
+    private const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    /// <summary>The budget's posts against the establishment as an Excel workbook to edit and import back (round 2b, R4b).</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("budgets/{id:guid}/establishment-workbook")]
+    public async Task<IActionResult> ExportEstablishmentWorkbook(Guid id, CancellationToken cancellationToken)
+    {
+        var model = await _manpowerBudgetService.GetEstablishmentWorkbookModelAsync(id, cancellationToken);
+        var bytes = ManpowerBudgetWorkbooks.Build(model);
+        return File(bytes, XlsxContentType, $"{model.BudgetNumber} establishment.xlsx");
+    }
+
+    /// <summary>
+    /// Imports an edited establishment workbook onto a Draft/Rejected budget (round 2b, R4b). Every
+    /// row is checked first; if any row has a problem the answer is 422 with the rows named and
+    /// NOTHING is written. Not the document gate: the package is inspected as a spreadsheet, the
+    /// way Finance's journal batches and QS's BoQs are, and nothing is stored.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetWritePolicy)]
+    [HttpPost("budgets/{id:guid}/establishment-workbook")]
+    [RequestSizeLimit(15_728_640)]
+    [ProducesResponseType(typeof(ManpowerBudgetWorkbookImportResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ManpowerBudgetWorkbookImportResultDto), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ManpowerBudgetWorkbookImportResultDto>> ImportEstablishmentWorkbook(
+        Guid id, IFormFile? file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "Select the establishment workbook (.xlsx) exported from this budget." });
+        if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "Only the .xlsx workbook exported from this budget can be imported." });
+
+        byte[] bytes;
+        await using (var ms = new MemoryStream())
+        {
+            await file.CopyToAsync(ms, cancellationToken);
+            bytes = ms.ToArray();
+        }
+        try
+        {
+            SpreadsheetSecurityInspector.ValidateXlsxPackage(bytes, maximumWorksheets: 4);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        var read = ManpowerBudgetWorkbooks.Read(bytes);
+        if (read.FileRejected || read.Import == null)
+            return BadRequest(new { message = read.FileErrors.FirstOrDefault() ?? "The workbook could not be read.", errors = read.FileErrors });
+
+        var result = await _manpowerBudgetService.ImportEstablishmentWorkbookAsync(id, read.Import, cancellationToken);
+        return result.Applied ? Ok(result) : UnprocessableEntity(result);
+    }
 
     /// <summary>Approved budget lines a requisition for this position may draw down from (round 2b, R5). Any internal user: the requester's picker.</summary>
     [Authorize(Policy = "InternalOnly")]

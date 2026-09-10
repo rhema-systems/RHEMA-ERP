@@ -1,6 +1,6 @@
 # HR demo feedback, round 2b — Recruitment: budget, establishment, requisition
 
-> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2), R4a (60 ×2), R5 (70 ×2), R7 (42 ×2) and R6 (57 ×2, `hr-jobarch/run-r6.mjs`) DONE 2026-09-10; R4b next; R8 on the Finance owner's answer.** Source: the feedback document *HR Demo Meetings —
+> **Status: LANES R1 (36 ×2), R2 (57 ×2), R3 (55 ×2), R4a (60 ×2), R4b (79 ×2, `hr-jobarch/run-r4b.mjs`), R5 (70 ×2), R6 (57 ×2) and R7 (42 ×2) ALL DONE 2026-09-10. Every built slice is closed; R8 (the AP hand-off) waits on the Finance owner's answer to `docs/HANDOFF-FINANCE-HR-RECRUITMENT-COST-AP.md`.** Source: the feedback document *HR Demo Meetings —
 > Changes and Additions 2* (2 pages, section RECRUITMENT), brought by the user on 2026-09-10 after
 > the round-2 HR demo, plus one follow-up from the user the same day (Finance must approve and
 > process requisition costs). Every bullet of the document is accounted for in § 2 — as a build
@@ -95,7 +95,7 @@ same service require their own route* — which is the ask.
 | Create-form details don't show in edit / "Correct" | `[id]/page.tsx:449-552` Correct dialog: 12 inputs; omitted `fiscalYear`, unit, `plannedPromotions`, `plannedTransfers`, the justification textarea; `UpdateEntity` (`JobAnalysisMappingExtensions.cs:558-573`) assigned all → **a correction zeroed promotions/transfers/actualSpent**. `UpdateManpowerBudgetDto` (`JobAnalysisDTOs.cs:832`) lacked year/unit/level. The detail rendered 4 tiles of ~20 fields. Correct was hidden on Rejected — and a Rejected budget could be neither resubmitted nor deleted | Full edit form; DTO parity; detail shows everything; Rejected is correctable and resubmittable | **R1** |
 | Budget line salary from the scale; selecting a position shows its salary | `PlannedAverageSalary` typed (`[id]/page.tsx:399-405`); `EmployeePosition.SalaryGradeId` (`HREntities.cs:974`) read by nobody in HR; the scale is `SalaryGrade/Level/Notch` (`SalaryEntities.cs`), cascade UI inline in `SalaryAssignmentsTab.tsx:164-247` | D-1 | **R3** |
 | Payroll budget (phase 2) | — | Record only | D-9 |
-| Use the establishment to initiate budget creation; export to Excel, edit, import back | `GET api/position-vacancies/establishment` (`PositionVacancyRepository.cs:65-132`); the establishment screens have no action rows and no export; ClosedXML toolkit in `EmployeeImportWorkbooks.cs`; no HR .xlsx export exists yet | D-3 | **R4a / R4b** |
+| Use the establishment to initiate budget creation; export to Excel, edit, import back | `GET api/position-vacancies/establishment` (`PositionVacancyRepository.cs:65-132`); the establishment screens have no action rows and no export; ClosedXML toolkit in `EmployeeImportWorkbooks.cs`; no HR .xlsx export exists yet | D-3 | **R4a / R4b** ✅ |
 | Gaps → budget → requisitions; raise without budget?; approver must know; justify when no budget or no gap; establishment as at the time of the requisition | `StaffRequisition.IsBudgeted` (self-declared), `BudgetCode` (free text, **zero readers**); no `ManpowerBudgetLineId`; `BuildBudgetCheckAsync` (`StaffRequisitionService.cs:883`) matches by position + calendar year and reads the typed `CurrentFilled`; `CheckEstablishmentAsync` (`:855`) is **never surfaced** to the panel; `BudgetCheckPanel` only on Draft/Rejected/Submitted (`requisitions/[id]/page.tsx:238`) | D-2, D-4, D-8 | **R5** |
 | Flag set dynamically; budget code auto; hide the textbox | as above | `IsBudgeted` derived from the link; `BudgetCode` = budget number snapshot; the textbox becomes a budget-line picker | **R5** |
 | Validate requisition costs within the budget, vacancy costs within requisition costs | `StaffRequisitionCost` totals compared to nothing (`AddCostAsync :605`); `JobVacancy` has no costs | D-5 | **R6** ✅ (vacancy half recorded, not built) |
@@ -372,13 +372,58 @@ refresh; status sync is **pull**. Consumer-contract tests + the CI gate entry; c
 **FIN-INT-017** added with the Finance owner's sign-off. The first HR AP adapter and the template
 for medical, travel and separation.
 
-### R4b — Excel round-trip of the establishment onto a draft budget · no migration
+### R4b — Excel round-trip of the establishment onto a draft budget · no migration · ✅ **DONE 2026-09-10** · 79 ×2
 
 `ManpowerBudgetWorkbooks.cs` on the `EmployeeImportWorkbooks.cs` idiom (ClosedXML, column-level
-number formats). `GET budgets/{id}/establishment-workbook` (Draft only): *Lines* sheet, one row
-per position with the editable planned columns, *Lists*, *Read Me*, hidden `_meta`. `POST`
-multipart (Draft only, `.xlsx`, 15 MB, **`SpreadsheetSecurityInspector` runs** — the employee
+number formats). `GET budgets/{id}/establishment-workbook`: *Lines* sheet, one row per position
+with the editable planned columns, *Lists*, *Read Me*, hidden `_meta`. `POST` multipart
+(Draft/Rejected only, `.xlsx`, 15 MB, **`SpreadsheetSecurityInspector` runs** — the employee
 importer skips it, this one must not); `_meta` must match; **all-or-nothing**. Harness `run-r4b.mjs`.
+
+**DONE 2026-09-10** — `dev-harness/hr-jobarch/run-r4b.mjs` 79 ×2 (edits through
+`edit-workbook.py`, openpyxl — the same tool `hr-employee-import` uses); regression after: R4a 60,
+R6 57, R5 70, R1 36, R2 57, R3 55, R7 42, slice 7 47, slice 8 40, slice 12 41.
+
+- **Split across the layers the way the employee import is.** Core owns the model and the write
+  (`GetEstablishmentWorkbookModelAsync`, `ImportEstablishmentWorkbookAsync` on
+  `IManpowerBudgetService`); the Api layer owns ClosedXML (`Services/HR/ManpowerBudgetWorkbooks.cs`:
+  `Build(model)`, `Read(bytes)`) and the two routes on `JobAnalysisController`. Nothing in Core
+  knows a cell exists.
+- **Rows are matched by the hidden Position Id, never by title.** The export writes it in column
+  A (hidden, text format); the reader accepts N or D form. A row without one is refused with a
+  sentence saying the workbook edits posts, it does not add them. A row for a post outside the
+  budget's subtree is refused by name.
+- **A blank editable cell means "leave it"**, never "clear it" — the same rule as the employee
+  import's update mode. A row for a post NOT on the budget with nothing typed is skipped
+  (counted, not refused); typing Planned posts on it adds the line through
+  `BuildLineFromBaselineAsync` (R4a's builder, so the establishment figures and the grade come
+  with it). Re-importing an unchanged file reports every row Unchanged and writes nothing.
+- **The Notch column is a list whose values map back to ids through the Lists sheet in the same
+  file**; Core then checks every id against the tenant's scale, so a tampered Lists sheet names
+  nothing that is not there. Salary rule on import (D-1): a notch picked → the notch's amount,
+  source Notch; an amount typed that differs from the notch's → Manual on that notch; the notch's
+  own amount typed → still Notch (the scale's figure is not an override); an amount with no notch →
+  Manual on whatever grade the line already names.
+- **All-or-nothing, and the refusal is the same shape as the success.** Every row is checked
+  (position, duplicates, negatives, quarter 1–4, priority name, Yes/No, unknown notch, more new
+  hires than posts, a new line without Planned posts or any salary source) before anything is
+  written; any error → **422** with `ManpowerBudgetWorkbookImportResultDto { applied:false,
+  errors[{row, column, message}] }` and the cell-level read errors merged in, so one round shows
+  everything. File-level problems (not a package, no `_meta`, wrong version, wrong budget stamp
+  → 400 from `JobArchitectureException.Invalid`, missing column, non-xlsx name) are 400.
+- **Not the document gate.** The upload is inspected as a spreadsheet package
+  (`SpreadsheetSecurityInspector.ValidateXlsxPackage(bytes, maximumWorksheets: 4)` — the Finance
+  journal-batch / QS BoQ precedent) and nothing is stored, so the ClamAV-backed
+  `ControlledFileUpload` path is not involved. Said in the controller remark.
+- **Screens.** Budget detail: *Export to Excel* (always — a Submitted/Approved budget still exports
+  for reference; the Read Me says it will not import) and *Import from Excel* (Draft/Rejected)
+  with a result dialog listing counts or the rows with problems. Streams through
+  `hrDocumentService.download`; the 422 body is read from the error's `response`. Not
+  browser-walked.
+- **Recorded, not built:** the *Lines* sheet is not protected (a holder can still type over a
+  read-only column; the import ignores those columns, so it does no harm); the workbook has no
+  per-row "delete this line" — removing a line stays in-app; `docs/HR/HR-IMPORT-EXPORT-CATALOGUE.md`
+  § 3.1 row for `Position` now names this round-trip as the first HR establishment export.
 
 ---
 

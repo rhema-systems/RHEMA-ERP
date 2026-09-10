@@ -201,6 +201,12 @@ public interface IManpowerBudgetService
     /// <summary>Adds lines for posts in the budget's subtree not yet on it; never overwrites (R4a).</summary>
     Task<AddLinesFromEstablishmentResultDto> AddLinesFromEstablishmentAsync(Guid budgetId, bool includeUnestablished, CancellationToken cancellationToken = default);
 
+    /// <summary>The budget's posts against the establishment, in the shape the Excel export renders (round 2b, R4b).</summary>
+    Task<ManpowerBudgetWorkbookModelDto> GetEstablishmentWorkbookModelAsync(Guid budgetId, CancellationToken cancellationToken = default);
+
+    /// <summary>Applies an edited establishment workbook onto a Draft/Rejected budget — all rows or none (round 2b, R4b).</summary>
+    Task<ManpowerBudgetWorkbookImportResultDto> ImportEstablishmentWorkbookAsync(Guid budgetId, ManpowerBudgetWorkbookImportDto import, CancellationToken cancellationToken = default);
+
     /// <summary>Every position's establishment in one read — the admin screen's list (R4a).</summary>
     Task<IEnumerable<PositionEstablishmentResultDto>> GetEstablishmentListAsync(Guid? organizationUnitId, CancellationToken cancellationToken = default);
 

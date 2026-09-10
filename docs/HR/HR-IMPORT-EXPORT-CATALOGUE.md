@@ -100,7 +100,7 @@ Legend — **Priority**: 🔴 high · 🟡 medium · 🟢 low/optional.
 | `EmployeeDependent`, `EmployeeEmergencyContact` | Yes — migration/onboarding bulk load | No | 🔲 | 🟡 | |
 | `EmployeeQualification`, `EmployeeWorkHistory`, `EmployeeSkill` | Yes — migration bulk load | No | 🔲 | 🟢 | |
 | `OrganizationUnit` (incl. head assignment) | **Yes** — bulk load/correct the org structure, especially unit heads | Yes — full org-structure export for review | 🔲 | 🔴 | Directly fixes the org-unit-head data gap already flagged in the UAT demo plan §6 |
-| `Position`, `JobDescription` | Yes — initial establishment bulk load | Yes — establishment register export | 🔲 | 🟡 | Ties to `ManpowerBudget`/establishment enforcement already discussed in the Finance sweep |
+| `Position`, `JobDescription` | Yes — initial establishment bulk load | Yes — establishment register export | 🔶 partial (2026-09-10) | 🟡 | Ties to `ManpowerBudget`/establishment enforcement already discussed in the Finance sweep. **Round 2b R4b built the first HR establishment round-trip:** `GET/POST api/JobAnalysis/budgets/{id}/establishment-workbook` exports a manpower budget's unit establishment (one row per post, establishment columns read-only, the planned columns editable) and imports the edited file back onto a Draft/Rejected budget, all-or-nothing (`ManpowerBudgetWorkbooks.cs`). It edits budget LINES, not positions — a positions bulk load is still owed |
 | `JobFamily`, `JobSubFamily`, `CareerLevel`, `StaffLevel` | Yes — reference-data bulk load | No | 🔲 | 🟢 | |
 
 ### 3.2 Compensation & Payroll

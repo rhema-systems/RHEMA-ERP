@@ -1200,6 +1200,121 @@ public class RecruitmentSpendByRequisitionDto
     public decimal Pending { get; set; }
 }
 
+// ── round 2b, R4b: the establishment workbook ──────────────────────────────────────────────
+// "Export the establishment to Excel, edit it, import it back onto the budget." The model the
+// Api layer renders (ClosedXML lives there, not in Core) and the rows it reads back. The import
+// is ALL-OR-NOTHING and Draft/Rejected only; rows are matched by the hidden Position Id the
+// export wrote, never by title.
+
+public class ManpowerBudgetWorkbookModelDto
+{
+    public Guid BudgetId { get; set; }
+    public string BudgetNumber { get; set; } = string.Empty;
+    public int FiscalYear { get; set; }
+    public string StatusName { get; set; } = string.Empty;
+    public string OrganizationUnitName { get; set; } = string.Empty;
+    public DateOnly PeriodStart { get; set; }
+    public DateOnly PeriodEnd { get; set; }
+    /// <summary>Draft or Rejected: the only states an import will be accepted in.</summary>
+    public bool Editable { get; set; }
+    public List<ManpowerBudgetWorkbookRowDto> Rows { get; set; } = new();
+    /// <summary>Every active notch on the tenant's scale, for the Notch column's list.</summary>
+    public List<ManpowerBudgetWorkbookNotchDto> Notches { get; set; } = new();
+}
+
+public class ManpowerBudgetWorkbookRowDto
+{
+    public Guid PositionId { get; set; }
+    public string? Code { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? OrganizationUnitName { get; set; }
+    // the establishment as of the export (read-only columns)
+    public bool IsEstablished { get; set; }
+    public int ExpectedHeadcount { get; set; }
+    public int Filled { get; set; }
+    public int? Gap { get; set; }
+    public int ExitsDue { get; set; }
+    public int SuggestedNewHires { get; set; }
+    public string? GradeCode { get; set; }
+    // the line, when the post is on the budget (editable columns)
+    public bool OnBudget { get; set; }
+    public Guid? LineId { get; set; }
+    public int? PlannedCount { get; set; }
+    public int? PlannedNewPositions { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
+    public string? PlannedSalarySourceName { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    public string? NotchLabel { get; set; }
+    public int? Quarter { get; set; }
+    public string? PriorityName { get; set; }
+    public bool? IsCritical { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class ManpowerBudgetWorkbookNotchDto
+{
+    public Guid Id { get; set; }
+    /// <summary>What the cell shows: <c>M2 · L1 · notch 3 (4,500.00)</c>.</summary>
+    public string Label { get; set; } = string.Empty;
+    public string GradeCode { get; set; } = string.Empty;
+    public string LevelCode { get; set; } = string.Empty;
+    public int NotchNumber { get; set; }
+    public decimal Amount { get; set; }
+}
+
+/// <summary>What the reader found in an uploaded workbook. Cell-level read errors travel with it so one round shows everything.</summary>
+public class ManpowerBudgetWorkbookImportDto
+{
+    /// <summary>From the hidden <c>_meta</c> sheet — must be the budget the file is imported onto.</summary>
+    public Guid BudgetId { get; set; }
+    public int Version { get; set; }
+    public List<ManpowerBudgetWorkbookImportRowDto> Rows { get; set; } = new();
+    public List<ManpowerBudgetWorkbookRowErrorDto> ReadErrors { get; set; } = new();
+}
+
+public class ManpowerBudgetWorkbookImportRowDto
+{
+    public int RowNumber { get; set; }
+    public Guid? PositionId { get; set; }
+    public string? PositionText { get; set; }
+    public int? PlannedCount { get; set; }
+    public int? PlannedNewPositions { get; set; }
+    public decimal? PlannedAverageSalary { get; set; }
+    public Guid? SalaryNotchId { get; set; }
+    /// <summary>The notch cell's text when it matched nothing on the Lists sheet.</summary>
+    public string? NotchText { get; set; }
+    public int? Quarter { get; set; }
+    public string? PriorityText { get; set; }
+    public bool? IsCritical { get; set; }
+    public string? Notes { get; set; }
+
+    /// <summary>Anything typed in an editable cell. A row with nothing typed is left alone (and never creates a line).</summary>
+    public bool HasEntries =>
+        PlannedCount.HasValue || PlannedNewPositions.HasValue || PlannedAverageSalary.HasValue || SalaryNotchId.HasValue
+        || NotchText != null || Quarter.HasValue || PriorityText != null || IsCritical.HasValue || Notes != null;
+}
+
+public class ManpowerBudgetWorkbookRowErrorDto
+{
+    public int Row { get; set; }
+    public string? Column { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+public class ManpowerBudgetWorkbookImportResultDto
+{
+    /// <summary>False when any row had an error: NOTHING was written.</summary>
+    public bool Applied { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Unchanged { get; set; }
+    /// <summary>Rows not on the budget with nothing typed in them.</summary>
+    public int Skipped { get; set; }
+    public List<ManpowerBudgetWorkbookRowErrorDto> Errors { get; set; } = new();
+    public List<ManpowerBudgetLineDto> Lines { get; set; } = new();
+}
+
 public class RejectManpowerBudgetDto
 {
     public string? Reason { get; set; }

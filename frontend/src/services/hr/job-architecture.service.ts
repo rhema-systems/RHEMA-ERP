@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type { BudgetLineForRequisition } from '@/types/hr/recruitment';
 import type {
@@ -67,6 +68,7 @@ import type {
   UpdateJobResponsibilityKpi,
   UpdateJobWorkingCondition,
   RecruitmentSpend,
+  ManpowerBudgetWorkbookImportResult,
 } from '@/types/hr/job-architecture';
 
 /**
@@ -874,6 +876,22 @@ class JobArchitectureService {
   /** Approved and pending recruitment costs drawn against the budget's recruitment envelope (R6). */
   getRecruitmentSpend(budgetId: string) {
     return apiService.get<RecruitmentSpend>(`${this.jobs}/budgets/${budgetId}/recruitment-spend`);
+  }
+
+  /** The budget's posts against the establishment as an .xlsx to edit and import back (R4b). Streams through the authorised download path. */
+  exportEstablishmentWorkbook(budgetId: string, budgetNumber: string) {
+    return hrDocumentService.download(`${this.jobs}/budgets/${budgetId}/establishment-workbook`, `${budgetNumber} establishment.xlsx`);
+  }
+
+  /**
+   * Imports an edited establishment workbook onto a Draft/Rejected budget (R4b). All-or-nothing:
+   * a 422 carries the same result shape with `applied: false` and the rows named — read it from
+   * the error's `response` rather than treating it as a plain failure.
+   */
+  importEstablishmentWorkbook(budgetId: string, file: File) {
+    const form = new FormData();
+    form.append('file', file);
+    return apiService.post<ManpowerBudgetWorkbookImportResult>(`${this.jobs}/budgets/${budgetId}/establishment-workbook`, form);
   }
 
   /** Every position's establishment in one read — the admin screen's list (R4a). */

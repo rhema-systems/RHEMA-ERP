@@ -1257,3 +1257,23 @@ export interface RecruitmentSpend {
   modeName: 'Off' | 'Warn' | 'Block' | string;
   byRequisition: RecruitmentSpendByRequisition[];
 }
+
+// ── round 2b, R4b: the establishment workbook round-trip ──────────────────────────────────
+
+export interface ManpowerBudgetWorkbookRowError {
+  row: number;
+  column?: string | null;
+  message: string;
+}
+
+/** 200 when `applied`; 422 with the same shape (and `applied: false`) when any row had a problem — nothing written. */
+export interface ManpowerBudgetWorkbookImportResult {
+  applied: boolean;
+  message: string;
+  created: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  errors: ManpowerBudgetWorkbookRowError[];
+  lines: ManpowerBudgetLine[];
+}

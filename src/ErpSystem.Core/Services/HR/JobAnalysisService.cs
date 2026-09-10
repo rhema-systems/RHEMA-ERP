@@ -2948,6 +2948,251 @@ public class ManpowerBudgetService : IManpowerBudgetService
         return line;
     }
 
+    private static string NotchLabel(SalaryNotch n) =>
+        $"{n.Level.Grade.Code} · {n.Level.Code} · notch {n.NotchNumber} ({n.SalaryAmount:N2})";
+
+    /// <inheritdoc />
+    public async Task<ManpowerBudgetWorkbookModelDto> GetEstablishmentWorkbookModelAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        if (budget.OrganizationUnitId is null)
+            throw JobArchitectureException.InvalidState("This budget names no organisation unit, so there is no establishment to export.");
+
+        var baseline = await GetPlanningBaselineAsync(budget.OrganizationUnitId.Value,
+            DateOnly.FromDateTime(budget.PeriodStartDate), DateOnly.FromDateTime(budget.PeriodEndDate), cancellationToken);
+        var lines = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Include(l => l.Position)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch).ThenInclude(n => n!.Level).ThenInclude(l => l.Grade)
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var notches = await _unitOfWork.Repository<SalaryNotch>().GetQueryable().AsNoTracking()
+            .Include(n => n.Level).ThenInclude(l => l.Grade)
+            .Where(n => n.TenantId == tenantId && !n.IsDeleted && n.IsActive && !n.Level.IsDeleted && !n.Level.Grade.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var gradeCodes = await _unitOfWork.Repository<SalaryGrade>().GetQueryable().AsNoTracking()
+            .Where(g => g.TenantId == tenantId && !g.IsDeleted)
+            .Select(g => new { g.Id, g.Code })
+            .ToDictionaryAsync(g => g.Id, g => g.Code, cancellationToken);
+
+        var model = new ManpowerBudgetWorkbookModelDto
+        {
+            BudgetId = budget.Id,
+            BudgetNumber = budget.BudgetNumber,
+            FiscalYear = budget.FiscalYear,
+            StatusName = budget.Status.ToString(),
+            OrganizationUnitName = baseline.OrganizationUnitName,
+            PeriodStart = baseline.PeriodStart,
+            PeriodEnd = baseline.PeriodEnd,
+            Editable = budget.Status == ManpowerBudgetStatus.Draft || budget.Status == ManpowerBudgetStatus.Rejected,
+            Notches = notches
+                .OrderBy(n => n.Level.Grade.Code).ThenBy(n => n.Level.Sequence).ThenBy(n => n.NotchNumber)
+                .Select(n => new ManpowerBudgetWorkbookNotchDto
+                {
+                    Id = n.Id, Label = NotchLabel(n), GradeCode = n.Level.Grade.Code, LevelCode = n.Level.Code,
+                    NotchNumber = n.NotchNumber, Amount = n.SalaryAmount,
+                }).ToList(),
+        };
+
+        var byPosition = lines.ToDictionary(l => l.PositionId);
+        void Fill(ManpowerBudgetWorkbookRowDto row, ManpowerBudgetLine l)
+        {
+            row.OnBudget = true;
+            row.LineId = l.Id;
+            row.PlannedCount = l.PlannedCount;
+            row.PlannedNewPositions = l.PlannedNewPositions;
+            row.PlannedAverageSalary = l.PlannedAverageSalary;
+            row.PlannedSalarySourceName = l.PlannedSalarySource.ToString();
+            row.SalaryNotchId = l.SalaryNotchId;
+            row.NotchLabel = l.SalaryNotch != null ? NotchLabel(l.SalaryNotch) : null;
+            row.Quarter = l.Quarter;
+            row.PriorityName = l.Priority.ToString();
+            row.IsCritical = l.IsCritical;
+            row.Notes = l.Notes;
+            row.GradeCode = l.SalaryGrade?.Code ?? row.GradeCode;
+        }
+
+        foreach (var p in baseline.Positions.OrderBy(p => p.OrganizationUnitName).ThenBy(p => p.Title))
+        {
+            var row = new ManpowerBudgetWorkbookRowDto
+            {
+                PositionId = p.PositionId, Code = p.Code, Title = p.Title, OrganizationUnitName = p.OrganizationUnitName,
+                IsEstablished = p.IsEstablished, ExpectedHeadcount = p.ExpectedHeadcount, Filled = p.Filled, Gap = p.Gap,
+                ExitsDue = p.ExitsDue, SuggestedNewHires = p.SuggestedNewHires,
+                GradeCode = p.SalaryGradeId.HasValue ? gradeCodes.GetValueOrDefault(p.SalaryGradeId.Value) : null,
+            };
+            if (byPosition.TryGetValue(p.PositionId, out var line)) Fill(row, line);
+            model.Rows.Add(row);
+        }
+        // A line whose post has since left the subtree (moved unit, deleted) is still the holder's
+        // figure: exported after the establishment rows, with no establishment columns.
+        var inBaseline = baseline.Positions.Select(p => p.PositionId).ToHashSet();
+        foreach (var l in lines.Where(l => !inBaseline.Contains(l.PositionId)).OrderBy(l => l.Position.Title))
+        {
+            var row = new ManpowerBudgetWorkbookRowDto { PositionId = l.PositionId, Code = l.Position.Code, Title = l.Position.Title, Filled = l.CurrentFilled, ExpectedHeadcount = l.CurrentCount };
+            Fill(row, l);
+            model.Rows.Add(row);
+        }
+        return model;
+    }
+
+    /// <inheritdoc />
+    public async Task<ManpowerBudgetWorkbookImportResultDto> ImportEstablishmentWorkbookAsync(
+        Guid budgetId, ManpowerBudgetWorkbookImportDto import, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        if (import.BudgetId != budget.Id)
+            throw JobArchitectureException.Invalid(
+                $"This workbook was exported from a different budget, not {budget.BudgetNumber}. Export the establishment from {budget.BudgetNumber} and edit that file.");
+        if (budget.Status != ManpowerBudgetStatus.Draft && budget.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState($"{budget.BudgetNumber} is {budget.Status}: a workbook can be imported only while the budget is Draft or Rejected.");
+        if (budget.OrganizationUnitId is null)
+            throw JobArchitectureException.InvalidState("This budget names no organisation unit, so there is no establishment to import against.");
+
+        var baseline = await GetPlanningBaselineAsync(budget.OrganizationUnitId.Value,
+            DateOnly.FromDateTime(budget.PeriodStartDate), DateOnly.FromDateTime(budget.PeriodEndDate), cancellationToken);
+        var inScope = baseline.Positions.ToDictionary(p => p.PositionId);
+        var lines = await _budgetLineRepository.GetQueryable()
+            .Include(l => l.Position)
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var byPosition = lines.ToDictionary(l => l.PositionId);
+        var notches = await _unitOfWork.Repository<SalaryNotch>().GetQueryable().AsNoTracking()
+            .Include(n => n.Level).ThenInclude(l => l.Grade)
+            .Where(n => n.TenantId == tenantId && !n.IsDeleted)
+            .ToDictionaryAsync(n => n.Id, cancellationToken);
+
+        var result = new ManpowerBudgetWorkbookImportResultDto();
+        result.Errors.AddRange(import.ReadErrors);
+        void Err(int row, string? column, string message) =>
+            result.Errors.Add(new ManpowerBudgetWorkbookRowErrorDto { Row = row, Column = column, Message = message });
+
+        // ── pass 1: every row is checked before anything is written ──
+        var seen = new HashSet<Guid>();
+        var plan = new List<(ManpowerBudgetWorkbookImportRowDto Row, ManpowerBudgetLine? Line, ManpowerPlanningPositionDto? Post)>();
+        foreach (var row in import.Rows)
+        {
+            if (row.PositionId is null)
+            {
+                Err(row.RowNumber, "Position Id", "The hidden Position Id is missing, so this row was not exported from the system. Add a post through the application; the workbook edits posts, it does not add them.");
+                continue;
+            }
+            var pid = row.PositionId.Value;
+            if (!seen.Add(pid)) { Err(row.RowNumber, "Position", $"'{row.PositionText}' appears more than once in the file."); continue; }
+            var line = byPosition.GetValueOrDefault(pid);
+            var post = inScope.GetValueOrDefault(pid);
+            if (line == null && post == null)
+            {
+                Err(row.RowNumber, "Position", $"'{row.PositionText}' is not a post in {baseline.OrganizationUnitName} or the units under it.");
+                continue;
+            }
+            if (line == null && !row.HasEntries) { result.Skipped++; continue; }
+
+            if (row.PlannedCount is < 0) Err(row.RowNumber, "Planned posts", "Cannot be negative.");
+            if (row.PlannedNewPositions is < 0) Err(row.RowNumber, "Planned new hires", "Cannot be negative.");
+            if (row.PlannedAverageSalary is < 0) Err(row.RowNumber, "Average salary", "Cannot be negative.");
+            if (row.Quarter is < 1 or > 4) Err(row.RowNumber, "Quarter", "Must be 1 to 4.");
+            if (row.PriorityText != null && !Enum.TryParse<BudgetPriority>(row.PriorityText, true, out _))
+                Err(row.RowNumber, "Priority", $"'{row.PriorityText}' is not one of {string.Join(", ", Enum.GetNames<BudgetPriority>())}.");
+            if (row.NotchText != null && row.SalaryNotchId is null)
+                Err(row.RowNumber, "Notch", $"'{row.NotchText}' is not a notch on the Lists sheet. Pick one from the list, or leave the cell blank to keep the line's salary.");
+            if (row.SalaryNotchId is { } nid && !notches.ContainsKey(nid))
+                Err(row.RowNumber, "Notch", "The notch named is not on this organisation's salary scale any more.");
+            if (line == null && row.PlannedCount is null)
+                Err(row.RowNumber, "Planned posts", $"'{row.PositionText}' is not on the budget yet: give it Planned posts to add it.");
+            var count = row.PlannedCount ?? line?.PlannedCount ?? 0;
+            var newPosts = row.PlannedNewPositions ?? line?.PlannedNewPositions ?? 0;
+            if (newPosts > count)
+                Err(row.RowNumber, "Planned new hires", $"{newPosts} new hire(s) is more than the {count} post(s) authorised.");
+            if (line == null && post != null && row.PlannedAverageSalary is null && row.SalaryNotchId is null
+                && post.SalaryGradeId is null && post.CurrentAverageSalary <= 0)
+                Err(row.RowNumber, "Average salary", $"'{row.PositionText}' has no grade and nobody in post: give it an Average salary or a Notch.");
+            plan.Add((row, line, post));
+        }
+
+        if (result.Errors.Count > 0)
+        {
+            result.Applied = false;
+            result.Message = $"{result.Errors.Count} problem(s) found. Nothing was written — fix the rows named and import the file again.";
+            return result;
+        }
+
+        // ── pass 2: apply ──
+        foreach (var (row, existing, post) in plan)
+        {
+            ManpowerBudgetLine line;
+            if (existing == null)
+            {
+                line = await BuildLineFromBaselineAsync(post!, tenantId, cancellationToken);
+                line.ManpowerBudgetId = budget.Id;
+                await ApplyRowAsync(line, row, notches, tenantId, cancellationToken);
+                await _budgetLineRepository.AddAsync(line);
+                result.Created++;
+                continue;
+            }
+            line = existing;
+            var before = Snapshot(line);
+            await ApplyRowAsync(line, row, notches, tenantId, cancellationToken);
+            if (Snapshot(line) == before) { result.Unchanged++; continue; }
+            line.UpdatedAt = DateTime.UtcNow;
+            await _budgetLineRepository.UpdateAsync(line);
+            result.Updated++;
+        }
+
+        if (result.Created + result.Updated > 0)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            var all = await _budgetLineRepository.GetByBudgetIdAsync(budget.Id);
+            budget.PlannedHeadcount = all.Sum(l => l.PlannedCount);
+            budget.PlannedNewHires = all.Sum(l => l.PlannedNewPositions);
+            budget.PlannedSalaryCost = all.Sum(l => l.PlannedTotalCost);
+            await _budgetRepository.UpdateAsync(budget);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Manpower budget {Number}: establishment workbook applied — {Created} created, {Updated} updated, {Unchanged} unchanged",
+                budget.BudgetNumber, result.Created, result.Updated, result.Unchanged);
+        }
+
+        result.Applied = true;
+        result.Message = $"{result.Created} line(s) added, {result.Updated} updated, {result.Unchanged} unchanged, {result.Skipped} row(s) left alone.";
+        result.Lines = (await _budgetLineRepository.GetByBudgetIdAsync(budget.Id)).Where(l => l.TenantId == tenantId).ToDtoList();
+        return result;
+
+        static (int, int, decimal, Guid?, Guid?, Guid?, int?, BudgetPriority, bool, string?) Snapshot(ManpowerBudgetLine l) =>
+            (l.PlannedCount, l.PlannedNewPositions, l.PlannedAverageSalary, l.SalaryGradeId, l.SalaryLevelId, l.SalaryNotchId, l.Quarter, l.Priority, l.IsCritical, l.Notes);
+    }
+
+    /// <summary>
+    /// One workbook row onto one line. A blank cell means "leave it" — never "clear it". The
+    /// salary: a notch picked from the list reads the amount from the scale (D-1); an amount typed
+    /// that differs from the notch's is kept as Manual on that notch; an amount with no notch is
+    /// Manual on whatever grade the line already names.
+    /// </summary>
+    private async Task ApplyRowAsync(
+        ManpowerBudgetLine line, ManpowerBudgetWorkbookImportRowDto row, IReadOnlyDictionary<Guid, SalaryNotch> notches,
+        Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (row.PlannedCount.HasValue) line.PlannedCount = row.PlannedCount.Value;
+        if (row.PlannedNewPositions.HasValue) line.PlannedNewPositions = row.PlannedNewPositions.Value;
+        if (row.Quarter.HasValue) line.Quarter = row.Quarter.Value;
+        if (row.PriorityText != null && Enum.TryParse<BudgetPriority>(row.PriorityText, true, out var priority)) line.Priority = priority;
+        if (row.IsCritical.HasValue) line.IsCritical = row.IsCritical.Value;
+        if (row.Notes != null) line.Notes = row.Notes;
+
+        if (row.SalaryNotchId.HasValue || row.PlannedAverageSalary.HasValue)
+        {
+            var notchId = row.SalaryNotchId ?? line.SalaryNotchId;
+            decimal? typed = row.PlannedAverageSalary;
+            if (typed.HasValue && notchId.HasValue && notches.TryGetValue(notchId.Value, out var notch) && notch.SalaryAmount == typed.Value)
+                typed = null; // the scale's own figure: from the notch, not Manual
+            await ApplyLineSalaryAsync(line,
+                notchId.HasValue ? null : line.SalaryGradeId,
+                notchId.HasValue ? null : line.SalaryLevelId,
+                notchId, typed, tenantId, cancellationToken);
+        }
+        line.PlannedTotalCost = line.PlannedAverageSalary * line.PlannedCount;
+    }
+
     /// <inheritdoc />
     public async Task<IEnumerable<PositionEstablishmentResultDto>> GetEstablishmentListAsync(
         Guid? organizationUnitId, CancellationToken cancellationToken = default)
