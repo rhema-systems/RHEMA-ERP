@@ -199,6 +199,7 @@
     <Compile Include="Services\Finance\InvoiceTradeDiscountPolicyTests.cs" />
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArCreditNotePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ArCreditNoteProducerRelationalFixtureTests.cs" />
     <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
