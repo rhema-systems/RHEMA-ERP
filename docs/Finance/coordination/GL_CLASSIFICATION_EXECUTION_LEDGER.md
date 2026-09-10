@@ -1238,6 +1238,15 @@ rewrite every unique control. Separately, the production-engine SQLite substitut
 minimal schema/seed is completed; no valid relational result or integration is claimed. No database, schema,
 migration or remote state was touched.
 
+Sales governance correction `0fafcad1` restores the 20 facts previously suppressed by `729d9e5a` and fixes the
+tamper case to use the deterministic Sales event identity with explicit C15/no-mutation assertions. The restored
+class is intentionally not integrated because its owner-guard facts still require governed harness migration and a
+green run. On the relational path, current binaries build with zero errors and both production-stack facts execute,
+but fail before FinancePostingEngine at `AccountingEventService:518` because a handcrafted-schema update affects
+zero rows; disabling test concurrency metadata did not change the result. The fixture task is capturing the exact
+SQL/entity/key mismatch and will correct only test-local schema/model/seed. No production, database, schema,
+migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
