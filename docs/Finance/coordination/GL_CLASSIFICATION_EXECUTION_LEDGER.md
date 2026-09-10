@@ -1109,6 +1109,15 @@ exposed. C13 passed 24/24, relevant C7/C10-C13 passed 58 with 5 guarded SQL skip
 and build/EF/456-migration/script/ancestry/scope gates are clean. Independent Sol High review is active;
 integration and Sales remain gated. No database, schema, migration, owner, ledger-in-candidate or default changed.
 
+Independent Sol High review of the ID-only bridge returned `CHANGES_REQUIRED` at exact clean `65d93c80`
+for one P1 provenance gap. The bridge validates a self-consistent C7 reversal but does not prove C13's canonical
+exact-opposite builder produced it; a generic fully rehashed/approved C7 reversal with substituted balanced
+economics, dimensions or flags could enter the ID-only path. All other gates passed, including 76 combined and
+363 widened tests with only guarded or established unrelated failures. A narrow correction is active to
+reconstruct the complete canonical C13 request from immutable original evidence and compare it before both
+ID-only execution and failure recording; self-consistent generic substitution tests are required. No database,
+migration or owner file was touched; Sales remains gated.
+
 Stage B3 Sales is reissued on GPT-5.6 Terra Medium from fresh exact base
 `50c41f97a45eddd9e046cbd52fadd75e863b26a2` in clean worktree
 `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c12` on branch
