@@ -1172,6 +1172,15 @@ production base `e4fd811882487d7755bffc379bc77bf83ebae161` on
 verification contract and adversarial tests. Sales integration stays blocked until C15 is independently approved,
 integrated and consumed; no schema, migration, database, default or remote action is authorized.
 
+C15 is committed cleanly as `cebca196540bc23d48e1df111fc4698ad4c45a07` from exact base
+`e4fd811882487d7755bffc379bc77bf83ebae161`. The additive read-only Finance contract tenant-scopes durable event,
+source, request, participant and complete owner-receipt authority, reuses the C10 compatibility resolver for exact
+posting/journal evidence, and applies canonical C13 original/reversal reconstruction before returning only book-
+blind identities, fingerprints and status. It exposes no book, line, selector, approval, execution or HTTP surface.
+C15 tests passed 15/15, Core contract discovery 3/3 and the widened C7/C10/C13/C15 slice 67/67; builds, EF no-
+pending-model, ancestry, scope and diff gates pass. Independent Sol High review is active before integration; no
+database, schema or migration was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
