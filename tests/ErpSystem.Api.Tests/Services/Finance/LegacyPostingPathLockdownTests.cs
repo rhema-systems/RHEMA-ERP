@@ -192,6 +192,12 @@ public sealed class LegacyPostingPathLockdownTests
             .And.NotContain("DecideProducerAccountingIntentDto")
             .And.NotContain("ProducerDecisionStatuses.Approved =")
             .And.NotContain(".PostAsync(");
+
+        var governedPost = service[service.IndexOf("PostCreditNoteAsync", StringComparison.Ordinal)
+            ..service.IndexOf("ApplyCreditNoteAsync", StringComparison.Ordinal)];
+        governedPost.Should().NotContain("ApprovePreparedAsync")
+            .And.NotContain(".ApproveAsync(")
+            .And.NotContain("ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved");
     }
 
     [Fact]

@@ -280,6 +280,7 @@ public sealed class ArCreditNotePostingMigrationTests
         var governed = CreateApprovedGovernedProducerMock(db, tenantId);
         var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object,
             replayVerifier: governed.Replay.Object);
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
@@ -288,6 +289,7 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote")).Should().Be(0);
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePostingFailed)).Should().Be(1);
         governed.VerifyNoPrepareOrExecution();
+        await AssertPostingSideEffectsUnchangedAsync(db, before);
     }
 
     [Fact]
@@ -300,12 +302,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, configureInvoice: invoice => invoice.JournalEntryId = null, seedInvoicePostingEvent: false);
         var governed = CreateApprovedGovernedProducerMock(db, tenantId);
         var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR credit note cannot post against unposted invoice '{fixture.Invoice.InvoiceNumber}'.");
         governed.VerifyNoPrepareOrExecution();
+        await AssertPostingSideEffectsUnchangedAsync(db, before);
     }
 
     [Fact]
@@ -318,12 +322,14 @@ public sealed class ArCreditNotePostingMigrationTests
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, amount: 125m);
         var governed = CreateApprovedGovernedProducerMock(db, tenantId);
         var (service, _) = CreateReturnOrderService(db, tenantId, governed.Intents.Object, governed.Execution.Object);
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR credit note would exceed eligible credit amount for invoice '{fixture.Invoice.InvoiceNumber}'.");
         governed.VerifyNoPrepareOrExecution();
+        await AssertPostingSideEffectsUnchangedAsync(db, before);
     }
 
     [Fact]
@@ -576,18 +582,27 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId, periodIsOpen: false, periodIsClosed: true);
+        var eventId = DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-POST");
+        const string fingerprint = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
         var producer = new Mock<IFinanceProducerIntentService>();
         producer.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AccountingEventDto { Id = Guid.NewGuid(), Status = AccountingEventStatuses.PendingApproval,
-                ProducerDecisionStatus = ProducerIntentDecisionStatuses.Pending, RequestFingerprint = new string('F', 64) });
+            .ReturnsAsync(new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
+                ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved, RequestFingerprint = fingerprint });
+        producer.Setup(x => x.GetAsync(eventId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
+                ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved, RequestFingerprint = fingerprint });
         var execution = new Mock<IFinanceProducerApprovedExecutionService>();
+        execution.Setup(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
+                It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Posting period is not open."));
         var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
-        await act.Should().NotThrowAsync();
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Posting period is not open.");
         fixture.CreditNote.JournalEntryId.Should().BeNull();
-        execution.VerifyNoOtherCalls();
+        execution.Verify(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -850,6 +865,29 @@ public sealed class ArCreditNotePostingMigrationTests
         return new ApplicationDbContext(options);
     }
 
+    private static async Task<PostingSideEffectSnapshot> CapturePostingSideEffectsAsync(ApplicationDbContext db) => new(
+        await db.AccountingEvents.CountAsync(),
+        await db.FinancePostingEvents.CountAsync(),
+        await db.JournalEntries.CountAsync(),
+        await db.Accounts.OrderBy(account => account.Id).Select(account => account.Balance).ToArrayAsync(),
+        await db.Set<AccountCurrencyExposure>().CountAsync());
+
+    private static async Task AssertPostingSideEffectsUnchangedAsync(
+        ApplicationDbContext db,
+        PostingSideEffectSnapshot before)
+    {
+        var after = await CapturePostingSideEffectsAsync(db);
+        after.Should().BeEquivalentTo(before,
+            "a denied Sales credit-note request must not create Finance authority, postings, journals, balances, or exposure evidence");
+    }
+
+    private sealed record PostingSideEffectSnapshot(
+        int AccountingEventCount,
+        int FinancePostingEventCount,
+        int JournalCount,
+        decimal[] AccountBalances,
+        int ExposureCount);
+
     private static void SeedPostedSalesCreditNoteCompatibilityLink(
         ApplicationDbContext db,
         Guid tenantId,
@@ -876,28 +914,44 @@ public sealed class ArCreditNotePostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId)
     {
-        var accountingEventId = Guid.NewGuid();
         var postingEventId = Guid.NewGuid();
         var journalEntryId = Guid.NewGuid();
-        const string fingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        var approved = new AccountingEventDto
-        {
-            Id = accountingEventId,
-            Status = AccountingEventStatuses.PendingApproval,
-            ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved,
-            RequestFingerprint = fingerprint
-        };
+        Guid accountingEventId = Guid.Empty;
+        string fingerprint = string.Empty;
+        ProducerAccountingIntentDto? preparedIntent = null;
+        AccountingEventDto? approved = null;
         var intents = new Mock<IFinanceProducerIntentService>();
         intents.Setup(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(approved);
-        intents.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(approved);
+            .ReturnsAsync((ProducerAccountingIntentDto intent, CancellationToken _) =>
+            {
+                accountingEventId = DeterministicSalesEventId(intent.PostingRequest.SourceDocumentId, "AR-CREDIT-NOTE-POST");
+                intent.AccountingEventId.Should().Be(accountingEventId);
+                fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                    $"{intent.IdempotencyKey}:{intent.ExpectedOwnerEffect.EffectFingerprint}")));
+                preparedIntent = intent;
+                approved = new AccountingEventDto
+                {
+                    Id = accountingEventId, Status = AccountingEventStatuses.PendingApproval,
+                    ProducerDecisionStatus = ProducerIntentDecisionStatuses.Approved, RequestFingerprint = fingerprint
+                };
+                return approved;
+            });
+        intents.Setup(x => x.GetAsync(It.Is<Guid>(id => id == accountingEventId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => approved ?? throw new InvalidOperationException("C11 Get was requested before Prepare."));
 
         var execution = new Mock<IFinanceProducerApprovedExecutionService>();
         execution.Setup(x => x.ExecuteInAmbientTransactionAsync(
-                accountingEventId,
-                It.IsAny<ProducerAccountingIntentDto>(),
-                It.IsAny<ProducerOwnerEffectReceiptDto>(),
+                It.Is<Guid>(id => id == accountingEventId),
+                It.Is<ProducerAccountingIntentDto>(intent => preparedIntent != null
+                    && intent.AccountingEventId == accountingEventId
+                    && intent.IdempotencyKey == preparedIntent.IdempotencyKey
+                    && intent.ExpectedOwnerEffect.EffectFingerprint == preparedIntent.ExpectedOwnerEffect.EffectFingerprint),
+                It.Is<ProducerOwnerEffectReceiptDto>(receipt => preparedIntent != null
+                    && receipt.TenantId == tenantId
+                    && receipt.ParticipantCode == preparedIntent.ExpectedOwnerEffect.ParticipantCode
+                    && receipt.OwnerEntityId == preparedIntent.ExpectedOwnerEffect.OwnerEntityId
+                    && receipt.OwnerAction == preparedIntent.ExpectedOwnerEffect.OwnerAction
+                    && receipt.EffectFingerprint == preparedIntent.ExpectedOwnerEffect.EffectFingerprint),
                 It.IsAny<CancellationToken>()))
             .Callback<Guid, ProducerAccountingIntentDto, ProducerOwnerEffectReceiptDto, CancellationToken>((eventId, intent, receipt, cancellationToken) =>
             {
@@ -906,7 +960,7 @@ public sealed class ArCreditNotePostingMigrationTests
                 var period = db.FiscalPeriods.Single(item => item.TenantId == tenantId && item.StartDate <= request.PostingDate && item.EndDate >= request.PostingDate);
                 db.AccountingEvents.Add(new AccountingEvent
                 {
-                    Id = intent.AccountingEventId ?? accountingEventId,
+                    Id = accountingEventId,
                     TenantId = tenantId,
                     OriginatingModuleCode = request.OriginModuleCode ?? request.SourceModule,
                     SourceDocumentType = request.SourceDocumentType,
@@ -965,14 +1019,26 @@ public sealed class ArCreditNotePostingMigrationTests
                     CreatedBy = "governed-producer-mock"
                 });
             })
-            .ReturnsAsync(new FinanceProducerApprovedExecutionResultDto(
-                accountingEventId,
-                fingerprint,
-                AccountingEventStatuses.Posted,
-                postingEventId,
-                journalEntryId));
+            .ReturnsAsync(() => new FinanceProducerApprovedExecutionResultDto(
+                accountingEventId, fingerprint, AccountingEventStatuses.Posted, postingEventId, journalEntryId));
 
-        return new GovernedSalesCreditNoteProducerMock(intents, execution, CreateReplayVerifier());
+        var replay = new Mock<IFinanceProducerReplayVerificationService>();
+        replay.Setup(x => x.VerifyPostedAsync(
+                It.Is<Guid>(id => id == accountingEventId),
+                It.Is<FinanceProducerReplayVerificationRequestDto>(request => preparedIntent != null
+                    && request.AccountingEventRequestFingerprint == fingerprint
+                    && request.SourceDocumentId == preparedIntent.PostingRequest.SourceDocumentId
+                    && request.SourceDocumentType == preparedIntent.PostingRequest.SourceDocumentType
+                    && request.PostingAction == preparedIntent.PostingRequest.PostingAction
+                    && request.ParticipantIdentity == preparedIntent.ExpectedOwnerEffect.ParticipantCode
+                    && request.OwnerEffectReceipt.EffectFingerprint == preparedIntent.ExpectedOwnerEffect.EffectFingerprint
+                    && request.FinancePostingEventId == postingEventId && request.JournalEntryId == journalEntryId),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new FinanceProducerReplayVerificationResultDto(
+                accountingEventId, fingerprint, preparedIntent!.ExpectedOwnerEffect.EffectFingerprint,
+                AccountingEventStatuses.Posted, postingEventId, journalEntryId));
+
+        return new GovernedSalesCreditNoteProducerMock(intents, execution, replay);
     }
 
     private static (ReturnOrderService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateReturnOrderService(
