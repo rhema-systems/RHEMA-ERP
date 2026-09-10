@@ -1214,6 +1214,15 @@ rebuild or explicit-date guard, but requires current-binary proof. Terra is rebu
 maker/checker/owner scopes, production Finance services and disposed transaction boundaries before retrying the
 focused gates. Integration remains blocked; no configured database or migration was touched.
 
+The current-binary relational fact now completes and deterministically fails inside the fixture's manual
+`C6CompatibilityLeaf` terminal-state save with a concurrency exception. Core, Data and the test assembly rebuild
+successfully, confirming this is invalid test architecture rather than a passing or production failure. A dedicated
+Terra Medium task is replacing the fake leaf with production AccountingEventService/FinancePostingEngine and the
+minimal test-local SQLite schema/seed needed for C7/C10/C11/C12/C13/C15, sequential actor scopes, atomic rollback
+and same-invoice serialization. In parallel, a separate clean-worktree Terra task is migrating the stale governed
+Sales unit/lockdown tests and adding explicit-date, locked-source and post-commit-audit coverage. No production
+schema, migration, configured database, remote or unrelated state is in scope.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
