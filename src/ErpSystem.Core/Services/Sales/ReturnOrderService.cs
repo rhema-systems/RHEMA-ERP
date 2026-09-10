@@ -38,6 +38,7 @@ public class ReturnOrderService : IReturnOrderService
     private readonly IFinanceProducerIntentService? _financeProducerIntents;
     private readonly IFinanceProducerApprovedExecutionService? _financeProducerExecution;
     private readonly IFinanceProducerReversalPreparationService? _financeProducerReversals;
+    private readonly IFinanceProducerReplayVerificationService? _financeProducerReplayVerifier;
 
     public ReturnOrderService(
         IGenericRepository<ReturnOrder> returnRepo,
@@ -54,7 +55,8 @@ public class ReturnOrderService : IReturnOrderService
         IFinanceAuditService? financeAuditService = null,
         IFinanceProducerIntentService? financeProducerIntents = null,
         IFinanceProducerApprovedExecutionService? financeProducerExecution = null,
-        IFinanceProducerReversalPreparationService? financeProducerReversals = null)
+        IFinanceProducerReversalPreparationService? financeProducerReversals = null,
+        IFinanceProducerReplayVerificationService? financeProducerReplayVerifier = null)
     {
         _returnRepo = returnRepo;
         _returnLineRepo = returnLineRepo;
@@ -71,6 +73,7 @@ public class ReturnOrderService : IReturnOrderService
         _financeProducerIntents = financeProducerIntents;
         _financeProducerExecution = financeProducerExecution;
         _financeProducerReversals = financeProducerReversals;
+        _financeProducerReplayVerifier = financeProducerReplayVerifier;
     }
 
     // ═════════════════════════════════════
@@ -1194,6 +1197,8 @@ public class ReturnOrderService : IReturnOrderService
         ?? throw new InvalidOperationException("Governed Finance producer execution is not configured for AR credit note posting.");
     private IFinanceProducerReversalPreparationService RequireProducerReversals() => _financeProducerReversals
         ?? throw new InvalidOperationException("Governed Finance producer reversal preparation is not configured for AR credit note reversal.");
+    private IFinanceProducerReplayVerificationService RequireReplayVerifier() => _financeProducerReplayVerifier
+        ?? throw new InvalidOperationException("Governed Finance producer replay verification is not configured for AR credit note posting.");
 
     private static string SalesCreditNotePostingKey(CreditNote creditNote) =>
         $"AR:SalesCreditNote:{creditNote.TenantId:N}:{creditNote.Id:N}:Post";
@@ -1222,6 +1227,18 @@ public class ReturnOrderService : IReturnOrderService
         expected.ParticipantCode == actual.ParticipantCode && expected.OwnerEntityType == actual.OwnerEntityType &&
         expected.OwnerEntityId == actual.OwnerEntityId && expected.OwnerAction == actual.OwnerAction &&
         expected.EffectFingerprint == actual.EffectFingerprint;
+    private static FinanceProducerReplayVerificationRequestDto ReplayRequest(CreditNote creditNote, string action, string salt,
+        string requestFingerprint, Guid postingEventId, Guid journalEntryId)
+    {
+        var owner = OwnerEffectFor(creditNote, action, salt);
+        return new FinanceProducerReplayVerificationRequestDto
+        {
+            AccountingEventRequestFingerprint = requestFingerprint, OriginatingModuleCode = "SALES",
+            SourceDocumentType = "SalesCreditNote", SourceDocumentId = creditNote.Id, PostingAction = "Post",
+            ParticipantIdentity = owner.ParticipantCode, OwnerEffectReceipt = ReceiptFor(creditNote, owner),
+            FinancePostingEventId = postingEventId, JournalEntryId = journalEntryId
+        };
+    }
     private static void RequireApprovedPreparedAuthority(AccountingEventDto prepared, AccountingEventDto decision)
     {
         if (decision.Id != prepared.Id || decision.RequestFingerprint != prepared.RequestFingerprint
@@ -1240,30 +1257,18 @@ public class ReturnOrderService : IReturnOrderService
         if (!creditNote.JournalEntryId.HasValue)
             throw new InvalidOperationException("AR credit note replay requires a linked journal identity.");
         var tenantId = _currentUserProvider.TenantId;
-        var item = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(eventItem =>
-                eventItem.TenantId == tenantId && eventItem.OriginatingModuleCode == "SALES" &&
-                eventItem.SourceDocumentType == "SalesCreditNote" && eventItem.SourceDocumentId == creditNote.Id &&
-                eventItem.PostingAction == "Post" && eventItem.IdempotencyKey == SalesCreditNotePostingKey(creditNote) &&
-                eventItem.EventKind == AccountingEventKinds.Original && eventItem.Status == AccountingEventStatuses.Posted &&
-                !eventItem.IsDeleted)
-            .Include(eventItem => eventItem.ProducerReceipt).Include(eventItem => eventItem.Postings)
-            .SingleOrDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException("AR credit note replay is missing its exact governed AccountingEvent evidence.");
-        if (item.ProducerReceipt is null || item.ProducerReceipt.IsDeleted ||
-            item.ProducerReceipt.OwnerEntityId != creditNote.Id || item.ProducerReceipt.OwnerAction != "POST" ||
-            item.ProducerReceipt.RequestFingerprint != item.RequestFingerprint)
-            throw new InvalidOperationException("AR credit note replay owner receipt is missing or conflicts with the immutable event.");
-        var representation = item.Postings.Where(posting => !posting.IsDeleted && posting.JournalEntryId == creditNote.JournalEntryId).ToList();
-        if (representation.Count != 1 || !representation[0].FinancePostingEventId.HasValue)
-            throw new InvalidOperationException("AR credit note replay journal link does not bind to exactly one C10 representation.");
+        var eventId = DeterministicGuid(creditNote.Id, "AR-CREDIT-NOTE-POST");
+        var prepared = await RequireProducerIntents().GetAsync(eventId, cancellationToken);
         var finance = await _unitOfWork.Repository<FinancePostingEvent>().GetQueryable(posting =>
-                posting.TenantId == tenantId && posting.Id == representation[0].FinancePostingEventId.Value &&
+                posting.TenantId == tenantId &&
                 posting.SourceModule == "AR" && posting.SourceDocumentType == "SalesCreditNote" &&
                 posting.SourceDocumentId == creditNote.Id && posting.PostingAction == "Post" &&
                 posting.JournalEntryId == creditNote.JournalEntryId && posting.PostingStatus == "Posted" && !posting.IsDeleted)
             .SingleOrDefaultAsync(cancellationToken);
         if (finance is null)
             throw new InvalidOperationException("AR credit note replay compatibility posting link is missing or conflicts with the governed event.");
+        await RequireReplayVerifier().VerifyPostedAsync(eventId, ReplayRequest(creditNote, "POST", "POST", prepared.RequestFingerprint,
+            finance.Id, creditNote.JournalEntryId.Value), cancellationToken);
     }
 
     private async Task RequireExactReversalReplayAsync(CreditNote creditNote, CancellationToken cancellationToken)
@@ -1271,26 +1276,17 @@ public class ReturnOrderService : IReturnOrderService
         if (!creditNote.ReversalJournalEntryId.HasValue || !creditNote.ReversalPostingEventId.HasValue)
             throw new InvalidOperationException("AR credit note reversal replay requires immutable compatibility identities.");
         var tenantId = _currentUserProvider.TenantId;
-        var original = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(eventItem =>
-                eventItem.TenantId == tenantId && eventItem.SourceDocumentId == creditNote.Id &&
-                eventItem.IdempotencyKey == SalesCreditNotePostingKey(creditNote) && eventItem.Status == AccountingEventStatuses.Posted && !eventItem.IsDeleted)
-            .SingleOrDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException("AR credit note reversal replay is missing its original governed event.");
-        var reversal = await _unitOfWork.Repository<AccountingEvent>().GetQueryable(eventItem =>
-                eventItem.TenantId == tenantId && eventItem.SourceDocumentId == creditNote.Id &&
-                eventItem.IdempotencyKey == SalesCreditNoteReversalKey(creditNote) && eventItem.EventKind == AccountingEventKinds.Reversal &&
-                eventItem.ReversesAccountingEventId == original.Id && eventItem.SupersedesAccountingEventId == original.Id &&
-                eventItem.Status == AccountingEventStatuses.Posted && !eventItem.IsDeleted)
-            .Include(eventItem => eventItem.ProducerReceipt).Include(eventItem => eventItem.Postings)
-            .SingleOrDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException("AR credit note reversal replay is missing exact C13 lineage evidence.");
-        if (reversal.ProducerReceipt is null || reversal.ProducerReceipt.IsDeleted || reversal.ProducerReceipt.OwnerEntityId != creditNote.Id ||
-            reversal.ProducerReceipt.OwnerAction != "REVERSE" || reversal.ProducerReceipt.RequestFingerprint != reversal.RequestFingerprint)
-            throw new InvalidOperationException("AR credit note reversal replay owner receipt is missing or conflicts with C13 evidence.");
-        var representation = reversal.Postings.Where(posting => !posting.IsDeleted && posting.FinancePostingEventId == creditNote.ReversalPostingEventId &&
-            posting.JournalEntryId == creditNote.ReversalJournalEntryId).ToList();
-        if (representation.Count != 1)
-            throw new InvalidOperationException("AR credit note reversal replay compatibility identities do not bind to C13 evidence.");
+        var eventId = DeterministicGuid(creditNote.Id, "AR-CREDIT-NOTE-REVERSAL");
+        var prepared = await RequireProducerIntents().GetAsync(eventId, cancellationToken);
+        var originalId = DeterministicGuid(creditNote.Id, "AR-CREDIT-NOTE-POST");
+        var owner = OwnerEffectFor(creditNote, "REVERSE", $"{originalId:N}:{creditNote.ReversedAt!.Value.Date:O}:{creditNote.ReversalReason}");
+        await RequireReplayVerifier().VerifyPostedAsync(eventId, new FinanceProducerReplayVerificationRequestDto
+        {
+            AccountingEventRequestFingerprint = prepared.RequestFingerprint, OriginatingModuleCode = "SALES",
+            SourceDocumentType = "SalesCreditNote", SourceDocumentId = creditNote.Id, PostingAction = "Post",
+            ParticipantIdentity = owner.ParticipantCode, OwnerEffectReceipt = ReceiptFor(creditNote, owner),
+            FinancePostingEventId = creditNote.ReversalPostingEventId.Value, JournalEntryId = creditNote.ReversalJournalEntryId.Value
+        }, cancellationToken);
     }
 
     private async Task<decimal> GetPostedSalesCreditTotalForInvoiceAsync(
