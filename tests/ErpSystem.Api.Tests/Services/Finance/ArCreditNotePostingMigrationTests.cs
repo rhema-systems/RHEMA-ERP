@@ -225,7 +225,6 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.ReturnOrders.CountAsync()).Should().Be(0);
     }
 
-    #if false // Superseded immediate-posting coverage. Governed C7/C11/C12/C13/C15 coverage follows the legacy block.
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     [Trait("Category", "AccountsReceivable")]
@@ -686,8 +685,6 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePosted && a.TenantId == tenantId)).Should().Be(1);
     }
 
-    #endif
-
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     public async Task GovernedSalesCreditNote_LockedSourceTamperBlocksExecution()
@@ -695,7 +692,7 @@ public sealed class ArCreditNotePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedSalesCreditNoteAsync(db, tenantId);
-        var originalEventId = Guid.NewGuid();
+        var originalEventId = DeterministicSalesEventId(fixture.CreditNote.Id, "AR-CREDIT-NOTE-POST");
         db.AccountingEvents.Add(new AccountingEvent
         {
             Id = originalEventId, TenantId = tenantId, OriginatingModuleCode = "SALES",
@@ -734,7 +731,12 @@ public sealed class ArCreditNotePostingMigrationTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note reversal source authority changed before execution.");
+        replay.Verify(x => x.VerifyPostedAsync(originalEventId, It.IsAny<FinanceProducerReplayVerificationRequestDto>(), It.IsAny<CancellationToken>()), Times.Once);
         execution.Verify(x => x.ExecuteInAmbientTransactionAsync(It.IsAny<Guid>(), It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        db.ChangeTracker.Clear();
+        var unchanged = await db.CreditNotes.SingleAsync(x => x.Id == fixture.CreditNote.Id);
+        unchanged.CreditNoteStatus.Should().Be(CreditNoteStatus.Approved);
+        unchanged.ReversalJournalEntryId.Should().BeNull();
     }
 
     [Fact]
@@ -847,6 +849,9 @@ public sealed class ArCreditNotePostingMigrationTests
                 Guid.NewGuid(), "replay", "owner-effect", AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
         return replay;
     }
+
+    private static Guid DeterministicSalesEventId(Guid creditNoteId, string purpose) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes($"{creditNoteId:N}:{purpose}"))[..16]);
 
     private static (PaymentService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreatePaymentService(
         ApplicationDbContext db,
