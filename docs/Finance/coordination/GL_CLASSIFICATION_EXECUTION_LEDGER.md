@@ -1138,6 +1138,14 @@ pending-model and exact 456-migration discovery green. The correction was integr
 Sales may now resume its real SQLite relational owner and replay-authority gates on the provider-explicit lock
 contract.
 
+Sales resumed on the approved C14 provider contract and added clean correction `77bbfd98`, which reconciles
+ordinary and reversal early retries against tenant-scoped C7/C10/C13 events, immutable owner receipts and request
+fingerprints, exact compatibility posting/journal identities and reversal lineage. The correction is not yet
+review-ready: shared compiler contention prevented an authoritative build and relational-fixture run, and the
+two-context race, post-commit audit fault, C13 authority/date matrix and stale direct-post/lockdown migrations still
+require executable evidence. Terra Medium implementation and parallel Sol High read-only review have resumed from
+the clean checkpoint; no database, migration, remote or unrelated work was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
