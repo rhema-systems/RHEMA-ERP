@@ -1283,6 +1283,15 @@ The production relational fixture continues through real dimension-rule includes
 additions. Neither branch is integrated; no configured database, production schema, migration or remote state was
 touched.
 
+Sales governance hardening is clean at `a56b59dc` atop `7a3561a3`. The helper now enforces deterministic Sales
+event identity, exact C11 Approved authority, reconstructed C12 intent/receipt and complete C15 source/participant/
+fingerprint/receipt/posting/journal binding; the closed-period fact reaches approved execution and fails on period
+authority; primary denials compare durable Finance state; and lockdown explicitly rejects producer approval and
+owner auto-approval. The exact suite passes 38/38 and the closed-period target 7/7 after a zero-error build. Sol High
+re-review is active before integration. The relational fixture reached real posting idempotency lookup and added
+only the missing test-local AccountTransactions table; a discarded EnsureCreated experiment hit SQLite-incompatible
+DDL and made no production change. No configured database, schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
