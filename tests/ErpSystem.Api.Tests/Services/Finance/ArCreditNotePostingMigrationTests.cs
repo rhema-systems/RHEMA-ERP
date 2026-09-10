@@ -122,6 +122,7 @@ public sealed class ArCreditNotePostingMigrationTests
                 AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
         var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object,
             Mock.Of<IFinanceProducerReversalPreparationService>());
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
@@ -131,6 +132,11 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.CreditNotes.SingleAsync(c => c.Id == fixture.CreditNote.Id)).JournalEntryId.Should().BeNull();
         execution.Verify(x => x.RecordFailureAfterRollbackAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
             It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<Exception>(), It.IsAny<CancellationToken>()), Times.Once);
+        producer.Verify(x => x.ApprovePreparedAsync(It.IsAny<Guid>(), It.IsAny<DecideProducerAccountingIntentDto>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        producer.Verify(x => x.ApproveAsync(It.IsAny<Guid>(), It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<DecideProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        await AssertPostingSideEffectsUnchangedAsync(db, before);
     }
 
     [Fact]
@@ -771,6 +777,7 @@ public sealed class ArCreditNotePostingMigrationTests
         await using var db = CreateContext();
         var fixture = await SeedCompatibilityCreditNoteAsync(db, tenantId);
         var (service, subledgerPostingMock) = CreatePaymentService(db, tenantId);
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var act = () => service.CreateCreditNoteAsync(new CreditNoteCreateDto
         {
@@ -785,6 +792,7 @@ public sealed class ArCreditNotePostingMigrationTests
             .WithMessage("The legacy AR payment credit-note endpoint is retired. Use the Sales credit-note workflow.");
         subledgerPostingMock.Verify(x => x.PostArPaymentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         (await db.FinancePostingEvents.CountAsync(e => e.TenantId == tenantId && e.SourceDocumentType == "CustomerCreditNote")).Should().Be(0);
+        await AssertPostingSideEffectsUnchangedAsync(db, before);
     }
 
     [Fact]
@@ -832,6 +840,7 @@ public sealed class ArCreditNotePostingMigrationTests
                 originalEventId, fingerprint, "owner-effect", AccountingEventStatuses.Posted, Guid.NewGuid(), Guid.NewGuid()));
         var execution = new Mock<IFinanceProducerApprovedExecutionService>();
         var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object, reversals.Object, replay.Object);
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var act = () => service.ReverseCreditNoteAsync(fixture.CreditNote.Id,
             new ReverseCreditNoteDto { Reason = "Tamper test", ReversalDate = new DateTime(2026, 7, 6) });
@@ -844,6 +853,7 @@ public sealed class ArCreditNotePostingMigrationTests
         var unchanged = await db.CreditNotes.SingleAsync(x => x.Id == fixture.CreditNote.Id);
         unchanged.CreditNoteStatus.Should().Be(CreditNoteStatus.Approved);
         unchanged.ReversalJournalEntryId.Should().BeNull();
+        await AssertOnlyExpectedTamperAuthorityChangeAsync(db, before);
     }
 
     [Fact]
@@ -889,31 +899,87 @@ public sealed class ArCreditNotePostingMigrationTests
     }
 
     private static async Task<PostingSideEffectSnapshot> CapturePostingSideEffectsAsync(ApplicationDbContext db) => new(
-        await db.AccountingEvents.AsNoTracking().OrderBy(item => item.Id).Select(item =>
-            $"{item.Id:N}|{item.TenantId:N}|{item.OriginatingModuleCode}|{item.SourceDocumentType}|{item.SourceDocumentId:N}|{item.PostingAction}|{item.IdempotencyKey}|{item.Status}").ToArrayAsync(),
-        await db.FinancePostingEvents.AsNoTracking().OrderBy(item => item.Id).Select(item =>
-            $"{item.Id:N}|{item.TenantId:N}|{item.OriginModuleCode}|{item.SourceModule}|{item.SourceDocumentType}|{item.SourceDocumentId:N}|{item.PostingAction}|{item.IdempotencyKey}|{item.JournalEntryId:N}|{item.PostingStatus}|{item.TotalDebitAmount}|{item.TotalCreditAmount}|{item.AccountingBookId:N}").ToArrayAsync(),
-        await db.JournalEntries.AsNoTracking().OrderBy(item => item.Id).Select(item =>
-            $"{item.Id:N}|{item.TenantId:N}|{item.JournalEntryNumber}|{item.SourceModule}|{item.OriginModuleCode}|{item.SourceDocumentType}|{item.SourceDocumentId:N}|{item.PostingStatus}|{item.TotalDebitAmount}|{item.TotalCreditAmount}|{item.AccountingBookId:N}|{item.FiscalPeriodId:N}").ToArrayAsync(),
-        await db.Accounts.AsNoTracking().OrderBy(item => item.Id).Select(item => $"{item.Id:N}|{item.Balance}").ToArrayAsync(),
-        await db.Set<AccountCurrencyExposure>().AsNoTracking().OrderBy(item => item.Id).Select(item =>
-            $"{item.Id:N}|{item.AccountId:N}|{item.AccountingBookId:N}|{item.AccountingBookCode}|{item.FunctionalCurrencyCode}|{item.TransactionCurrencyCode}|{item.SignedForeignBalance}|{item.SignedFunctionalBalance}|{item.TransactionCount}|{item.FirstTransactionDate:O}|{item.LastTransactionDate:O}|{item.SourceFingerprint}").ToArrayAsync());
+        await CaptureMappedScalarsAsync<AccountingEvent>(db),
+        await CaptureMappedScalarsAsync<AccountingEventPosting>(db),
+        await CaptureMappedScalarsAsync<AccountingEventAttempt>(db),
+        await CaptureMappedScalarsAsync<AccountingEventProducerReceipt>(db),
+        await CaptureMappedScalarsAsync<FinancePostingEvent>(db),
+        await CaptureMappedScalarsAsync<JournalEntry>(db),
+        await CaptureMappedScalarsAsync<AccountTransaction>(db),
+        await CaptureMappedScalarsAsync<Account>(db),
+        await CaptureMappedScalarsAsync<AccountCurrencyExposure>(db),
+        await CaptureMappedScalarsAsync<AuditLog>(db));
+
+    private static async Task<string[]> CaptureMappedScalarsAsync<TEntity>(ApplicationDbContext db)
+        where TEntity : class
+    {
+        var entityType = db.Model.FindEntityType(typeof(TEntity))
+            ?? throw new InvalidOperationException($"{typeof(TEntity).Name} is not mapped.");
+        var properties = entityType.GetProperties().OrderBy(property => property.Name, StringComparer.Ordinal).ToArray();
+        var keyProperties = entityType.FindPrimaryKey()?.Properties
+            ?? throw new InvalidOperationException($"{typeof(TEntity).Name} has no primary key.");
+        var rows = await db.Set<TEntity>().AsNoTracking().ToListAsync();
+        return rows.Select(item => new
+            {
+                Key = string.Join("|", keyProperties.Select(property => FormatMappedScalar(property.PropertyInfo!.GetValue(item)))),
+                Value = string.Join("|", properties.Select(property => $"{property.Name}={FormatMappedScalar(property.PropertyInfo!.GetValue(item))}"))
+            })
+            .OrderBy(row => row.Key, StringComparer.Ordinal)
+            .Select(row => row.Value)
+            .ToArray();
+    }
+
+    private static string FormatMappedScalar(object? value) => value switch
+    {
+        null => "<null>",
+        Guid guid => guid.ToString("N"),
+        DateTime date => date.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+        DateTimeOffset dateTimeOffset => dateTimeOffset.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+        decimal number => number.ToString("G29", System.Globalization.CultureInfo.InvariantCulture),
+        IFormattable formattable => formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? string.Empty
+    };
 
     private static async Task AssertPostingSideEffectsUnchangedAsync(
         ApplicationDbContext db,
         PostingSideEffectSnapshot before)
     {
         var after = await CapturePostingSideEffectsAsync(db);
-        after.Should().BeEquivalentTo(before,
+        (after with { AuditLogs = before.AuditLogs }).Should().BeEquivalentTo(before,
             "a denied Sales credit-note request must not create Finance authority, postings, journals, balances, or exposure evidence");
+        var appendedAudits = after.AuditLogs.Except(before.AuditLogs).ToArray();
+        after.AuditLogs.Should().HaveCount(before.AuditLogs.Length + appendedAudits.Length);
+        if (appendedAudits.Length != 0)
+            appendedAudits.Should().OnlyContain(audit => audit.Contains("Action=Finance.ARCreditNote.PostingFailed", StringComparison.Ordinal),
+                "the only durable denial delta is its failure audit evidence");
     }
+
+    private static async Task AssertOnlyExpectedTamperAuthorityChangeAsync(
+        ApplicationDbContext db,
+        PostingSideEffectSnapshot before)
+    {
+        var after = await CapturePostingSideEffectsAsync(db);
+        after.AccountingEvents.Should().OnlyContain(row => row.Contains("Status=Failed", StringComparison.Ordinal));
+        var normalizedBefore = before with { AccountingEvents = before.AccountingEvents.Select(StripMutableTamperFields).ToArray() };
+        var normalizedAfter = after with { AccountingEvents = after.AccountingEvents.Select(StripMutableTamperFields).ToArray() };
+        normalizedAfter.Should().BeEquivalentTo(normalizedBefore,
+            "the locked-source test simulates only Finance authority changing; the denied Sales reversal must add no owner or posting evidence");
+    }
+
+    private static string StripMutableTamperFields(string row) => string.Join("|", row.Split('|')
+        .Where(field => !field.StartsWith("Status=", StringComparison.Ordinal) && !field.StartsWith("UpdatedAt=", StringComparison.Ordinal)));
 
     private sealed record PostingSideEffectSnapshot(
         string[] AccountingEvents,
+        string[] AccountingEventPostings,
+        string[] AccountingEventAttempts,
+        string[] AccountingEventProducerReceipts,
         string[] FinancePostingEvents,
         string[] Journals,
+        string[] AccountTransactions,
         string[] AccountBalances,
-        string[] AccountCurrencyExposures);
+        string[] AccountCurrencyExposures,
+        string[] AuditLogs);
 
     private static void SeedPostedSalesCreditNoteCompatibilityLink(
         ApplicationDbContext db,
@@ -953,8 +1019,11 @@ public sealed class ArCreditNotePostingMigrationTests
             {
                 accountingEventId = DeterministicSalesEventId(intent.PostingRequest.SourceDocumentId, "AR-CREDIT-NOTE-POST");
                 intent.AccountingEventId.Should().Be(accountingEventId);
-                fingerprint = ComputeCanonicalIntentFingerprint(intent);
-                preparedIntent = intent;
+                // C11 returns Finance's durable request fingerprint. The unit mock deliberately does
+                // not invent a second canonicalization authority: C12 compares the entire immutable
+                // producer request captured here, in caller supplied order.
+                fingerprint = "ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD";
+                preparedIntent = CloneIntent(intent);
                 approved = new AccountingEventDto
                 {
                     Id = accountingEventId, Status = AccountingEventStatuses.PendingApproval,
@@ -969,9 +1038,7 @@ public sealed class ArCreditNotePostingMigrationTests
         execution.Setup(x => x.ExecuteInAmbientTransactionAsync(
                 It.Is<Guid>(id => id == accountingEventId),
                 It.Is<ProducerAccountingIntentDto>(intent => preparedIntent != null
-                    && intent.AccountingEventId == accountingEventId
-                    && intent.IdempotencyKey == preparedIntent.IdempotencyKey
-                    && intent.ExpectedOwnerEffect.EffectFingerprint == preparedIntent.ExpectedOwnerEffect.EffectFingerprint),
+                    && intent.AccountingEventId == accountingEventId),
                 It.Is<ProducerOwnerEffectReceiptDto>(receipt => preparedIntent != null
                     && receipt.TenantId == tenantId
                     && receipt.ParticipantCode == preparedIntent.ExpectedOwnerEffect.ParticipantCode
@@ -982,6 +1049,7 @@ public sealed class ArCreditNotePostingMigrationTests
                 It.IsAny<CancellationToken>()))
             .Callback<Guid, ProducerAccountingIntentDto, ProducerOwnerEffectReceiptDto, CancellationToken>((eventId, intent, receipt, cancellationToken) =>
             {
+                AssertExactPreparedIntent(intent, preparedIntent!);
                 var request = intent.PostingRequest;
                 var book = db.AccountingBooks.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
                 var period = db.FiscalPeriods.Single(item => item.TenantId == tenantId && item.StartDate <= request.PostingDate && item.EndDate >= request.PostingDate);
@@ -1074,38 +1142,14 @@ public sealed class ArCreditNotePostingMigrationTests
         return new GovernedSalesCreditNoteProducerMock(intents, execution, replay);
     }
 
-    private static string ComputeCanonicalIntentFingerprint(ProducerAccountingIntentDto intent)
+    private static ProducerAccountingIntentDto CloneIntent(ProducerAccountingIntentDto source) =>
+        JsonSerializer.Deserialize<ProducerAccountingIntentDto>(JsonSerializer.Serialize(source))
+        ?? throw new InvalidOperationException("Unable to capture the immutable prepared producer intent.");
+
+    private static void AssertExactPreparedIntent(ProducerAccountingIntentDto actual, ProducerAccountingIntentDto expected)
     {
-        var request = intent.PostingRequest;
-        var canonical = JsonSerializer.Serialize(new
-        {
-            intent.AccountingEventId, intent.EventKind, intent.SupersedesAccountingEventId, intent.CorrectsAccountingEventId,
-            intent.ReversesAccountingEventId, intent.IdempotencyKey, intent.ParticipantIdentity,
-            OwnerEffect = new { intent.ExpectedOwnerEffect.ParticipantCode, intent.ExpectedOwnerEffect.OwnerEntityType,
-                intent.ExpectedOwnerEffect.OwnerEntityId, intent.ExpectedOwnerEffect.OwnerAction, intent.ExpectedOwnerEffect.EffectFingerprint },
-            Request = new
-            {
-                request.SourceModule, request.OriginModuleCode, request.SourceDocumentType, request.SourceDocumentId,
-                request.SourceDocumentTenantId, request.ExistingJournalEntryId, request.ReversalOfJournalEntryId,
-                request.ReversalReason, request.ReversalType, request.PostingAction, request.SourceDocumentReference,
-                request.Description, request.PostingDate, request.FiscalPeriodId, request.JournalType, request.FunctionalCurrencyCode,
-                request.IdempotencyKey, request.ReturnExistingOnDuplicate, request.ExchangeRateTypeOverride,
-                request.ExchangeRateQuoteSideOverride, request.ExchangeRateOverrideReason, request.ExchangeRateOverrideApprovedByUserId,
-                request.ExchangeRateOverrideApprovedAt, request.PreserveHistoricalExchangeRateSnapshot, request.AllowPostingToClosedPeriod,
-                BudgetReservationIds = request.BudgetReservationIds.OrderBy(id => id), request.BudgetReservationSourceDocumentType,
-                Lines = request.Lines.OrderBy(line => line.LineNumber).ThenBy(line => line.AccountId).Select(line => new
-                {
-                    line.AccountId, line.SourceDocumentLineId, line.Description, line.DebitAmount, line.CreditAmount,
-                    line.TransactionCurrency, line.TransactionDebitAmount, line.TransactionCreditAmount, line.ForeignCurrencyAmount,
-                    line.ExchangeRateId, line.ExchangeRate, line.ExchangeRateSource, line.ExchangeRateDate, line.SourceReferenceNumber,
-                    line.LineNumber, line.FinanceDimensionSetId, line.SegmentString, line.Notes, line.TransactionTag,
-                    Dimensions = line.Dimensions.OrderBy(dimension => dimension.DimensionCode).ThenBy(dimension => dimension.ValueCode)
-                        .Select(dimension => new { dimension.DimensionCode, dimension.ValueCode, dimension.SourceEntityType, dimension.SourceEntityId })
-                }),
-                TaxSnapshots = request.TaxCalculationSnapshots
-            }
-        });
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        actual.Should().BeEquivalentTo(expected, options => options.WithStrictOrdering(),
+            "C12 must receive the exact immutable C11 producer intent, including every scalar, ordered line, dimension, tax, flag, and lineage field");
     }
 
     private static (ReturnOrderService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateReturnOrderService(
@@ -1192,6 +1236,10 @@ public sealed class ArCreditNotePostingMigrationTests
         public void VerifyNoPrepareOrExecution()
         {
             Intents.Verify(x => x.PrepareAsync(It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            Intents.Verify(x => x.ApprovePreparedAsync(It.IsAny<Guid>(), It.IsAny<DecideProducerAccountingIntentDto>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            Intents.Verify(x => x.ApproveAsync(It.IsAny<Guid>(), It.IsAny<ProducerAccountingIntentDto>(),
+                It.IsAny<DecideProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Never);
             Execution.Verify(x => x.ExecuteInAmbientTransactionAsync(It.IsAny<Guid>(), It.IsAny<ProducerAccountingIntentDto>(),
                 It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Never);
         }
