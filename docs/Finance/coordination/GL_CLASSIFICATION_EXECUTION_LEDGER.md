@@ -1130,6 +1130,14 @@ builds and EF/456-migration gates pass; one combined Sales failure is the docume
 Independent Sol High cross-module concurrency review is active. Sales relational execution remains gated on
 approval/integration; no configured database was accessed.
 
+Independent Sol High review approved exact C14 commit `d2d7b65c51965121295957a133d12cfbbaf8f8d0`
+with no P1/P2. The SQL Server checked `sp_getapplock` block is byte-identical to the exact base; the provider matrix
+passed 8/8 and targeted Inventory/Procurement/Audit lock consumers passed 26/26, with Core/API builds, EF no-
+pending-model and exact 456-migration discovery green. The correction was integrated locally as
+`e4fd811882487d7755bffc379bc77bf83ebae161`; no database, schema, migration, remote or unrelated work was touched.
+Sales may now resume its real SQLite relational owner and replay-authority gates on the provider-explicit lock
+contract.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
