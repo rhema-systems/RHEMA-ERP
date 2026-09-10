@@ -1146,6 +1146,23 @@ two-context race, post-commit audit fault, C13 authority/date matrix and stale d
 require executable evidence. Terra Medium implementation and parallel Sol High read-only review have resumed from
 the clean checkpoint; no database, migration, remote or unrelated work was touched.
 
+Sol High review at exact Sales checkpoint `77bbfd98` requires further correction. The transaction lock is keyed by
+credit note rather than the shared invoice authority, so concurrent notes can still pass the same invoice credit
+limit; reversal does not fully rebuild/revalidate owner and original authority after the Serializable reload; an
+explicit changed reversal date is incorrectly treated like an omitted-date retry; and replay reconciliation does
+not yet reproduce exact Finance C10/default-posted representation and complete receipt/C13 lineage authority. The
+current SQLite fixture substitutes and fabricates C6/C10/C12 state and lacks a synchronized two-context race, so it
+is not accepted as end-to-end atomicity evidence. Terra Medium correction continues with production Finance
+services or an equivalent guarded relational proof, plus post-commit audit-fault coverage. Integration remains
+blocked; no database or migration was touched.
+
+The fresh exact Sales gate confirms the checkpoint is red: 28 tests were discovered, 23 failed and 5 passed. Both
+new relational cases fail, the mock replay cases lack the newly required durable authority, and stale direct-post
+tests omit governed services. Review also found that a joined caller-owned transaction remains active after the
+service catch, yet the service immediately invokes the post-rollback Finance failure recorder; durable failure
+evidence must instead wait for the actual outer rollback and tracker cleanup. This is a production P1 correction,
+not accepted baseline debt.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
