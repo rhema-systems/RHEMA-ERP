@@ -1100,6 +1100,15 @@ preparation from immutable historical authority. Terra Medium implementation may
 selection, legacy posting-engine use or Finance-history reconstruction. Independent Sol High review and clean
 integration remain required before HR/Payroll.
 
+The final Sales implementer produced clean owner commit `ddf7ea48` from exact base `5bbc86a7`, replacing ordinary
+credit-note V1/literal-book posting with neutral C7 prepare/C11 handoff/C12 ambient execution and replacing
+legacy reversal reconstruction with C13 prepare plus ID-only C12 execution. Core builds with zero errors and the
+diff is clean, but the existing AR credit-note tests still exercise the retired direct-posting harness. The task
+has been continued rather than sent to review: it must add executable shared-context evidence for maker-checker,
+disabled/default selector denial, compatibility binding, rollback-before-durable-failure, exact retry and C13
+frozen-book reversal under C5 drift, then run widened/EF/migration gates. No database or migration was touched;
+independent review and integration remain gated.
+
 The post-C13 Sales reissue stopped cleanly before owner edits on one remaining contract handoff. C13 returns an
 identity/fingerprint result after Finance-owned reversal reconstruction, but C12 execution still requires the
 complete prepared neutral intent. Sales cannot deserialize and resubmit the stored Finance snapshot without
