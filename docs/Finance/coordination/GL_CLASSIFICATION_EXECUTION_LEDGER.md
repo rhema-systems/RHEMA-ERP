@@ -1109,6 +1109,14 @@ disabled/default selector denial, compatibility binding, rollback-before-durable
 frozen-book reversal under C5 drift, then run widened/EF/migration gates. No database or migration was touched;
 independent review and integration remain gated.
 
+Sales added partial evidence commit `cad7bbeb` atop production `ddf7ea48`, covering pending no-mutation and
+approved compatibility-bound one-time completion/read-only retry. The Core build and diff pass, but the API test
+assembly did not finish compiling in the task window and the required relational rollback/recovery, C13 drift,
+authority-denial and static-lockdown matrix remains incomplete. The candidate is not review-ready. A fresh Terra
+Medium Sales test-harness task has been assigned the clean two-commit checkpoint to complete and execute the full
+directly affected matrix, using real C7/C11/C12/C13 evidence and relational shared-context transactions where
+required. No database, migration or unrelated owner change occurred; independent review remains gated.
+
 The post-C13 Sales reissue stopped cleanly before owner edits on one remaining contract handoff. C13 returns an
 identity/fingerprint result after Finance-owned reversal reconstruction, but C12 execution still requires the
 complete prepared neutral intent. Sales cannot deserialize and resubmit the stored Finance snapshot without
