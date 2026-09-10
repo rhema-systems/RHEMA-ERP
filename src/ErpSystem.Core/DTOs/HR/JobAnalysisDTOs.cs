@@ -831,6 +831,23 @@ public class CreateManpowerBudgetDto : CreateDtoBase
 /// </summary>
 public class UpdateManpowerBudgetDto : UpdateDtoBase
 {
+    /// <summary>
+    /// The scope — fiscal year, unit, level — editable while the budget is still its author's
+    /// (Draft or Rejected). Round 2b, lane R1: the create form collected all three and the edit
+    /// could change none of them, so a budget drafted against the wrong unit had to be deleted and
+    /// typed again.
+    /// </summary>
+    /// <remarks>
+    /// All three are optional and <b>null means unchanged</b> — the rest of this DTO is a REPLACE,
+    /// but callers written before R1 send no scope and must not have their year wiped. When the
+    /// unit changes and no level is named, the level follows the unit.
+    /// </remarks>
+    [Range(2000, 2100)]
+    public int? FiscalYear { get; set; }
+
+    public Guid? OrganizationLevelId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+
     [Required]
     public DateTime PeriodStartDate { get; set; }
 
@@ -878,8 +895,11 @@ public class UpdateManpowerBudgetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal TrainingBudget { get; set; }
 
-    [Range(0, double.MaxValue)]
-    public decimal ActualSpent { get; set; }
+    // ⚠ `ActualSpent` is no longer accepted here (round 2b, lane R1). It was the one figure the
+    // create form never asked for and the correction dialog never sent, so every correction wrote
+    // 0 over it; and it is the one figure that can only come from Finance's actuals
+    // (HR-FINANCE-INTEGRATION-BACKLOG, area 17/18). Nothing in HR types it now. An old client that
+    // still sends it is ignored, not refused.
 
     /// <summary>
     /// The status the caller believes the budget is in. Optional, and never written.

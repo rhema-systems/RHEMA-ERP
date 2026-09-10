@@ -2086,6 +2086,22 @@ public class ManpowerBudgetService : IManpowerBudgetService
     public async Task<ManpowerBudgetDto> CreateAsync(CreateManpowerBudgetDto createDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+
+        // Round 2b, R1: the unit must be this tenant's, and the level follows the unit when the
+        // caller names none — the flat dropdown never sent a level, so every budget in the table
+        // carried a unit and no level. Same rule as UpdateAsync.
+        if (createDto.OrganizationUnitId.HasValue)
+        {
+            var unit = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .FirstOrDefaultAsync(u => u.Id == createDto.OrganizationUnitId.Value
+                                       && u.TenantId == tenantId && !u.IsDeleted, cancellationToken);
+            if (unit is null)
+                throw JobArchitectureException.Invalid(
+                    "The organisation unit named for this budget does not exist in this organisation.");
+            if (!createDto.OrganizationLevelId.HasValue)
+                createDto.OrganizationLevelId = unit.OrganizationLevelId;
+        }
+
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         entity.BudgetNumber = await GenerateBudgetNumberAsync(cancellationToken);
@@ -2111,7 +2127,9 @@ public class ManpowerBudgetService : IManpowerBudgetService
 
         _logger.LogInformation("Manpower budget created: {BudgetNumber}", entity.BudgetNumber);
 
-        return entity.ToDto();
+        // Re-read so the response carries the unit and level NAMES (the entity was built from the
+        // DTO and has no navigations loaded — the lane F2 shape).
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<ManpowerBudgetDto> UpdateAsync(UpdateManpowerBudgetDto updateDto, CancellationToken cancellationToken = default)
@@ -2125,8 +2143,27 @@ public class ManpowerBudgetService : IManpowerBudgetService
         if (entity == null)
             throw JobArchitectureException.NotFound($"Manpower budget with ID '{updateDto.Id}' not found.");
 
-        if (entity.Status == ManpowerBudgetStatus.Approved)
-            throw JobArchitectureException.InvalidState("Cannot update an approved budget.");
+        // ⚠ Was "refuse Approved only", which let a budget be corrected WHILE it was out for
+        // approval — the three approvers of FR-HR-135's chain reading a moving target. A budget is
+        // its author's while Draft or Rejected and the approvers' from Submitted on (round 2b, R1).
+        if (entity.Status != ManpowerBudgetStatus.Draft && entity.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState(
+                $"A {entity.Status} budget cannot be corrected. Only a Draft or Rejected budget can be " +
+                "edited: one out for approval is what its approvers are reading, and an approved one is the record.");
+
+        // The scope (year, unit, level) is editable here too — null on the DTO means unchanged. A
+        // unit must exist in this tenant; the level follows the unit unless the caller names one.
+        if (updateDto.OrganizationUnitId.HasValue && updateDto.OrganizationUnitId != entity.OrganizationUnitId)
+        {
+            var unit = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .FirstOrDefaultAsync(u => u.Id == updateDto.OrganizationUnitId.Value
+                                       && u.TenantId == tenantId && !u.IsDeleted, cancellationToken);
+            if (unit is null)
+                throw JobArchitectureException.Invalid(
+                    "The organisation unit named for this budget does not exist in this organisation.");
+            if (!updateDto.OrganizationLevelId.HasValue)
+                updateDto.OrganizationLevelId = unit.OrganizationLevelId;
+        }
 
         // A correction does not move the budget through its chain — submit, approve and reject do.
         // A caller who sends the current status is round-tripping the record and is fine; one who
@@ -2138,22 +2175,29 @@ public class ManpowerBudgetService : IManpowerBudgetService
 
         updateDto.UpdateEntity(entity);
         entity.TotalBudget = updateDto.SalaryBudget + updateDto.BenefitsBudget + updateDto.RecruitmentBudget + updateDto.TrainingBudget;
-        entity.Variance = entity.TotalBudget - updateDto.ActualSpent;
+        // Against the stored actuals, which nothing in HR writes — not a caller-supplied figure.
+        entity.Variance = entity.TotalBudget - entity.ActualSpent;
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Manpower budget updated: {BudgetNumber}", entity.BudgetNumber);
 
-        return entity.ToDto();
+        // Re-read: the tracked entity still carries the OLD unit/level navigations after a scope
+        // change, and mapping it would answer with the previous unit's name (the lane F2 lesson).
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> SubmitForApprovalAsync(Guid budgetId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(budgetId);
 
-        if (entity.Status != ManpowerBudgetStatus.Draft)
-            throw JobArchitectureException.InvalidState("Only draft budgets can be submitted for approval.");
+        // A Rejected budget is resubmittable on purpose (round 2b, R1): correct-and-resubmit is the
+        // loop that status exists for. Until R1 it could only be deleted — and a rejected budget
+        // cannot be deleted either (Draft only), so it was simply stuck.
+        if (entity.Status != ManpowerBudgetStatus.Draft && entity.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState(
+                "Only a Draft or Rejected budget can be submitted for approval.");
 
         // ⚠ Refuse an empty budget before troubling anyone with it. A manpower budget with no lines
         // authorises no posts, so sending one up FR-HR-135's three-step chain wastes three people's

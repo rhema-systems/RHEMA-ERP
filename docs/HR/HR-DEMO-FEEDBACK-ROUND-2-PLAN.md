@@ -292,6 +292,12 @@ added the same day out of lane G's closing note, and is deferred with a trigger 
 position in the order: **before the next demo**, because Staff Movements is session 14 of the
 demo walk. Everything else keeps the order below.
 
+**Lane R — Recruitment (round 2b, added 2026-09-10).** The second feedback document's
+RECRUITMENT section (manpower budget ↔ establishment ↔ requisition, retirements in the plan, salary
+from the scale, an Excel round-trip) and the user's Finance follow-up on requisition costs are
+planned in their own document, `HR-DEMO-FEEDBACK-ROUND-2B-RECRUITMENT-PLAN.md`, as slices R1–R8.
+R1 is in build. Lane R's order is independent of the order below; lane H keeps its trigger.
+
 Harness folders under `D:\Rhema\TDC ERPS\dev-harness\` (outside the repo, per the demo-pack
 boundary): existing `hr-employee-docs`, `hr-jobarch`, `hr-payroll-membership`; new
 `hr-organization`, `hr-teams` and `hr-salary-structure`. Every new table goes into
@@ -897,7 +903,7 @@ From the survey, grouped by area. Each is a bespoke `Select` fed from the unit l
 - **Succession:** `CandidateSearchPanel.tsx`, `TalentReviewFormDialog.tsx:131`.
 - **Performance:** `unit-goals/page.tsx`, `at-risk/page.tsx`, `cycles/[id]/page.tsx`, `administration/hr/performance/goal-library/page.tsx:97`, `templates/page.tsx:112`.
 - **Probation / separation / awards / attendance:** `confirming-authorities/page.tsx:226`, `separation/clearance-form/page.tsx:174`, `awards/types/[id]/page.tsx`, `attendance/alert-rules/page.tsx`, `shift-rotations/[id]/page.tsx`.
-- **Employee relations / manpower / movements:** `employee-relations/responders/page.tsx:158, :307`, `manpower-budgets/new/page.tsx:110`, `movements/career-paths/[employeeId]/page.tsx:393`, `movements/new/page.tsx`.
+- **Employee relations / manpower / movements:** `employee-relations/responders/page.tsx:158, :307`, ~~`manpower-budgets/new/page.tsx:110`~~ (done in round 2b lane R1 — the level is stored too), `movements/career-paths/[employeeId]/page.tsx:393`, `movements/new/page.tsx`.
 - **SHE:** `safety/inspections/new/page.tsx:164-170`, `inspections/[id]`, `risk-assessments/new` + `[id]`, `safety/documents/[id]`, `safety/training/page.tsx`, `safety/training/plans/[id]`, `safety/performance/analytics`, `InspectionChecklistRun.tsx`.
 - **Training (already on `OrganizationScopeFields`):** `training/budgets/new` + `[id]`, `training/plans/new` + `[id]`, `administration/hr/training/compliance/[id]`, `learning-paths/[id]`, `calibration/page.tsx:263` — swap `OrganizationScopeFields` to wrap the new picker so it is one implementation.
 - **Travel / leave / recruitment / announcements:** `TravelPolicyForm.tsx`, `TravelRequestForm.tsx`, `LeaveEligibilityTab.tsx`, `leave/plans/page.tsx`, `recruitment/requisitions/new/page.tsx:48` + `[id]/edit` (derived from position — leave), `announcements/page.tsx:129` (multi-select audience — the picker needs a multi mode or this one stays).

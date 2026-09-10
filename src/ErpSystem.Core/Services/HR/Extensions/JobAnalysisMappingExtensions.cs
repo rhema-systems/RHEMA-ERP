@@ -550,6 +550,11 @@ public static class JobAnalysisMappingExtensions
 
     public static void UpdateEntity(this UpdateManpowerBudgetDto dto, ManpowerBudget entity)
     {
+        // Scope: null means unchanged (see the DTO). The service has already checked the unit.
+        if (dto.FiscalYear.HasValue) entity.FiscalYear = dto.FiscalYear.Value;
+        if (dto.OrganizationUnitId.HasValue) entity.OrganizationUnitId = dto.OrganizationUnitId;
+        if (dto.OrganizationLevelId.HasValue) entity.OrganizationLevelId = dto.OrganizationLevelId;
+
         entity.PeriodStartDate = dto.PeriodStartDate;
         entity.PeriodEndDate = dto.PeriodEndDate;
         entity.CurrentHeadcount = dto.CurrentHeadcount;
@@ -564,8 +569,9 @@ public static class JobAnalysisMappingExtensions
         entity.BenefitsBudget = dto.BenefitsBudget;
         entity.RecruitmentBudget = dto.RecruitmentBudget;
         entity.TrainingBudget = dto.TrainingBudget;
-        entity.ActualSpent = dto.ActualSpent;
-        // ⚠ Not assigned — see UpdateManpowerBudgetDto.Status. The correction dialog does not send
+        // ⚠ `ActualSpent` is deliberately NOT assigned (round 2b, lane R1): the screen never sent it,
+        // so this line zeroed it on every correction, and it belongs to Finance's actuals anyway.
+        // ⚠ Status is not assigned either — see UpdateManpowerBudgetDto.Status. The correction dialog does not send
         // a status, so this line wrote 0 over every budget it touched and left it unsubmittable.
         entity.BusinessJustification = dto.BusinessJustification;
     }
