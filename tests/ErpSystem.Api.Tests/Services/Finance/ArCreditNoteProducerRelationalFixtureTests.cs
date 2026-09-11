@@ -103,10 +103,12 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         (await fixture.Db.AccountBalances.CountAsync()).Should().BeGreaterThan(0);
         (await fixture.Db.AuditLogs.CountAsync()).Should().BeGreaterThan(0, "success uses the real durable audit service");
 
+        var retryBefore = await MappedRowsAsync(fixture.Db);
         var retry = await fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
         retry.JournalEntryId.Should().Be(posted.JournalEntryId);
         (await fixture.Db.FinancePostingEvents.CountAsync()).Should().Be(2, "an exact retry is Finance and owner read-only; the fixture also carries the original invoice authority");
         (await fixture.Db.AccountingEventProducerReceipts.CountAsync()).Should().Be(1, "C15 retry cannot duplicate the C12 receipt");
+        (await MappedRowsAsync(fixture.Db)).Should().Equal(retryBefore, "C15 exact retry is read-only across every mapped fixture row, including binary columns");
     }
 
     [Fact]
@@ -405,7 +407,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
     private static string Hash(char value) => new(value, 64);
     private static async Task CreateSchemaAsync(ApplicationDbContext db)
     {
-        Type[] types = [typeof(Tenant), typeof(FiscalYear), typeof(FiscalPeriod), typeof(ModuleDefinition), typeof(AccountingBook), typeof(AccountingBookPeriod), typeof(Account), typeof(AccountAccountingBook), typeof(AccountClassification), typeof(FinanceDimensionDefinition), typeof(FinanceDimensionValue), typeof(FinanceDimensionAccountRule), typeof(BusinessPartner), typeof(FinanceSettings), typeof(Invoice), typeof(ReturnOrder), typeof(CreditNote), typeof(CreditNoteLine), typeof(FinancePostingEvent), typeof(JournalEntry), typeof(AccountTransaction), typeof(AccountBalance), typeof(AccountingEvent), typeof(AccountingEventPosting), typeof(AccountingEventAttempt), typeof(AccountingEventProducerReceipt), typeof(AuditLog), typeof(ProducerIntentGroupMember), typeof(ProducerIntentGroupReceipt), typeof(AccountingBookSelectionEvidence), typeof(AccountingBookSelectionEvidenceBook)];
+        Type[] types = SnapshotTypes;
         foreach (var type in types)
         {
             var entity = db.Model.FindEntityType(type)!; var store = StoreObjectIdentifier.Table(entity.GetTableName()!, entity.GetSchema());
@@ -418,4 +420,19 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
     // SQLite harness match that provider behavior for producer/replay identity predicates.
     private static string SqlType(Type type) { type = Nullable.GetUnderlyingType(type) ?? type; return type == typeof(byte[]) ? "BLOB" : type == typeof(decimal) || type == typeof(double) || type == typeof(float) ? "REAL" : type == typeof(int) || type == typeof(long) || type == typeof(short) || type == typeof(bool) || type.IsEnum ? "INTEGER" : "TEXT COLLATE NOCASE"; }
     private static string SqlDefault(string sqlType) => sqlType switch { "BLOB" => "X'0000000000000000'", "REAL" => "0", "INTEGER" => "0", _ => "''" };
+    private static readonly Type[] SnapshotTypes = [typeof(Tenant), typeof(FiscalYear), typeof(FiscalPeriod), typeof(ModuleDefinition), typeof(AccountingBook), typeof(AccountingBookPeriod), typeof(Account), typeof(AccountAccountingBook), typeof(AccountClassification), typeof(FinanceDimensionDefinition), typeof(FinanceDimensionValue), typeof(FinanceDimensionAccountRule), typeof(BusinessPartner), typeof(FinanceSettings), typeof(Invoice), typeof(ReturnOrder), typeof(CreditNote), typeof(CreditNoteLine), typeof(FinancePostingEvent), typeof(JournalEntry), typeof(AccountTransaction), typeof(AccountBalance), typeof(AccountCurrencyExposure), typeof(AccountingEvent), typeof(AccountingEventPosting), typeof(AccountingEventAttempt), typeof(AccountingEventProducerReceipt), typeof(AuditLog), typeof(ProducerIntentGroupMember), typeof(ProducerIntentGroupReceipt), typeof(AccountingBookSelectionEvidence), typeof(AccountingBookSelectionEvidenceBook)];
+    private static async Task<IReadOnlyList<string>> MappedRowsAsync(ApplicationDbContext db)
+    {
+        var rows = new List<string>();
+        foreach (var type in SnapshotTypes)
+        {
+            var table = db.Model.FindEntityType(type)!.GetTableName()!;
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = $"SELECT * FROM \"{table}\"";
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                rows.Add(table + ":" + string.Join("|", Enumerable.Range(0, reader.FieldCount).Select(i => reader.GetName(i) + "=" + (reader.IsDBNull(i) ? "<null>" : reader.GetValue(i) is byte[] bytes ? Convert.ToHexString(bytes) : Convert.ToString(reader.GetValue(i)))));
+        }
+        return rows.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+    }
 }
