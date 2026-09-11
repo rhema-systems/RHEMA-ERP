@@ -1341,6 +1341,14 @@ C15 authority, independent scopes, guarded SQL lock and C13 reversal evidence re
 Generated diagnostics remain intentionally untracked and are not integration material. No configured database,
 production schema, migration or remote state was touched.
 
+Sales governance correction `f7958434` is clean atop `0f53f95d` and passes the isolated class 28/28 plus branch
+batch 38/38. It snapshots actual AccountBalance and owner CreditNote/line/invoice rows, renders binary values as
+stable hex, covers pending/execution-boundary/reversal-conflict denials, directly verifies no producer approval, and
+limits permitted failure audit evidence to exactly one tenant/resource/owner/action-bound row. Sol High final review
+is active before integration. The relational branch has uncommitted exact C11/C12 assertion work awaiting its fresh
+build, then will complete C10/C15/full-row evidence. No configured database, production schema, migration or remote
+state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
