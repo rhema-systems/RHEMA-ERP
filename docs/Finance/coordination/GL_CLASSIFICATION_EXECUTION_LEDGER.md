@@ -1332,6 +1332,15 @@ required despite 5/5: tracker cleanliness is still asserted after Clear, zero/al
 are incomplete, and separate-context/guarded-SQL/C13 boundaries remain unproved. Terra is correcting the first two
 sets before expansion. No configured database, production schema, migration or remote state was touched.
 
+Overnight review keeps governance `0f53f95d` changes-required: the snapshot still queried legacy Account rather
+than C2 AccountBalance, omitted owner rows and binary contents, skipped several denial paths, and did not place
+explicit no-approval assertions in the named lockdown fact; its permitted audit delta was also too broad. Terra is
+correcting that exact list. Relational tracker correction `1b3a4c0c` is clean tracked work and retains 5/5: failure
+and closed-period paths now assert unchanged tracker state before any Clear. Full mapped-row zero/all, exact C10–
+C15 authority, independent scopes, guarded SQL lock and C13 reversal evidence remain active follow-on work.
+Generated diagnostics remain intentionally untracked and are not integration material. No configured database,
+production schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
