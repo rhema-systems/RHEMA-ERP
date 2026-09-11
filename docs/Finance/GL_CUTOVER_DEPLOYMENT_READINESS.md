@@ -2,7 +2,12 @@
 
 Status: **code candidate only — deployment is not authorized**
 
-Candidate base: `cfea93f28cb3b41a838a7c2fa628b04e0781db1d`
+Frozen integrated candidate: `cbc0d3c91142c63c4ea40f08f11d633752268367`
+
+Candidate provenance: exact Stage B5 commit `cc132ac329b6a4e7187e57bd8108cbc8492822d6` was
+independently approved by GPT-5.6 Sol High, integrated locally as
+`0a27f50bee597d15429cfb5ab6598122ca689ec9`, and reconciled in the readiness-only commit
+`cbc0d3c91142c63c4ea40f08f11d633752268367`. No database operation occurred in that review or integration.
 
 This checklist is the release boundary for the Finance multi-book GL cutover. It records what may be
 reviewed from the repository without connecting to a database and what must still be performed by an
@@ -24,8 +29,9 @@ apply migrations to, seed, or otherwise inspect or mutate the configured `RHEMAE
   stable account intent to the Finance-owned provisioning service.
 - [x] C6 `Finance:AccountingEvents`, C7 `Finance:ProducerIntents`, and C8
   `Finance:ProducerIntentGroups` are disabled by default. Absence of configuration is false.
-- [ ] Independent Sol High review has approved the exact candidate commit.
-- [ ] The coordinator has integrated the approved commit in order and reproduced the final gates.
+- [x] Independent Sol High review approved exact candidate commit `cc132ac329b6a4e7187e57bd8108cbc8492822d6`.
+- [x] The coordinator integrated it as `0a27f50bee597d15429cfb5ab6598122ca689ec9`, reproduced the
+  final gates, and recorded the frozen integrated candidate at `cbc0d3c91142c63c4ea40f08f11d633752268367`.
 
 Immutable historical database columns, migration SQL, reporting/read-model fields, and audit evidence
 that contain the legacy classification label are retained intentionally. They are stored evidence, not an
@@ -87,9 +93,37 @@ must be regenerated and independently checked after deployment-time discovery.
 
 Deployment remains blocked until every item below has durable evidence and an independent reviewer sign-off.
 
+The Stage A `RehearseClone` mode remains a historical regression path and intentionally accepts only its
+documented Phase 4 stop. The operational cutover path is `RehearseFinalClone`. It does not use an application
+configuration fallback: both connection strings and all three disabled flags must be explicit process values.
+It first builds, proves EF model parity, discovers exactly 456 migrations ending at C8, captures source history,
+derives and records the exact pending delta, generates and hashes its bounded idempotent SQL artifact, and runs
+read-only readiness diagnostics. Any `BLOCKER` or explicit `REVIEW` finding produces
+durable `NO_GO_PREFLIGHT` evidence before a backup or target exists. Only a clean preflight may proceed through
+the target-derived absent backup check, `COPY_ONLY`/`CHECKSUM`, `RESTORE VERIFYONLY`, prefix-safe restore,
+`DBCC CHECKDB ... PHYSICAL_ONLY`, exact pending-delta application, two real seed passes, and byte-identical
+Finance invariant evidence. Failures preserve evidence and any exact target/backup; the harness never drops or
+overwrites either automatically.
+
+```powershell
+$env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<secure same-server connection; exact RhemaERP catalog>'
+$env:RHEMA_GL_REHEARSAL_CONNECTION = '<same server; absent RHEMAERP_GL_REHEARSAL_* catalog>'
+$env:Finance__AccountingEvents__Enabled = 'false'
+$env:Finance__ProducerIntents__Enabled = 'false'
+$env:Finance__ProducerIntentGroups__Enabled = 'false'
+./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode RehearseFinalClone `
+  -EvidenceDirectory '<new or empty raw-evidence directory>'
+./scripts/finance/Test-GlCutoverEvidencePackage.ps1 -PackageKind FinalClone `
+  -EvidenceDirectory '<raw-evidence directory>' -WriteManifest
+```
+
+An operator must review a NO-GO package; it is not permission to repair, backfill, stamp, weaken a preflight,
+or retry against a different source. Cleanup remains a separate explicit `DropRehearsal -ConfirmDrop` action.
+
 - [ ] Freeze the exact reviewed commit SHA and record its full ancestry and tree hash.
-- [ ] Capture the target's sanitized server/database identity, current migration history, schema fingerprint,
-  Finance control counts, and cutover feature-flag values without exposing credentials.
+- [ ] Capture the source's sanitized server/database identity, current migration history, schema fingerprint,
+  Finance control counts, explicit disabled cutover flags, and the absent target identity without exposing credentials;
+  verify the restored target history equals that fresh source history before applying anything.
 - [ ] Run every migration preflight in order. Do not weaken or bypass the Phase 2 singleton-role, Phase 3
   immutable-layout, Phase 4 historical-FX, Phase 5 governed-segment, or C1-C8 lineage checks.
 - [ ] Take a `COPY_ONLY` backup with `CHECKSUM`, record the SHA-256 checksum, run `RESTORE VERIFYONLY`, and

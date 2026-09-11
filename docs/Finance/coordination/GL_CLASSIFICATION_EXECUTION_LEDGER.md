@@ -4,24 +4,25 @@ Last reconciled: 2026-09-11 (Africa/Accra)
 
 ## Objective
 
-Execute the approved GL classification and revaluation refactor in bounded phases, preserving Finance ownership and V1 external-producer compatibility until a separately coordinated cutover.
+Complete the approved GL classification/revaluation and V2 producer cutover, then prepare its fail-closed
+operational rehearsal boundary without authorizing deployment or configured-database mutation.
 
 ## Current package
 
 | Field | Value |
 |---|---|
-| Phase | Stage B5 — final V1-removal and deployment-readiness gate |
-| Status | `COMPLETE` |
-| Implementing task | None — code cutover and readiness review complete |
-| Exact base | `cfea93f28cb3b41a838a7c2fa628b04e0781db1d` |
-| Branch | `codex/finance-gl-cutover-final-readiness-b5` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-final-readiness-b5` |
+| Phase | Stage D1 — final operational clone-rehearsal harness |
+| Status | `REVIEW_REQUIRED` — database access remains prohibited until independent approval and operator authorization |
+| Implementing task | `rehearsal_harness` |
+| Exact base | `cbc0d3c91142c63c4ea40f08f11d633752268367` |
+| Branch | `codex/finance-gl-cutover-rehearsal-d1` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-rehearsal-d1` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
-| Primary HEAD at activation | `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9` |
+| Primary HEAD at activation | `cbc0d3c91142c63c4ea40f08f11d633752268367` |
 | Coordinator | Current primary Finance task |
-| Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
+| Recovery heartbeat | `finance-gl-cutover-coordinator` — deleted after code-cutover completion |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Final candidate approved and integrated; deployment remains operational `NO-GO` |
+| Review status | Code cutover approved/integrated; Stage D1 harness requires independent Sol High review; deployment remains operational `NO-GO` |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -2162,3 +2163,21 @@ Deployment intentionally remains `NO-GO` until the separately authorized operati
 restore proof, migration-zero decision/repair where fresh-history deployment is required, pending-migration apply
 authorization, guarded SQL gates, reconciliation, feature enablement ordering and rollback sign-off. These are
 deployment operations, not unfinished code-cutover work.
+
+## Stage D1 operational rehearsal harness
+
+Stage D1 was activated from the exact clean integrated readiness commit
+`cbc0d3c91142c63c4ea40f08f11d633752268367` in fresh worktree
+`RHEMA-ERP-finance-gl-cutover-rehearsal-d1` on branch `codex/finance-gl-cutover-rehearsal-d1`. Its bounded
+scope is rehearsal tooling, offline safety/evidence tests and readiness-document reconciliation only. It may
+not inspect a configured connection fallback, access a database during implementation/review, apply a migration,
+change product schema/runtime behavior, or enable C6-C8.
+
+The final-clone contract retains Stage A.1 `RehearseClone` as immutable historical Phase 4-stop evidence and
+adds a distinct `RehearseFinalClone` path. The new path requires exact process-scoped source/target connections,
+the exact `RhemaERP` source on the target server, an absent prefix-safe target and target-derived absent backup,
+an explicit new/empty evidence directory, and explicit process-scoped false values for C6, C7 and C8. It proves
+the 456/C8 repository state offline, freshly derives the source pending delta, and fails closed before backup on
+readiness blockers. A clean preflight alone may proceed to COPY_ONLY/CHECKSUM/VERIFYONLY/restore/DBCC, exact
+pending-delta application and two-pass invariant evidence. It never drops or overwrites automatically. Independent
+GPT-5.6 Sol High review is required before any operator may supply connections or execute the final-clone path.

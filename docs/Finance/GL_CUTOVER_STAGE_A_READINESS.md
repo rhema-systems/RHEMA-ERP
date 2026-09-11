@@ -1,6 +1,7 @@
 # GL cutover Stage A readiness and producer inventory
 
-Status: Stage A.1 review required
+Status: Stage A.1 historical rehearsal approved and integrated; superseded for final cutover by the 456/C8
+deployment candidate and `GL_CUTOVER_DEPLOYMENT_READINESS.md`
 
 Stage A.1 exact base: `7bc24b22c0624aec9acae580ba8049d5f5a83425`
 
@@ -44,6 +45,12 @@ final server query returned zero `RHEMAERP_GL_REHEARSAL_*` databases.
 
 This stage rehearses the migration/reset path and inventories the remaining V1 producers. It does not
 change a producer, remove V1, or authorize a developer to point the rehearsal tooling at `RhemaERP`.
+
+The 448-migration and expected Phase 4 stop statements below are retained as exact Stage A.1 historical
+evidence. They must not be interpreted as the final cutover terminal gate. The frozen final code candidate
+discovers 456 migrations ending at `20260908120000_AddProducerIntentGroupsC8`; authorized final clone work uses
+`RehearseFinalClone`, derives the pending set from a fresh source-history read, and either completes that exact
+delta or returns fail-closed NO-GO evidence without bypassing any migration preflight.
 
 ## Database safety boundary
 
