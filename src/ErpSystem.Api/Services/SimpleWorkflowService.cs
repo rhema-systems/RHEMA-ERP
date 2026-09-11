@@ -1726,6 +1726,25 @@ public class SimpleWorkflowService : IWorkflowService
             return context;
         }
 
+        if (IsEntityType(entityTypeRecord, "HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HrEmployeeSalaryChangeRequest", "HR Employee Salary Change Request"))
+        {
+            var request = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSalaryChangeRequest>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Salary change request not found");
+
+            // The size of the change is what a definition would branch on: a 3% move and a 40%
+            // move are not the same decision. Both figures are monthly.
+            context["employeeId"] = request.EmployeeId;
+            context["kind"] = request.Kind.ToString();
+            context["currentAmount"] = request.CurrentAmount;
+            context["proposedAmount"] = request.ProposedAmount;
+            context["increasePercent"] = request.CurrentAmount is > 0 && request.ProposedAmount.HasValue
+                ? Math.Round((request.ProposedAmount.Value - request.CurrentAmount.Value) / request.CurrentAmount.Value * 100m, 2)
+                : (decimal?)null;
+            context["proposedPayBasis"] = request.ProposedPayBasis?.ToString();
+            context["status"] = request.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "HR_TEAM_OBJECTIVE", "HrTeamObjective", "HR Team Objective"))
         {
             var objective = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.TeamObjective>()

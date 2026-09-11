@@ -63,6 +63,8 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             // modules could plausibly claim. Round 2, lane F3.
             new("HrTeamTermsOfReference", "Human Resources", "A committee's charter — what it may decide and on whose authority — approved before the committee operates under it", "ScrollText", "#0D9488", 79),
             new("HrTeamObjective", "Human Resources", "What a team or committee undertakes to deliver in a period, approved before work starts against it", "Target", "#7C3AED", 79),
+            // Round 3, lane S. `Hr`-prefixed like the types above — the namespace is flat and shared.
+            new("HrEmployeeSalaryChangeRequest", "Human Resources", "A change to an employee's pay — grade placement, negotiated amount or pay basis — applied to HR and payroll when approved", "BadgeDollarSign", "#0F766E", 79),
             new("Project", "Projects", "Project management items", "CheckCircle", "#22C55E", 80),
             new("ProjectDeliverable", "Projects", "Project deliverable approvals and external sign-off", "PackageCheck", "#16A34A", 82),
             new("ProjectClosure", "Projects", "Project closure approval and close-out governance", "Flag", "#15803D", 84),

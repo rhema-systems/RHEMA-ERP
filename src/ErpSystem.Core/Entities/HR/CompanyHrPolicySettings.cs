@@ -132,6 +132,15 @@ public class CompanyHrPolicySettings : TenantEntity
     [Range(0, 365)]
     public int TeamTaskReminderLeadDays { get; set; } = 3;
 
+    /// <summary>
+    /// Round 3, lane S (decision D-1). When on, the three direct pay doors — grade placement, pay
+    /// basis, and the employee header's salary figure — refuse and point at the salary change
+    /// request, which is applied when the engine approves it. Movements and hire-from-offer are
+    /// unaffected: they are approved records already.
+    /// ⚠ Defaults ON, and the migration must say <c>DEFAULT (1)</c>: the scaffold writes false.
+    /// </summary>
+    public bool SalaryChangeRequiresApproval { get; set; } = true;
+
     // ═══════════════════════════════════════════
     //  EMPLOYEE-RELATIONS CLOCKS (area 9c slice 7)
     // ═══════════════════════════════════════════

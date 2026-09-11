@@ -513,6 +513,9 @@ namespace ErpSystem.Web.Services
                     // describes for "the line manager approves".
                     ("HR_TEAM_TERMS_OF_REFERENCE", "HR Team Terms Of Reference", "Committee Charter Approval", "A committee's terms of reference: Draft -> PendingApproval (owning unit's head, or HR) -> Approved.", staffRaised),
                     ("HR_TEAM_OBJECTIVE", "HR Team Objective", "Team Objective Approval", "What a team undertakes to deliver: Draft -> PendingApproval (owning unit's head, or HR) -> Active.", staffRaised),
+                    // Round 3, lane S. A pay change is an executive decision; the service applies it
+                    // to HR and to payroll the moment the engine says Approved.
+                    ("HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HR Employee Salary Change Request", "Salary Change Approval", "A change to an employee's pay: Draft -> PendingApproval (HR, Managing Director) -> Approved, then applied to HR and payroll.", executive),
                 };
 
                 foreach (var tenant in tenants)

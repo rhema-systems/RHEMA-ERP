@@ -49,6 +49,8 @@ import {
 } from '@/types/hr/employee';
 import { PayrollEmployeeProfileEditor, money } from '@/components/hr/payroll/PayrollEmployeeProfileEditor';
 import { SalaryAssignmentsTab } from './SalaryAssignmentsTab';
+import { SalaryChangesCard } from './SalaryChangesCard';
+import { policySettingsService } from '@/services/hr/policy-settings.service';
 
 const COMPENSATION_WRITE = 'HR.Compensation.Write';
 
@@ -61,6 +63,11 @@ export function SalaryTab({ employee }: { employee: EmployeeDetail }) {
   const employeeId = employee.id;
   const employeeNumber = employee.employeeNumber;
   const negotiated = employee.payBasis === 'Negotiated';
+
+  // Round 3, lane S. Until the policy is known the direct doors stay locked — the safe reading.
+  const policy = useQuery({ queryKey: ['hr', 'policy-settings'], queryFn: () => policySettingsService.get(), staleTime: 60_000 });
+  const requiresApproval = policy.data ? policy.data.salaryChangeRequiresApproval : true;
+  const directWrite = canWrite && !requiresApproval;
 
   // Both sides in one read: HR's basis and resolved figure, payroll's profile state, the issue.
   const status = useQuery({
@@ -84,10 +91,17 @@ export function SalaryTab({ employee }: { employee: EmployeeDetail }) {
 
   return (
     <div className="space-y-4">
+      <SalaryChangesCard
+        employee={employee}
+        canWrite={canWrite}
+        requiresApproval={requiresApproval}
+        onApplied={refreshAll}
+      />
+
       <PayBasisCard
         employee={employee}
         status={status.data}
-        canWrite={canWrite}
+        canWrite={directWrite}
         onChanged={refreshAll}
       />
 
@@ -103,7 +117,7 @@ export function SalaryTab({ employee }: { employee: EmployeeDetail }) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <SalaryAssignmentsTab employeeId={employeeId} isOnPayroll={employee.isOnPayroll} />
+            <SalaryAssignmentsTab employeeId={employeeId} isOnPayroll={employee.isOnPayroll} lockedReason={requiresApproval ? 'On this tenant a placement is changed through an approved salary change request — raise one in the card above.' : undefined} />
           </CardContent>
         </Card>
       )}
@@ -145,6 +159,7 @@ export function SalaryTab({ employee }: { employee: EmployeeDetail }) {
                 reload={() => employeeService.getPayrollProfile(employeeId)}
                 readOnly={!employee.isOnPayroll}
                 canSave={canWrite}
+                basicSalaryLocked={requiresApproval}
                 onSaved={() => {
                   toast({ title: 'Payroll profile saved' });
                   void refreshAll();

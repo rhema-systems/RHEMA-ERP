@@ -317,6 +317,19 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("HrEmployeeSalaryChangeRequest") || key == Normalize("HR_EMPLOYEE_SALARY_CHANGE_REQUEST")
+                || key == Normalize("HR Employee Salary Change Request"))
+            {
+                var request = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSalaryChangeRequest>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "HrEmployeeSalaryChangeRequest";
+                info.EntityName = request == null
+                    ? null
+                    : $"Salary change ({request.Kind}) — {request.Employee?.FullName}";
+                info.ActionUrl = request == null ? "/hr/employees" : $"/hr/employees/{request.EmployeeId}?tab=salary";
+                return info;
+            }
+
             if (key == Normalize("HrTeamObjective") || key == Normalize("HR_TEAM_OBJECTIVE")
                 || key == Normalize("HR Team Objective"))
             {

@@ -134,6 +134,7 @@ the same thing.
 | `SalaryStructureProjectionService` | `PayrollGrade`, `PayrollGradeNotch` | Grade mirror (§2.1) |
 | `PayComponentProjectionService` | payroll component master | Component mirror (§2.2) |
 | `PayrollMembershipService` | `PayrollEmployeeProfile`, `UpsertEmployeeProfileAsync` | Membership (§2.3) |
+| `PayrollMembershipService.UpdateMonthlyBasicAsync` (round 3, lane S) | `UpsertEmployeeProfileAsync`, read-modify-write of the full profile | **The one write of a payroll FIGURE from HR**: an APPROVED salary change request sets payroll's monthly basic. Every payment method and component is carried through with its id (the upsert is a replace-set) and the profile is re-read; a changed method set or a basis that did not take is reported as a failure, never success. Ask (d) in the round-3 plan § 6: payroll to confirm the upsert is lossless on a round trip. |
 | `AssetsController` `surcharges/payroll-deductions`, `payroll/rental-deductions` | — (HR *exposes* these for payroll to read; neither writes a deduction) | Asset recovery projections |
 | `StaffAttendancePayrollExport` | — (a hand-off *record*, no file) | Attendance → payroll period |
 | `PayrollReportSnapshot` / payslip snapshots | payroll's own | Read by the ESS portal's payslip view |

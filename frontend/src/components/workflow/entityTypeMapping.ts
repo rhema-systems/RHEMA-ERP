@@ -50,6 +50,8 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     // namespace is flat and shared across modules.
     'HrTeamTermsOfReference',
     'HrTeamObjective',
+    // Round 3, lane S.
+    'HrEmployeeSalaryChangeRequest',
   ],
   helpdesk: ['EhcTicket', 'ServiceRequest'],
   projects: ['Project'],

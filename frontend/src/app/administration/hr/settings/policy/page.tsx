@@ -62,6 +62,7 @@ const schema = z
     // ⚠ 365, not 3650, matching the entity and the update DTO — a committee task cannot usefully
     // remind more than a year ahead.
     teamTaskReminderLeadDays: z.coerce.number().int().min(0).max(365),
+    salaryChangeRequiresApproval: z.boolean(),
     certificationExpiryLeadDays: z.coerce.number().int().min(0).max(3650),
 
     longServiceMilestoneYears: z
@@ -172,6 +173,7 @@ export default function PolicySettingsPage() {
       probationEndLeadDays: data.probationEndLeadDays,
       retirementCountdownLeadDays: data.retirementCountdownLeadDays,
       teamTaskReminderLeadDays: data.teamTaskReminderLeadDays,
+      salaryChangeRequiresApproval: data.salaryChangeRequiresApproval,
       certificationExpiryLeadDays: data.certificationExpiryLeadDays,
 
       longServiceMilestoneYears: data.longServiceMilestoneYears ?? '',
@@ -237,6 +239,7 @@ export default function PolicySettingsPage() {
         probationEndLeadDays: Number(v.probationEndLeadDays),
         retirementCountdownLeadDays: Number(v.retirementCountdownLeadDays),
         teamTaskReminderLeadDays: Number(v.teamTaskReminderLeadDays),
+        salaryChangeRequiresApproval: v.salaryChangeRequiresApproval,
         certificationExpiryLeadDays: Number(v.certificationExpiryLeadDays),
 
         longServiceMilestoneYears: v.longServiceMilestoneYears.trim(),
@@ -495,6 +498,16 @@ export default function PolicySettingsPage() {
                 required
               />
             </FieldRow>
+            {/* Round 3, lane S (D-1). On: the Salary tab's direct writes lock and a change of pay
+                is raised as a request, approved on the engine and applied to HR and payroll. */}
+            <div className="pt-2">
+              <SwitchField
+                form={form}
+                name="salaryChangeRequiresApproval"
+                label="Salary changes require an approved request"
+                description="Grade placement, pay basis and the salary figure change only through an approved salary change request. Staff movements and hires are unaffected."
+              />
+            </div>
             {/*
               ⚠ Lane C2's field, wired through by F2. It was on the entity and read by the
               certification expiry sweep, but reached neither DTO — the engine honoured it and

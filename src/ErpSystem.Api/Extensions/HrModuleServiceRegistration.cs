@@ -461,6 +461,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IPerformanceLinkService, PerformanceLinkService>();
         services.AddScoped<IPerformanceAnalyticsService, PerformanceAnalyticsService>();
         services.AddScoped<ISalaryReviewProposalService, SalaryReviewProposalService>();
+        services.AddScoped<IEmployeeSalaryChangeRequestService, EmployeeSalaryChangeRequestService>();
         services.AddScoped<IEmploymentActionProposalService, EmploymentActionProposalService>();
         services.AddScoped<IPerformanceRatingResolver, PerformanceRatingResolver>();
         services.AddScoped<ITalentRatingSyncService, TalentRatingSyncService>();

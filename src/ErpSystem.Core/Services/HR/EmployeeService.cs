@@ -780,6 +780,14 @@ public class EmployeeService : IEmployeeService
             (dto.PayTax ?? false) || (dto.SSFund ?? false) || (dto.GrossUp ?? false)
                 || (dto.Tier2Only ?? false) || (dto.Overtime ?? false));
 
+        // Round 3, lane S. The form stopped sending the figure in round 2 (E1); the server never
+        // refused it. Under the approval policy a CHANGED figure on the header is refused too. A
+        // first figure — the record had none, typically somebody just put (back) on payroll — is
+        // not a change and passes; a request cannot be raised for someone off payroll, so refusing
+        // it here would leave no door at all.
+        if (dto.Salary.HasValue && employee.Salary.HasValue && dto.Salary.Value != employee.Salary.Value)
+            await RequireDirectChangeAllowedAsync(SalaryChangeAuthority.Direct, cancellationToken);
+
         // ⚠ The hole this lane closes. `EmployeeMappingExtensions.Apply` wrote
         // `e.ConfirmationDate = dto.ConfirmationDate` with NO guard of any kind, so anybody who
         // could edit an employee could confirm them — or un-confirm them, or move the date —
@@ -2739,10 +2747,11 @@ public class EmployeeService : IEmployeeService
         return entity?.ToDetailDto();
     }
 
-    public async Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default)
+    public async Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct)
     {
         ArgumentNullException.ThrowIfNull(dto);
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
+        await RequireDirectChangeAllowedAsync(authority, cancellationToken);
         await RequireOnPayrollAsync(dto.EmployeeId, cancellationToken);
         await RequireOnScaleAsync(dto.EmployeeId, cancellationToken);
 
@@ -2788,12 +2797,13 @@ public class EmployeeService : IEmployeeService
         return (reloaded ?? entity).ToDetailDto();
     }
 
-    public async Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default)
+    public async Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct)
     {
         ArgumentNullException.ThrowIfNull(dto);
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Salary assignment not found.");
+        await RequireDirectChangeAllowedAsync(authority, cancellationToken);
         await RequireOnPayrollAsync(entity.EmployeeId, cancellationToken);
         await RequireOnScaleAsync(entity.EmployeeId, cancellationToken);
 
@@ -3569,11 +3579,13 @@ public class EmployeeService : IEmployeeService
     }
 
     /// <inheritdoc />
-    public async Task<EmployeeDetailDto> SetPayBasisAsync(Guid employeeId, SetEmployeePayBasisDto dto, CancellationToken cancellationToken = default)
+    public async Task<EmployeeDetailDto> SetPayBasisAsync(Guid employeeId, SetEmployeePayBasisDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct)
     {
         ArgumentNullException.ThrowIfNull(dto);
         var employee = await _employeeRepository.GetByIdAsync(employeeId)
             ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+        if (employee.PayBasis != dto.PayBasis)
+            await RequireDirectChangeAllowedAsync(authority, cancellationToken);
 
         var note = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim();
         if (dto.PayBasis == PayBasis.Negotiated && note == null)
@@ -3653,6 +3665,21 @@ public class EmployeeService : IEmployeeService
             return levels[0].Id;
 
         return null;
+    }
+
+    /// <summary>
+    /// Round 3, lane S. When the tenant requires approval for pay changes, a caller at the door is
+    /// refused and pointed at the salary change request; a record the engine has already approved
+    /// (the request itself when applied, a staff movement) passes <see cref="SalaryChangeAuthority.Approved"/>.
+    /// One implementation, several callers — the rule cannot drift between the doors.
+    /// </summary>
+    private async Task RequireDirectChangeAllowedAsync(SalaryChangeAuthority authority, CancellationToken cancellationToken)
+    {
+        if (authority == SalaryChangeAuthority.Approved) return;
+        var settings = await _policySettings.GetAsync(cancellationToken);
+        if (settings.SalaryChangeRequiresApproval)
+            throw new InvalidOperationException(
+                "On this tenant a change of pay goes through an approved salary change request. Raise one from the Salary tab; it is applied when approved.");
     }
 
     /// <summary>The scale gate: a placement on the grade structure contradicts a negotiated salary.</summary>

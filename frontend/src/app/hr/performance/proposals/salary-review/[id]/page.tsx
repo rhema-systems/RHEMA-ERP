@@ -175,6 +175,13 @@ export default function SalaryReviewProposalPage() {
           <div className="flex items-center gap-2">
             <WorkflowApprovalActions {...workflow.actionProps} />
             {data.status === 'Approved' && (
+              // Round 3, lane S: the proposal is a recommendation; the pay change itself is a
+              // salary change request on the employee's Salary tab, applied when approved there.
+              <Button variant="outline" onClick={() => router.push(`/hr/employees/${data.employeeId}?tab=salary&fromProposal=${data.id}`)}>
+                Raise the salary change
+              </Button>
+            )}
+            {data.status === 'Approved' && (
               <Button onClick={() => setApplyOpen(true)}>
                 <Handshake className="mr-2 h-4 w-4" />
                 Mark applied

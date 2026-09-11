@@ -144,3 +144,22 @@ a proposal approve to prove the gate did not refuse the assignee path.
 
 See `HR-CROSS-MODULE-PATTERNS-SWEEP.md` §3.3, `HR-BULK-OPERATIONS-CATALOGUE.md` §4.1,
 `HR-MODULE-INTEGRATION-MAP.md` row 28, `HR-SHE-INTEGRATION-AND-BOUNDARIES.md` §5.
+
+## Tenth application — `HrEmployeeSalaryChangeRequest` (round 3, lane S, 2026-09-11)
+
+Adapter `HrSalaryChangeWorkflowStatusAdapter`; the service APPLIES the change inside the approve
+call when the outcome is Approved (HR's half, then payroll's monthly basic through payroll's own
+upsert), so an approved request cannot sit un-applied. Two things worth copying and one trap:
+
+- **TRAP 7 — the SEEDED definitions do not bar the initiator.** `EnsureHrWorkflowsSeededAsync`
+  builds one-step, role-routed definitions with no `PreventInitiatorApproval`; where the requester
+  holds one of the named roles (HR is in most lists) the engine lets them approve their own record.
+  Put the record-level rule in the SERVICE, before `CanUserApproveAsync`: lane S refuses the
+  requester and the subject; lane F3 narrowed to the owning unit's head. Assume the definition
+  alone does not protect you.
+- **TRAP 5 cannot be asserted on a tenant whose default definition is seeded** — retiring a seeded
+  definition is TRAP 6's re-activation problem. Guard it in code; assert instead that exactly one
+  live definition exists, asked the way the engine asks (normalised type, `IsActive` AND
+  `Published`, every page).
+- Save the decision BEFORE applying it, then apply in a second SaveChanges: a failure in applying
+  must never lose the approval. Stamp each half as it goes through so a retry repeats nothing.

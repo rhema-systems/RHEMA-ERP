@@ -1080,7 +1080,7 @@ public class StaffMovementService : IStaffMovementService
             NotchId = notchId,
             EffectiveDate = effective,
             AssignmentReason = reason,
-        }, cancellationToken);
+        }, cancellationToken, SalaryChangeAuthority.Approved);
     }
 
     /// <summary>

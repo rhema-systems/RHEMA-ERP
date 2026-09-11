@@ -48,6 +48,9 @@ public class CompanyHrPolicySettingsDto : BaseDto
     /// </remarks>
     public int TeamTaskReminderLeadDays { get; set; }
 
+    /// <summary>Round 3, lane S. A change of pay must go through an approved salary change request.</summary>
+    public bool SalaryChangeRequiresApproval { get; set; }
+
     /// <summary>
     /// How many days ahead of expiry a credential without its own lead days reminds (lane C2).
     /// </summary>
@@ -139,6 +142,9 @@ public class UpdateCompanyHrPolicySettingsDto
     // Round 2, lane F2. Range matches the entity's — a task cannot usefully remind more than a
     // year ahead, and 0 means "only once it is due".
     [Range(0, 365)] public int TeamTaskReminderLeadDays { get; set; } = 3;
+
+    // Round 3, lane S. Default matches the entity's: on.
+    public bool SalaryChangeRequiresApproval { get; set; } = true;
 
     // Lane C2's, closed by F2. Default matches the entity's 60 — see the read DTO for why it is
     // being added here rather than in its own lane.

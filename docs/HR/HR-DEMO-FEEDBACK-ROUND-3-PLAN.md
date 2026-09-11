@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2, `hr-jobarch/run-q.mjs`), P1 (17 ×2, `hr-employee-docs/run-p1.mjs`) and H (round 2's; 33 ×2, `hr-movements/run-h.mjs`; slices 2 and 4 at 38 each after) BUILT 2026-09-11. Sixteen slices remain; S next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2) and S (65 ×2, `hr-payroll-membership/run-s.mjs`; E1 73, membership 86, H 33, D1 79 after) BUILT 2026-09-11. Fifteen slices remain; J1 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -156,7 +156,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 1 | **Q** — requisition detail fixes + the screening card move · ✅ **DONE 2026-09-11 · 32 ×2** | none | `hr-jobarch/run-q.mjs` | demo-visible bugs, half a day |
 | 2 | **P1** — modal subject labels, the announcement topic · ✅ **DONE 2026-09-11 · 17 ×2** | none | `hr-employee-docs/run-p1.mjs` (announcement half); the modal half is a screen walk | quick, demo-visible |
 | 3 | **H** (round 2) — a movement writes the placement · ✅ **DONE 2026-09-11 · 33 ×2** (logged in the round-2 plan, lane H) | none | `hr-movements/run-h.mjs` | S's "already-approved writers" rule needs it; owed before the next demo regardless |
-| 4 | **S** — the salary change request | `AddEmployeeSalaryChangeRequest` (+ `CompanyHrPolicySettings.SalaryChangeRequiresApproval`) | `hr-payroll-membership/run-s.mjs` | the PDF's first bullet |
+| 4 | **S** — the salary change request · ✅ **DONE 2026-09-11 · 65 ×2** | `20260911091344_AddEmployeeSalaryChangeRequest` (+ `CompanyHrPolicySettings.SalaryChangeRequiresApproval`) | `hr-payroll-membership/run-s.mjs` | the PDF's first bullet |
 | 5 | **J1** — prefill from the position, optional text, clone to another position, `CertificationId` | none | `hr-jobarch/run-j1.mjs` | |
 | 6 | **C1** — candidate identity trio, `Language` master, certification fields, document description | `AddCandidateIdentityLanguagesAndCertification` | `hr-recruitment/run-c1.mjs` | schema before screens |
 | 7 | **C2** — careers + HR candidate screens, photo, currency picker, languages tab, document restructure | none | `hr-recruitment/run-c2.mjs` + screen walk | |
@@ -210,6 +210,35 @@ callers are untouched. Type-check: baseline 33 only.
 Harness lessons: the admin login is not employee-linked, so archive/publish (attributed actions)
 must run as the HR actor; a harness announcement targets a freshly minted POSITION, never
 `AllEmployees` (that would notify the whole demo tenant). The modal half is a screen walk.
+
+**Lane S log (2026-09-11).** Migration `20260911091344_AddEmployeeSalaryChangeRequest` — one table,
+one policy column (`DEFAULT (1)`; the scaffold said false, fifth time this shape), the seeded row's
+`UpdateData` replaced with plain SQL because the fast build strips migration models and the apply
+failed with "no entity type mapped to the table". Built as § 5.1 describes, with these deviations:
+
+- **Approve/reject take the caller's employee id and refuse the requester and the subject BEFORE
+  the engine is asked.** The harness found the reason: every seeded HR definition names approver
+  ROLES (HR among them) with no initiator prevention, so the HR officer who raised the request
+  approved it — and, the definition being one step, applied it. Recorded for the workflow owner in
+  § 6; the other eight surfaces on the recipe have the same exposure.
+- **TRAP 5 is guarded but not asserted.** The seeder publishes a default definition for the type at
+  start-up, so "no published definition" cannot be exercised without retiring a seeded one (the F3
+  trap). The harness asserts instead that exactly one live definition exists, asked the engine's way.
+- **A first salary figure on the header is not a change.** A record with no figure (someone just put
+  back on payroll) may receive one directly; a request cannot be raised for someone off payroll, so
+  refusing it would have left no door. Only a CHANGED figure is refused under the policy.
+- **The policy defaults ON, and three suites that place pay directly now toggle it off for their
+  run** (`run-e1`, `run-payroll-membership`, `run-h`) and restore it. ⚠ A crash mid-run leaves it
+  OFF — the API was stopped by SQL Server saturation once during this lane's regression (execution
+  timeout, pool exhaustion, a Procurement background service throwing, host configured to stop) and
+  the restore never ran; the next runs then "restored" the polluted value. Check the setting after
+  any red run. This tenant is two-tier: `ResolvePlacementLevelAsync` fills the implicit level.
+- Q-10 taken as `HR.Compensation.Write` only (no line-manager raise yet); Q-11 as written.
+- Frontend: the "Salary changes" card first on the tab (raise dialog with the shared scale picker,
+  the engine's actions on the one live request, retry, history); placement list and pay-basis card
+  lock under the policy with a sentence; the payroll editor's basic-salary input locks with a
+  caption; the policy screen's switch; the approved salary-review proposal links to the tab with
+  `?tab=salary&fromProposal=` (T1 will honour `?tab`). Screen walk owed.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.
@@ -368,6 +397,14 @@ Shape: `docs/HANDOFF-*.md` (what is broken · what was proven · what it blocks 
    will call `UpsertEmployeeProfileAsync` read-modify-write — please confirm the upsert is lossless
    on a round-trip of payment methods and components.
 3. **Finance — R8** (`../HANDOFF-FINANCE-HR-RECRUITMENT-COST-AP.md`) is unchanged and still waiting.
+4. **Workflow owner — seeded definitions do not bar the initiator** (found by lane S, 2026-09-11).
+   `DatabaseSeedingService.EnsureHrWorkflowsSeededAsync` publishes one-step, role-routed definitions
+   for every HR type; the approval configuration it builds names roles (HR is in most lists) and
+   sets no initiator prevention, so on any surface where the requester holds one of those roles the
+   ENGINE lets them approve their own record. Lane S closes it in its service (requester and subject
+   refused before `CanUserApproveAsync`); lane F3 did the same for teams. The other eight HR surfaces
+   on the recipe rely on the definition alone. Ask: `PreventInitiatorApproval = true` in the seeded
+   approval configuration, or a per-type flag.
 
 ---
 

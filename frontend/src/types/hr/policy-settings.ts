@@ -43,6 +43,8 @@ export interface CompanyHrPolicySettings {
    * around, so its default is 3 days where the others are weeks. 0 means "only once it is due".
    */
   teamTaskReminderLeadDays: number;
+  /** Round 3, lane S. A change of pay goes through an approved salary change request. */
+  salaryChangeRequiresApproval: boolean;
   /**
    * Lane C2's, wired through by F2. The fallback for a credential that carries no lead days of its
    * own — `Certification.expiryNotificationLeadDays` overrides it per credential.

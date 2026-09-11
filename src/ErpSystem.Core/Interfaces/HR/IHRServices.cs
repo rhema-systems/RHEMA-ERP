@@ -191,7 +191,8 @@ public interface IEmployeeService
     // Salary assignments
     Task<IEnumerable<EmployeeSalaryAssignmentListDto>> GetSalaryAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeSalaryAssignmentDetailDto?> GetSalaryAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
+    /// <param name="authority">Round 3, lane S: <c>Direct</c> is refused when the tenant requires approval for pay changes; an approved record passes <c>Approved</c>.</param>
+    Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct);
     /// <summary>
     /// The level a placement on <paramref name="gradeId"/> resolves to (round 3, lane H). A notch
     /// names its level; a two-tier structure's single implicit level is filled in; a notch or level
@@ -210,8 +211,8 @@ public interface IEmployeeService
     /// scale closes nothing and places nothing: placement is its own act, and until it happens the
     /// reconciliation says <c>NoPayBasis</c>.
     /// </remarks>
-    Task<EmployeeDetailDto> SetPayBasisAsync(Guid employeeId, SetEmployeePayBasisDto dto, CancellationToken cancellationToken = default);
-    Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
+    Task<EmployeeDetailDto> SetPayBasisAsync(Guid employeeId, SetEmployeePayBasisDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct);
+    Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct);
     Task<bool> RemoveSalaryAssignmentAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Referees

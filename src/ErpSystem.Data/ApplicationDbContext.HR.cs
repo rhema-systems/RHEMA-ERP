@@ -656,6 +656,8 @@ public partial class ApplicationDbContext
     // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): the checked workbook and its rows.
     public DbSet<EmployeeImportSession> EmployeeImportSessions { get; set; } = null!;
     public DbSet<EmployeeImportRow> EmployeeImportRows { get; set; } = null!;
+    /// <summary>Round 3, lane S. ⚠ A DbSet is load-bearing for HR entities (tenant FK convention, table name).</summary>
+    public DbSet<EmployeeSalaryChangeRequest> EmployeeSalaryChangeRequests { get; set; } = null!;
 
     #endregion
 
@@ -4243,6 +4245,8 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // Round 2, lane F2 — a committee action item is a thing somebody does on Tuesday,
                 // not a date they plan a month around, so the lead time is days rather than weeks.
                 TeamTaskReminderLeadDays       = 3,
+                // Round 3, lane S — pay changes go through an approved request.
+                SalaryChangeRequiresApproval   = true,
                 // Area 9c slice 7 — the employee-relations clocks.
                 //
                 // ⚠ These MUST be listed here. The seed is an ANONYMOUS TYPE, so EF matches it to
@@ -4363,6 +4367,26 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.PerformanceAppraisalId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Round 3, lane S. Every FK explicit and Restrict; the three scale FKs are WithMany() so
+        // no navigation on the grade side gets paired with them (the shadow-FK trap).
+        builder.Entity<EmployeeSalaryChangeRequest>(entity =>
+        {
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => new { x.EmployeeId, x.Status });
+
+            entity.Property(x => x.Kind).HasConversion<int>();
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.CurrentPayBasis).HasConversion<int>();
+            entity.Property(x => x.ProposedPayBasis).HasConversion<int?>();
+
+            entity.HasOne(x => x.Employee).WithMany().HasForeignKey(x => x.EmployeeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.RequestedBy).WithMany().HasForeignKey(x => x.RequestedById).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ProposedGrade).WithMany().HasForeignKey(x => x.ProposedGradeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ProposedLevel).WithMany().HasForeignKey(x => x.ProposedLevelId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ProposedNotch).WithMany().HasForeignKey(x => x.ProposedNotchId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<SalaryReviewProposal>(entity =>

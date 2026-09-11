@@ -57,8 +57,11 @@ const toPayload = (employeeId: string, v: FormValues) => ({
 export function SalaryAssignmentsTab({
   employeeId,
   isOnPayroll = true,
+  lockedReason,
 }: {
   employeeId: string;
+  /** Round 3, lane S: when set, the list is read-only and this sentence says why (the approval policy). */
+  lockedReason?: string;
   /**
    * Off-payroll staff cannot be placed on a grade (the POST is refused with the same message), so
    * the tab renders their history read-only with a banner saying why, rather than offering an add
@@ -88,12 +91,15 @@ export function SalaryAssignmentsTab({
           to place them again.
         </div>
       )}
+      {isOnPayroll && lockedReason && (
+        <p className="text-xs text-muted-foreground">{lockedReason}</p>
+      )}
     <EmployeeSubResourceTab<EmployeeSalaryAssignment, FormValues>
       employeeId={employeeId}
       title="salary assignments"
       singular="salary assignment"
       queryKey="salary-assignments"
-      readOnly={!isOnPayroll}
+      readOnly={!isOnPayroll || !!lockedReason}
       emptyDescription={
         isOnPayroll
           ? 'Place the employee on a grade to resolve their basic pay.'

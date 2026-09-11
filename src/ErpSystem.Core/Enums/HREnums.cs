@@ -10109,3 +10109,38 @@ public enum EmployeeCertificationStatus
     Expired = 2,
     Revoked = 3
 }
+
+/// <summary>What a salary change request changes (round 3, lane S).</summary>
+public enum SalaryChangeKind
+{
+    /// <summary>A new grade / level / notch for somebody already paid on the scale.</summary>
+    Placement = 1,
+    /// <summary>A new agreed figure for somebody paid off the scale.</summary>
+    NegotiatedAmount = 2,
+    /// <summary>Scale ↔ negotiated, carrying whichever figure the new basis needs.</summary>
+    PayBasisSwitch = 3
+}
+
+/// <summary>Lifecycle of a salary change request. Recall returns to Draft.</summary>
+public enum SalaryChangeRequestStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    /// <summary>Decided, HR's half not yet through (see the request's ApplyFailure).</summary>
+    Approved = 3,
+    Rejected = 4,
+    Applied = 5,
+    /// <summary>HR's half written; payroll's monthly basic could not be — a retry re-runs only that.</summary>
+    AwaitingPayrollEntry = 6
+}
+
+/// <summary>
+/// Who is asking a pay door to write (round 3, lane S). <c>Direct</c> is a caller at the door —
+/// refused when the tenant requires approval; <c>Approved</c> is a record the engine has already
+/// approved (a salary change request, a staff movement), which the gate lets through.
+/// </summary>
+public enum SalaryChangeAuthority
+{
+    Direct = 0,
+    Approved = 1
+}

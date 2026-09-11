@@ -131,6 +131,100 @@ public class PayrollMembershipService : IPayrollMembershipService
     }
 
     /// <inheritdoc />
+    public async Task<PayrollBasicWriteResult> UpdateMonthlyBasicAsync(
+        Guid employeeId, decimal monthlyBasic, string? currencyCode, DateTime effectiveFrom, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        PayrollEmployeeProfileDto? profile;
+        try { profile = await GetPayrollProfileAsync(employeeId, cancellationToken); }
+        catch (Exception ex) { return PayrollBasicWriteResult.Failed($"Payroll's profile could not be read: {ex.Message}"); }
+        if (profile == null)
+            return PayrollBasicWriteResult.Failed("Payroll has no profile for this employee yet; create it on the Salary tab, then apply again.");
+
+        var beforeMethods = profile.PaymentMethods.Select(m => m.Id).OrderBy(x => x).ToList();
+        var currency = string.IsNullOrWhiteSpace(currencyCode)
+            ? (profile.SalaryBasis?.CurrencyCode ?? profile.CurrencyCode)
+            : currencyCode.Trim().ToUpperInvariant();
+
+        var dto = new UpsertPayrollEmployeeProfileDto
+        {
+            Id = profile.Id,
+            EmployeeId = profile.EmployeeId,
+            EmployeeNumber = profile.EmployeeNumber,
+            LegacyEmployeeId = profile.LegacyEmployeeId,
+            LegacyEmployeeNumber = profile.LegacyEmployeeNumber,
+            PayrollActive = profile.PayrollActive,
+            PayTax = profile.PayTax,
+            SsfApplicable = profile.SsfApplicable,
+            GrossUp = profile.GrossUp,
+            Tier2Only = profile.Tier2Only,
+            OvertimeEligible = profile.OvertimeEligible,
+            SsfNumber = profile.SsfNumber,
+            TinNumber = profile.TinNumber,
+            CurrencyCode = profile.CurrencyCode,
+            SalaryBasis = new UpsertPayrollSalaryBasisDto
+            {
+                Id = profile.SalaryBasis?.Id,
+                MonthlyBasicSalary = monthlyBasic,
+                AnnualBasicSalary = monthlyBasic * 12,
+                HourlyRate = profile.SalaryBasis?.HourlyRate,
+                CurrencyCode = currency,
+                EffectiveFrom = effectiveFrom.Date,
+                IsActive = true,
+            },
+            // Carried through unchanged, ids included: the upsert replaces the list it is given.
+            PaymentMethods = profile.PaymentMethods.Select(m => new UpsertPayrollPaymentMethodDto
+            {
+                Id = m.Id, PaymentType = m.PaymentType, PaymentMode = m.PaymentMode, PaymentPercent = m.PaymentPercent,
+                Amount = m.Amount, BankCode = m.BankCode, BankBranchCode = m.BankBranchCode, AccountNumber = m.AccountNumber,
+                ChequeNumber = m.ChequeNumber, ChequeBankCode = m.ChequeBankCode, CurrencyCode = m.CurrencyCode,
+                ExchangeRate = m.ExchangeRate, SequenceNo = m.SequenceNo, StartDate = m.StartDate, EndDate = m.EndDate,
+                IsActive = m.IsActive,
+            }).ToList(),
+            EmployeeComponents = profile.EmployeeComponents.Select(c => new UpsertPayrollEmployeeComponentDto
+            {
+                Id = c.Id, PayrollComponentId = c.PayrollComponentId, CalculationTypeOverride = c.CalculationTypeOverride,
+                AmountOverride = c.AmountOverride, RateOverride = c.RateOverride, TaxableOverride = c.TaxableOverride,
+                TaxFreeCeilingOverride = c.TaxFreeCeilingOverride, EmployerAmountOverride = c.EmployerAmountOverride,
+                EmployerTaxableOverride = c.EmployerTaxableOverride, GrossUpOverride = c.GrossUpOverride,
+                CurrencyCodeOverride = c.CurrencyCodeOverride, Applicable = c.Applicable,
+                EffectiveFrom = c.EffectiveFrom, EffectiveTo = c.EffectiveTo,
+            }).ToList(),
+        };
+
+        try
+        {
+            await _payroll.UpsertEmployeeProfileAsync(tenantId, dto, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Payroll's upsert refused the approved monthly basic for {EmployeeId}.", employeeId);
+            return PayrollBasicWriteResult.Failed($"Payroll refused the change: {ex.Message}");
+        }
+
+        PayrollEmployeeProfileDto? after;
+        try { after = await GetPayrollProfileAsync(employeeId, cancellationToken); }
+        catch (Exception ex) { return PayrollBasicWriteResult.Failed($"Written, but payroll's profile could not be re-read: {ex.Message}"); }
+
+        var afterMethods = after?.PaymentMethods.Select(m => m.Id).OrderBy(x => x).ToList() ?? new List<Guid>();
+        if (!beforeMethods.SequenceEqual(afterMethods))
+        {
+            _logger.LogError(
+                "Payroll's upsert changed the payment methods of {EmployeeId} on a basis-only round trip ({Before} → {After}). Report to the payroll owner.",
+                employeeId, beforeMethods.Count, afterMethods.Count);
+            return PayrollBasicWriteResult.Failed(
+                $"Payroll's payment methods changed on the round trip ({beforeMethods.Count} → {afterMethods.Count}); check the profile in payroll before applying again.");
+        }
+        if (after?.SalaryBasis == null || after.SalaryBasis.MonthlyBasicSalary != monthlyBasic)
+            return PayrollBasicWriteResult.Failed(
+                $"Payroll answered without refusing, but its basis reads {after?.SalaryBasis?.MonthlyBasicSalary.ToString() ?? "nothing"} rather than {monthlyBasic}.");
+
+        _logger.LogInformation("Payroll monthly basic for {EmployeeId} set to {Amount} {Currency} from {From:yyyy-MM-dd} (approved salary change).",
+            employeeId, monthlyBasic, currency, effectiveFrom);
+        return PayrollBasicWriteResult.Ok();
+    }
+
+    /// <inheritdoc />
     public async Task<(decimal? MonthlyBasicPay, string Source)> ResolveMonthlyBasicPayAsync(
         Guid employeeId, CancellationToken cancellationToken = default)
     {

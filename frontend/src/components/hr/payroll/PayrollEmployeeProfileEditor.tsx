@@ -233,6 +233,11 @@ export interface PayrollEmployeeProfileEditorProps {
    * page passes true and relies on its own gating (defect #11, recorded, not HR's to fix).
    */
   canSave?: boolean;
+  /**
+   * Round 3, lane S. The tenant requires an approved salary change request for the monthly basic,
+   * so the figure is shown but not typed here; everything else on the profile stays editable.
+   */
+  basicSalaryLocked?: boolean;
 }
 
 export function PayrollEmployeeProfileEditor({
@@ -243,6 +248,7 @@ export function PayrollEmployeeProfileEditor({
   onSaved,
   readOnly = false,
   canSave = true,
+  basicSalaryLocked = false,
 }: PayrollEmployeeProfileEditorProps) {
   const { toast } = useToast();
 
@@ -507,7 +513,10 @@ export function PayrollEmployeeProfileEditor({
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Monthly Basic Salary">
-              <Input type="number" step="0.01" value={profileForm.monthlyBasicSalary} disabled={locked} onChange={(event) => setProfileForm((current) => ({ ...current, monthlyBasicSalary: Number(event.target.value) }))} />
+              <Input type="number" step="0.01" value={profileForm.monthlyBasicSalary} disabled={locked || basicSalaryLocked} onChange={(event) => setProfileForm((current) => ({ ...current, monthlyBasicSalary: Number(event.target.value) }))} />
+              {basicSalaryLocked && !locked && (
+                <p className="mt-1 text-xs text-muted-foreground">Changed through an approved salary change request.</p>
+              )}
             </Field>
             <Field label="Currency">
               <select

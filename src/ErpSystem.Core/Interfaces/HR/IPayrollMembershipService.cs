@@ -54,4 +54,20 @@ public interface IPayrollMembershipService
     /// <c>(null, reason)</c> when there is no figure, so the caller can print why rather than 0.
     /// </remarks>
     Task<(decimal? MonthlyBasicPay, string Source)> ResolveMonthlyBasicPayAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Round 3, lane S — the one write of a payroll FIGURE from HR, for an APPROVED salary change.
+    /// Reads payroll's full profile, changes only the salary basis, re-sends through payroll's own
+    /// upsert with every payment method and component carried (the upsert is a replace-set), then
+    /// re-reads and refuses to report success if the round trip changed anything else. Returns the
+    /// failure in words rather than throwing: the caller records it on the request.
+    /// </summary>
+    Task<PayrollBasicWriteResult> UpdateMonthlyBasicAsync(Guid employeeId, decimal monthlyBasic, string? currencyCode, DateTime effectiveFrom, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Outcome of <see cref="IPayrollMembershipService.UpdateMonthlyBasicAsync"/>.</summary>
+public sealed record PayrollBasicWriteResult(bool Success, string? Failure)
+{
+    public static PayrollBasicWriteResult Ok() => new(true, null);
+    public static PayrollBasicWriteResult Failed(string why) => new(false, why);
 }
