@@ -1,6 +1,6 @@
 # GL Classification and Revaluation Refactor — Execution Ledger
 
-Last reconciled: 2026-09-06 (Africa/Accra)
+Last reconciled: 2026-09-11 (Africa/Accra)
 
 ## Objective
 
@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage B3 — Sales credit-note accounting-event cutover |
+| Phase | Stage B4 — HR/Payroll Finance-account provisioning cutover |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/sales_cutover` reissued after approved C13 bridge |
-| Exact base | `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9` |
-| Branch | `codex/sales-accounting-event-cutover-c13b` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-sales-accounting-event-cutover-c13b` |
+| Implementing task | Coordinator subagent `/root/hr_payroll_cutover` |
+| Exact base | `fe8fbf5ceb162f2416ec610f0b560550692df135` |
+| Branch | `codex/hr-payroll-finance-account-provisioning-b4` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-hr-payroll-finance-account-provisioning-b4` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | C13 bridge approved and integrated; final fresh exact-base Sales implementation active |
+| Review status | Sales approved and integrated; fresh exact-base HR/Payroll implementation active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -2033,3 +2033,34 @@ Approved-to-Retired trigger predicate, maker-checker evidence, minimum-bound end
 post-retirement immutability, and unmasked guarded SQL cases. A read-only structured handoff was requested
 because the task turn exposed no final text. Integration and C6 remain blocked pending approval; no migration
 was applied and configured `RHEMAERP` remains untouched.
+
+Stage B3 Sales reached final clean candidate `90dce5beda76d3ac9fb6aaab974c88c3b21ca652`
+as a 35-commit linear range from exact base `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9`.
+Independent GPT-5.6 Sol High review approved it with no P1/P2 findings. The reviewed production path prepares
+the neutral C7 intent before owner posting mutation, consumes only durable independently approved C11 authority
+after the invoice-scoped Serializable lock and fresh reconstruction, executes C12 in the caller-owned shared
+`ApplicationDbContext` transaction, records failure only after owned rollback, and uses Finance-owned C10/C13/C15
+authority for exact replay and reversal. No Sales book enumeration, C5 derivation, auto-approval, legacy posting
+engine, Finance schema/migration or default enablement was introduced. Reviewer gates passed 68/68 selected API
+tests including the 7/7 relational suite, 109/109 widened C6-C15 tests, 3/3 Core contracts, zero-error compilation,
+EF no-pending-model, exactly 456 no-connect migrations and idempotent C7-to-C8 script generation. The guarded SQL
+race remained unrun because `RHEMA_TEST_SQLSERVER` was absent; no configured database was accessed or mutated.
+
+The coordinator created restore point `codex/finance-pre-sales-integration-20260911` at primary HEAD
+`4adc3dda54be0162884abde10de62cae086b3d5b`, selected only the 33 Sales-unique commits by patch equivalence,
+and integrated them locally without conflict through `fe8fbf5ceb162f2416ec610f0b560550692df135`.
+All six task-owned Sales/test blobs are byte-identical to the independently reviewed candidate. The protected
+unrelated primary worktree changes remain untouched. Stage B3 Sales is complete; no push, PR, remote merge,
+migration application or configured-database access occurred.
+
+Stage B4 HR/Payroll is activated on GPT-5.6 Terra Medium from fresh exact base
+`fe8fbf5ceb162f2416ec610f0b560550692df135`, branch
+`codex/hr-payroll-finance-account-provisioning-b4`, in isolated worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-hr-payroll-finance-account-provisioning-b4`.
+This packet is limited to replacing `PayrollService.EnsurePayrollFinanceAccountsAsync` direct Finance `Account`
+inserts/updates and display-text classification inference with `IFinanceAccountProvisioningService` using stable
+tenant-scoped intents and canonical identity. It must prove repeat idempotency, wrong-type conflict, canonical
+segments, enabled classified mappings, tenant isolation and absence of display-text inference while preserving
+all payroll posting economics and public callers. HR/Payroll must not select books, derive C5, invoke C6-C13,
+alter Finance schema/migrations or access configured `RHEMAERP`. Independent GPT-5.6 Sol High review and clean
+local integration remain required before final no-active-V1 and deployment-readiness gates.
