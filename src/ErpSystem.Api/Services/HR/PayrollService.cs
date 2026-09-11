@@ -71,8 +71,6 @@ public class PayrollService : IPayrollService
         string AccountCode,
         string AccountName,
         AccountType AccountType,
-        string AccountCategory,
-        string? AccountSubCategory,
         string Description);
 
     private static readonly IReadOnlyList<PayrollLegacyMenuItemDto> LegacyMenuItems =
@@ -106,6 +104,7 @@ public class PayrollService : IPayrollService
 
     private readonly ApplicationDbContext _context;
     private readonly IJournalEntryService _journalEntryService;
+    private readonly IFinanceAccountProvisioningService _financeAccountProvisioning;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly INotificationTopicPublisher _notificationTopicPublisher;
     private readonly ILogger<PayrollService> _logger;
@@ -113,12 +112,14 @@ public class PayrollService : IPayrollService
     public PayrollService(
         ApplicationDbContext context,
         IJournalEntryService journalEntryService,
+        IFinanceAccountProvisioningService financeAccountProvisioning,
         IWorkflowIntegrationService workflowIntegrationService,
         INotificationTopicPublisher notificationTopicPublisher,
         ILogger<PayrollService> logger)
     {
         _context = context;
         _journalEntryService = journalEntryService;
+        _financeAccountProvisioning = financeAccountProvisioning;
         _workflowIntegrationService = workflowIntegrationService;
         _notificationTopicPublisher = notificationTopicPublisher;
         _logger = logger;
@@ -2979,75 +2980,33 @@ public class PayrollService : IPayrollService
 
     private async Task EnsurePayrollFinanceAccountsAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var seeds = BuildPayrollFinanceAccountSeeds();
-        var existingAccounts = await _context.Accounts
-            .Where(e => e.TenantId == tenantId && !e.IsDeleted)
-            .ToListAsync(cancellationToken);
-        var existingByCode = existingAccounts
-            .SelectMany(e => new[]
-            {
-                new { Code = NormalizePayrollJournalAccountCode(e.AccountCode), Account = e },
-                new { Code = NormalizePayrollJournalAccountCode(e.AccountNumber), Account = e }
-            })
-            .Where(e => e.Code.Length > 0)
-            .GroupBy(e => e.Code, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(e => e.Key, e => e.First().Account, StringComparer.OrdinalIgnoreCase);
-
-        foreach (var seed in seeds)
+        foreach (var seed in BuildPayrollFinanceAccountSeeds())
         {
-            var code = NormalizePayrollJournalAccountCode(seed.AccountCode);
-            var number = NormalizePayrollJournalAccountCode(seed.AccountNumber);
-            var account = existingByCode.GetValueOrDefault(code) ??
-                          existingByCode.GetValueOrDefault(number);
-
-            if (account == null)
+            // Payroll owns only its stable account intent. Finance owns canonical identity,
+            // classification and enabled-book mapping policy; category captions are not an
+            // authority boundary and must never be used to infer those decisions here.
+            await _financeAccountProvisioning.ProvisionAsync(new ProvisionFinanceAccountDto
             {
-                account = new Account
-                {
-                    TenantId = tenantId,
-                    AccountCode = seed.AccountCode,
-                    AccountNumber = seed.AccountNumber,
-                    AccountName = seed.AccountName,
-                    AccountType = seed.AccountType,
-                    CurrencyCode = "GHS",
-                    IsSegmented = true,
-                    AllowDirectPosting = true,
-                    IsSystemAccount = true,
-                    Status = AccountStatus.Active,
-                    ReferenceNumber = seed.AccountCode,
-                    EffectiveDate = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    CreatedBy = PayrollJournalSourceModule
-                };
-                _context.Accounts.Add(account);
-            }
-
-            account.AccountCategory = seed.AccountCategory;
-            account.AccountSubCategory = seed.AccountSubCategory;
-            account.AccountNumber = seed.AccountNumber;
-            account.Description = seed.Description;
-            account.IsSegmented = true;
-            account.AllowDirectPosting = true;
-            account.IsSystemAccount = true;
-            account.Status = AccountStatus.Active;
-            account.UpdatedAt = DateTime.UtcNow;
-            account.UpdatedBy = PayrollJournalSourceModule;
-
-            existingByCode[code] = account;
-            existingByCode[number] = account;
+                TenantId = tenantId,
+                AccountCode = seed.AccountCode,
+                AccountNumber = seed.AccountNumber,
+                AccountName = seed.AccountName,
+                CoreAccountType = seed.AccountType,
+                CurrencyCode = "GHS",
+                Description = seed.Description,
+                IsSegmented = true
+            }, cancellationToken);
         }
-
-        await _context.SaveChangesAsync(cancellationToken);
     }
 
     private static IReadOnlyList<PayrollFinanceAccountSeed> BuildPayrollFinanceAccountSeeds()
         =>
         [
-            new("000-1010-0000", "1010", "Cash and Bank - Payroll Clearing", AccountType.Asset, "Current Assets", "Cash and Bank", "Default bank and cash clearing account used by payroll net pay journals."),
-            new("000-1120-0000", "1120", "Staff Loans and Salary Advances", AccountType.Asset, "Current Assets", "Employee Receivables", "Receivable account for staff loan repayments, salary advances, and related payroll recoveries."),
-            new("000-2120-0000", "2120", "Accrued Payroll Payables", AccountType.Liability, "Current Liabilities", "Payroll Payables", "Default liability account for accrued payroll deductions, taxes, pensions, and contribution payables."),
-            new("000-4920-0000", "4920", "Payroll Recoveries and Interest Income", AccountType.Revenue, "Other Income", "Payroll Recoveries", "Income account for payroll loan interest and recoveries credited from payroll runs."),
-            new("000-6020-0000", "6020", "Salaries, Wages and Payroll Costs", AccountType.Expense, "Operating Expenses", "Payroll Costs", "Default payroll expense account for basic salary, allowances, overtime, employer contributions, and arrears.")
+            new("000-1010-0000", "1010", "Cash and Bank - Payroll Clearing", AccountType.Asset, "Default bank and cash clearing account used by payroll net pay journals."),
+            new("000-1120-0000", "1120", "Staff Loans and Salary Advances", AccountType.Asset, "Receivable account for staff loan repayments, salary advances, and related payroll recoveries."),
+            new("000-2120-0000", "2120", "Accrued Payroll Payables", AccountType.Liability, "Default liability account for accrued payroll deductions, taxes, pensions, and contribution payables."),
+            new("000-4920-0000", "4920", "Payroll Recoveries and Interest Income", AccountType.Revenue, "Income account for payroll loan interest and recoveries credited from payroll runs."),
+            new("000-6020-0000", "6020", "Salaries, Wages and Payroll Costs", AccountType.Expense, "Default payroll expense account for basic salary, allowances, overtime, employer contributions, and arrears.")
         ];
 
     private async Task<int> NextPayrollJournalMappingSequenceAsync(Guid tenantId, CancellationToken cancellationToken)
