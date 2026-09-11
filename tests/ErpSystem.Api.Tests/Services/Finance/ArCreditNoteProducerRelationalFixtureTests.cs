@@ -121,6 +121,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         fixture.UseChecker();
         await fixture.Producer.ApprovePreparedAsync(eventId, new DecideProducerAccountingIntentDto { Reason = "Independent checker" });
         fixture.UseMaker();
+        var beforeFailure = await MappedRowsAsync(fixture.Db);
         // The production leaf accepts this deliberate pre-commit audit fault after it has
         // written its owner and Finance effects; the owner must roll both back before C12
         // records the separate durable failure evidence.
@@ -140,6 +141,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         failed.Attempts.Should().ContainSingle(x => x.Status == AccountingEventStatuses.Failed);
         fixture.Db.Database.CurrentTransaction.Should().BeNull();
         fixture.Db.ChangeTracker.Entries().Should().OnlyContain(x => x.State == EntityState.Unchanged);
+        var afterFailure = await MappedRowsAsync(fixture.Db);
+        afterFailure.Should().NotEqual(beforeFailure, "only the independently durable failed attempt is permitted after the owner transaction rolls back");
 
         fixture.Audit.FailPostingAudit = false;
         var repaired = await fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
@@ -166,6 +169,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             var journalCount = await closed.Db.JournalEntries.CountAsync();
             var balanceCount = await closed.Db.AccountBalances.CountAsync();
             var originalUpdatedAt = (await closed.Db.CreditNotes.SingleAsync()).UpdatedAt;
+            var beforeRejection = await MappedRowsAsync(closed.Db);
 
             await FluentActions.Awaiting(() => closed.Service.PostCreditNoteAsync(closed.CreditNote.Id))
                 .Should().ThrowAsync<InvalidOperationException>().WithMessage("*not open*");
@@ -180,6 +184,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             (await closed.Db.FinancePostingEvents.CountAsync()).Should().Be(postingCount);
             (await closed.Db.JournalEntries.CountAsync()).Should().Be(journalCount);
             (await closed.Db.AccountBalances.CountAsync()).Should().Be(balanceCount);
+            (await MappedRowsAsync(closed.Db)).Should().Equal(beforeRejection,
+                "a C10 period gate rejects before an owner, C5, event, posting, journal, balance, receipt, or audit row can change");
         }
 
         // Recovery is an independently prepared scenario; the rejected C11 authority is never
@@ -222,6 +228,42 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         (await fixture.Db.FinancePostingEvents.CountAsync(x => x.SourceDocumentType == "SalesCreditNote" && x.PostingStatus == "Posted"))
             .Should().Be(1);
         (await fixture.Db.CreditNotes.SingleAsync(x => x.Id == ordered[1].Id)).JournalEntryId.Should().BeNull();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task C13Reversal_PreparesThenRequiresIndependentApproval_AndC15RetryIsReadOnly()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        var originalId = (await fixture.Db.AccountingEvents.SingleAsync()).Id;
+        fixture.UseChecker();
+        await fixture.Producer.ApprovePreparedAsync(originalId, new DecideProducerAccountingIntentDto { Reason = "Independent original approval" });
+        fixture.UseMaker();
+        var posted = await fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
+
+        var request = new ReverseCreditNoteDto { Reason = "Customer return corrected", ReversalDate = new DateTime(2026, 9, 2) };
+        var prepared = await fixture.Service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
+        prepared.CreditNoteStatus.Should().NotBe(CreditNoteStatus.Reversed, "C13 remains pending until a distinct checker decides it");
+        var reversal = await fixture.Db.AccountingEvents.SingleAsync(x => x.Id != originalId);
+        reversal.Status.Should().Be(AccountingEventStatuses.PendingApproval);
+        reversal.ReversesAccountingEventId.Should().Be(originalId);
+        reversal.ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Pending);
+
+        fixture.UseChecker();
+        await fixture.Producer.ApprovePreparedAsync(reversal.Id, new DecideProducerAccountingIntentDto { Reason = "Independent reversal approval" });
+        fixture.UseMaker();
+        var reversed = await fixture.Service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
+        reversed.CreditNoteStatus.Should().Be(CreditNoteStatus.Reversed);
+        reversed.ReversalJournalEntryId.Should().NotBeNull();
+        reversed.ReversalPostingEventId.Should().NotBeNull();
+        var frozenRows = await MappedRowsAsync(fixture.Db);
+
+        var replay = await fixture.Service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
+        replay.ReversalJournalEntryId.Should().Be(reversed.ReversalJournalEntryId);
+        replay.ReversalPostingEventId.Should().Be(reversed.ReversalPostingEventId);
+        (await MappedRowsAsync(fixture.Db)).Should().Equal(frozenRows,
+            "C15 reversal retry must replay only the frozen C13 identity and never create a second owner or Finance effect");
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -431,7 +473,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             command.CommandText = $"SELECT * FROM \"{table}\"";
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
-                rows.Add(table + ":" + string.Join("|", Enumerable.Range(0, reader.FieldCount).Select(i => reader.GetName(i) + "=" + (reader.IsDBNull(i) ? "<null>" : reader.GetValue(i) is byte[] bytes ? Convert.ToHexString(bytes) : Convert.ToString(reader.GetValue(i)))));
+                rows.Add(table + ":" + string.Join("|", Enumerable.Range(0, reader.FieldCount).Select(i => reader.GetName(i) + "=" + (reader.IsDBNull(i) ? "<null>" : reader.GetValue(i) is byte[] bytes ? Convert.ToHexString(bytes) : Convert.ToString(reader.GetValue(i))))));
         }
         return rows.OrderBy(x => x, StringComparer.Ordinal).ToArray();
     }
