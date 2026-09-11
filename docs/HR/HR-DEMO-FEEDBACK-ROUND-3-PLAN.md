@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) and J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) BUILT 2026-09-11. Fourteen slices remain; C1 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11. Thirteen slices remain; C2 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -158,7 +158,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 3 | **H** (round 2) — a movement writes the placement · ✅ **DONE 2026-09-11 · 33 ×2** (logged in the round-2 plan, lane H) | none | `hr-movements/run-h.mjs` | S's "already-approved writers" rule needs it; owed before the next demo regardless |
 | 4 | **S** — the salary change request · ✅ **DONE 2026-09-11 · 65 ×2** | `20260911091344_AddEmployeeSalaryChangeRequest` (+ `CompanyHrPolicySettings.SalaryChangeRequiresApproval`) | `hr-payroll-membership/run-s.mjs` | the PDF's first bullet |
 | 5 | **J1** — prefill from the position, optional text, clone to another position, `CertificationId` · ✅ **DONE 2026-09-11 · 42 ×2** | none | `hr-jobarch/run-j1.mjs` | |
-| 6 | **C1** — candidate identity trio, `Language` master, certification fields, document description | `AddCandidateIdentityLanguagesAndCertification` | `hr-recruitment/run-c1.mjs` | schema before screens |
+| 6 | **C1** — candidate identity trio, `Language` master, certification fields, document description · ✅ **DONE 2026-09-11 · 96 ×2** | `AddCandidateIdentityLanguagesAndCertification` | `hr-recruitment/run-c1.mjs` | schema before screens |
 | 7 | **C2** — careers + HR candidate screens, photo, currency picker, languages tab, document restructure | none | `hr-recruitment/run-c2.mjs` + screen walk | |
 | 8 | **K** — catalogue-driven criteria values + the nine scoring fixes + D-7 | `AddCriteriaCatalogueValues` | `hr-recruitment/run-k.mjs` (extends `run-lane5b.mjs`) | |
 | 9 | **A** — application source and posting | none | `hr-recruitment/run-a.mjs` | |
@@ -260,6 +260,43 @@ the new-version path both built the row without `CertificationId` (nobody could 
 no DTO wrote it). Both now carry it. Deviation: reporting relationships are not carried to another
 position (D-12); the same-position copy still carries them. Screen walk owed for the dialog, the
 panel's picker and the post-create toast.
+
+**Lane C1 log (2026-09-11).** Migration `AddCandidateIdentityLanguagesAndCertification` (guarded
+SQL; proven fresh and already-built). `Language` is HR reference data: entity, `api/hr/languages`
+(reads on EmployeeRead, writes on EmployeeWrite, delete on EmployeeAdmin, refused with a count while
+a candidate row names it; deletes are soft and both unique indexes are filtered on live rows so a
+deleted name can be used again), `LanguageSeeder` (23 rows, Ghana's working languages first) under
+`seed-hr-all`, a `ResourceListPanel` screen at `/administration/hr/languages` under People Reference
+Data, and `GET api/public/catalogue/languages` for the careers form — with `catalogue/identification-types`
+and `catalogue/currencies` beside it, all three tenant-scoped by the `X-Tenant-Id` header and reading
+the tenant's rows through explicit-tenant paths (`ICurrencyService` takes its tenant from the signed-in
+user, so the currency route reads Finance's `Currency` rows directly). `JobCandidateLanguage.LanguageId`
+with the name mirrored from the catalogue on every save; the rule "a catalogue id or a typed name,
+neither refused, an unknown id refused" is applied identically on the careers profile save
+(`CandidatePortalService.ResolveLanguage`), the new HR door (`GET/POST/PUT/DELETE
+api/job-candidates/{id}/languages`) and the dormant external-apply path. The candidate's national-ID
+trio (`NationalIdTypeId`→`IdentificationType`, `NationalIdNumber`, `NationalIdExpiryDate`) on the HR
+create/update and the careers profile, refused for a type the tenant does not accept (422 HR, 400
+careers); at hire it becomes the new employee's first `EmployeeIdentificationCard`, unverified, when
+both a type and a number are present. `JobCandidateSkill` gains `CertificationNumber`,
+`CertifyingBody`, `CertificationExpiryDate`; all four certificate fields are cleared together whenever
+`IsCertified` is off, on both doors. `JobCandidateDocument.Description`, taken as a form field on both
+upload doors. `Languages` added to the demo coverage manifest.
+
+⚠ **Found while building:** (1) the employee has no identity columns — the trio the plan named
+(`HREntities.cs:2111-2132`) is the GUARANTOR's; the employee keeps its documents as
+`EmployeeIdentificationCard` rows, which is where the hire path now writes. (2) Both of today's
+migrations (S and C1) had been left in scaffolded builder form; both were converted to the guarded
+SQL idiom and proven twice (fresh scratch database and the already-built dev database, Down
+included) — the convention holds for purely additive migrations too, because `rebuild-db` builds
+from the model. (3) Two defects of my own caught by the harness before commit: the portal maps
+documents to their DTO inline in three places (description stored, never returned) and the plain
+candidate read loads no navigations (type name blank except on `/details`). (4) The recruitment
+regression fixtures (`run-lane5b`, the two lane-5 probes, slices B–F) still supplied a staff number
+and `hireDate`; repaired to the round-2b rule. Two assertions in slices B and D expect an HR actor
+to pass a delete that the W3 sweep gated to `HR.Recruitment.Admin` — stale expectations, not
+regressions, left for the harness owner. Screen walk owed for the Languages page; the candidate
+screens themselves are lane C2.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

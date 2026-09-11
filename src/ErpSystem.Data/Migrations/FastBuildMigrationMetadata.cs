@@ -318,3 +318,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260910201924_AddStaffRequisitionBudgetLink")] partial class AddStaffRequisitionBudgetLink { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260910205043_AddStaffRequisitionCostPayeeAndApproval")] partial class AddStaffRequisitionCostPayeeAndApproval { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260911091344_AddEmployeeSalaryChangeRequest")] partial class AddEmployeeSalaryChangeRequest { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260911111931_AddCandidateIdentityLanguagesAndCertification")] partial class AddCandidateIdentityLanguagesAndCertification { }

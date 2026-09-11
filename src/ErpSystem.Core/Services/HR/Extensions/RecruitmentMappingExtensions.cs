@@ -821,6 +821,10 @@ public static class RecruitmentMappingExtensions
             ExpectedSalaryMax = entity.ExpectedSalaryMax,
             ExpectedSalaryCurrency = entity.ExpectedSalaryCurrency,
             WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
+            NationalIdTypeId = entity.NationalIdTypeId,
+            NationalIdTypeName = entity.NationalIdTypeRef?.Name,
+            NationalIdNumber = entity.NationalIdNumber,
+            NationalIdExpiryDate = entity.NationalIdExpiryDate,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
             ApplicationCount = entity.Applications?.Count ?? 0,
@@ -885,6 +889,10 @@ public static class RecruitmentMappingExtensions
             ExpectedSalaryMax = entity.ExpectedSalaryMax,
             ExpectedSalaryCurrency = entity.ExpectedSalaryCurrency,
             WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
+            NationalIdTypeId = entity.NationalIdTypeId,
+            NationalIdTypeName = entity.NationalIdTypeRef?.Name,
+            NationalIdNumber = entity.NationalIdNumber,
+            NationalIdExpiryDate = entity.NationalIdExpiryDate,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
             ApplicationCount = entity.Applications?.Count ?? 0,
@@ -892,14 +900,7 @@ public static class RecruitmentMappingExtensions
             WorkHistories = entity.WorkHistories.Select(w => w.ToDto()).ToList(),
             Referees = entity.Referees.Select(r => r.ToDto()).ToList(),
             Skills = entity.Skills.Select(s => s.ToDto()).ToList(),
-            Languages = entity.Languages.Select(l => new JobCandidateLanguageDto
-            {
-                Id             = l.Id,
-                TenantId       = l.TenantId,
-                JobCandidateId = l.JobCandidateId,
-                LanguageName   = l.LanguageName,
-                Proficiency    = l.Proficiency,
-            }).ToList(),
+            Languages = entity.Languages.Select(l => l.ToDto()).ToList(),
             Interests = entity.Interests.Select(i => i.ToDto()).ToList(),
             Documents = entity.Documents.Select(d => d.ToDto()).ToList(),
             Notes = entity.Notes.Select(n => n.ToDto()).ToList(),
@@ -928,6 +929,9 @@ public static class RecruitmentMappingExtensions
             LinkedInProfile = dto.LinkedInProfile,
             PortfolioUrl = dto.PortfolioUrl,
             GitHubUrl = dto.GitHubUrl,
+            NationalIdTypeId = dto.NationalIdTypeId,
+            NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim(),
+            NationalIdExpiryDate = dto.NationalIdExpiryDate,
             IsInTalentPool = dto.IsInTalentPool,
             TalentPoolAddedDate = dto.IsInTalentPool ? DateTime.UtcNow : null,
             CreatedBy = userId.ToString(),
@@ -948,6 +952,9 @@ public static class RecruitmentMappingExtensions
         entity.DigitalAddress = dto.DigitalAddress;
         entity.City = dto.City;
         entity.CountryId = dto.CountryId;
+        entity.NationalIdTypeId = dto.NationalIdTypeId;
+        entity.NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim();
+        entity.NationalIdExpiryDate = dto.NationalIdExpiryDate;
         entity.LinkedInProfile = dto.LinkedInProfile;
         entity.PortfolioUrl = dto.PortfolioUrl;
         entity.GitHubUrl = dto.GitHubUrl;
@@ -1162,6 +1169,9 @@ public static class RecruitmentMappingExtensions
             YearsOfExperience = entity.YearsOfExperience,
             IsCertified = entity.IsCertified,
             CertificationName = entity.CertificationName,
+            CertificationNumber = entity.CertificationNumber,
+            CertifyingBody = entity.CertifyingBody,
+            CertificationExpiryDate = entity.CertificationExpiryDate,
         };
     }
 
@@ -1176,7 +1186,10 @@ public static class RecruitmentMappingExtensions
             Proficiency = dto.Proficiency,
             YearsOfExperience = dto.YearsOfExperience,
             IsCertified = dto.IsCertified,
-            CertificationName = dto.CertificationName,
+            CertificationName = dto.IsCertified ? dto.CertificationName : null,
+            CertificationNumber = dto.IsCertified ? dto.CertificationNumber : null,
+            CertifyingBody = dto.IsCertified ? dto.CertifyingBody : null,
+            CertificationExpiryDate = dto.IsCertified ? dto.CertificationExpiryDate : null,
             CreatedBy = userId.ToString(),
         };
     }
@@ -1188,7 +1201,11 @@ public static class RecruitmentMappingExtensions
         entity.Proficiency = dto.Proficiency;
         entity.YearsOfExperience = dto.YearsOfExperience;
         entity.IsCertified = dto.IsCertified;
-        entity.CertificationName = dto.CertificationName;
+        // An unticked skill carries no certificate: the four fields are cleared together.
+        entity.CertificationName = dto.IsCertified ? dto.CertificationName : null;
+        entity.CertificationNumber = dto.IsCertified ? dto.CertificationNumber : null;
+        entity.CertifyingBody = dto.IsCertified ? dto.CertifyingBody : null;
+        entity.CertificationExpiryDate = dto.IsCertified ? dto.CertificationExpiryDate : null;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1242,6 +1259,25 @@ public static class RecruitmentMappingExtensions
 
     #region JobCandidateDocument
 
+    /// <summary>Round 3, lane C1: the catalogue link and code ride beside the mirrored name.</summary>
+    public static JobCandidateLanguageDto ToDto(this JobCandidateLanguage l)
+    {
+        return new JobCandidateLanguageDto
+        {
+            Id             = l.Id,
+            TenantId       = l.TenantId,
+            CreatedAt      = l.CreatedAt,
+            CreatedBy      = l.CreatedBy ?? string.Empty,
+            UpdatedAt      = l.UpdatedAt,
+            UpdatedBy      = l.UpdatedBy,
+            JobCandidateId = l.JobCandidateId,
+            LanguageId     = l.LanguageId,
+            LanguageCode   = l.Language?.Code,
+            LanguageName   = l.LanguageName,
+            Proficiency    = l.Proficiency,
+        };
+    }
+
     public static JobCandidateDocumentDto ToDto(this JobCandidateDocument entity)
     {
         return new JobCandidateDocumentDto
@@ -1257,6 +1293,7 @@ public static class RecruitmentMappingExtensions
             FileName = entity.FileName,
             FilePath = entity.FilePath,
             UploadDate = entity.UploadDate,
+            Description = entity.Description,
         };
     }
 

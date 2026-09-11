@@ -2978,14 +2978,22 @@ public class JobApplicationService : IJobApplicationService
             });
         }
 
-        // Languages
-        foreach (var l in dto.Languages)
+        // Languages — round 3, lane C1: a catalogue row or a typed name, the same rule as the
+        // careers profile save (CandidatePortalService.ResolveLanguage).
+        var languageMaster = (await _unitOfWork.Repository<Language>()
+                .FindAsync(x => x.TenantId == tenantId && !x.IsDeleted))
+            .ToDictionary(x => x.Id);
+        var resolvedLanguages = dto.Languages
+            .Select(l => (Row: l, Resolved: CandidatePortalService.ResolveLanguage(l.LanguageId, l.LanguageName, languageMaster)))
+            .ToList();
+        foreach (var (l, resolved) in resolvedLanguages)
         {
             await _languageRepository.AddAsync(new JobCandidateLanguage
             {
                 TenantId       = tenantId,
                 JobCandidateId = candidate.Id,
-                LanguageName   = l.LanguageName.Trim(),
+                LanguageId     = resolved.LanguageId,
+                LanguageName   = resolved.LanguageName,
                 Proficiency    = l.Proficiency,
                 CreatedBy      = "external-portal",
             });
@@ -3017,11 +3025,11 @@ public class JobApplicationService : IJobApplicationService
                 };
             }).Where(q => q.NormalisedName.Length > 0).ToList();
 
-            var snapshotLangs = dto.Languages.Select(l => new SnapshotLanguage
+            var snapshotLangs = resolvedLanguages.Select(x => new SnapshotLanguage
             {
-                NormalisedName = l.LanguageName.Trim().ToLowerInvariant(),
-                DisplayName    = l.LanguageName.Trim(),
-                Proficiency    = (int)l.Proficiency,
+                NormalisedName = x.Resolved.LanguageName.ToLowerInvariant(),
+                DisplayName    = x.Resolved.LanguageName,
+                Proficiency    = (int)x.Row.Proficiency,
             }).Where(l => l.NormalisedName.Length > 0).ToList();
 
             var snapshotWork = dto.WorkHistories.Select(w => new SnapshotWorkHistory

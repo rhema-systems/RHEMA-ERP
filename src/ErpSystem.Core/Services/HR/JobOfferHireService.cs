@@ -1521,6 +1521,27 @@ public class JobHireService : IJobHireService
             await _employeeRepository.AddAsync(employee);
             entity.EmployeeId = employee.Id;
 
+            // Round 3, lane C1 (D-15): the identity document the candidate gave becomes the new
+            // employee's first identification card — the employee record keeps its documents as
+            // child rows, not as columns. A type without a number is nothing to file, so it is
+            // skipped; the card stays unverified until HR sights the original.
+            if (candidate.NationalIdTypeId is { } nationalIdTypeId
+                && !string.IsNullOrWhiteSpace(candidate.NationalIdNumber))
+            {
+                await _unitOfWork.Repository<EmployeeIdentificationCard>().AddAsync(new EmployeeIdentificationCard
+                {
+                    TenantId             = entity.TenantId,
+                    CreatedById          = confirmedByUserId,
+                    EmployeeId           = employee.Id,
+                    IdentificationTypeId = nationalIdTypeId,
+                    DocumentNumber       = candidate.NationalIdNumber.Trim(),
+                    ExpiryDate           = candidate.NationalIdExpiryDate is { } nationalIdExpiry
+                                            ? DateOnly.FromDateTime(nationalIdExpiry) : null,
+                    IsVerified           = false,
+                    Notes                = "Carried from the candidate record at hire.",
+                });
+            }
+
             // 2 — EmployeeContractDetail
             var startDate       = DateOnly.FromDateTime(actualStartDate);
             var contractEndDate = offer.ContractDurationMonths.HasValue

@@ -878,6 +878,21 @@ public class JobCandidate : TenantEntity
     [MaxLength(100)]
     public string? Nationality { get; set; }
 
+    // ── National identity (round 3, lane C1; decision D-15) ───────────────────
+    // The employee's trio, verbatim, so the hire path copies it across untouched. "Ghana Card"
+    // is a seeded IdentificationType row, not a column: a foreign national with a passport uses
+    // the same three fields.
+
+    public Guid? NationalIdTypeId { get; set; }
+
+    [ForeignKey(nameof(NationalIdTypeId))]
+    public virtual IdentificationType? NationalIdTypeRef { get; set; }
+
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+
+    public DateTime? NationalIdExpiryDate { get; set; }
+
     // ── Documents ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -1060,6 +1075,18 @@ public class JobCandidateSkill : TenantEntity
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1 (register row R-3d). A certificate is a name, a number, who issued it and
+    // when it lapses; the three below are blank whenever IsCertified is false — the services clear
+    // them, so an unticked skill never carries a stale certificate.
+
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 /// <summary>
@@ -1072,7 +1099,19 @@ public class JobCandidateLanguage : TenantEntity
     [ForeignKey(nameof(JobCandidateId))]
     public virtual JobCandidate JobCandidate { get; set; } = null!;
 
-    /// <summary>Language name, e.g. "English", "French", "Twi".</summary>
+    /// <summary>
+    /// Link to the HR language catalogue (round 3, lane C1; decision D-16). Null on rows written
+    /// before the catalogue existed and on a one-off language typed under "Other".
+    /// </summary>
+    public Guid? LanguageId { get; set; }
+
+    [ForeignKey(nameof(LanguageId))]
+    public virtual Language? Language { get; set; }
+
+    /// <summary>
+    /// Language name, e.g. "English", "French", "Twi". Mirrored from the catalogue row when one is
+    /// linked, so a rename there does not rewrite what the candidate said.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string LanguageName { get; set; } = string.Empty;
@@ -1123,6 +1162,10 @@ public class JobCandidateDocument : TenantEntity
 
     /// <summary>Central-DMS version, once registered.</summary>
     public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>What the file is, in the uploader's words (round 3, lane C1; decision D-17).</summary>
+    [MaxLength(500)]
+    public string? Description { get; set; }
 }
 
 public class JobCandidateNote : TenantEntity

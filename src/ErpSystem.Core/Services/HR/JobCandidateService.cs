@@ -1,6 +1,7 @@
 ﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -155,6 +156,48 @@ public class JobCandidateService : IJobCandidateService
         return entity;
     }
 
+    private async Task<JobCandidateLanguage> GetOwnedLanguageAsync(Guid id)
+    {
+        var entity = await _unitOfWork.Repository<JobCandidateLanguage>().GetQueryable()
+            .Include(l => l.Language)
+            .FirstOrDefaultAsync(l => l.Id == id && !l.IsDeleted);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Language with ID '{id}' not found.");
+        return entity;
+    }
+
+    /// <summary>
+    /// Round 3, lane C1: a catalogue id or a typed name. With an id the name is mirrored from the
+    /// catalogue; an id that is not the tenant's is refused; neither is refused.
+    /// </summary>
+    private async Task<(Guid? LanguageId, string LanguageName)> ResolveLanguageAsync(Guid? languageId, string? languageName)
+    {
+        var tenantId = GetTenantId();
+        if (languageId is { } id)
+        {
+            var row = await _unitOfWork.Repository<Language>().GetQueryable()
+                .FirstOrDefaultAsync(l => l.Id == id && l.TenantId == tenantId && !l.IsDeleted);
+            if (row == null)
+                throw new InvalidOperationException("The language chosen is not in the catalogue. Pick one from the list or type the name.");
+            return (row.Id, row.Name);
+        }
+        var name = languageName?.Trim();
+        if (string.IsNullOrEmpty(name))
+            throw new InvalidOperationException("A language needs either a catalogue entry or a name.");
+        return (null, name);
+    }
+
+    /// <summary>Round 3, lane C1: the identity document type must be one of the tenant's active types.</summary>
+    private async Task RequireIdentificationTypeAsync(Guid? typeId)
+    {
+        if (typeId is not { } id) return;
+        var tenantId = GetTenantId();
+        var ok = await _unitOfWork.Repository<IdentificationType>().GetQueryable()
+            .AnyAsync(x => x.Id == id && x.TenantId == tenantId && x.IsActive && !x.IsDeleted);
+        if (!ok)
+            throw new InvalidOperationException("The identification type chosen is not one this organisation accepts.");
+    }
+
     private async Task<JobCandidateInterest> GetOwnedInterestAsync(Guid id)
     {
         var entity = await _interestRepository.GetByIdAsync(id);
@@ -184,7 +227,24 @@ public class JobCandidateService : IJobCandidateService
     public async Task<JobCandidateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(id);
-        return entity.ToDto();
+        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Round 3, lane C1. The plain candidate read loads no navigations (only the /details read
+    /// does), so the identity type's name is looked up here rather than left blank on the DTO the
+    /// create, update and get-by-id doors return.
+    /// </summary>
+    private async Task<JobCandidateDto> WithIdentityTypeNameAsync(JobCandidateDto dto, CancellationToken cancellationToken)
+    {
+        if (dto.NationalIdTypeId is { } typeId && dto.NationalIdTypeName == null)
+        {
+            dto.NationalIdTypeName = await _unitOfWork.Repository<IdentificationType>().GetQueryable()
+                .Where(x => x.Id == typeId)
+                .Select(x => x.Name)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        return dto;
     }
 
     public async Task<JobCandidateDto?> GetByCandidateNumberAsync(string candidateNumber, CancellationToken cancellationToken = default)
@@ -265,6 +325,7 @@ public class JobCandidateService : IJobCandidateService
         if (existing != null)
             throw new InvalidOperationException($"A candidate with email '{createDto.Email}' already exists.");
 
+        await RequireIdentificationTypeAsync(createDto.NationalIdTypeId);
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.CandidateNumber = await _candidateRepository.GetNextCandidateNumberAsync(current);
 
@@ -272,19 +333,20 @@ public class JobCandidateService : IJobCandidateService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job candidate created: {CandidateNumber}", entity.CandidateNumber);
-        return entity.ToDto();
+        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
     }
 
     public async Task<JobCandidateDto> UpdateAsync(UpdateJobCandidateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(updateDto.Id);
 
+        await RequireIdentificationTypeAsync(updateDto.NationalIdTypeId);
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job candidate updated: {CandidateNumber}", entity.CandidateNumber);
-        return entity.ToDto();
+        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -892,6 +954,65 @@ public class JobCandidateService : IJobCandidateService
         return true;
     }
 
+    // ── Languages (round 3, lane C1) ──────────────────────────────────────────
+
+    public async Task<IEnumerable<JobCandidateLanguageDto>> GetLanguagesAsync(Guid candidateId, CancellationToken cancellationToken = default)
+    {
+        await GetOwnedCandidateAsync(candidateId);
+        var tenantId = GetTenantId();
+        var rows = await _unitOfWork.Repository<JobCandidateLanguage>().GetQueryable()
+            .Include(l => l.Language)
+            .Where(l => l.JobCandidateId == candidateId && l.TenantId == tenantId && !l.IsDeleted)
+            .OrderBy(l => l.LanguageName)
+            .ToListAsync(cancellationToken);
+        return rows.Select(l => l.ToDto()).ToList();
+    }
+
+    public async Task<JobCandidateLanguageDto> AddLanguageAsync(CreateJobCandidateLanguageDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    {
+        var current = GetTenantId();
+        if (tenantId != Guid.Empty && tenantId != current)
+            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+
+        await GetOwnedCandidateAsync(createDto.JobCandidateId);
+        var (languageId, languageName) = await ResolveLanguageAsync(createDto.LanguageId, createDto.LanguageName);
+        var repo = _unitOfWork.Repository<JobCandidateLanguage>();
+        var entity = new JobCandidateLanguage
+        {
+            TenantId       = current,
+            JobCandidateId = createDto.JobCandidateId,
+            LanguageId     = languageId,
+            LanguageName   = languageName,
+            Proficiency    = createDto.Proficiency,
+            CreatedBy      = createdByUserId.ToString(),
+        };
+        await repo.AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return (await GetOwnedLanguageAsync(entity.Id)).ToDto();
+    }
+
+    public async Task<JobCandidateLanguageDto> UpdateLanguageAsync(UpdateJobCandidateLanguageDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedLanguageAsync(updateDto.Id);
+        var (languageId, languageName) = await ResolveLanguageAsync(updateDto.LanguageId, updateDto.LanguageName);
+        entity.LanguageId   = languageId;
+        entity.LanguageName = languageName;
+        entity.Proficiency  = updateDto.Proficiency;
+        entity.UpdatedAt    = DateTime.UtcNow;
+        entity.UpdatedBy    = updatedByUserId.ToString();
+        await _unitOfWork.Repository<JobCandidateLanguage>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return (await GetOwnedLanguageAsync(entity.Id)).ToDto();
+    }
+
+    public async Task<bool> DeleteLanguageAsync(Guid languageId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedLanguageAsync(languageId);
+        await _unitOfWork.Repository<JobCandidateLanguage>().DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     // ── Interests ─────────────────────────────────────────────────────────────
 
     public async Task<JobCandidateInterestDto> AddInterestAsync(CreateJobCandidateInterestDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -944,7 +1065,8 @@ public class JobCandidateService : IJobCandidateService
         CancellationToken cancellationToken = default,
         Guid? fileUploadRecordId = null,
         Guid? documentRecordId = null,
-        Guid? documentVersionId = null)
+        Guid? documentVersionId = null,
+        string? description = null)
     {
         var current = GetTenantId();
         if (tenantId != Guid.Empty && tenantId != current)
@@ -959,6 +1081,7 @@ public class JobCandidateService : IJobCandidateService
             TenantId           = current,
             JobCandidateId     = candidateId,
             DocumentType       = documentType,
+            Description        = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
             FileName           = fileName,
             FilePath           = string.Empty,
             UploadDate         = DateTime.UtcNow,

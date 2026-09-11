@@ -869,6 +869,11 @@ public class JobCandidateDto : BaseDto
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
     public string WorkAuthorizationStatusName => WorkAuthorizationStatus.ToString();
+    // National identity (round 3, lane C1) — the employee's trio
+    public Guid? NationalIdTypeId { get; set; }
+    public string? NationalIdTypeName { get; set; }
+    public string? NationalIdNumber { get; set; }
+    public DateTime? NationalIdExpiryDate { get; set; }
     // Documents
     public string? CvFilePath { get; set; }
     public string? ProfilePhotoUrl { get; set; }
@@ -954,6 +959,15 @@ public class CreateJobCandidateDto : CreateDtoBase
     [MaxLength(200)]
     public string? GitHubUrl { get; set; }
 
+    // National identity (round 3, lane C1). The type must be an active IdentificationType of the
+    // tenant; the service refuses an unknown one.
+    public Guid? NationalIdTypeId { get; set; }
+
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+
+    public DateTime? NationalIdExpiryDate { get; set; }
+
     public bool IsInTalentPool { get; set; }
 }
 
@@ -1009,6 +1023,15 @@ public class UpdateJobCandidateDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? GitHubUrl { get; set; }
+
+    // National identity (round 3, lane C1). The type must be an active IdentificationType of the
+    // tenant; the service refuses an unknown one.
+    public Guid? NationalIdTypeId { get; set; }
+
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+
+    public DateTime? NationalIdExpiryDate { get; set; }
 
     public bool IsInTalentPool { get; set; }
 }
@@ -1263,6 +1286,9 @@ public class JobCandidateSkillDto : BaseDto
     public int? YearsOfExperience { get; set; }
     public bool IsCertified { get; set; }
     public string? CertificationName { get; set; }
+    public string? CertificationNumber { get; set; }
+    public string? CertifyingBody { get; set; }
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 public class CreateJobCandidateSkillDto : CreateDtoBase
@@ -1285,6 +1311,15 @@ public class CreateJobCandidateSkillDto : CreateDtoBase
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1. Ignored (cleared) unless IsCertified is true.
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 public class UpdateJobCandidateSkillDto : UpdateDtoBase
@@ -1304,6 +1339,15 @@ public class UpdateJobCandidateSkillDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1. Ignored (cleared) unless IsCertified is true.
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 #endregion
@@ -1347,6 +1391,8 @@ public class JobCandidateDocumentDto : BaseDto
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
     public DateTime UploadDate { get; set; }
+    /// <summary>What the file is, in the uploader's words (round 3, lane C1).</summary>
+    public string? Description { get; set; }
 }
 
 // CreateJobCandidateDocumentDto is deliberately absent. It carried a caller-supplied FilePath, so the
@@ -5354,6 +5400,15 @@ public class ExternalSkillDto
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1. Ignored (cleared) unless IsCertified is true.
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 /// <summary>A language spoken/written by an external candidate.</summary>
@@ -5362,9 +5417,12 @@ public class ExternalLanguageDto
     /// <summary>Guid.Empty for new records; existing DB row Id for updates.</summary>
     public Guid Id { get; set; }
 
-    [Required]
+    /// <summary>Catalogue row (round 3, lane C1). Either this or <see cref="LanguageName"/> is required.</summary>
+    public Guid? LanguageId { get; set; }
+
+    /// <summary>Free text when no catalogue row fits; mirrored from the catalogue when <see cref="LanguageId"/> is set.</summary>
     [MaxLength(100)]
-    public string LanguageName { get; set; } = string.Empty;
+    public string? LanguageName { get; set; }
 
     public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; } = ErpSystem.Core.Enums.LanguageProficiency.ProfessionalWorking;
 }
@@ -5374,9 +5432,38 @@ public class JobCandidateLanguageDto : BaseDto
 {
     public Guid TenantId { get; set; }
     public Guid JobCandidateId { get; set; }
+    public Guid? LanguageId { get; set; }
+    public string? LanguageCode { get; set; }
     public string LanguageName { get; set; } = string.Empty;
     public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; }
     public string ProficiencyName => Proficiency.ToString();
+}
+
+/// <summary>
+/// HR-side write of a candidate language (round 3, lane C1). Either the catalogue id or a name;
+/// with an id the name is mirrored from the catalogue and any name sent is ignored.
+/// </summary>
+public class CreateJobCandidateLanguageDto : CreateDtoBase
+{
+    [Required]
+    public Guid JobCandidateId { get; set; }
+
+    public Guid? LanguageId { get; set; }
+
+    [MaxLength(100)]
+    public string? LanguageName { get; set; }
+
+    public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; } = ErpSystem.Core.Enums.LanguageProficiency.ProfessionalWorking;
+}
+
+public class UpdateJobCandidateLanguageDto : UpdateDtoBase
+{
+    public Guid? LanguageId { get; set; }
+
+    [MaxLength(100)]
+    public string? LanguageName { get; set; }
+
+    public ErpSystem.Core.Enums.LanguageProficiency Proficiency { get; set; }
 }
 
 /// <summary>
@@ -5494,6 +5581,11 @@ public class CandidatePortalProfileDto
     public string? ExpectedSalaryCurrency { get; set; }
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
+    // National identity (round 3, lane C1)
+    public Guid? NationalIdTypeId { get; set; }
+    public string? NationalIdTypeName { get; set; }
+    public string? NationalIdNumber { get; set; }
+    public DateTime? NationalIdExpiryDate { get; set; }
     // Documents
     public string? CvFilePath { get; set; }
     public string? ProfilePhotoUrl { get; set; }
@@ -5559,6 +5651,11 @@ public class UpdateCandidatePortalProfileDto
     public string? ExpectedSalaryCurrency { get; set; }
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
+    // National identity (round 3, lane C1)
+    public Guid? NationalIdTypeId { get; set; }
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+    public DateTime? NationalIdExpiryDate { get; set; }
     // Documents
     // ⚠ No ProfilePhotoUrl. The candidate sets their photo by uploading it through the gate,
     // which stores a scanned upload record and leaves the legacy public URL null. Accepting a

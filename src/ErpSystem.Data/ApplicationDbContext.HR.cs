@@ -269,6 +269,8 @@ public partial class ApplicationDbContext
     public DbSet<JobCandidateReferee> JobCandidateReferees { get; set; } = null!;
     public DbSet<JobCandidateSkill> JobCandidateSkills { get; set; } = null!;
     public DbSet<JobCandidateLanguage> JobCandidateLanguages { get; set; } = null!;
+    /// <summary>HR language catalogue (round 3, lane C1) — what a candidate language row links to.</summary>
+    public DbSet<Language> Languages { get; set; } = null!;
     public DbSet<JobCandidateInterest> JobCandidateInterests { get; set; } = null!;
     public DbSet<JobCandidateDocument> JobCandidateDocuments { get; set; } = null!;
     public DbSet<JobCandidateNote> JobCandidateNotes { get; set; } = null!;
@@ -7911,10 +7913,52 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ---- Language catalogue (round 3, lane C1) ----
+        builder.Entity<Language>(entity =>
+        {
+            // Both filtered on live rows: a delete here is a soft delete, and an unfiltered unique
+            // index would keep a deleted name reserved for ever (the relationship-type lesson).
+            entity.HasIndex(e => new { e.TenantId, e.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_Language_Tenant_Name");
+
+            // Also filtered on Code IS NOT NULL: the code is optional, and an unfiltered unique
+            // index would let exactly one row have no code.
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasFilter("[Code] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("IX_Language_Tenant_Code");
+        });
+
+        // ---- JobCandidateLanguage (configured explicitly from lane C1; before it, by convention) ----
+        builder.Entity<JobCandidateLanguage>(entity =>
+        {
+            entity.HasIndex(x => x.JobCandidateId).HasDatabaseName("IX_CandidateLanguage_CandidateId");
+            entity.HasIndex(x => x.LanguageId).HasDatabaseName("IX_CandidateLanguage_LanguageId");
+
+            entity.HasOne(x => x.JobCandidate)
+                .WithMany(x => x.Languages)
+                .HasForeignKey(x => x.JobCandidateId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Restrict: the catalogue's delete is refused with a count while a row names it.
+            entity.HasOne(x => x.Language)
+                .WithMany()
+                .HasForeignKey(x => x.LanguageId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // ---- JobCandidate ----
         builder.Entity<JobCandidate>(entity =>
         {
             entity.HasIndex(x => x.CandidateNumber).HasDatabaseName("IX_JobCandidate_Number");
+
+            // Round 3, lane C1: the identity document type. Restrict — a type in use cannot go.
+            entity.HasOne(x => x.NationalIdTypeRef)
+                .WithMany()
+                .HasForeignKey(x => x.NationalIdTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => x.Email).HasDatabaseName("IX_JobCandidate_Email");
             entity.HasIndex(x => x.IsInTalentPool).HasDatabaseName("IX_JobCandidate_TalentPool");
             entity.HasIndex(x => new { x.TenantId, x.CandidateNumber })

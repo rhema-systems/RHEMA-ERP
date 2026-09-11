@@ -151,6 +151,15 @@ public class HrSeedOrchestrator
                                       && x.Code == RelationshipTypeSeeder.ProbeCode, ct),
             ct => new RelationshipTypeSeeder(_context, Log<RelationshipTypeSeeder>()).SeedAsync(tenantId, ct)),
 
+        // Round 3, lane C1: the language catalogue a candidate picks from. Probes on the code
+        // "EN" rather than a non-empty table, like the relationship types above.
+        new SeedStep(
+            "Languages (Ghanaian, regional, international)",
+            ct => _context.Set<Language>()
+                          .AnyAsync(x => x.TenantId == tenantId
+                                      && x.Code == LanguageSeeder.ProbeCode, ct),
+            ct => new LanguageSeeder(_context, Log<LanguageSeeder>()).SeedAsync(tenantId, ct)),
+
         new SeedStep(
             "Skills",
             ct => _context.Set<Skill>().AnyAsync(x => x.TenantId == tenantId, ct),

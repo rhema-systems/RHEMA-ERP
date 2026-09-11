@@ -67,6 +67,13 @@ public interface IJobCandidateService
     Task<JobCandidateSkillDto> UpdateSkillAsync(UpdateJobCandidateSkillDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteSkillAsync(Guid skillId, CancellationToken cancellationToken = default);
 
+    // Language operations (round 3, lane C1). HR had no door onto a candidate's languages at all;
+    // the candidate wrote them from the careers profile and HR could only read them on the detail.
+    Task<IEnumerable<JobCandidateLanguageDto>> GetLanguagesAsync(Guid candidateId, CancellationToken cancellationToken = default);
+    Task<JobCandidateLanguageDto> AddLanguageAsync(CreateJobCandidateLanguageDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    Task<JobCandidateLanguageDto> UpdateLanguageAsync(UpdateJobCandidateLanguageDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> DeleteLanguageAsync(Guid languageId, CancellationToken cancellationToken = default);
+
     // Interest operations
     Task<JobCandidateInterestDto> AddInterestAsync(CreateJobCandidateInterestDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobCandidateInterestDto>> GetInterestsAsync(Guid candidateId, CancellationToken cancellationToken = default);
@@ -93,7 +100,8 @@ public interface IJobCandidateService
         CancellationToken cancellationToken = default,
         Guid? fileUploadRecordId = null,
         Guid? documentRecordId = null,
-        Guid? documentVersionId = null);
+        Guid? documentVersionId = null,
+        string? description = null);
     Task<IEnumerable<JobCandidateDocumentDto>> GetDocumentsAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 

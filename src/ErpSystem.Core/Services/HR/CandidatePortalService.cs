@@ -1,4 +1,5 @@
 ﻿using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -25,6 +26,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
     private readonly IGenericRepository<JobCandidateReferee> _refereeRepo;
     private readonly IGenericRepository<JobCandidateSkill> _skillRepo;
     private readonly IGenericRepository<JobCandidateLanguage> _languageRepo;
+    private readonly IGenericRepository<Language> _languageMasterRepo;
+    private readonly IGenericRepository<IdentificationType> _identificationTypeRepo;
     private readonly IGenericRepository<JobCandidateInterest> _interestRepo;
     private readonly IGenericRepository<JobCandidateDocument> _documentRepo;
     private readonly IJobApplicationRepository _applicationRepo;
@@ -44,6 +47,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         IGenericRepository<JobCandidateReferee> refereeRepo,
         IGenericRepository<JobCandidateSkill> skillRepo,
         IGenericRepository<JobCandidateLanguage> languageRepo,
+        IGenericRepository<Language> languageMasterRepo,
+        IGenericRepository<IdentificationType> identificationTypeRepo,
         IGenericRepository<JobCandidateInterest> interestRepo,
         IGenericRepository<JobCandidateDocument> documentRepo,
         IJobApplicationRepository applicationRepo,
@@ -62,6 +67,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         _refereeRepo      = refereeRepo;
         _skillRepo        = skillRepo;
         _languageRepo     = languageRepo;
+        _languageMasterRepo = languageMasterRepo;
+        _identificationTypeRepo = identificationTypeRepo;
         _interestRepo     = interestRepo;
         _documentRepo     = documentRepo;
         _applicationRepo  = applicationRepo;
@@ -153,6 +160,9 @@ public sealed class CandidatePortalService : ICandidatePortalService
         CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // Round 3, lane C1: an identity document type must be one the tenant accepts.
+        await RequireIdentificationTypeAsync(dto.NationalIdTypeId, tenantId);
 
         // Loaded without nav props deliberately — EF tracking child collections during the
         // scalar update would cause duplicate inserts when the collections are patched below.
@@ -343,7 +353,10 @@ public sealed class CandidatePortalService : ICandidatePortalService
                         Proficiency       = s.Proficiency,
                         YearsOfExperience = s.YearsOfExperience,
                         IsCertified       = s.IsCertified,
-                        CertificationName = s.CertificationName,
+                        CertificationName = s.IsCertified ? s.CertificationName : null,
+                        CertificationNumber = s.IsCertified ? s.CertificationNumber : null,
+                        CertifyingBody = s.IsCertified ? s.CertifyingBody : null,
+                        CertificationExpiryDate = s.IsCertified ? s.CertificationExpiryDate : null,
                     });
                 }
                 else if (existing.TryGetValue(s.Id, out var row))
@@ -352,7 +365,10 @@ public sealed class CandidatePortalService : ICandidatePortalService
                     row.Proficiency       = s.Proficiency;
                     row.YearsOfExperience = s.YearsOfExperience;
                     row.IsCertified       = s.IsCertified;
-                    row.CertificationName = s.CertificationName;
+                    row.CertificationName = s.IsCertified ? s.CertificationName : null;
+                    row.CertificationNumber = s.IsCertified ? s.CertificationNumber : null;
+                    row.CertifyingBody = s.IsCertified ? s.CertifyingBody : null;
+                    row.CertificationExpiryDate = s.IsCertified ? s.CertificationExpiryDate : null;
                     await _skillRepo.UpdateAsync(row);
                 }
             }
@@ -367,21 +383,30 @@ public sealed class CandidatePortalService : ICandidatePortalService
             var toDelete = existing.Values.Where(l => !incomingIds.Contains(l.Id)).ToList();
             if (toDelete.Count > 0) await _languageRepo.DeleteRangeAsync(toDelete);
 
+            // Round 3, lane C1: a language is a catalogue row or a typed name. With a row the name
+            // is mirrored from the catalogue, so the free-text column stays readable by everything
+            // that only knows the name (the shortlisting engine among them).
+            var master = (await _languageMasterRepo.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted))
+                         .ToDictionary(x => x.Id);
+
             foreach (var l in dto.Languages)
             {
+                var (languageId, languageName) = ResolveLanguage(l.LanguageId, l.LanguageName, master);
                 if (l.Id == Guid.Empty)
                 {
                     await _languageRepo.AddAsync(new JobCandidateLanguage
                     {
                         TenantId       = tenantId,
                         JobCandidateId = candidate.Id,
-                        LanguageName   = l.LanguageName,
+                        LanguageId     = languageId,
+                        LanguageName   = languageName,
                         Proficiency    = l.Proficiency,
                     });
                 }
                 else if (existing.TryGetValue(l.Id, out var row))
                 {
-                    row.LanguageName = l.LanguageName;
+                    row.LanguageId   = languageId;
+                    row.LanguageName = languageName;
                     row.Proficiency  = l.Proficiency;
                     await _languageRepo.UpdateAsync(row);
                 }
@@ -709,6 +734,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             FileName       = d.FileName,
             FilePath       = d.FilePath,
             UploadDate     = d.UploadDate,
+            Description    = d.Description,
         }).ToList();
     }
 
@@ -726,12 +752,43 @@ public sealed class CandidatePortalService : ICandidatePortalService
                 "You must save your profile before uploading documents.");
     }
 
+    /// <summary>
+    /// A candidate language is a catalogue row or a typed name (round 3, lane C1). An id that is
+    /// not in the tenant's catalogue is refused rather than silently dropped; neither id nor
+    /// name is refused too — an empty language row tells nobody anything.
+    /// </summary>
+    internal static (Guid? LanguageId, string LanguageName) ResolveLanguage(
+        Guid? languageId, string? languageName, IReadOnlyDictionary<Guid, Language> master)
+    {
+        if (languageId is { } id)
+        {
+            if (!master.TryGetValue(id, out var row))
+                throw new InvalidOperationException("The language chosen is not in the catalogue. Pick one from the list or type the name.");
+            return (row.Id, row.Name);
+        }
+        var name = languageName?.Trim();
+        if (string.IsNullOrEmpty(name))
+            throw new InvalidOperationException("A language needs either a catalogue entry or a name.");
+        return (null, name);
+    }
+
+    /// <summary>Round 3, lane C1: the identity document type must be one of the tenant's active types.</summary>
+    private async Task RequireIdentificationTypeAsync(Guid? typeId, Guid tenantId)
+    {
+        if (typeId is not { } id) return;
+        var ok = await _identificationTypeRepo.GetQueryable()
+            .AnyAsync(x => x.Id == id && x.TenantId == tenantId && x.IsActive && !x.IsDeleted);
+        if (!ok)
+            throw new InvalidOperationException("The identification type chosen is not one this organisation accepts.");
+    }
+
     public async Task<JobCandidateDocumentDto> AddDocumentAsync(
         Guid userId, JobCandidateDocumentType documentType, string fileName, string filePath,
         Guid tenantId, CancellationToken ct = default,
         Guid? fileUploadRecordId = null,
         Guid? documentRecordId = null,
-        Guid? documentVersionId = null)
+        Guid? documentVersionId = null,
+        string? description = null)
     {
         tenantId = RequireCurrentTenant(tenantId);
         var ownCandidate = await FindOwnCandidateAsync(userId, tenantId)
@@ -742,6 +799,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             TenantId       = tenantId,
             JobCandidateId = ownCandidate.Id,
             DocumentType   = documentType,
+            Description    = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
             FileName       = fileName,
             FilePath       = filePath,
             UploadDate     = DateTime.UtcNow,
@@ -762,6 +820,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             FileName       = doc.FileName,
             FilePath       = doc.FilePath,
             UploadDate     = doc.UploadDate,
+            Description    = doc.Description,
         };
     }
 
@@ -837,6 +896,10 @@ public sealed class CandidatePortalService : ICandidatePortalService
         c.ExpectedSalaryCurrency = dto.ExpectedSalaryCurrency;
         // Compliance
         c.WorkAuthorizationStatus = dto.WorkAuthorizationStatus;
+        // National identity (round 3, lane C1) — the type is checked by the caller
+        c.NationalIdTypeId     = dto.NationalIdTypeId;
+        c.NationalIdNumber     = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim();
+        c.NationalIdExpiryDate = dto.NationalIdExpiryDate;
         // Documents
         // ⚠ ProfilePhotoUrl is NOT taken from the payload. It is the legacy public URL, and
         // UpdateProfilePhotoAsync above deliberately nulls it when a photo is uploaded through the
@@ -887,6 +950,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
         dto.ExpectedSalaryCurrency = c.ExpectedSalaryCurrency;
         // Compliance
         dto.WorkAuthorizationStatus = c.WorkAuthorizationStatus;
+        // National identity (round 3, lane C1)
+        dto.NationalIdTypeId     = c.NationalIdTypeId;
+        dto.NationalIdTypeName   = c.NationalIdTypeRef?.Name;
+        dto.NationalIdNumber     = c.NationalIdNumber;
+        dto.NationalIdExpiryDate = c.NationalIdExpiryDate;
         // Documents
         dto.CvFilePath       = c.CvFilePath;
         dto.ProfilePhotoUrl  = c.ProfilePhotoUrl;
@@ -937,12 +1005,17 @@ public sealed class CandidatePortalService : ICandidatePortalService
             YearsOfExperience = s.YearsOfExperience,
             IsCertified       = s.IsCertified,
             CertificationName = s.CertificationName,
+            CertificationNumber = s.CertificationNumber,
+            CertifyingBody = s.CertifyingBody,
+            CertificationExpiryDate = s.CertificationExpiryDate,
         }).ToList();
 
         dto.Languages = c.Languages.Where(l => !l.IsDeleted).Select(l => new JobCandidateLanguageDto
         {
             Id             = l.Id,
             JobCandidateId = l.JobCandidateId,
+            LanguageId     = l.LanguageId,
+            LanguageCode   = l.Language?.Code,
             LanguageName   = l.LanguageName,
             Proficiency    = l.Proficiency,
         }).ToList();
@@ -963,6 +1036,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             FileName       = d.FileName,
             FilePath       = d.FilePath,
             UploadDate     = d.UploadDate,
+            Description    = d.Description,
         }).OrderByDescending(d => d.UploadDate).ToList();
     }
 

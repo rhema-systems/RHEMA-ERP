@@ -471,6 +471,57 @@ public class JobCandidateController : ControllerBase
     }
 
     // =========================================================================
+    // LANGUAGES (round 3, lane C1)
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/languages")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<IEnumerable<JobCandidateLanguageDto>>> GetLanguages(Guid candidateId)
+        => Ok(await _service.GetLanguagesAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/languages")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<JobCandidateLanguageDto>> AddLanguage(
+        Guid candidateId, [FromBody] CreateJobCandidateLanguageDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        dto.JobCandidateId = candidateId;
+        return Ok(await _service.AddLanguageAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/languages/{languageId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<JobCandidateLanguageDto>> UpdateLanguage(
+        Guid candidateId, Guid languageId, [FromBody] UpdateJobCandidateLanguageDto dto)
+    {
+        if (languageId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateLanguageAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("languages/{languageId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
+    public async Task<IActionResult> DeleteLanguage(Guid languageId)
+    {
+        await _service.DeleteLanguageAsync(languageId);
+        return NoContent();
+    }
+
+    // =========================================================================
     // INTERESTS
     // =========================================================================
 
@@ -572,7 +623,8 @@ public class JobCandidateController : ControllerBase
             persist: (uploadedById, document) => _service.AddDocumentAsync(
                 candidateId, documentType, document.OriginalFileName,
                 tenantId, uploadedById, ct,
-                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                description),
             cancellationToken: ct,
             category: ControlledFileUploadCategories.HrRecruitmentAttachments);
     }

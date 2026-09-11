@@ -57,6 +57,7 @@ import {
   Users,
   Users2,
   HeartHandshake,
+  Languages,
   Workflow,
   Wrench,
   type LucideIcon,
@@ -320,6 +321,15 @@ export const hrSetupGroups: HrSetupGroup[] = [
         href: '/administration/hr/identification-types',
         icon: IdCard,
         description: 'Identity document types.',
+      },
+      {
+        // Round 3, lane C1. A candidate's languages were free text; the shortlisting engine
+        // scored a Language criterion against exactly that text. The catalogue gives the form a
+        // dropdown and the criterion something to match on.
+        title: 'Languages',
+        href: '/administration/hr/languages',
+        icon: Languages,
+        description: 'The languages a candidate can say they speak or write.',
       },
       {
         title: 'Document Types',
