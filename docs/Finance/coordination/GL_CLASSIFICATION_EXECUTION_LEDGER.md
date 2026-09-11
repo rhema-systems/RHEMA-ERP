@@ -12,7 +12,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 |---|---|
 | Phase | Stage B5 — final V1-removal and deployment-readiness gate |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/final_readiness` |
+| Implementing task | Independent reviewer `/root/stage_a1_review` |
 | Exact base | `cfea93f28cb3b41a838a7c2fa628b04e0781db1d` |
 | Branch | `codex/finance-gl-cutover-final-readiness-b5` |
 | Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-final-readiness-b5` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | HR/Payroll approved and integrated; final V1/removal-readiness implementation active |
+| Review status | Final V1/removal-readiness candidate `cc132ac3` under independent review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -2120,3 +2120,21 @@ Procurement/HR direct-account-writer scans, disabled C6-C8 defaults, full produc
 regression, frontend gates, EF no-pending-model, exactly 456 no-connect migrations, idempotent script generation,
 and an explicit deployment-readiness report listing unapplied migrations/flags and database preflight gates.
 No migration may be applied and configured `RHEMAERP` remains protected.
+
+The Stage B5 implementer produced clean direct-child candidate
+`cc132ac329b6a4e7187e57bd8108cbc8492822d6`. It removes the retired
+`FinancePostingRequestDto`, V1 external envelope/engine/adapter overloads, V1 evidence canonicalizer and
+deprecated catalogue entry; `FIN-INT-001` is now V2-only v2.1 while the published V2 evidence domain and
+immutable historical `BookClassification` storage/report fields remain preserved. Focused testing also corrected
+the Finance year-end reopen exact-reversal path to retain original book, ordered economic, dimension, currency,
+rate and source evidence. `GL_CUTOVER_DEPLOYMENT_READINESS.md` records code-candidate `NO-GO`, the 13 known
+unapplied migrations, disabled C6/C7/C8 sequence and required preflight/rehearsal/backup/restore/reconciliation/
+review/rollback gates.
+
+Implementation gates passed a zero-error test-project build, 197 focused and 136 widened backend scenarios,
+33 frontend tests, targeted ESLint, EF no-pending-model, exact 456 no-connect migration discovery, zero active
+V1 and Procurement/HR direct-writer references, and a 265,374-byte idempotent script for the exact last-known
+13-migration range with SHA-256 `CDBC813157F551BF192845DFBC05D74D55C6029620EA54A41A99E35769CF3D01`.
+Full-history idempotent generation from migration zero still encounters a documented inherited AspNetRoles
+data-operation/model-metadata mismatch; the exact pending cutover range generates cleanly. Independent GPT-5.6
+Sol High review is active. No migration was applied and configured `RHEMAERP` was not accessed or mutated.
