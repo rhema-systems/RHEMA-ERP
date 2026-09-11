@@ -54,8 +54,15 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         (await fixture.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().BeNull();
 
         fixture.UseChecker();
+        const string checkerReason = "Independent Sales checker approval";
         await fixture.Producer.ApprovePreparedAsync(pending.Id,
-            new DecideProducerAccountingIntentDto { Reason = "Independent Sales checker approval" });
+            new DecideProducerAccountingIntentDto { Reason = checkerReason });
+        fixture.Db.ChangeTracker.Clear();
+        var approved = await fixture.Db.AccountingEvents.SingleAsync(x => x.Id == pending.Id);
+        approved.ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Approved);
+        approved.ProducerDecidedByUserId.Should().Be(fixture.CheckerId);
+        approved.ProducerDecisionReason.Should().Be(checkerReason);
+        approved.ProducerDecidedAtUtc.Should().NotBeNull();
         fixture.UseMaker();
 
         await using var callerTransaction = await fixture.Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -79,8 +86,14 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         durable.Postings.Should().ContainSingle(x => x.FinancePostingEventId.HasValue && x.JournalEntryId.HasValue);
         durable.ProducerReceipt.Should().NotBeNull();
         durable.ProducerReceipt!.AccountingEventId.Should().Be(durable.Id);
+        durable.ProducerReceipt.ParticipantCode.Should().Be("SALES.CREDIT_NOTE.V1");
+        durable.ProducerReceipt.OwnerEntityType.Should().Be("SALES_CREDIT_NOTE");
         durable.ProducerReceipt.OwnerEntityId.Should().Be(fixture.CreditNote.Id);
+        durable.ProducerReceipt.OwnerAction.Should().Be("POST");
+        durable.ProducerReceipt.EffectFingerprint.Should().NotBeNullOrWhiteSpace();
         durable.ProducerReceipt.RequestFingerprint.Should().Be(durable.RequestFingerprint);
+        durable.ProducerReceipt.RecordedByUserId.Should().Be(fixture.MakerId);
+        durable.ProducerReceipt.RecordedAtUtc.Should().BeAfter(DateTime.UnixEpoch);
         (await fixture.Db.CreditNotes.SingleAsync()).JournalEntryId.Should().Be(posted.JournalEntryId);
         var finance = await fixture.Db.FinancePostingEvents.SingleAsync(x => x.SourceDocumentId == fixture.CreditNote.Id);
         finance.JournalEntryId.Should().Be(posted.JournalEntryId);
@@ -222,6 +235,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         public FaultingAudit Audit { get; }
         public SqlCapture Sql { get; }
         public StateCapture State { get; }
+        public Guid MakerId => _maker;
+        public Guid CheckerId => _checker;
 
         private Fixture(SqliteConnection connection, ApplicationDbContext db, CreditNote creditNote,
             ReturnOrderService service, FinanceProducerIntentService producer, FaultingAudit audit, SqlCapture sql, StateCapture state,
