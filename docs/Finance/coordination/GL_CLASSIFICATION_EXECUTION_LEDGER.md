@@ -1357,6 +1357,14 @@ checker/reason/time, complete C12 receipt/actor/time and C10 journal linkage. Fu
 separate actor/owner contexts, C13 reversal and guarded SQL lock evidence remain in progress. No configured database,
 production schema, migration or remote state was touched.
 
+Sol High approved final Sales governance checkpoint `a7909366` with no P1/P2 after the additive legacy Account
+and C2 AccountBalance snapshot correction; the isolated suite passes 28/28. The full ordered governance series was
+integrated into the active Sales branch atop relational snapshot commit `5d221f96`, producing tracked HEAD
+`fd255dd5` with no conflict. The relational snapshot proves whole-state C15 retry is byte-for-byte read-only and
+keeps 5/5 green, while failure/closed/loser full deltas, independent actor/owner contexts, C13 reversal and guarded
+SQL lock evidence remain in progress. Generated diagnostics remain untracked and excluded. No configured database,
+production schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
