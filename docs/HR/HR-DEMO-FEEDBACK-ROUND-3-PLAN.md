@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANE Q BUILT 2026-09-11 (32 ×2, `hr-jobarch/run-q.mjs`; R5 70, R7 42 after). Eighteen slices remain, P1 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2, `hr-jobarch/run-q.mjs`) and P1 (17 ×2, `hr-employee-docs/run-p1.mjs`; D2 121, lane A 88 after) BUILT 2026-09-11. Seventeen slices remain; H (round 2) next, then S.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -154,7 +154,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | Order | Lane | Migration | Harness | Why here |
 |---|---|---|---|---|
 | 1 | **Q** — requisition detail fixes + the screening card move · ✅ **DONE 2026-09-11 · 32 ×2** | none | `hr-jobarch/run-q.mjs` | demo-visible bugs, half a day |
-| 2 | **P1** — modal subject labels, the announcement topic | none | `hr-employee-docs/run-p1.mjs` (announcement half); the modal half is a screen walk | quick, demo-visible |
+| 2 | **P1** — modal subject labels, the announcement topic · ✅ **DONE 2026-09-11 · 17 ×2** | none | `hr-employee-docs/run-p1.mjs` (announcement half); the modal half is a screen walk | quick, demo-visible |
 | 3 | **H** (round 2) — a movement writes the placement | none | `hr-movements/run-h.mjs` | S's "already-approved writers" rule needs it; owed before the next demo regardless |
 | 4 | **S** — the salary change request | `AddEmployeeSalaryChangeRequest` (+ `CompanyHrPolicySettings.SalaryChangeRequiresApproval`) | `hr-payroll-membership/run-s.mjs` | the PDF's first bullet |
 | 5 | **J1** — prefill from the position, optional text, clone to another position, `CertificationId` | none | `hr-jobarch/run-j1.mjs` | |
@@ -194,6 +194,22 @@ Deviations: the queue is a `StaffRequisitionSummaryDto` and does not carry the d
 added (the list screen has no such column); the location keeps no default (D-20's "from the
 organisation unit" is moot: `OrganizationUnit` carries no location). Harness lesson: requisition
 DELETE is `HR.Recruitment.Admin`; an HR actor's cleanup 403s — delete as admin.
+
+**Lane P1 log (2026-09-11).** *Announcements:* `HrAnnouncementService.PublishAsync` now raises
+`HrAnnouncement.Published.Internal` through `IAppEventBus` after the commit, for the users linked to
+the employees the audience rules resolve (chunked lookup through `UserManager`, the same reach the
+publish already counted). The topic is seeded on first publish — in-app on, email and SMS off, one
+`UsersFromData` recipient rule allowing every channel — so an administrator's switch on the topic is
+all that is needed to reach staff who never open the portal. Best-effort: a dispatch failure is
+logged, never a failed publish. *Modal headers:* `EmployeeProfileContext` provided by the profile
+page; `ResourceCollectionTab` gained optional `subjectLabel` + `itemLabel(item)` (title "Edit
+dependent — Kofi Mensah", description "On Ama Mensah's profile", remove confirmation names both);
+`EmployeeSubResourceTab` reads the context; twelve tabs supply row labels. The ~30 non-employee
+callers are untouched. Type-check: baseline 33 only.
+
+Harness lessons: the admin login is not employee-linked, so archive/publish (attributed actions)
+must run as the HR actor; a harness announcement targets a freshly minted POSITION, never
+`AllEmployees` (that would notify the whole demo tenant). The modal half is a screen walk.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

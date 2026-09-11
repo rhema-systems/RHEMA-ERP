@@ -125,6 +125,7 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
       employeeId={employeeId}
       title="contracts"
       singular="contract"
+      itemLabel={(c) => c.contractNumber}
       queryKey="contracts"
       getId={(c) => c.id}
       list={employeeService.getContracts.bind(employeeService)}

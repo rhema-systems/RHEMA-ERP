@@ -128,6 +128,19 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
   emptyDescription?: string;
   /** Sentence under the dialog title, e.g. "Add a sub-type to this leave type." */
   dialogHint?: string;
+  /**
+   * Whose record this collection belongs to, e.g. the employee's full name (round 3, lane P1 —
+   * the demo asked for the employee's name in every sub-detail dialog). Shown in the dialog
+   * description ("On Ama Mensah's profile") and in the remove confirmation. Optional: ~30 screens
+   * use this tab for lookups that belong to nobody.
+   */
+  subjectLabel?: string | null;
+  /**
+   * A short label for one row — the dependant's own name, the qualification's title — shown in
+   * the edit title ("Edit dependent — Kofi Mensah") and the remove confirmation, so a dialog
+   * about a person says which person, and the subject line says whose profile they are on.
+   */
+  itemLabel?: (item: TItem) => string | null | undefined;
 }
 
 /**
@@ -161,6 +174,8 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   dialogClassName = 'sm:max-w-[560px]',
   emptyDescription,
   dialogHint,
+  subjectLabel,
+  itemLabel,
   prefill,
   onPrefillConsumed,
 }: ResourceCollectionTabProps<TItem, TForm>) {
@@ -171,6 +186,8 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   const [editing, setEditing] = useState<TItem | null>(null);
   const [hydrating, setHydrating] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<TItem | null>(null);
+  const editingLabel = editing && itemLabel ? itemLabel(editing) : null;
+  const pendingDeleteLabel = pendingDelete && itemLabel ? itemLabel(pendingDelete) : null;
   const [pendingAction, setPendingAction] = useState<{
     action: CollectionAction<TItem>;
     item: TItem;
@@ -405,9 +422,17 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
         <DialogContent className={dialogClassName}>
           <form onSubmit={form.handleSubmit((values) => saveMutation.mutate(values))}>
             <DialogHeader>
-              <DialogTitle>{editing ? `Edit ${singular}` : `Add ${singular}`}</DialogTitle>
+              <DialogTitle>
+                {editing
+                  ? `Edit ${singular}${editingLabel ? ` — ${editingLabel}` : ''}`
+                  : `Add ${singular}`}
+              </DialogTitle>
               <DialogDescription>
-                {editing ? `Update this ${singular}.` : (dialogHint ?? `Add a new ${singular}.`)}
+                {editing
+                  ? subjectLabel
+                    ? `On ${subjectLabel}'s profile.`
+                    : `Update this ${singular}.`
+                  : (dialogHint ?? (subjectLabel ? `Add a new ${singular} to ${subjectLabel}'s profile.` : `Add a new ${singular}.`))}
               </DialogDescription>
             </DialogHeader>
 
@@ -442,8 +467,12 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
       <ConfirmationDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
-        title={`Remove ${singular}?`}
-        description={`This will remove the ${singular}.`}
+        title={`Remove ${singular}${pendingDeleteLabel ? ` — ${pendingDeleteLabel}` : ''}?`}
+        description={
+          subjectLabel
+            ? `This will remove the ${singular} from ${subjectLabel}'s profile.`
+            : `This will remove the ${singular}.`
+        }
         confirmText="Remove"
         variant="destructive"
         isLoading={deleteMutation.isPending}

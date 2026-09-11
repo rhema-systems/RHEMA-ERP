@@ -98,6 +98,7 @@ export function BankDetailsTab({ employeeId }: { employeeId: string }) {
       employeeId={employeeId}
       title="bank accounts"
       singular="bank account"
+      itemLabel={(b) => b.bankName}
       queryKey="bank-details"
       emptyDescription="Where the employee's net pay is sent."
       getId={(b) => b.id}

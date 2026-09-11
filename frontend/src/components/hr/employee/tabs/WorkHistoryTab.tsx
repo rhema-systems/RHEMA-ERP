@@ -91,6 +91,7 @@ export function WorkHistoryTab({ employeeId }: { employeeId: string }) {
       employeeId={employeeId}
       title="previous roles"
       singular="previous role"
+      itemLabel={(w) => w.companyName}
       queryKey="work-histories"
       emptyDescription="Record employment held before joining."
       getId={(w) => w.id}

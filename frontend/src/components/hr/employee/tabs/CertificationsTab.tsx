@@ -117,6 +117,7 @@ export function CertificationsTab({ employeeId }: { employeeId: string }) {
         employeeId={employeeId}
         title="certifications"
         singular="certification"
+        itemLabel={(c) => c.certificationName}
         queryKey="certifications"
         getId={(c) => c.id}
         list={(id) => certificationService.getEmployeeCertifications(id)}

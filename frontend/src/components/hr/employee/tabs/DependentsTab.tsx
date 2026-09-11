@@ -103,6 +103,7 @@ export function DependentsTab({ employeeId }: { employeeId: string }) {
         employeeId={employeeId}
         title="dependents"
         singular="dependent"
+        itemLabel={(d) => [d.firstName, d.middleName, d.lastName].filter(Boolean).join(' ')}
         queryKey="dependents"
         getId={(d) => d.id}
         list={employeeService.getDependents.bind(employeeService)}

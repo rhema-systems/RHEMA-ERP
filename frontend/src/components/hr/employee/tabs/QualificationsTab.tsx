@@ -77,6 +77,7 @@ export function QualificationsTab({ employeeId }: { employeeId: string }) {
       employeeId={employeeId}
       title="qualifications"
       singular="qualification"
+      itemLabel={(q) => q.qualificationName || q.customQualificationName}
       queryKey="qualifications"
       getId={(q) => q.id}
       list={employeeService.getQualifications.bind(employeeService)}

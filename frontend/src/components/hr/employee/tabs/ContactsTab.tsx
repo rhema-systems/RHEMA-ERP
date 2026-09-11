@@ -59,6 +59,7 @@ export function ContactsTab({ employeeId }: { employeeId: string }) {
       employeeId={employeeId}
       title="addresses"
       singular="address"
+      itemLabel={(c) => c.contactType}
       queryKey="contacts"
       getId={(c) => c.id}
       list={employeeService.getContacts.bind(employeeService)}

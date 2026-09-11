@@ -86,6 +86,7 @@ export function EmergencyContactsTab({ employeeId }: { employeeId: string }) {
       employeeId={employeeId}
       title="emergency contacts"
       singular="emergency contact"
+      itemLabel={(c) => [c.firstName, c.middleName, c.lastName].filter(Boolean).join(' ')}
       queryKey="emergency-contacts"
       getId={(c) => c.id}
       list={employeeService.getEmergencyContacts.bind(employeeService)}

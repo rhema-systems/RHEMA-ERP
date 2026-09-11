@@ -110,6 +110,7 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
       onPrefillConsumed={() => setPrefill(null)}
       title="skills"
       singular="skill"
+      itemLabel={(s) => s.skillName}
       queryKey="skills"
       getId={(s) => s.id}
       list={employeeService.getEmployeeSkills.bind(employeeService)}

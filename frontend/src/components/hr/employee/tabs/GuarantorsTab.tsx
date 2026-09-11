@@ -217,6 +217,7 @@ export function GuarantorsTab({ employeeId }: { employeeId: string }) {
         employeeId={employeeId}
         title="guarantors"
         singular="guarantor"
+        itemLabel={(g) => [g.title, g.firstName, g.middleName, g.lastName].filter(Boolean).join(' ')}
         queryKey="guarantors"
         getId={(g) => g.id}
         list={employeeService.getGuarantors.bind(employeeService)}

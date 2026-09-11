@@ -38,6 +38,7 @@ import { RelieversTab } from '@/components/hr/employee/tabs/RelieversTab';
 import { TeamsTab } from '@/components/hr/employee/tabs/TeamsTab';
 import { GuarantorsTab } from '@/components/hr/employee/tabs/GuarantorsTab';
 import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
+import { EmployeeProfileProvider } from '@/components/hr/employee/EmployeeProfileContext';
 import { offPayrollReasonLabel, PAYROLL_ISSUE_LABELS, PROBATION_SOURCE_LABEL } from '@/types/hr/employee';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
@@ -207,6 +208,7 @@ export default function EmployeeDetailPage() {
         subjectLabel={e.fullName}
       />
 
+      <EmployeeProfileProvider value={{ id: e.id, fullName: e.fullName, employeeNumber: e.employeeNumber }}>
       <Tabs defaultValue="overview">
         {/* 15 tabs will not fit a fixed row — let the strip scroll on narrow screens. */}
         <div className="overflow-x-auto pb-1">
@@ -417,6 +419,7 @@ export default function EmployeeDetailPage() {
           <BankDetailsTab employeeId={id} />
         </TabsContent>
       </Tabs>
+      </EmployeeProfileProvider>
 
       <ConfirmationDialog
         open={action !== null}

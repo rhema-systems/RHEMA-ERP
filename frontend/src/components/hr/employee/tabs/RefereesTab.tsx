@@ -94,6 +94,7 @@ export function RefereesTab({ employeeId }: { employeeId: string }) {
         employeeId={employeeId}
         title="referees"
         singular="referee"
+        itemLabel={(r) => r.fullName}
         queryKey="referees"
         getId={(r) => r.id}
         list={employeeService.getReferees.bind(employeeService)}
