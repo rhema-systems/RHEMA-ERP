@@ -12,7 +12,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 |---|---|
 | Phase | Stage B4 — HR/Payroll Finance-account provisioning cutover |
 | Status | `IN_PROGRESS` |
-| Implementing task | Independent reviewer `/root/stage_a1_review` |
+| Implementing task | Coordinator subagent `/root/hr_payroll_cutover` |
 | Exact base | `fe8fbf5ceb162f2416ec610f0b560550692df135` |
 | Branch | `codex/hr-payroll-finance-account-provisioning-b4` |
 | Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-hr-payroll-finance-account-provisioning-b4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Sales approved and integrated; HR/Payroll candidate `f45f6a35` under independent review |
+| Review status | HR/Payroll candidate `f45f6a35` requires bounded test-evidence correction |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -2076,3 +2076,12 @@ scans pass. The implementer's focused run did not complete because the large API
 without diagnostics, so no test-pass claim is recorded. Independent GPT-5.6 Sol High review is active with a
 single long-watchdog rebuild, focused/widened execution and EF/no-connect gates. No configured database, migration,
 Finance schema/contract, remote state or unrelated work was touched.
+
+Independent GPT-5.6 Sol High review returned `CHANGES_REQUIRED` at exact clean HR/Payroll candidate
+`f45f6a35`. Production scope and ownership boundaries are sound, EF no-pending-model passed and no-connect
+migration discovery remained exactly 456, but the new test file does not compile because `TenantStatus` lacks
+its `ErpSystem.Shared` namespace. The evidence also uses aggregate segment/mapping counts rather than exact
+per-account canonical number, COMPANY/NATURAL values, enabled same-tenant classification-linked active/posting
+type compatibility, and complete zero-Finance-mutation denial state. A bounded Terra Medium test-evidence
+correction is active atop the same candidate; production behavior must not be broadened or weakened. No database
+was accessed or mutated.
