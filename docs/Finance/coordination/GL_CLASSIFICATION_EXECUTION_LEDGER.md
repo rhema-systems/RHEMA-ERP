@@ -1349,6 +1349,14 @@ is active before integration. The relational branch has uncommitted exact C11/C1
 build, then will complete C10/C15/full-row evidence. No configured database, production schema, migration or remote
 state was touched.
 
+Sol High narrowed governance `f7958434` to one remaining P1: its corrected snapshot captures C2 AccountBalance
+but no longer captures the still-active legacy/default-book Account.Balance, so both sets must be present. Terra is
+applying that final additive snapshot correction; all other governance findings are closed and the isolated suite
+passes 28/28. Relational authority correction `072fddb7` is clean and keeps 5/5 green while asserting exact C11
+checker/reason/time, complete C12 receipt/actor/time and C10 journal linkage. Full mapped-row zero/all snapshots,
+separate actor/owner contexts, C13 reversal and guarded SQL lock evidence remain in progress. No configured database,
+production schema, migration or remote state was touched.
+
 Sales added clean checked-lock commit `51eddbf5`, using the existing transaction-owned
 `IUnitOfWork.AcquireTransactionLockAsync` before fresh Serializable reload/revalidation. The real SQLite owner
 fixture exposed a shared infrastructure defect: `UnitOfWork` emits SQL Server `sp_getapplock` for every relational
