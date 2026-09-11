@@ -12,7 +12,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 |---|---|
 | Phase | Stage B4 — HR/Payroll Finance-account provisioning cutover |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/hr_payroll_cutover` |
+| Implementing task | Independent reviewer `/root/stage_a1_review` |
 | Exact base | `fe8fbf5ceb162f2416ec610f0b560550692df135` |
 | Branch | `codex/hr-payroll-finance-account-provisioning-b4` |
 | Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-hr-payroll-finance-account-provisioning-b4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Sales approved and integrated; fresh exact-base HR/Payroll implementation active |
+| Review status | Sales approved and integrated; HR/Payroll candidate `f45f6a35` under independent review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -2064,3 +2064,15 @@ segments, enabled classified mappings, tenant isolation and absence of display-t
 all payroll posting economics and public callers. HR/Payroll must not select books, derive C5, invoke C6-C13,
 alter Finance schema/migrations or access configured `RHEMAERP`. Independent GPT-5.6 Sol High review and clean
 local integration remain required before final no-active-V1 and deployment-readiness gates.
+
+The Stage B4 implementer produced clean direct-child candidate
+`f45f6a35b870dd8278c1491a4db8ee14a8fe7a1c`. `PayrollService` now delegates its five stable,
+tenant-scoped account intents to `IFinanceAccountProvisioningService`; direct Finance `Account` and
+display-caption category writes are removed while existing mapping codes, posting economics and public callers
+are preserved. New focused tests cover repeated stable intents, canonical identities/segments, enabled classified
+mappings, wrong-type and cross-tenant denial, and source-boundary scans. The candidate changes only PayrollService,
+the API-test project include and its focused test file; `git diff --check`, direct-writer scans and book/V1 scope
+scans pass. The implementer's focused run did not complete because the large API test assembly compilation stalled
+without diagnostics, so no test-pass claim is recorded. Independent GPT-5.6 Sol High review is active with a
+single long-watchdog rebuild, focused/widened execution and EF/no-connect gates. No configured database, migration,
+Finance schema/contract, remote state or unrelated work was touched.
