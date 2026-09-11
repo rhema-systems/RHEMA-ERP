@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -33,11 +34,11 @@ public sealed class PayrollFinanceAccountProvisioningTests
             db, currentUser.Object, NullLogger<FinanceAccountProvisioningService>.Instance);
         var intents = new[]
         {
-            ("1010", "000-1010-0000", AccountType.Asset, "CASH"),
-            ("1120", "000-1120-0000", AccountType.Asset, "RECEIVABLE_CONTROL"),
-            ("2120", "000-2120-0000", AccountType.Liability, "PAYABLE_CONTROL"),
-            ("4920", "000-4920-0000", AccountType.Revenue, "OTHER_INCOME"),
-            ("6020", "000-6020-0000", AccountType.Expense, "EXPENSE")
+            ("1010", "PAY-1010", AccountType.Asset, "CASH"),
+            ("1120", "PAY-1120", AccountType.Asset, "RECEIVABLE_CONTROL"),
+            ("2120", "PAY-2120", AccountType.Liability, "PAYABLE_CONTROL"),
+            ("4920", "PAY-4920", AccountType.Revenue, "OTHER_INCOME"),
+            ("6020", "PAY-6020", AccountType.Expense, "EXPENSE")
         };
 
         foreach (var intent in intents)
@@ -58,19 +59,48 @@ public sealed class PayrollFinanceAccountProvisioningTests
 
         var accounts = await db.Accounts.Include(item => item.SegmentValues).ToListAsync();
         accounts.Should().HaveCount(5);
-        accounts.Should().OnlyContain(item => item.IsSegmented && item.SegmentValues.Count(value => !value.IsDeleted) == 2);
-        (await db.AccountAccountingBooks.CountAsync()).Should().Be(15);
+        foreach (var intent in intents)
+        {
+            var account = accounts.Single(item => item.AccountCode == intent.Item1);
+            account.AccountNumber.Should().Be(intent.Item2);
+            account.IsSegmented.Should().BeTrue();
+            account.SegmentValues.Where(value => !value.IsDeleted)
+                .Select(value => (value.SegmentPosition, value.SegmentValue))
+                .Should().BeEquivalentTo([(1, "PAY"), (2, intent.Item1)]);
+        }
+
+        var mappings = await db.AccountAccountingBooks
+            .Include(item => item.Account)
+            .Include(item => item.AccountingBook)
+            .Include(item => item.AccountClassification)
+            .ToListAsync();
+        mappings.Should().HaveCount(15);
+        mappings.Should().OnlyContain(item => item.IsEnabled
+            && item.TenantId == tenantId
+            && item.Account.TenantId == tenantId
+            && item.AccountingBook.TenantId == tenantId
+            && item.AccountClassification != null
+            && item.AccountClassification.TenantId == tenantId
+            && item.AccountClassification.AccountingBookId == item.AccountingBookId
+            && item.AccountClassification.Status == AccountClassificationStatus.Active
+            && item.AccountClassification.IsPostingClassification
+            && item.AccountClassification.CoreAccountType == item.Account.AccountType);
+
+        var beforeWrongType = await RelevantFinanceStateAsync(db, tenantId);
         await service.Invoking(item => item.ProvisionAsync(new ProvisionFinanceAccountDto
         {
             TenantId = tenantId, AccountCode = "2120", AccountName = "Wrong type",
             CoreAccountType = AccountType.Asset, CurrencyCode = "GHS"
         })).Should().ThrowAsync<InvalidOperationException>().WithMessage("*different core account type*");
+        (await RelevantFinanceStateAsync(db, tenantId)).Should().Be(beforeWrongType);
+
+        var beforeCrossTenant = await RelevantFinanceStateAsync(db, tenantId);
         await service.Invoking(item => item.ProvisionAsync(new ProvisionFinanceAccountDto
         {
             TenantId = Guid.NewGuid(), AccountCode = "1010", AccountName = "Wrong tenant",
             CoreAccountType = AccountType.Asset, CurrencyCode = "GHS"
         })).Should().ThrowAsync<InvalidOperationException>().WithMessage("*tenant context is invalid*");
-        (await db.Accounts.CountAsync()).Should().Be(5);
+        (await RelevantFinanceStateAsync(db, tenantId)).Should().Be(beforeCrossTenant);
     }
 
     [Fact]
@@ -117,5 +147,20 @@ public sealed class PayrollFinanceAccountProvisioningTests
         source.Should().NotContain("_context.Accounts.Add(");
         source.Should().NotContain("AccountCategory = seed.");
         source.Should().NotContain("AccountSubCategory = seed.");
+    }
+
+    private static async Task<string> RelevantFinanceStateAsync(ApplicationDbContext db, Guid tenantId)
+    {
+        var accounts = await db.Accounts.AsNoTracking().Where(item => item.TenantId == tenantId)
+            .OrderBy(item => item.Id).Select(item => $"{item.Id}|{item.AccountCode}|{item.AccountNumber}|{item.AccountType}|{item.IsDeleted}").ToListAsync();
+        var segments = await db.AccountSegmentValues.AsNoTracking().Where(item => item.TenantId == tenantId)
+            .OrderBy(item => item.Id).Select(item => $"{item.Id}|{item.AccountId}|{item.SegmentStructureId}|{item.SegmentPosition}|{item.SegmentValue}|{item.SegmentLookupValueId}|{item.IsDeleted}").ToListAsync();
+        var mappings = await db.AccountAccountingBooks.AsNoTracking().Where(item => item.TenantId == tenantId)
+            .OrderBy(item => item.Id).Select(item => $"{item.Id}|{item.AccountId}|{item.AccountingBookId}|{item.AccountClassificationId}|{item.IsEnabled}|{item.IsDeleted}").ToListAsync();
+        var classifications = await db.AccountClassifications.AsNoTracking().Where(item => item.TenantId == tenantId)
+            .OrderBy(item => item.Id).Select(item => $"{item.Id}|{item.AccountingBookId}|{item.Code}|{item.CoreAccountType}|{item.Status}|{item.IsPostingClassification}|{item.IsDeleted}").ToListAsync();
+        var audits = await db.AuditLogs.AsNoTracking().Where(item => item.TenantId == tenantId)
+            .OrderBy(item => item.Id).Select(item => $"{item.Id}|{item.Action}|{item.Resource}|{item.ResourceId}|{item.OldValues}|{item.NewValues}").ToListAsync();
+        return string.Join("\n", accounts.Concat(segments).Concat(mappings).Concat(classifications).Concat(audits));
     }
 }
