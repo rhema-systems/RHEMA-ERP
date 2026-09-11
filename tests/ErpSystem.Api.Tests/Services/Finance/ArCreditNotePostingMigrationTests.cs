@@ -52,6 +52,7 @@ public sealed class ArCreditNotePostingMigrationTests
             .ReturnsAsync(new AccountingEventDto { Id = eventId, Status = AccountingEventStatuses.PendingApproval,
                 ProducerDecisionStatus = ProducerIntentDecisionStatuses.Pending, RequestFingerprint = new string('A', 64) });
         var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object, reversal.Object);
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var result = await service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
@@ -65,6 +66,11 @@ public sealed class ArCreditNotePostingMigrationTests
         captured.PostingRequest.Lines.Sum(line => line.CreditAmount).Should().Be(120m);
         result.JournalEntryId.Should().BeNull();
         execution.VerifyNoOtherCalls();
+        producer.Verify(x => x.ApprovePreparedAsync(It.IsAny<Guid>(), It.IsAny<DecideProducerAccountingIntentDto>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        producer.Verify(x => x.ApproveAsync(It.IsAny<Guid>(), It.IsAny<ProducerAccountingIntentDto>(),
+            It.IsAny<DecideProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        await AssertPostingSideEffectsUnchangedAsync(db, before);
     }
 
     [Fact]
@@ -183,6 +189,7 @@ public sealed class ArCreditNotePostingMigrationTests
 
         var first = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
         var replay = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
+        var before = await CapturePostingSideEffectsAsync(db);
         var conflict = () => service.ReverseCreditNoteAsync(fixture.CreditNote.Id,
             new ReverseCreditNoteDto { Reason = request.Reason, ReversalDate = request.ReversalDate!.Value.AddDays(1) });
 
@@ -191,6 +198,7 @@ public sealed class ArCreditNotePostingMigrationTests
             .WithMessage("AR credit note reversal retry conflicts with the immutable reversal evidence.");
         execution.Verify(x => x.ExecuteInAmbientTransactionAsync(reversalEventId,
             It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id, FinanceAuditEvents.ArCreditNoteReversalFailed);
     }
 
     [Fact]
@@ -296,7 +304,7 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote")).Should().Be(0);
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArCreditNotePostingFailed)).Should().Be(1);
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id);
     }
 
     [Fact]
@@ -316,7 +324,7 @@ public sealed class ArCreditNotePostingMigrationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR credit note cannot post against unposted invoice '{fixture.Invoice.InvoiceNumber}'.");
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id);
     }
 
     [Fact]
@@ -336,7 +344,7 @@ public sealed class ArCreditNotePostingMigrationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"AR credit note would exceed eligible credit amount for invoice '{fixture.Invoice.InvoiceNumber}'.");
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id);
     }
 
     [Fact]
@@ -367,7 +375,7 @@ public sealed class ArCreditNotePostingMigrationTests
         (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentType == "SalesCreditNote"))
             .Should().Be(1);
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, secondCreditNote.Id);
     }
 
     [Fact]
@@ -524,7 +532,7 @@ public sealed class ArCreditNotePostingMigrationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note customer was not found for this tenant.");
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id);
     }
 
     [Fact]
@@ -549,7 +557,7 @@ public sealed class ArCreditNotePostingMigrationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note posting AR control account was not found for this tenant.");
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id);
     }
 
     [Fact]
@@ -574,7 +582,7 @@ public sealed class ArCreditNotePostingMigrationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note posting sales returns/allowance account was not found for this tenant.");
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id);
     }
 
     [Fact]
@@ -596,7 +604,7 @@ public sealed class ArCreditNotePostingMigrationTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("AR credit note posting sales returns/allowance account account '5200' does not allow direct posting.");
         governed.VerifyNoPrepareOrExecution();
-        await AssertPostingSideEffectsUnchangedAsync(db, before);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id);
     }
 
     [Fact]
@@ -621,6 +629,7 @@ public sealed class ArCreditNotePostingMigrationTests
                 It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("governed execution boundary unavailable"));
         var (service, _) = CreateReturnOrderService(db, tenantId, producer.Object, execution.Object);
+        var before = await CapturePostingSideEffectsAsync(db);
 
         var act = () => service.PostCreditNoteAsync(fixture.CreditNote.Id);
 
@@ -628,6 +637,7 @@ public sealed class ArCreditNotePostingMigrationTests
         fixture.CreditNote.JournalEntryId.Should().BeNull();
         execution.Verify(x => x.ExecuteInAmbientTransactionAsync(eventId, It.IsAny<ProducerAccountingIntentDto>(),
             It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        await AssertPostingSideEffectsUnchangedAsync(db, before);
     }
 
     [Fact]
@@ -758,6 +768,7 @@ public sealed class ArCreditNotePostingMigrationTests
 
         var first = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Correction" });
         var second = await service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Correction" });
+        var before = await CapturePostingSideEffectsAsync(db);
         var conflict = () => service.ReverseCreditNoteAsync(fixture.CreditNote.Id, new ReverseCreditNoteDto { Reason = "Repeated request" });
 
         second.ReversalJournalEntryId.Should().Be(first.ReversalJournalEntryId);
@@ -766,6 +777,7 @@ public sealed class ArCreditNotePostingMigrationTests
             .WithMessage("AR credit note reversal retry conflicts with the immutable reversal evidence.");
         governed.Execution.Verify(x => x.ExecuteInAmbientTransactionAsync(reversalEventId,
             It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        await AssertPostingSideEffectsUnchangedAsync(db, before, tenantId, fixture.CreditNote.Id, FinanceAuditEvents.ArCreditNoteReversalFailed);
     }
 
     [Fact]
@@ -906,9 +918,12 @@ public sealed class ArCreditNotePostingMigrationTests
         await CaptureMappedScalarsAsync<FinancePostingEvent>(db),
         await CaptureMappedScalarsAsync<JournalEntry>(db),
         await CaptureMappedScalarsAsync<AccountTransaction>(db),
-        await CaptureMappedScalarsAsync<Account>(db),
+        await CaptureMappedScalarsAsync<AccountBalance>(db),
         await CaptureMappedScalarsAsync<AccountCurrencyExposure>(db),
-        await CaptureMappedScalarsAsync<AuditLog>(db));
+        await CaptureMappedScalarsAsync<AuditLog>(db),
+        await CaptureMappedScalarsAsync<CreditNote>(db),
+        await CaptureMappedScalarsAsync<CreditNoteLine>(db),
+        await CaptureMappedScalarsAsync<Invoice>(db));
 
     private static async Task<string[]> CaptureMappedScalarsAsync<TEntity>(ApplicationDbContext db)
         where TEntity : class
@@ -936,22 +951,35 @@ public sealed class ArCreditNotePostingMigrationTests
         DateTime date => date.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture),
         DateTimeOffset dateTimeOffset => dateTimeOffset.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture),
         decimal number => number.ToString("G29", System.Globalization.CultureInfo.InvariantCulture),
+        byte[] bytes => Convert.ToHexString(bytes),
         IFormattable formattable => formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty
     };
 
     private static async Task AssertPostingSideEffectsUnchangedAsync(
         ApplicationDbContext db,
-        PostingSideEffectSnapshot before)
+        PostingSideEffectSnapshot before,
+        Guid? expectedFailureAuditTenantId = null,
+        Guid? expectedFailureAuditCreditNoteId = null,
+        string expectedFailureAuditAction = FinanceAuditEvents.ArCreditNotePostingFailed)
     {
         var after = await CapturePostingSideEffectsAsync(db);
         (after with { AuditLogs = before.AuditLogs }).Should().BeEquivalentTo(before,
             "a denied Sales credit-note request must not create Finance authority, postings, journals, balances, or exposure evidence");
         var appendedAudits = after.AuditLogs.Except(before.AuditLogs).ToArray();
         after.AuditLogs.Should().HaveCount(before.AuditLogs.Length + appendedAudits.Length);
-        if (appendedAudits.Length != 0)
-            appendedAudits.Should().OnlyContain(audit => audit.Contains("Action=Finance.ARCreditNote.PostingFailed", StringComparison.Ordinal),
-                "the only durable denial delta is its failure audit evidence");
+        if (expectedFailureAuditCreditNoteId is null)
+        {
+            appendedAudits.Should().BeEmpty("this path has no durable posting-failure audit authority");
+            return;
+        }
+
+        expectedFailureAuditTenantId.Should().NotBeNull();
+        appendedAudits.Should().ContainSingle("a rejected posting writes exactly one durable failure audit");
+        appendedAudits[0].Should().Contain($"Action={expectedFailureAuditAction}");
+        appendedAudits[0].Should().Contain($"TenantId={expectedFailureAuditTenantId.Value:N}");
+        appendedAudits[0].Should().Contain("Resource=Finance.ARCreditNote");
+        appendedAudits[0].Should().Contain($"ResourceId={expectedFailureAuditCreditNoteId.Value:D}");
     }
 
     private static async Task AssertOnlyExpectedTamperAuthorityChangeAsync(
@@ -979,7 +1007,10 @@ public sealed class ArCreditNotePostingMigrationTests
         string[] AccountTransactions,
         string[] AccountBalances,
         string[] AccountCurrencyExposures,
-        string[] AuditLogs);
+        string[] AuditLogs,
+        string[] CreditNotes,
+        string[] CreditNoteLines,
+        string[] Invoices);
 
     private static void SeedPostedSalesCreditNoteCompatibilityLink(
         ApplicationDbContext db,
