@@ -826,7 +826,7 @@ the third time this round). Regression after it: `run-e1.mjs` 73, membership 86,
 
 ---
 
-### Lane H — A movement changes the pay but not the placement · 1 slice · **DEFERRED 2026-09-09, before the next demo**
+### Lane H — A movement changes the pay but not the placement · 1 slice · ✅ **BUILT 2026-09-11** · 33 ×2, `hr-movements/run-h.mjs` (round-3 slice 3)
 
 Found while explaining lane G's level-resolver note to the user, and it is not what that note
 said. **`StaffMovementService` never writes an `EmployeeSalaryAssignment` at all.** It resolves
@@ -867,6 +867,24 @@ Recommendation: **(1)**, with the movement's notch as the source and a refusal o
 movement names a notch that does not belong to the grade it names. Then hire-from-offer
 (lane G's remaining bullet) is routed through the same door in the same slice, and every placement
 in the system is written by one method.
+
+**Built 2026-09-11 (round 3, slice 3) — decision (1), as recommended.** `EmployeeService.ResolvePlacementLevelAsync`
+is public and on `IEmployeeService`; `StaffMovementService` calls it when a movement is RAISED (a
+notch of another grade, or a level/notch with no grade, is refused at 422 before any approval, and
+so is a grade on somebody paid a negotiated amount) and at implementation writes the placement
+through `AssignSalaryAsync` — the same door as the Salary tab, so the level resolver, E1b's
+withdrawal rule and the payroll gate all apply. Before writing, the movement's `CurrentSalary*`
+snapshot is filled from the placement in force (the form never knows it); the return from a
+temporary assignment ends the acting placement on the return date and re-places the previous grade
+the day after, or simply ends the acting placement when there was nothing before. Hire-from-offer
+now resolves its level through the same resolver (the row is still written directly — the employee
+is unsaved at that step). The movement form gained the shared `SalaryScalePicker` for the new
+placement (grade from the position, notch the user's, notch amount offered as the new salary).
+
+⚠ `hr-movements/setup.mjs` still sent `employeeNumber` and `hireDate` (the tenth folder) — every
+suite there had been failing at setup; repaired. Slices 2 and 4 read 38 each (their real totals —
+the README's "current totals" line predates several rewrites). The placement list DTO names the
+reason `reason`; the detail names it `assignmentReason`.
 
 Harness: `hr-movements/` exists. Assert the promotion end to end — placement withdrawn and
 reopened, `HrBasicPay` quoting the new notch, the reversal unwinding both rows.

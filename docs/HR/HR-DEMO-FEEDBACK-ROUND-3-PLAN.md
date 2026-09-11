@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2, `hr-jobarch/run-q.mjs`) and P1 (17 ×2, `hr-employee-docs/run-p1.mjs`; D2 121, lane A 88 after) BUILT 2026-09-11. Seventeen slices remain; H (round 2) next, then S.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2, `hr-jobarch/run-q.mjs`), P1 (17 ×2, `hr-employee-docs/run-p1.mjs`) and H (round 2's; 33 ×2, `hr-movements/run-h.mjs`; slices 2 and 4 at 38 each after) BUILT 2026-09-11. Sixteen slices remain; S next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -155,7 +155,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 |---|---|---|---|---|
 | 1 | **Q** — requisition detail fixes + the screening card move · ✅ **DONE 2026-09-11 · 32 ×2** | none | `hr-jobarch/run-q.mjs` | demo-visible bugs, half a day |
 | 2 | **P1** — modal subject labels, the announcement topic · ✅ **DONE 2026-09-11 · 17 ×2** | none | `hr-employee-docs/run-p1.mjs` (announcement half); the modal half is a screen walk | quick, demo-visible |
-| 3 | **H** (round 2) — a movement writes the placement | none | `hr-movements/run-h.mjs` | S's "already-approved writers" rule needs it; owed before the next demo regardless |
+| 3 | **H** (round 2) — a movement writes the placement · ✅ **DONE 2026-09-11 · 33 ×2** (logged in the round-2 plan, lane H) | none | `hr-movements/run-h.mjs` | S's "already-approved writers" rule needs it; owed before the next demo regardless |
 | 4 | **S** — the salary change request | `AddEmployeeSalaryChangeRequest` (+ `CompanyHrPolicySettings.SalaryChangeRequiresApproval`) | `hr-payroll-membership/run-s.mjs` | the PDF's first bullet |
 | 5 | **J1** — prefill from the position, optional text, clone to another position, `CertificationId` | none | `hr-jobarch/run-j1.mjs` | |
 | 6 | **C1** — candidate identity trio, `Language` master, certification fields, document description | `AddCandidateIdentityLanguagesAndCertification` | `hr-recruitment/run-c1.mjs` | schema before screens |

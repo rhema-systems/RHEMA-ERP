@@ -838,6 +838,19 @@ public class StaffMovementService : IStaffMovementService
                 $"{movement.MovementNumber}: returned from temporary assignment",
                 cancellationToken);
 
+        // The placement goes back too (round 3, lane H): the acting grade ends on the return date
+        // and the grade they held before — snapshotted at implementation — resumes the day after.
+        // Someone since taken off payroll or moved to a negotiated amount is left as that change
+        // left them, for the same reason the salary above is.
+        if (movement.NewSalaryGradeId.HasValue && employee.IsOnPayroll && employee.PayBasis == PayBasis.SalaryScale)
+        {
+            if (movement.CurrentSalaryGradeId is { } backGradeId)
+                await PlaceOnScaleAsync(movement, employee, backGradeId, movement.CurrentSalaryLevelId, movement.CurrentSalaryNotchId,
+                    returnDate.AddDays(1), $"{movement.MovementNumber}: returned from temporary assignment", cancellationToken);
+            else
+                await EndMovementPlacementAsync(movement, returnDate, cancellationToken);
+        }
+
         var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();
         var openStep = await careerRepo
             .GetQueryable(c => c.TenantId == movement.TenantId
@@ -1004,6 +1017,89 @@ public class StaffMovementService : IStaffMovementService
         if (employee != null && !employee.IsOnPayroll)
             throw new InvalidOperationException(
                 $"{employee.EmployeeNumber} is not on payroll, so a movement cannot set a salary or a salary grade for them. Put them on payroll first, or raise the movement without pay details.");
+
+        // Round 3, lane H. A movement that names a grade is a placement on the scale, and the two
+        // rules every placement obeys apply at raise time: not for somebody paid a negotiated
+        // amount, and the notch/level must belong to the grade. The resolver is the one the Salary
+        // tab's own placement door uses, so a movement cannot say something the tab would refuse.
+        if (movement.NewSalaryGradeId is { } gradeId)
+        {
+            if (employee != null && employee.PayBasis == PayBasis.Negotiated)
+                throw new InvalidOperationException(NegotiatedSentence(employee));
+            await _employees.ResolvePlacementLevelAsync(gradeId, movement.NewSalaryLevelId, movement.NewSalaryNotchId, cancellationToken);
+        }
+        else if (movement.NewSalaryLevelId.HasValue || movement.NewSalaryNotchId.HasValue)
+        {
+            throw new InvalidOperationException("A salary level or notch on a movement needs its grade. Choose the grade as well.");
+        }
+    }
+
+    private static string NegotiatedSentence(Employee employee) =>
+        $"{employee.EmployeeNumber} is paid a negotiated amount, so a movement cannot place them on the salary scale. Change their pay basis to the scale first, or raise the movement with a salary figure only.";
+
+    /// <summary>
+    /// The movement's CURRENT grade/level/notch snapshot is what a temporary assignment returns to.
+    /// The form rarely fills it (it reads the employee header, which has no placement), so it is
+    /// taken here, at implementation, from the placement in force on the day — before the new one
+    /// is written over it.
+    /// </summary>
+    private async Task SnapshotCurrentPlacementAsync(StaffMovement movement, CancellationToken cancellationToken)
+    {
+        if (movement.CurrentSalaryGradeId.HasValue) return;
+
+        var today = DateTime.UtcNow.Date;
+        var inForce = await _unitOfWork.Repository<EmployeeSalaryAssignment>().GetQueryable()
+            .Where(a => a.EmployeeId == movement.EmployeeId && !a.IsDeleted && a.WithdrawnAt == null
+                     && a.EffectiveDate <= today && (a.EffectiveTo == null || a.EffectiveTo >= today))
+            .OrderByDescending(a => a.EffectiveDate)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (inForce == null) return;
+
+        movement.CurrentSalaryGradeId = inForce.GradeId;
+        movement.CurrentSalaryLevelId = inForce.LevelId;
+        movement.CurrentSalaryNotchId = inForce.NotchId;
+    }
+
+    /// <summary>
+    /// Writes the placement a movement names, through the same door as the Salary tab — so it
+    /// inherits the level resolver, the withdrawal rule for a placement that has not started, and
+    /// the payroll gate. The reason carries the movement number so the return path can find it.
+    /// </summary>
+    private async Task PlaceOnScaleAsync(
+        StaffMovement movement, Employee employee, Guid gradeId, Guid? levelId, Guid? notchId,
+        DateTime effective, string reason, CancellationToken cancellationToken)
+    {
+        if (employee.PayBasis == PayBasis.Negotiated)
+            throw new InvalidOperationException(NegotiatedSentence(employee));
+
+        await _employees.AssignSalaryAsync(new CreateEmployeeSalaryAssignmentDto
+        {
+            EmployeeId = movement.EmployeeId,
+            GradeId = gradeId,
+            LevelId = levelId,
+            NotchId = notchId,
+            EffectiveDate = effective,
+            AssignmentReason = reason,
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// A temporary assignment with no outgoing placement to return to (nobody was placed before it)
+    /// simply ends the placement the movement opened, on the return date.
+    /// </summary>
+    private async Task EndMovementPlacementAsync(StaffMovement movement, DateTime returnDate, CancellationToken cancellationToken)
+    {
+        var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
+        var prefix = movement.MovementNumber + ":";
+        var open = await repo.GetQueryable()
+            .Where(a => a.EmployeeId == movement.EmployeeId && !a.IsDeleted && a.WithdrawnAt == null
+                     && a.EffectiveTo == null && a.AssignmentReason.StartsWith(prefix))
+            .ToListAsync(cancellationToken);
+        foreach (var a in open)
+        {
+            a.EffectiveTo = returnDate;
+            await repo.UpdateAsync(a);
+        }
     }
 
     private async Task ApplyMovementToEmployeeAsync(
@@ -1053,6 +1149,21 @@ public class StaffMovementService : IStaffMovementService
             newEmploymentType: null,
             $"{movement.MovementNumber}: {movement.Reason}",
             cancellationToken);
+
+        // ── The grade placement (round 3, lane H — owed since round 2) ────────
+        //
+        // Until now a promotion moved the position, the unit, the manager, Employee.Salary and the
+        // contract, and left EmployeeSalaryAssignment saying the OLD grade — whose notch HrBasicPay
+        // quotes first, so the person read as promoted everywhere except in what they were paid.
+        // The movement's grade/level/notch landed only in the career-path row, which no pay
+        // resolver reads. The movement is approved by the time it is implemented, so it writes the
+        // placement itself rather than raising a salary change request (round-3 D-1).
+        if (movement.NewSalaryGradeId is { } newGradeId)
+        {
+            await SnapshotCurrentPlacementAsync(movement, cancellationToken);
+            await PlaceOnScaleAsync(movement, employee, newGradeId, movement.NewSalaryLevelId, movement.NewSalaryNotchId,
+                effective, $"{movement.MovementNumber}: {movement.MovementType}", cancellationToken);
+        }
 
         // ── Career path: close the open step, open the new one ────────────────
         var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();

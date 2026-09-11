@@ -3608,13 +3608,15 @@ public class EmployeeService : IEmployeeService
     /// implicit level is filled in, because the caller cannot see it and should not have to; in
     /// three-tier a supplied level is checked against the grade and an omitted one stays null — a
     /// placement on the grade alone is allowed, as it always was.</para>
-    /// <para>⚠ The hire-from-offer and staff-movement paths write placements directly and are NOT
-    /// routed through this. A notch-bearing placement from either still resolves its pay through the
-    /// notch (HrBasicPay reads the notch before the level), so nothing is mis-paid; the level column
-    /// is simply left as the caller set it. Recorded, not hidden.</para>
+    /// <para>Round 3, lane H: public, and on <see cref="IEmployeeService"/>. The staff-movement
+    /// service calls it when a movement is RAISED (so a notch of another grade is refused before
+    /// three approvals, not after) and then writes the placement through
+    /// <see cref="AssignSalaryAsync"/> at implementation; the hire-from-offer path calls it to fill
+    /// the level it used to leave as the offer set it. Every placement in the system now resolves
+    /// its level here.</para>
     /// </remarks>
-    private async Task<Guid?> ResolvePlacementLevelAsync(
-        Guid gradeId, Guid? levelId, Guid? notchId, CancellationToken cancellationToken)
+    public async Task<Guid?> ResolvePlacementLevelAsync(
+        Guid gradeId, Guid? levelId, Guid? notchId, CancellationToken cancellationToken = default)
     {
         if (notchId is { } nId)
         {

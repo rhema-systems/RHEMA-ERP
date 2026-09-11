@@ -1189,6 +1189,7 @@ public class JobHireService : IJobHireService
     // Enrols the new employee in payroll once the hire has committed — the same create-only bridge
     // the employee master uses, so a hire and a direct create arrive in payroll the same way.
     private readonly IPayrollMembershipService _payrollMembership;
+    private readonly IEmployeeService _employees;
 
     public JobHireService(
         IJobHireRecordRepository hireRepository,
@@ -1207,10 +1208,12 @@ public class JobHireService : IJobHireService
         IUnitOfWork unitOfWork,
         IStaffNumberService staffNumbers,
         IPayrollMembershipService payrollMembership,
+        IEmployeeService employees,
         ILogger<JobHireService> logger)
     {
         _staffNumbers             = staffNumbers;
         _payrollMembership        = payrollMembership;
+        _employees                = employees;
         _hireRepository           = hireRepository;
         _offerRepository          = offerRepository;
         _pipelineService          = pipelineService;
@@ -1593,13 +1596,19 @@ public class JobHireService : IJobHireService
             var gradeId = offer.SalaryLevel?.SalaryGradeId ?? offer.Position?.SalaryGradeId;
             if (gradeId.HasValue && employee.IsOnPayroll)
             {
+                // Round 3, lane H: the level resolves the way every other placement's does (a
+                // two-tier structure's implicit level is filled; a notch of another grade is
+                // refused). The row is still written here rather than through AssignSalaryAsync
+                // because the employee is not yet saved at this point of the hire transaction.
+                var resolvedLevelId = await _employees.ResolvePlacementLevelAsync(
+                    gradeId.Value, offer.SalaryLevelId, offer.SalaryNotchId, cancellationToken);
                 var salaryAssignment = new EmployeeSalaryAssignment
                 {
                     TenantId         = entity.TenantId,
                     CreatedById      = confirmedByUserId,
                     EmployeeId       = employee.Id,
                     GradeId          = gradeId.Value,
-                    LevelId          = offer.SalaryLevelId,
+                    LevelId          = resolvedLevelId,
                     NotchId          = offer.SalaryNotchId,
                     EffectiveDate    = actualStartDate,
                     AssignmentReason = "Initial hire assignment",

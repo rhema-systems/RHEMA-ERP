@@ -192,6 +192,13 @@ public interface IEmployeeService
     Task<IEnumerable<EmployeeSalaryAssignmentListDto>> GetSalaryAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeSalaryAssignmentDetailDto?> GetSalaryAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The level a placement on <paramref name="gradeId"/> resolves to (round 3, lane H). A notch
+    /// names its level; a two-tier structure's single implicit level is filled in; a notch or level
+    /// of another grade is refused. Callers that build a placement elsewhere (hire, movements) use
+    /// this so every placement resolves the same way.
+    /// </summary>
+    Task<Guid?> ResolvePlacementLevelAsync(Guid gradeId, Guid? levelId, Guid? notchId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records how this person's basic pay is arrived at — the scale, or an amount agreed for them.
