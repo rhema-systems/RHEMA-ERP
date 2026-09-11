@@ -12,7 +12,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 |---|---|
 | Phase | Stage B4 — HR/Payroll Finance-account provisioning cutover |
 | Status | `IN_PROGRESS` |
-| Implementing task | Coordinator subagent `/root/hr_payroll_cutover` |
+| Implementing task | Independent reviewer `/root/stage_a1_review` |
 | Exact base | `fe8fbf5ceb162f2416ec610f0b560550692df135` |
 | Branch | `codex/hr-payroll-finance-account-provisioning-b4` |
 | Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-hr-payroll-finance-account-provisioning-b4` |
@@ -21,7 +21,7 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | HR/Payroll candidate `f45f6a35` requires bounded test-evidence correction |
+| Review status | Corrected HR/Payroll candidate `03986811` under independent re-review |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -2085,3 +2085,12 @@ per-account canonical number, COMPANY/NATURAL values, enabled same-tenant classi
 type compatibility, and complete zero-Finance-mutation denial state. A bounded Terra Medium test-evidence
 correction is active atop the same candidate; production behavior must not be broadened or weakened. No database
 was accessed or mutated.
+
+The HR/Payroll implementer completed the bounded test-only correction as
+`039868118ad7a7d890493f04891514891659f3cd` atop `f45f6a35`. The test project now compiles, exact
+`PAY-{code}` account identities and COMPANY/NATURAL values are asserted, every mapping is checked for enabled
+same-tenant classification linkage and active/posting type compatibility, and wrong-type/cross-tenant denials
+compare complete relevant Finance state. The ordinary API/test-project build completed with zero errors. The
+implementer's focused VSTest process made no progress under its watchdog, so no focused pass is claimed;
+independent Sol High re-review is running the exact binary with extended diagnostics plus widened and EF/no-connect
+gates. The two-commit worktree is tracked-clean and no database was accessed.
