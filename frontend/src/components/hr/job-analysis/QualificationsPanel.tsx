@@ -20,17 +20,27 @@ import {
   type QualificationType,
 } from '@/types/hr/job-architecture';
 import { childKey, idOrNull, labelFor, nullIfBlank, optionalNumber, type ChildPanelProps } from './shared';
+import { certificationService } from '@/services/hr/certification.service';
 
-const schema = z.object({
-  type: z.string().min(1, 'Choose a type'),
-  qualificationId: z.string().optional(),
-  title: z.string().trim().min(1, 'The title is required').max(200),
-  description: z.string().max(1000),
-  isRequired: z.boolean(),
-  jobSpecificRequirements: z.string().max(500).optional(),
-  monetaryValue: optionalNumber(0),
-  jobResponsibilityId: z.string().optional(),
-});
+// Round 3, lane J1: the title is optional — a catalogue link (qualification or certification)
+// names the row when it is blank; a row with no link must be titled. The server holds the same rule.
+const schema = z
+  .object({
+    type: z.string().min(1, 'Choose a type'),
+    qualificationId: z.string().optional(),
+    certificationId: z.string().optional(),
+    title: z.string().trim().max(200),
+    description: z.string().max(1000),
+    isRequired: z.boolean(),
+    jobSpecificRequirements: z.string().max(500).optional(),
+    monetaryValue: optionalNumber(0),
+    jobResponsibilityId: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (!v.title && !idOrNull(v.qualificationId) && !idOrNull(v.certificationId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['title'], message: 'Give it a title, or pick one from a catalogue' });
+    }
+  });
 
 type Form = z.infer<typeof schema>;
 
@@ -79,7 +89,15 @@ export function QualificationsPanel({
     enabled: !!jobDescriptionId,
   });
 
-  const catalogueOptions = (catalogue ?? []).map((q) => ({
+    const { data: certifications } = useQuery({
+    queryKey: ['hr', 'certifications', 'active', 'for-jd'],
+    queryFn: () => certificationService.getAll({ activeOnly: true }),
+  });
+  const certificationOptions = (certifications ?? []).map((c) => ({
+    value: c.id,
+    label: c.certifyingBodyAbbreviation ? `${c.name} (${c.certifyingBodyAbbreviation})` : c.name,
+  }));
+const catalogueOptions = (catalogue ?? []).map((q) => ({
     value: q.id,
     label: q.shortCode ? `${q.name} (${q.shortCode})` : q.name,
   }));
@@ -111,7 +129,8 @@ export function QualificationsPanel({
           jobResponsibilityId: idOrNull(v.jobResponsibilityId),
           type: v.type as QualificationType,
           qualificationId: idOrNull(v.qualificationId),
-          title: v.title.trim(),
+          certificationId: idOrNull(v.certificationId),
+          title: v.title.trim() || null,
           description: (v.description ?? '').trim(),
           isRequired: v.isRequired,
           jobSpecificRequirements: nullIfBlank(v.jobSpecificRequirements),
@@ -123,7 +142,8 @@ export function QualificationsPanel({
           jobResponsibilityId: idOrNull(v.jobResponsibilityId),
           type: v.type as QualificationType,
           qualificationId: idOrNull(v.qualificationId),
-          title: v.title.trim(),
+          certificationId: idOrNull(v.certificationId),
+          title: v.title.trim() || null,
           description: (v.description ?? '').trim(),
           isRequired: v.isRequired,
           jobSpecificRequirements: nullIfBlank(v.jobSpecificRequirements),
@@ -137,7 +157,7 @@ export function QualificationsPanel({
       }
       getId={(q) => q.id}
       columns={[
-        { header: 'Qualification', cell: (q) => q.title },
+        { header: 'Qualification', cell: (q) => q.title || q.certificationName || q.qualificationName || '—' },
         { header: 'Type', cell: (q) => labelFor(QUALIFICATION_TYPES, q.type) },
         {
           header: 'Catalogue',
@@ -169,6 +189,7 @@ export function QualificationsPanel({
       toForm={(q) => ({
         type: q.type,
         qualificationId: q.qualificationId ?? '',
+        certificationId: q.certificationId ?? '',
         title: q.title,
         description: q.description ?? '',
         isRequired: q.isRequired,
@@ -191,12 +212,23 @@ export function QualificationsPanel({
             />
           </FieldRow>
 
+          {(form.watch('type') === 'Certification' || form.watch('type') === 'License') && (
+            <SelectField
+              form={form}
+              name="certificationId"
+              label="From the certification catalogue"
+              allowEmpty
+              emptyLabel="Not in the catalogue"
+              placeholder="Optional"
+              options={certificationOptions}
+            />
+          )}
+
           <TextField
             form={form}
             name="title"
             label="Title"
-            required
-            placeholder="e.g. Bachelor's degree in Accounting"
+            placeholder="Optional when picked from a catalogue — e.g. Bachelor's degree in Accounting"
           />
           <TextareaField
             form={form}

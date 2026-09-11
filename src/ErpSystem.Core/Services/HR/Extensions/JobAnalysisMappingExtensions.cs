@@ -308,6 +308,8 @@ public static class JobAnalysisMappingExtensions
             Type = entity.Type,
             QualificationId = entity.QualificationId,
             QualificationName = entity.Qualification?.Name,
+            CertificationId = entity.CertificationId,
+            CertificationName = entity.Certification?.Name,
             Title = entity.Title,
             Description = entity.Description,
             IsRequired = entity.IsRequired,
@@ -328,7 +330,8 @@ public static class JobAnalysisMappingExtensions
             JobDescriptionId = dto.JobDescriptionId,
             Type = dto.Type,
             QualificationId = dto.QualificationId,
-            Title = dto.Title,
+            CertificationId = dto.CertificationId,
+            Title = dto.Title ?? string.Empty,
             Description = dto.Description,
             IsRequired = dto.IsRequired,
             JobSpecificRequirements = dto.JobSpecificRequirements,
@@ -341,7 +344,8 @@ public static class JobAnalysisMappingExtensions
         entity.JobResponsibilityId = dto.JobResponsibilityId;
         entity.Type = dto.Type;
         entity.QualificationId = dto.QualificationId;
-        entity.Title = dto.Title;
+        entity.CertificationId = dto.CertificationId;
+        entity.Title = dto.Title ?? string.Empty;
         entity.Description = dto.Description;
         entity.IsRequired = dto.IsRequired;
         entity.JobSpecificRequirements = dto.JobSpecificRequirements;
@@ -390,7 +394,7 @@ public static class JobAnalysisMappingExtensions
             JobDescriptionId = dto.JobDescriptionId,
             SkillId = dto.SkillId,
             CompetencyId = dto.CompetencyId,
-            CompetencyName = dto.CompetencyName,
+            CompetencyName = dto.CompetencyName ?? string.Empty,
             Description = dto.Description,
             Type = dto.Type,
             RequiredLevel = dto.RequiredLevel,
@@ -404,7 +408,7 @@ public static class JobAnalysisMappingExtensions
         entity.JobResponsibilityId = dto.JobResponsibilityId;
         entity.SkillId = dto.SkillId;
         entity.CompetencyId = dto.CompetencyId;
-        entity.CompetencyName = dto.CompetencyName;
+        entity.CompetencyName = dto.CompetencyName ?? string.Empty;
         entity.Description = dto.Description;
         entity.Type = dto.Type;
         entity.RequiredLevel = dto.RequiredLevel;

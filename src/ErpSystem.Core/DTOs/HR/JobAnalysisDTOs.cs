@@ -362,6 +362,21 @@ public class ApproveJobDescriptionDto
 /// <summary>
 /// DTO for creating a new version of job description
 /// </summary>
+/// <summary>Body of <c>POST descriptions/{id}/clone</c> (round 3, lane J1). Empty = a copy on the same position.</summary>
+public class CloneJobDescriptionDto
+{
+    /// <summary>Copy onto another position: the copy takes that position's staff level, keeps the title, starts its own version line, and carries no reporting relationships.</summary>
+    public Guid? TargetPositionId { get; set; }
+}
+
+/// <summary>What <c>POST descriptions/{id}/import-position-requirements</c> did.</summary>
+public class PositionRequirementsImportResultDto
+{
+    public int CompetenciesAdded { get; set; }
+    public int QualificationsAdded { get; set; }
+    public int AlreadyPresent { get; set; }
+}
+
 public class CreateJobDescriptionVersionDto
 {
     [Required]
@@ -506,6 +521,9 @@ public class JobQualificationDto : BaseDto
     public string TypeName => Type.ToString();
     public Guid? QualificationId { get; set; }
     public string? QualificationName { get; set; }
+    /// <summary>Round 3, lane J1: the credential catalogue link (lane C2's column, unreachable until now).</summary>
+    public Guid? CertificationId { get; set; }
+    public string? CertificationName { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public bool IsRequired { get; set; }
@@ -528,9 +546,16 @@ public class CreateJobQualificationDto : CreateDtoBase
 
     public Guid? QualificationId { get; set; }
 
-    [Required]
+    /// <summary>A credential from the certification catalogue; the title is mirrored from it when blank.</summary>
+    public Guid? CertificationId { get; set; }
+
+    /// <summary>
+    /// Round 3, lane J1: OPTIONAL. The rule is "a catalogue id or a title" — a row linked to the
+    /// qualification or certification catalogue takes the catalogue's name when the title is blank;
+    /// a row with no link must be titled. Checked in the service.
+    /// </summary>
     [MaxLength(200)]
-    public string Title { get; set; } = string.Empty;
+    public string? Title { get; set; }
 
     [MaxLength(1000)]
     public string Description { get; set; } = string.Empty;
@@ -565,9 +590,16 @@ public class UpdateJobQualificationDto : UpdateDtoBase
 
     public Guid? QualificationId { get; set; }
 
-    [Required]
+    /// <summary>A credential from the certification catalogue; the title is mirrored from it when blank.</summary>
+    public Guid? CertificationId { get; set; }
+
+    /// <summary>
+    /// Round 3, lane J1: OPTIONAL. The rule is "a catalogue id or a title" — a row linked to the
+    /// qualification or certification catalogue takes the catalogue's name when the title is blank;
+    /// a row with no link must be titled. Checked in the service.
+    /// </summary>
     [MaxLength(200)]
-    public string Title { get; set; } = string.Empty;
+    public string? Title { get; set; }
 
     [MaxLength(1000)]
     public string Description { get; set; } = string.Empty;
@@ -620,9 +652,9 @@ public class CreateJobCompetencyDto : CreateDtoBase
     public Guid? SkillId { get; set; }
     public Guid? CompetencyId { get; set; }
 
-    [Required]
+    /// <summary>Round 3, lane J1: OPTIONAL — a skill or competency from the catalogue names the row when this is blank; a row with no link must be named. Checked in the service.</summary>
     [MaxLength(200)]
-    public string CompetencyName { get; set; } = string.Empty;
+    public string? CompetencyName { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
@@ -658,9 +690,9 @@ public class UpdateJobCompetencyDto : UpdateDtoBase
     public Guid? SkillId { get; set; }
     public Guid? CompetencyId { get; set; }
 
-    [Required]
+    /// <summary>Round 3, lane J1: OPTIONAL — a skill or competency from the catalogue names the row when this is blank; a row with no link must be named. Checked in the service.</summary>
     [MaxLength(200)]
-    public string CompetencyName { get; set; } = string.Empty;
+    public string? CompetencyName { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }

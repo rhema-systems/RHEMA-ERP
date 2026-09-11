@@ -43,7 +43,24 @@ import { ResponsibilitiesPanel } from '@/components/hr/job-analysis/Responsibili
 import { WorkingConditionsPanel } from '@/components/hr/job-analysis/WorkingConditionsPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
+import { employeePositionService } from '@/services/hr/employee-position.service';
 import { workflowApiService } from '@/services/workflow-api.service';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   AUTHORABLE_JOB_DESCRIPTION_STATUSES,
   type JobDescriptionStatus,
@@ -69,6 +86,15 @@ export default function JobDescriptionDetailPage() {
   const qc = useQueryClient();
   const { hasAnyPermission, hasAnyRole } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
+  // Round 3, lane J1: "Duplicate" asks where the copy goes — this position (a "(Copy)" draft) or
+  // another one (title kept, staff level from the target, no reporting relationships).
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicateTarget, setDuplicateTarget] = useState<string>('');
+  const { data: allPositions } = useQuery({
+    queryKey: ['positions', 'all'],
+    queryFn: () => employeePositionService.getAll(),
+    enabled: duplicateOpen,
+  });
 
   const {
     data: jd,
@@ -304,18 +330,85 @@ export default function JobDescriptionDetailPage() {
               </Button>
             )}
 
-            <Button
-              variant="outline"
-              onClick={async () => {
-                const clone = await jobArchitectureService.cloneJobDescription(id);
-                toast.success('Copied');
-                router.push(`/hr/job-descriptions/${clone.id}`);
-              }}
-              disabled={busy !== null}
-            >
+            {(status === 'Draft' || status === 'UnderRevision') && (
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  setBusy('import');
+                  try {
+                    const r = await jobArchitectureService.importPositionRequirements(id);
+                    const n = r.competenciesAdded + r.qualificationsAdded;
+                    toast.success(n > 0 ? `Brought in ${n} requirement${n === 1 ? '' : 's'} from the position` : 'Nothing to bring in — every requirement is already here');
+                    qc.invalidateQueries({ queryKey: ['job-descriptions', id] });
+                    qc.invalidateQueries({ queryKey: ['job-architecture'] });
+                  } catch (e: any) {
+                    toast.error(e?.message ?? 'Could not bring in the requirements');
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
+                disabled={busy !== null}
+              >
+                Bring in the position&apos;s requirements
+              </Button>
+            )}
+
+            <Button variant="outline" onClick={() => { setDuplicateTarget(''); setDuplicateOpen(true); }} disabled={busy !== null}>
               <Copy className="mr-2 h-4 w-4" />
               Duplicate
             </Button>
+
+            <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
+              <DialogContent className="sm:max-w-[520px]">
+                <DialogHeader>
+                  <DialogTitle>Duplicate this job description</DialogTitle>
+                  <DialogDescription>
+                    On the same position it becomes a &quot;(Copy)&quot; draft. On another position it keeps
+                    its title, takes that position&apos;s staff level, starts its own version line, and
+                    carries no reporting relationships.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-1.5 py-2">
+                  <Label>Copy onto</Label>
+                  <Select value={duplicateTarget || '__same__'} onValueChange={(v) => setDuplicateTarget(v === '__same__' ? '' : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="This position" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__same__">This position (a copy)</SelectItem>
+                      {(allPositions ?? [])
+                        .filter((p) => p.id !== jd.positionId)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.title}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDuplicateOpen(false)}>Cancel</Button>
+                  <Button
+                    onClick={async () => {
+                      setBusy('clone');
+                      try {
+                        const clone = await jobArchitectureService.cloneJobDescription(id, duplicateTarget || null);
+                        toast.success(duplicateTarget ? 'Copied onto the other position' : 'Copied');
+                        setDuplicateOpen(false);
+                        router.push(`/hr/job-descriptions/${clone.id}`);
+                      } catch (e: any) {
+                        toast.error(e?.message ?? 'Could not copy');
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}
+                    disabled={busy !== null}
+                  >
+                    Duplicate
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         }
       />

@@ -31,6 +31,7 @@ public class JobDescriptionService : IJobDescriptionService
     private readonly IJobMedicalRequirementRepository _medicalRequirementRepository;
     private readonly IJobResponsibilityKpiRepository _kpiRepository;
     private readonly ISalaryGradeRepository _salaryGradeRepository;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
@@ -52,6 +53,7 @@ public class JobDescriptionService : IJobDescriptionService
         IJobMedicalRequirementRepository medicalRequirementRepository,
         IJobResponsibilityKpiRepository kpiRepository,
         ISalaryGradeRepository salaryGradeRepository,
+        IPositionNamedSetService namedSets,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegration,
         IWorkflowStatusAdapterRegistry workflowAdapters,
@@ -72,6 +74,7 @@ public class JobDescriptionService : IJobDescriptionService
         _medicalRequirementRepository = medicalRequirementRepository;
         _kpiRepository = kpiRepository;
         _salaryGradeRepository = salaryGradeRepository;
+        _namedSets = namedSets;
         _currentUserProvider = currentUserProvider;
         _workflowIntegration = workflowIntegration;
         _workflowAdapters = workflowAdapters;
@@ -913,7 +916,7 @@ public class JobDescriptionService : IJobDescriptionService
                     JobDescriptionId = newVersion.Id,
                     JobResponsibilityId = newResp.Id,
                     Type = qual.Type,
-                    QualificationId = qual.QualificationId,
+                    QualificationId = qual.QualificationId, CertificationId = qual.CertificationId,
                     Title = qual.Title,
                     Description = qual.Description,
                     IsRequired = qual.IsRequired,
@@ -1013,7 +1016,7 @@ public class JobDescriptionService : IJobDescriptionService
         return newVersion.ToDto();
     }
 
-    public async Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default)
+    public async Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, Guid? targetPositionId = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var src = await _jobDescriptionRepository.GetQueryable()
@@ -1034,14 +1037,27 @@ public class JobDescriptionService : IJobDescriptionService
         var competencies = (await _competencyRepository.GetByJobDescriptionIdAsync(id))
             .Where(c => c.TenantId == tenantId).ToList();
 
+        // Round 3, lane J1: a copy onto ANOTHER position. The title is kept (it is the job's, not
+        // the post's), the staff level is the target's, the version line is the target's own, and
+        // the reporting relationships — who this post answers to and supervises — are not carried,
+        // because they are facts about the original post.
+        EmployeePosition? target = null;
+        if (targetPositionId is { } wantedPositionId && wantedPositionId != src.PositionId)
+        {
+            target = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+                .FirstOrDefaultAsync(p => p.Id == wantedPositionId && p.TenantId == tenantId && !p.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.NotFound($"Position with ID '{wantedPositionId}' not found.");
+        }
+        var positionId = target?.Id ?? src.PositionId;
+
         var clone = new JobDescription
         {
             TenantId = tenantId,
             JobDescriptionNumber = await GenerateJobDescriptionNumberAsync(cancellationToken),
-            PositionId = src.PositionId,
-            JobTitle = src.JobTitle + " (Copy)",
+            PositionId = positionId,
+            JobTitle = target == null ? src.JobTitle + " (Copy)" : src.JobTitle,
             JobSummary = src.JobSummary,
-            VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(src.PositionId),
+            VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(positionId),
             EffectiveDate = DateTime.Today,
             ReviewCycleMonths = src.ReviewCycleMonths,
             Status = JobDescriptionStatus.Draft,
@@ -1057,7 +1073,7 @@ public class JobDescriptionService : IJobDescriptionService
             DecisionMakingScope = src.DecisionMakingScope,
             FinancialAuthorityLimit = src.FinancialAuthorityLimit,
             ApprovalAuthorityNotes = src.ApprovalAuthorityNotes,
-            StaffLevelId = src.StaffLevelId,
+            StaffLevelId = target != null ? target.StaffLevelId : src.StaffLevelId,
             IntendedEmploymentType = src.IntendedEmploymentType,
             IsBargainingUnitRole = src.IsBargainingUnitRole,
             UnionId = src.UnionId,
@@ -1087,7 +1103,7 @@ public class JobDescriptionService : IJobDescriptionService
         }
 
         foreach (var q in qualifications)
-            await _qualificationRepository.AddAsync(new JobQualification { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = q.JobResponsibilityId.HasValue && respMap.TryGetValue(q.JobResponsibilityId.Value, out var rid) ? rid : null, Type = q.Type, QualificationId = q.QualificationId, Title = q.Title, Description = q.Description, IsRequired = q.IsRequired, JobSpecificRequirements = q.JobSpecificRequirements, MonetaryValue = q.MonetaryValue });
+            await _qualificationRepository.AddAsync(new JobQualification { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = q.JobResponsibilityId.HasValue && respMap.TryGetValue(q.JobResponsibilityId.Value, out var rid) ? rid : null, Type = q.Type, QualificationId = q.QualificationId, CertificationId = q.CertificationId, Title = q.Title, Description = q.Description, IsRequired = q.IsRequired, JobSpecificRequirements = q.JobSpecificRequirements, MonetaryValue = q.MonetaryValue });
 
         foreach (var c in competencies)
             await _competencyRepository.AddAsync(new JobCompetency { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = c.JobResponsibilityId.HasValue && respMap.TryGetValue(c.JobResponsibilityId.Value, out var rid) ? rid : null, SkillId = c.SkillId, CompetencyId = c.CompetencyId, CompetencyName = c.CompetencyName, Description = c.Description, Type = c.Type, RequiredLevel = c.RequiredLevel, IsCritical = c.IsCritical, MonetaryValue = c.MonetaryValue });
@@ -1110,8 +1126,9 @@ public class JobDescriptionService : IJobDescriptionService
                 await _equipmentTrainingRepository.AddAsync(new JobEquipmentTraining { TenantId = tenantId, JobEquipmentToolId = ne.Id, TrainingProgramId = t.TrainingProgramId, RequirementText = t.RequirementText, IsMandatory = t.IsMandatory });
         }
 
-        foreach (var rr in src.ReportingRelationships)
-            await _reportingRelationshipRepository.AddAsync(new JobReportingRelationship { TenantId = tenantId, JobDescriptionId = clone.Id, RelationshipType = rr.RelationshipType, TitleOrRole = rr.TitleOrRole, EmployeeOrPositionId = rr.EmployeeOrPositionId, Description = rr.Description, NumberOfDirectReports = rr.NumberOfDirectReports, IsPrimarySupervisor = rr.IsPrimarySupervisor });
+        if (target == null)
+            foreach (var rr in src.ReportingRelationships)
+                await _reportingRelationshipRepository.AddAsync(new JobReportingRelationship { TenantId = tenantId, JobDescriptionId = clone.Id, RelationshipType = rr.RelationshipType, TitleOrRole = rr.TitleOrRole, EmployeeOrPositionId = rr.EmployeeOrPositionId, Description = rr.Description, NumberOfDirectReports = rr.NumberOfDirectReports, IsPrimarySupervisor = rr.IsPrimarySupervisor });
 
         foreach (var m in src.MedicalRequirements)
             await _medicalRequirementRepository.AddAsync(new JobMedicalRequirement { TenantId = tenantId, JobDescriptionId = clone.Id, Category = m.Category, RequirementDescription = m.RequirementDescription, Rationale = m.Rationale, Contraindications = m.Contraindications, IsMandatory = m.IsMandatory });
@@ -1200,6 +1217,134 @@ public class JobDescriptionService : IJobDescriptionService
 
     #region Qualification Operations
 
+    /// <summary>
+    /// Round 3, lane J1 — "a catalogue id or a title". A row linked to the qualification or the
+    /// certification catalogue takes the catalogue's name when its title is blank (the mirror keeps
+    /// the NOT NULL column honest and the row readable without a join); a row with no link must be
+    /// titled. A certification link also settles the type when the caller left an education type.
+    /// </summary>
+    private async Task ResolveQualificationIdentityAsync(JobQualification q, CancellationToken cancellationToken)
+    {
+        q.Title = (q.Title ?? string.Empty).Trim();
+        var tenantId = GetTenantId();
+
+        if (q.CertificationId is { } certificationId)
+        {
+            var cert = await _unitOfWork.Repository<Certification>().GetQueryable()
+                .FirstOrDefaultAsync(c => c.Id == certificationId && c.TenantId == tenantId && !c.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The certification chosen does not exist.");
+            if (q.Title.Length == 0) q.Title = cert.Name;
+            if (q.Type is not (QualificationType.Certification or QualificationType.License))
+                q.Type = cert.Kind == CertificationKind.Licence ? QualificationType.License : QualificationType.Certification;
+        }
+
+        if (q.QualificationId is { } qualificationId)
+        {
+            var qual = await _unitOfWork.Repository<Qualification>().GetQueryable()
+                .FirstOrDefaultAsync(x => x.Id == qualificationId && x.TenantId == tenantId && !x.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The qualification chosen does not exist.");
+            if (q.Title.Length == 0) q.Title = qual.Name;
+        }
+
+        if (q.Title.Length == 0)
+            throw JobArchitectureException.Invalid(
+                "Give the qualification a title, or pick one from the catalogue — a qualification or a certification.");
+    }
+
+    /// <summary>Same rule for a competency row: a skill or a competency from the catalogue names it; otherwise it must be named.</summary>
+    private async Task ResolveCompetencyIdentityAsync(JobCompetency c, CancellationToken cancellationToken)
+    {
+        c.CompetencyName = (c.CompetencyName ?? string.Empty).Trim();
+        var tenantId = GetTenantId();
+
+        if (c.CompetencyId is { } competencyId)
+        {
+            var master = await _unitOfWork.Repository<Competency>().GetQueryable()
+                .FirstOrDefaultAsync(x => x.Id == competencyId && x.TenantId == tenantId && !x.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The competency chosen does not exist.");
+            if (c.CompetencyName.Length == 0) c.CompetencyName = master.Name;
+        }
+
+        if (c.SkillId is { } skillId)
+        {
+            var skill = await _unitOfWork.Repository<Skill>().GetQueryable()
+                .FirstOrDefaultAsync(x => x.Id == skillId && x.TenantId == tenantId && !x.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The skill chosen does not exist.");
+            if (c.CompetencyName.Length == 0) c.CompetencyName = skill.Name;
+        }
+
+        if (c.CompetencyName.Length == 0)
+            throw JobArchitectureException.Invalid(
+                "Name the competency, or pick a skill or a competency from the catalogue.");
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionRequirementsImportResultDto> ImportPositionRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        var jd = await RequireAuthorableJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+
+        // The EFFECTIVE requirements: individual rows and named sets together (round 2, lane C3a —
+        // a reader of the individual table alone goes on ignoring sets).
+        var skills = await _namedSets.GetEffectiveSkillsAsync(jd.PositionId, tenantId, cancellationToken);
+        var certifications = await _namedSets.GetEffectiveCertificationsAsync(jd.PositionId, tenantId, cancellationToken);
+
+        var existingSkillIds = (await _competencyRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
+            .Where(c => c.TenantId == tenantId && c.SkillId.HasValue).Select(c => c.SkillId!.Value).ToHashSet();
+        var existingCertIds = (await _qualificationRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
+            .Where(q => q.TenantId == tenantId && q.CertificationId.HasValue).Select(q => q.CertificationId!.Value).ToHashSet();
+
+        var result = new PositionRequirementsImportResultDto();
+        foreach (var s in skills)
+        {
+            if (!existingSkillIds.Add(s.SkillId)) { result.AlreadyPresent++; continue; }
+            await _competencyRepository.AddAsync(new JobCompetency
+            {
+                TenantId = tenantId,
+                JobDescriptionId = jobDescriptionId,
+                SkillId = s.SkillId,
+                CompetencyName = s.SkillName,
+                Type = CompetencyType.Technical,
+                RequiredLevel = MapSkillLevel(s.RequiredLevel),
+                IsCritical = s.IsRequired,
+                Description = "From the position's skill requirements.",
+            });
+            result.CompetenciesAdded++;
+        }
+        foreach (var c in certifications)
+        {
+            if (!existingCertIds.Add(c.CertificationId)) { result.AlreadyPresent++; continue; }
+            await _qualificationRepository.AddAsync(new JobQualification
+            {
+                TenantId = tenantId,
+                JobDescriptionId = jobDescriptionId,
+                CertificationId = c.CertificationId,
+                Title = c.CertificationName,
+                Type = QualificationType.Certification,
+                IsRequired = c.IsMandatory,
+                Description = string.IsNullOrWhiteSpace(c.CertifyingBodyName)
+                    ? "From the position's certification requirements."
+                    : $"From the position's certification requirements ({c.CertifyingBodyName}).",
+            });
+            result.QualificationsAdded++;
+        }
+
+        if (result.CompetenciesAdded + result.QualificationsAdded > 0)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Job description {Id}: imported {C} competencies and {Q} qualifications from position {PositionId} ({Skipped} already present).",
+            jobDescriptionId, result.CompetenciesAdded, result.QualificationsAdded, jd.PositionId, result.AlreadyPresent);
+        return result;
+    }
+
+    /// <summary>The skill scale has three steps, the competency scale five; the floor of each maps onto the other's.</summary>
+    private static ProficiencyLevel MapSkillLevel(SkillLevel level) => level switch
+    {
+        SkillLevel.Beginner => ProficiencyLevel.Basic,
+        SkillLevel.Intermediate => ProficiencyLevel.WorkingKnowledge,
+        SkillLevel.Advanced => ProficiencyLevel.Advanced,
+        _ => ProficiencyLevel.Basic,
+    };
+
     public async Task<JobQualificationDto> AddQualificationAsync(CreateJobQualificationDto createDto, CancellationToken cancellationToken = default)
     {
         await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
@@ -1207,12 +1352,14 @@ public class JobDescriptionService : IJobDescriptionService
             createDto.JobResponsibilityId, createDto.JobDescriptionId, cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+        await ResolveQualificationIdentityAsync(entity, cancellationToken);
 
         await _qualificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _qualificationRepository.GetQueryable()
             .Include(q => q.Qualification)
+            .Include(q => q.Certification)
             .FirstOrDefaultAsync(q => q.Id == entity.Id, cancellationToken);
 
         _logger.LogInformation("Qualification added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
@@ -1232,6 +1379,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _qualificationRepository.GetQueryable()
             .Include(q => q.Qualification)
+            .Include(q => q.Certification)
             .FirstOrDefaultAsync(q => q.Id == updateDto.Id, cancellationToken);
 
         if (entity == null || entity.TenantId != GetTenantId())
@@ -1242,12 +1390,18 @@ public class JobDescriptionService : IJobDescriptionService
             updateDto.JobResponsibilityId, entity.JobDescriptionId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
+        await ResolveQualificationIdentityAsync(entity, cancellationToken);
 
         await _qualificationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Qualification updated: {QualificationId}", updateDto.Id);
 
+        // Re-read: a changed catalogue link's navigation is not loaded on the tracked entity.
+        entity = await _qualificationRepository.GetQueryable()
+            .Include(q => q.Qualification)
+            .Include(q => q.Certification)
+            .FirstOrDefaultAsync(q => q.Id == entity.Id, cancellationToken) ?? entity;
         return entity.ToDto();
     }
 
@@ -1279,12 +1433,16 @@ public class JobDescriptionService : IJobDescriptionService
             createDto.JobResponsibilityId, createDto.JobDescriptionId, cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+        await ResolveCompetencyIdentityAsync(entity, cancellationToken);
 
         await _competencyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Competency added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
 
+        entity = await _competencyRepository.GetQueryable()
+            .Include(c => c.Skill).Include(c => c.Competency)
+            .FirstOrDefaultAsync(c => c.Id == entity.Id, cancellationToken) ?? entity;
         return entity.ToDto();
     }
 
@@ -1308,12 +1466,16 @@ public class JobDescriptionService : IJobDescriptionService
             updateDto.JobResponsibilityId, entity.JobDescriptionId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
+        await ResolveCompetencyIdentityAsync(entity, cancellationToken);
 
         await _competencyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Competency updated: {CompetencyId}", updateDto.Id);
 
+        entity = await _competencyRepository.GetQueryable()
+            .Include(c => c.Skill).Include(c => c.Competency)
+            .FirstOrDefaultAsync(c => c.Id == entity.Id, cancellationToken) ?? entity;
         return entity.ToDto();
     }
 

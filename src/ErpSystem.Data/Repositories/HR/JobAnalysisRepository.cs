@@ -136,6 +136,7 @@ public class JobQualificationRepository : GenericRepository<JobQualification>, I
     {
         return await _dbSet
             .Include(q => q.Qualification)
+            .Include(q => q.Certification)
             .Where(q => q.JobDescriptionId == jobDescriptionId)
             .OrderBy(q => q.Type)
             .ThenByDescending(q => q.IsRequired)

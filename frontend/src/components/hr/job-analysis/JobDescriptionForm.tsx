@@ -184,8 +184,16 @@ export function JobDescriptionForm({
     if (mode !== 'create' || !positions || !form.positionId) return;
     if (previousPosition.current === form.positionId) return;
     previousPosition.current = form.positionId;
-    const inherited = positions.find((p) => p.id === form.positionId)?.staffLevelId ?? null;
-    setForm((f) => ({ ...f, staffLevelId: inherited }));
+    const chosen = positions.find((p) => p.id === form.positionId);
+    const inherited = chosen?.staffLevelId ?? null;
+    // Round 3, lane J1: the title and the summary start from the position too — only where the
+    // author has typed nothing yet, so a draft in progress is never overwritten by a re-pick.
+    setForm((f) => ({
+      ...f,
+      staffLevelId: inherited,
+      jobTitle: f.jobTitle.trim() ? f.jobTitle : (chosen?.title ?? f.jobTitle),
+      jobSummary: f.jobSummary.trim() ? f.jobSummary : (chosen?.description ?? f.jobSummary),
+    }));
   }, [mode, form.positionId, positions]);
 
   const positionStaffLevelId = selectedPosition?.staffLevelId ?? null;

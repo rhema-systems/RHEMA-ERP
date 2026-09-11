@@ -207,8 +207,19 @@ class JobArchitectureService {
     });
   }
 
-  cloneJobDescription(id: string) {
-    return apiService.post<JobDescription>(`${this.jobs}/descriptions/${id}/clone`, {});
+  /** Same position → a "(Copy)" draft; `targetPositionId` → a copy onto that position (round 3, J1). */
+  cloneJobDescription(id: string, targetPositionId?: string | null) {
+    return apiService.post<JobDescription>(`${this.jobs}/descriptions/${id}/clone`, {
+      targetPositionId: targetPositionId ?? null,
+    });
+  }
+
+  /** Bring the position's effective skill and certification requirements onto the description. Idempotent. */
+  importPositionRequirements(id: string) {
+    return apiService.post<{ competenciesAdded: number; qualificationsAdded: number; alreadyPresent: number }>(
+      `${this.jobs}/descriptions/${id}/import-position-requirements`,
+      {},
+    );
   }
 
   deleteJobDescription(id: string) {

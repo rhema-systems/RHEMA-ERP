@@ -194,13 +194,20 @@ public class JobAnalysisController : ControllerBase
         return CreatedAtAction(nameof(GetJobDescription), new { id = created.Id }, created);
     }
 
+    /// <summary>Copy a description — onto the same position (a "(Copy)" draft) or, with a body naming <c>targetPositionId</c>, onto another (round 3, lane J1).</summary>
     [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
     [HttpPost("descriptions/{id:guid}/clone")]
-    public async Task<ActionResult<JobDescriptionDto>> CloneJobDescription(Guid id)
+    public async Task<ActionResult<JobDescriptionDto>> CloneJobDescription(Guid id, [FromBody] CloneJobDescriptionDto? dto)
     {
-        var created = await _jobDescriptionService.CloneAsync(id, GetCurrentEmployeeId());
+        var created = await _jobDescriptionService.CloneAsync(id, GetCurrentEmployeeId(), dto?.TargetPositionId);
         return CreatedAtAction(nameof(GetJobDescription), new { id = created.Id }, created);
     }
+
+    /// <summary>Bring the position's effective skill and certification requirements onto the description (round 3, lane J1). Idempotent.</summary>
+    [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
+    [HttpPost("descriptions/{id:guid}/import-position-requirements")]
+    public async Task<ActionResult<PositionRequirementsImportResultDto>> ImportPositionRequirements(Guid id)
+        => Ok(await _jobDescriptionService.ImportPositionRequirementsAsync(id));
 
     private Guid? GetCurrentEmployeeId()
     {

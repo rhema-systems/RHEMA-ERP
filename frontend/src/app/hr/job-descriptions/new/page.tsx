@@ -48,6 +48,18 @@ export default function NewJobDescriptionPage() {
           }
 
           toast.success(`${created.jobDescriptionNumber ?? 'Job description'} created`);
+
+          // Round 3, lane J1: what the position already requires — its skills and certifications,
+          // individual rows and named sets alike — arrives on the draft as competencies and
+          // qualifications, so the author edits a list rather than retyping the setup. Best-effort:
+          // the draft exists either way, and the detail page has the same action.
+          try {
+            const imported = await jobArchitectureService.importPositionRequirements(created.id);
+            const n = imported.competenciesAdded + imported.qualificationsAdded;
+            if (n > 0) toast.message(`Brought in ${n} requirement${n === 1 ? '' : 's'} from the position`);
+          } catch {
+            /* the draft is saved; the detail page offers the import again */
+          }
           // replace, not push: Back belongs to the register, not to a form that has already saved.
           router.replace(`/hr/job-descriptions/${created.id}`);
         } catch (e) {

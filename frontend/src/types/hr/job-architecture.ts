@@ -409,6 +409,9 @@ export interface JobQualification {
   qualificationId?: string | null;
   /** Resolved from the qualification catalogue; null when `qualificationId` is unset. */
   qualificationName?: string | null;
+  /** Round 3, lane J1: the credential catalogue link and its resolved name. */
+  certificationId?: string | null;
+  certificationName?: string | null;
   title: string;
   description: string;
   isRequired: boolean;
@@ -624,7 +627,9 @@ export interface CreateJobQualification {
   type: QualificationType;
   /** Optional link to the qualification catalogue; `title` still carries the wording. */
   qualificationId?: string | null;
-  title: string;
+  certificationId?: string | null;
+  /** Optional since round 3 (J1): a catalogue link (qualification or certification) names the row when this is blank. */
+  title?: string | null;
   description: string;
   isRequired: boolean;
   jobSpecificRequirements?: string | null;
@@ -645,7 +650,8 @@ export interface CreateJobCompetency {
   jobResponsibilityId?: string | null;
   skillId?: string | null;
   competencyId?: string | null;
-  competencyName: string;
+  /** Optional since round 3 (J1): a skill or competency link names the row when this is blank. */
+  competencyName?: string | null;
   description?: string | null;
   type: CompetencyType;
   requiredLevel: ProficiencyLevel;

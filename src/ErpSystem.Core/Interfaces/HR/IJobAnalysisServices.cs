@@ -48,8 +48,20 @@ public interface IJobDescriptionService
     /// <summary>Rejects the current workflow step, returning the job description to its author.</summary>
     Task<bool> RejectViaWorkflowAsync(Guid jobDescriptionId, string? reason, CancellationToken cancellationToken = default);
     Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default);
-    /// <summary>Deep-copies a job description (and all its child sections) into a new Draft.</summary>
-    Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Deep-copies a job description (and all its child sections) into a new Draft. With
+    /// <paramref name="targetPositionId"/> (round 3, lane J1) the copy lands on ANOTHER position:
+    /// its title is kept, its staff level is the target's, its version line starts afresh, and the
+    /// reporting relationships — which belong to the original post — are not carried.
+    /// </summary>
+    Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, Guid? targetPositionId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Round 3, lane J1. Brings the position's effective skill and certification requirements
+    /// (individual rows and named sets alike) onto the description as competencies and
+    /// qualifications, skipping what is already there. Idempotent; Draft/UnderRevision only.
+    /// </summary>
+    Task<PositionRequirementsImportResultDto> ImportPositionRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Responsibility operations

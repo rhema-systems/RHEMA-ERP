@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2) and S (65 ×2, `hr-payroll-membership/run-s.mjs`; E1 73, membership 86, H 33, D1 79 after) BUILT 2026-09-11. Fifteen slices remain; J1 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) and J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) BUILT 2026-09-11. Fourteen slices remain; C1 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -157,7 +157,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 2 | **P1** — modal subject labels, the announcement topic · ✅ **DONE 2026-09-11 · 17 ×2** | none | `hr-employee-docs/run-p1.mjs` (announcement half); the modal half is a screen walk | quick, demo-visible |
 | 3 | **H** (round 2) — a movement writes the placement · ✅ **DONE 2026-09-11 · 33 ×2** (logged in the round-2 plan, lane H) | none | `hr-movements/run-h.mjs` | S's "already-approved writers" rule needs it; owed before the next demo regardless |
 | 4 | **S** — the salary change request · ✅ **DONE 2026-09-11 · 65 ×2** | `20260911091344_AddEmployeeSalaryChangeRequest` (+ `CompanyHrPolicySettings.SalaryChangeRequiresApproval`) | `hr-payroll-membership/run-s.mjs` | the PDF's first bullet |
-| 5 | **J1** — prefill from the position, optional text, clone to another position, `CertificationId` | none | `hr-jobarch/run-j1.mjs` | |
+| 5 | **J1** — prefill from the position, optional text, clone to another position, `CertificationId` · ✅ **DONE 2026-09-11 · 42 ×2** | none | `hr-jobarch/run-j1.mjs` | |
 | 6 | **C1** — candidate identity trio, `Language` master, certification fields, document description | `AddCandidateIdentityLanguagesAndCertification` | `hr-recruitment/run-c1.mjs` | schema before screens |
 | 7 | **C2** — careers + HR candidate screens, photo, currency picker, languages tab, document restructure | none | `hr-recruitment/run-c2.mjs` + screen walk | |
 | 8 | **K** — catalogue-driven criteria values + the nine scoring fixes + D-7 | `AddCriteriaCatalogueValues` | `hr-recruitment/run-k.mjs` (extends `run-lane5b.mjs`) | |
@@ -239,6 +239,27 @@ failed with "no entity type mapped to the table". Built as § 5.1 describes, wit
   lock under the policy with a sentence; the payroll editor's basic-salary input locks with a
   caption; the policy screen's switch; the approved salary-review proposal links to the tab with
   `?tab=salary&fromProposal=` (T1 will honour `?tab`). Screen walk owed.
+
+**Lane J1 log (2026-09-11).** No migration. `POST descriptions/{id}/import-position-requirements`
+brings the position's EFFECTIVE skills and certifications (individual rows and named sets, through
+`IPositionNamedSetService`) onto the draft as competencies (skill link, name mirrored, critical when
+required, skill level mapped onto the competency scale: Beginner→Basic, Intermediate→
+WorkingKnowledge, Advanced→Advanced) and qualifications (certification link, title mirrored, typed
+Certification, required when mandatory); idempotent — the second call reports what was already
+present. The create page calls it after saving and says how many rows arrived; the detail page has
+the same action on a Draft. The form starts the title and summary from the position when blank.
+`Title` / `CompetencyName` are optional on the DTOs; the service rule is "a catalogue id or a
+title" with the catalogue's name mirrored into the NOT NULL column — a credential link also
+re-types an education row to Certification/Licence. `JobQualification.CertificationId` reaches the
+DTOs, the mapper, the repository include and the TS type, with a certification picker on the panel
+for the two credential types. `POST descriptions/{id}/clone` takes `{ targetPositionId }` (D-12);
+the detail page's Duplicate opens a dialog asking where the copy goes.
+
+⚠ **Found while building: every qualification COPY dropped the certification link** — the clone and
+the new-version path both built the row without `CertificationId` (nobody could have noticed while
+no DTO wrote it). Both now carry it. Deviation: reporting relationships are not carried to another
+position (D-12); the same-position copy still carries them. Screen walk owed for the dialog, the
+panel's picker and the post-create toast.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

@@ -23,8 +23,9 @@ import {
 } from '@/types/hr/job-architecture';
 import { childKey, idOrNull, labelFor, nullIfBlank, optionalNumber, type ChildPanelProps } from './shared';
 
+// Round 3, lane J1: the name is optional — a skill or competency from the catalogue names the row.
 const schema = z.object({
-  competencyName: z.string().trim().min(1, 'Name the competency').max(200),
+  competencyName: z.string().trim().max(200),
   competencyId: z.string().optional(),
   skillId: z.string().optional(),
   description: z.string().max(1000).optional(),
@@ -33,6 +34,10 @@ const schema = z.object({
   isCritical: z.boolean(),
   monetaryValue: optionalNumber(0),
   jobResponsibilityId: z.string().optional(),
+}).superRefine((v, ctx) => {
+  if (!v.competencyName && !idOrNull(v.skillId) && !idOrNull(v.competencyId)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['competencyName'], message: 'Name it, or pick a skill or competency' });
+  }
 });
 
 type Form = z.infer<typeof schema>;
@@ -128,7 +133,7 @@ export function JobCompetenciesPanel({
           jobResponsibilityId: idOrNull(v.jobResponsibilityId),
           skillId: idOrNull(v.skillId),
           competencyId: idOrNull(v.competencyId),
-          competencyName: v.competencyName.trim(),
+          competencyName: v.competencyName.trim() || null,
           description: nullIfBlank(v.description),
           type: v.type as CompetencyType,
           requiredLevel: v.requiredLevel as ProficiencyLevel,
@@ -141,7 +146,7 @@ export function JobCompetenciesPanel({
           jobResponsibilityId: idOrNull(v.jobResponsibilityId),
           skillId: idOrNull(v.skillId),
           competencyId: idOrNull(v.competencyId),
-          competencyName: v.competencyName.trim(),
+          competencyName: v.competencyName.trim() || null,
           description: nullIfBlank(v.description),
           type: v.type as CompetencyType,
           requiredLevel: v.requiredLevel as ProficiencyLevel,
@@ -156,7 +161,7 @@ export function JobCompetenciesPanel({
       }
       getId={(c) => c.id}
       columns={[
-        { header: 'Competency', cell: (c) => c.competencyName },
+        { header: 'Competency', cell: (c) => c.competencyName || c.skillName || c.masterCompetencyName || '—' },
         { header: 'Type', cell: (c) => labelFor(JOB_COMPETENCY_TYPES, c.type) },
         { header: 'Level required', cell: (c) => labelFor(PROFICIENCY_LEVELS, c.requiredLevel) },
         {
@@ -203,7 +208,6 @@ export function JobCompetenciesPanel({
             form={form}
             name="competencyName"
             label="Competency"
-            required
             placeholder="e.g. Financial reporting under IFRS"
           />
 
