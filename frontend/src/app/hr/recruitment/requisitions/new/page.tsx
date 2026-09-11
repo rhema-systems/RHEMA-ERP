@@ -45,6 +45,7 @@ export default function NewRequisitionPage() {
     mutationFn: () =>
       staffRequisitionService.create({
         positionId: form.positionId,
+        jobDescriptionId: form.jobDescriptionId || null,
         organizationUnitId: position?.organizationUnitId ?? null,
         organizationLevelId: position?.organizationLevelId ?? null,
         locationId: form.locationId || null,

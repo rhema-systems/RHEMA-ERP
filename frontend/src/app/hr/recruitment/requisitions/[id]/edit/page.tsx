@@ -47,6 +47,7 @@ export default function EditRequisitionPage() {
     if (!data) return;
     setForm({
       positionId: data.positionId,
+      jobDescriptionId: data.jobDescriptionId ?? '',
       locationId: data.locationId ?? '',
       type: data.type,
       priority: data.priority,
@@ -77,6 +78,7 @@ export default function EditRequisitionPage() {
       staffRequisitionService.update(id, {
         id,
         positionId: form.positionId,
+        jobDescriptionId: form.jobDescriptionId || null,
         organizationUnitId: position?.organizationUnitId ?? null,
         organizationLevelId: position?.organizationLevelId ?? null,
         locationId: form.locationId || null,

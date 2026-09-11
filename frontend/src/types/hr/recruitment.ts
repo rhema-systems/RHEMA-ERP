@@ -33,6 +33,23 @@ export type StaffRequisitionType = (typeof STAFF_REQUISITION_TYPES)[number];
 export const STAFF_REQUISITION_PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'] as const;
 export type StaffRequisitionPriority = (typeof STAFF_REQUISITION_PRIORITIES)[number];
 
+/**
+ * `StaffReplacementReason` on the server (round 3, lane Q). The form used to offer a free-text
+ * "Why they left" box against this ENUM, so a Replacement requisition typed any way other than an
+ * exact member name was refused with the middleware's canned 400 — from the screen, always.
+ */
+export const STAFF_REPLACEMENT_REASONS = [
+  'Resignation',
+  'Retirement',
+  'Termination',
+  'Promotion',
+  'Transfer',
+  'LongTermLeave',
+  'Death',
+  'Other',
+] as const;
+export type StaffReplacementReason = (typeof STAFF_REPLACEMENT_REASONS)[number];
+
 export const JOB_VACANCY_STATUSES = [
   'Draft',
   'PendingApproval',

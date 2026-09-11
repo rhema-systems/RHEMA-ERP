@@ -52,14 +52,24 @@ public class StaffRequisitionRepository : GenericRepository<StaffRequisition>, I
     /// and <c>jobVacancyNumber</c> came back null on every single read even when both were set. The
     /// second one matters most: <c>link-vacancy</c> exists to tie a requisition to its vacancy, and
     /// the detail screen could never show that it had worked.</para>
+    ///
+    /// <para>Round 3 (demo feedback, lane Q): the same shape a second time. <c>LocationLevel</c>,
+    /// <c>OrganizationLevel</c>, <c>ReplacementForEmployee</c> and <c>CancelledBy</c> were still
+    /// absent, so the replacement's name and the whole cancellation block on the detail screen had
+    /// never once rendered. The list below is now the DTO's navigation list, in the DTO's order —
+    /// when a navigation is added to <c>StaffRequisitionDto</c>, add it here in the same commit.</para>
     /// </summary>
     private IQueryable<StaffRequisition> WithSummaryNavigations() =>
         _dbSet
-            .Include(r => r.Position)
-            .Include(r => r.OrganizationUnit)
+            .Include(r => r.LocationLevel)
             .Include(r => r.Location)
-            .Include(r => r.RequestedBy)
+            .Include(r => r.OrganizationLevel)
+            .Include(r => r.OrganizationUnit)
+            .Include(r => r.Position)
             .Include(r => r.JobDescription)
+            .Include(r => r.ReplacementForEmployee)
+            .Include(r => r.RequestedBy)
+            .Include(r => r.CancelledBy)
             .Include(r => r.JobVacancy);
 
     public async Task<StaffRequisition?> GetWithSummaryNavAsync(Guid id)

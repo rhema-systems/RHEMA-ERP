@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -17,9 +19,11 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { BudgetLinePicker } from '@/components/hr/recruitment/BudgetLinePicker';
 import { BudgetCheckPanel } from '@/components/hr/recruitment/BudgetCheckPanel';
 import { employeePositionService } from '@/services/hr/employee-position.service';
+import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { locationService } from '@/services/hr/location.service';
 import { humanizeEnum } from '@/lib/hr/attendance-format';
 import {
+  STAFF_REPLACEMENT_REASONS,
   STAFF_REQUISITION_PRIORITIES,
   STAFF_REQUISITION_TYPES,
   type StaffRequisitionPriority,
@@ -28,6 +32,12 @@ import {
 
 export interface RequisitionFormState {
   positionId: string;
+  /**
+   * The approved job description for the position, or '' (round 3, lane Q). Filled from the
+   * position's current description when the position is chosen; the detail screen had shown
+   * "Job description: —" on every requisition because no form ever sent this.
+   */
+  jobDescriptionId: string;
   locationId: string;
   type: StaffRequisitionType;
   priority: StaffRequisitionPriority;
@@ -53,6 +63,7 @@ export interface RequisitionFormState {
 
 export const emptyRequisitionForm = (): RequisitionFormState => ({
   positionId: '',
+  jobDescriptionId: '',
   locationId: '',
   type: 'NewPosition',
   priority: 'Medium',
@@ -106,6 +117,26 @@ export function RequisitionFormFields({ value, onChange, positionLocked, requisi
     queryFn: () => locationService.getAll(),
   });
 
+  // The position's current APPROVED description (the same read the offer letter uses). A draft
+  // or superseded one is not offered: recruiting against a description nobody signed off is
+  // the thing the approval exists to prevent.
+  const currentJd = useQuery({
+    queryKey: ['hr', 'job-descriptions', 'current-for-position', value.positionId],
+    queryFn: () => jobArchitectureService.getCurrentForPosition(value.positionId),
+    enabled: !!value.positionId,
+  });
+
+  // Fill the description in when the position changes and nothing is chosen yet. Deliberately
+  // one-way: a description already on the record (edit) is kept even if a newer version has
+  // since been approved — the user sees both and decides.
+  useEffect(() => {
+    if (!value.positionId || value.jobDescriptionId || !currentJd.data?.id) return;
+    onChange({ ...value, jobDescriptionId: currentJd.data.id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.positionId, value.jobDescriptionId, currentJd.data?.id]);
+
+  const jdIsCurrent = !!value.jobDescriptionId && currentJd.data?.id === value.jobDescriptionId;
+
   const isReplacement = value.type === 'Replacement';
 
   return (
@@ -146,6 +177,63 @@ export function RequisitionFormFields({ value, onChange, positionLocked, requisi
             {positionLocked && (
               <p className="text-xs text-muted-foreground">
                 A vacancy has been opened from this requisition, so the position is fixed.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Job description</Label>
+            {!value.positionId ? (
+              <p className="text-sm text-muted-foreground">Choose the position first.</p>
+            ) : currentJd.isLoading ? (
+              <p className="text-sm text-muted-foreground">Looking up the position's description…</p>
+            ) : value.jobDescriptionId ? (
+              <div className="rounded-md border px-3 py-2 text-sm">
+                {jdIsCurrent && currentJd.data ? (
+                  <Link
+                    href={`/hr/job-descriptions/${currentJd.data.id}`}
+                    className="font-medium text-primary hover:underline"
+                    target="_blank"
+                  >
+                    {currentJd.data.jobTitle} · v{currentJd.data.versionNumber}
+                  </Link>
+                ) : (
+                  <span className="font-medium">The description already on this requisition</span>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {jdIsCurrent
+                    ? 'The current approved description for this position.'
+                    : currentJd.data
+                      ? `A newer approved version exists (${currentJd.data.jobTitle} · v${currentJd.data.versionNumber}).`
+                      : 'This position has no current approved description; the one on record is kept.'}
+                </p>
+                {!jdIsCurrent && (
+                  <div className="mt-1 flex gap-3">
+                    {currentJd.data && (
+                      <button
+                        type="button"
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => set('jobDescriptionId', currentJd.data!.id)}
+                      >
+                        Use the current version
+                      </button>
+                    )}
+                    {/* Needed when the position is changed on edit: the old description now
+                        belongs to another post and the server refuses it. */}
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:underline"
+                      onClick={() => set('jobDescriptionId', '')}
+                    >
+                      Remove it
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No approved job description for this position yet. The requisition can be raised
+                without one; write and approve the description before the offer stage.
               </p>
             )}
           </div>
@@ -255,13 +343,22 @@ export function RequisitionFormFields({ value, onChange, positionLocked, requisi
               />
             </div>
             <div className="space-y-1.5 md:col-span-2">
-              <Label htmlFor="replacementReason">Why they left</Label>
-              <Input
-                id="replacementReason"
+              <Label>Why they left</Label>
+              <Select
                 value={value.replacementReason}
-                onChange={(e) => set('replacementReason', e.target.value)}
-                placeholder="e.g. Resignation"
-              />
+                onValueChange={(v) => set('replacementReason', v)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a reason" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STAFF_REPLACEMENT_REASONS.map((reason) => (
+                    <SelectItem key={reason} value={reason}>
+                      {humanizeEnum(reason)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>

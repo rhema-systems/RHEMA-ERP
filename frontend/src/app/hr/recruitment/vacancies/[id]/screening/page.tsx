@@ -248,32 +248,6 @@ export default function VacancyScreeningPage() {
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <ShortlistApprovalCard vacancyId={vacancyId} summary={s} onChanged={refresh} />
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Candidate notifications</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Emails everyone shortlisted or rejected who has not already been told. Safe to run
-              again — anyone already notified is skipped.
-            </p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={notify.isPending} onClick={() => notify.mutate('shortlist')}>
-                <Mail className="mr-2 h-3.5 w-3.5" />
-                Tell the shortlisted
-              </Button>
-              <Button size="sm" variant="outline" disabled={notify.isPending} onClick={() => notify.mutate('rejection')}>
-                <Mail className="mr-2 h-3.5 w-3.5" />
-                Tell the rejected
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       <Tabs defaultValue="shortlist">
         <TabsList className="flex-wrap">
           <TabsTrigger value="shortlist">Shortlist</TabsTrigger>
@@ -637,6 +611,34 @@ export default function VacancyScreeningPage() {
           </p>
         </TabsContent>
       </Tabs>
+
+      {/* Round 3 (demo feedback): the approval and the notifications come AFTER the shortlist
+          itself — you read and shape the list, then sign it off and tell people. */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <ShortlistApprovalCard vacancyId={vacancyId} summary={s} onChanged={refresh} />
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Candidate notifications</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Emails everyone shortlisted or rejected who has not already been told. Safe to run
+              again — anyone already notified is skipped.
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={notify.isPending} onClick={() => notify.mutate('shortlist')}>
+                <Mail className="mr-2 h-3.5 w-3.5" />
+                Tell the shortlisted
+              </Button>
+              <Button size="sm" variant="outline" disabled={notify.isPending} onClick={() => notify.mutate('rejection')}>
+                <Mail className="mr-2 h-3.5 w-3.5" />
+                Tell the rejected
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Dialog open={autoOpen} onOpenChange={(o) => !o && setAutoOpen(false)}>
         <DialogContent className="sm:max-w-[480px]">

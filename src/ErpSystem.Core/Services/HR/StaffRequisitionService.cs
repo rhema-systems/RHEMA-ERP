@@ -29,6 +29,7 @@ public class StaffRequisitionService : IStaffRequisitionService
     private readonly IStaffRequisitionAttachmentRepository _attachmentRepository;
     private readonly IStaffRequisitionCommentRepository _commentRepository;
     private readonly IStaffRequisitionHistoryRepository _historyRepository;
+    private readonly IJobDescriptionRepository _jobDescriptionRepository;
     private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
@@ -50,6 +51,7 @@ public class StaffRequisitionService : IStaffRequisitionService
         IStaffRequisitionAttachmentRepository attachmentRepository,
         IStaffRequisitionCommentRepository commentRepository,
         IStaffRequisitionHistoryRepository historyRepository,
+        IJobDescriptionRepository jobDescriptionRepository,
         ICompanyHrPolicyProvider policyProvider,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegrationService,
@@ -64,6 +66,7 @@ public class StaffRequisitionService : IStaffRequisitionService
         _attachmentRepository = attachmentRepository;
         _commentRepository = commentRepository;
         _historyRepository = historyRepository;
+        _jobDescriptionRepository = jobDescriptionRepository;
         _policyProvider = policyProvider;
         _currentUserProvider = currentUserProvider;
         _workflowIntegrationService = workflowIntegrationService;
@@ -291,6 +294,7 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         var entity = createDto.ToEntity(current, requestedByUserId);
         entity.RequisitionNumber = await GenerateRequisitionNumberAsync(current, cancellationToken);
+        await RequireJobDescriptionOfPositionAsync(entity, cancellationToken);
         await ApplyBudgetLinkAsync(entity, createDto.ManpowerBudgetLineId, cancellationToken);
 
         await _requisitionRepository.AddAsync(entity);
@@ -312,6 +316,7 @@ public class StaffRequisitionService : IStaffRequisitionService
             throw new InvalidOperationException("Only Draft or Rejected requisitions can be edited.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        await RequireJobDescriptionOfPositionAsync(entity, cancellationToken);
         await ApplyBudgetLinkAsync(entity, updateDto.ManpowerBudgetLineId, cancellationToken);
 
         await _requisitionRepository.UpdateAsync(entity);
@@ -320,6 +325,28 @@ public class StaffRequisitionService : IStaffRequisitionService
         _logger.LogInformation("Staff requisition updated: {RequisitionNumber}", entity.RequisitionNumber);
 
         return await ReloadDtoAsync(entity.Id, cancellationToken);
+    }
+
+    /// <summary>
+    /// A requisition may name the job description it recruits against (round 3, lane Q — the
+    /// form never sent one, and nothing checked one). The reference is optional; when present it
+    /// must be a description of THIS requisition's position: an offer letter later picks the
+    /// position's description, and a requisition pointing at another post's description would
+    /// read as one job and hire for another. Refused as an <see cref="InvalidOperationException"/>
+    /// — a bad reference inside a payload is a bad request, not a missing resource, and this
+    /// controller maps it to 422 like every other rule here.
+    /// </summary>
+    private async Task RequireJobDescriptionOfPositionAsync(StaffRequisition entity, CancellationToken cancellationToken)
+    {
+        if (entity.JobDescriptionId is not { } jobDescriptionId) return;
+
+        var jobDescription = await _jobDescriptionRepository.GetByIdAsync(jobDescriptionId);
+        if (jobDescription == null || jobDescription.IsDeleted || jobDescription.TenantId != entity.TenantId)
+            throw new InvalidOperationException("The job description named on this requisition does not exist.");
+
+        if (jobDescription.PositionId != entity.PositionId)
+            throw new InvalidOperationException(
+                $"The job description '{jobDescription.JobTitle}' describes a different position; choose one written for the requisition's position.");
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)

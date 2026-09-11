@@ -246,9 +246,37 @@ export default function RequisitionDetailPage() {
 
           <InfoCard title="The role">
             <InfoRow label="Position" value={r.positionTitle} />
-            <InfoRow label="Job description" value={r.jobDescriptionTitle} />
-            <InfoRow label="Organisation unit" value={r.organizationUnitName} />
-            <InfoRow label="Location" value={r.locationName} />
+            <InfoRow
+              label="Job description"
+              value={
+                r.jobDescriptionId ? (
+                  <Link
+                    href={`/hr/job-descriptions/${r.jobDescriptionId}`}
+                    className="text-primary hover:underline"
+                  >
+                    {r.jobDescriptionTitle ?? 'Open job description'}
+                  </Link>
+                ) : (
+                  'None named'
+                )
+              }
+            />
+            <InfoRow
+              label="Organisation unit"
+              value={
+                r.organizationLevelName
+                  ? `${r.organizationUnitName ?? '—'} (${r.organizationLevelName})`
+                  : r.organizationUnitName
+              }
+            />
+            <InfoRow
+              label="Location"
+              value={
+                r.locationLevelName
+                  ? `${r.locationName ?? '—'} (${r.locationLevelName})`
+                  : r.locationName
+              }
+            />
             <InfoRow label="Type" value={humanizeEnum(r.type)} />
             <InfoRow label="Priority" value={r.priority} />
             <InfoRow
@@ -281,7 +309,7 @@ export default function RequisitionDetailPage() {
           {r.type === 'Replacement' && (
             <InfoCard title="Replacement">
               <InfoRow label="Outgoing employee" value={r.replacementForEmployeeName} />
-              <InfoRow label="Reason" value={r.replacementReason} />
+              <InfoRow label="Reason" value={r.replacementReason ? humanizeEnum(r.replacementReason) : null} />
               <InfoRow label="Departure date" value={formatDate(r.employeeDepartureDate)} />
             </InfoCard>
           )}
@@ -290,6 +318,10 @@ export default function RequisitionDetailPage() {
             <InfoRow label="Raised" value={formatDate(r.requestDate)} />
             <InfoRow label="Desired start" value={formatDate(r.desiredStartDate)} />
             <InfoRow label="Latest acceptable start" value={formatDate(r.latestAcceptableStartDate)} />
+            {r.targetStartDateReason && (
+              <InfoRow label="Why that start date" value={r.targetStartDateReason} />
+            )}
+            <InfoRow label="Expected offer date" value={formatDate(r.expectedOfferDate)} />
             <InfoRow label="Target fill date" value={formatDate(r.targetFillDate)} />
             <InfoRow label="Days to fill" value={r.daysToFill ?? '—'} />
             <InfoRow label="Fulfilled" value={formatDate(r.fulfilledDate)} />
@@ -300,6 +332,12 @@ export default function RequisitionDetailPage() {
               <CardTitle className="text-base">The case for it</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              {r.description && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Description</p>
+                  <p className="whitespace-pre-wrap text-sm">{r.description}</p>
+                </div>
+              )}
               <div>
                 <p className="text-xs text-muted-foreground">Business justification</p>
                 <p className="whitespace-pre-wrap text-sm">{r.businessJustification || '—'}</p>
