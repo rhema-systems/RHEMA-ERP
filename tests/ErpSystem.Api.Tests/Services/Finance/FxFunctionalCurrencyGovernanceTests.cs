@@ -1048,9 +1048,9 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         return exchangeRate;
     }
 
-    private static FinancePostingRequestDto CreateSameCurrencyPostingRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
+    private static FinancePostingRequestV2Dto CreateSameCurrencyPostingRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
     {
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "FXTEST",
             SourceDocumentType = "SameCurrency",
@@ -1061,7 +1061,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             Description = "Same currency posting",
             PostingDate = new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {
@@ -1071,7 +1071,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         };
     }
 
-    private static FinancePostingRequestDto CreateForeignPostingRequest(
+    private static FinancePostingRequestV2Dto CreateForeignPostingRequest(
         Guid tenantId,
         Guid debitAccountId,
         Guid creditAccountId,
@@ -1080,7 +1080,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
         DateTime? postingDate = null)
     {
         var functionalAmount = decimal.Round(transactionAmount * rate, 2, MidpointRounding.AwayFromZero);
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "FXTEST",
             SourceDocumentType = "ForeignCurrency",
@@ -1091,7 +1091,7 @@ public sealed class FxFunctionalCurrencyGovernanceTests
             Description = "Foreign currency posting",
             PostingDate = postingDate ?? new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {

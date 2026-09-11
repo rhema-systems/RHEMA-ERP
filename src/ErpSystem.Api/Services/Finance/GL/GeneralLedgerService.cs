@@ -2787,6 +2787,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                     PostingDate = closingEntry.EntryDate,
                     FiscalPeriodId = closingEntry.FiscalPeriodId,
                     JournalType = "Year-End Close Reversal",
+                    AccountingBookCode = closingEntry.BookClassification,
                     FunctionalCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
                     IdempotencyKey = $"GL:YearEndCloseReversal:{tenantId:N}:{fiscalYear.Id:N}:{closingEntry.Id:N}",
                     AllowPostingToClosedPeriod = true,
@@ -2795,9 +2796,22 @@ namespace ErpSystem.Api.Services.Finance.GL
                         .Select(t => new FinancePostingLineDto
                         {
                             AccountId = t.AccountId,
+                            SourceDocumentLineId = t.SourceDocumentLineId,
                             Description = $"Reversal: {t.Description}",
                             DebitAmount = t.CreditAmount,
                             CreditAmount = t.DebitAmount,
+                            TransactionCurrency = t.TransactionCurrency,
+                            TransactionDebitAmount = t.TransactionCreditAmount,
+                            TransactionCreditAmount = t.TransactionDebitAmount,
+                            ForeignCurrencyAmount = t.ForeignCurrencyAmount,
+                            ExchangeRateId = t.ExchangeRateId,
+                            ExchangeRate = t.ExchangeRate,
+                            ExchangeRateSource = t.ExchangeRateSource,
+                            ExchangeRateDate = t.ExchangeRateDate,
+                            SourceReferenceNumber = t.SourceReferenceNumber,
+                            LineNumber = t.LineNumber,
+                            FinanceDimensionSetId = t.FinanceDimensionSetId,
+                            SegmentString = t.SegmentString,
                             Notes = reason.Trim(),
                             TransactionTag = "YearEndCloseReversal"
                         })

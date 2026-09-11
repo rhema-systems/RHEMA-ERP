@@ -46,17 +46,6 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
     }
 
     public async Task<FinancePostingResultDto> PostAsync(
-        FinancePostingRequestDto request,
-        CancellationToken cancellationToken = default) =>
-        await PostCoreAsync(request, request.BookClassification, producerContext: null, allowHistoricalMappingException: false, cancellationToken);
-
-    public async Task<FinancePostingResultDto> PostAsync(
-        FinancePostingRequestDto request,
-        FinancePostingProducerContext producerContext,
-        CancellationToken cancellationToken = default) =>
-        await PostCoreAsync(request, request.BookClassification, producerContext ?? throw new ArgumentNullException(nameof(producerContext)), allowHistoricalMappingException: false, cancellationToken);
-
-    public async Task<FinancePostingResultDto> PostAsync(
         FinancePostingRequestV2Dto request,
         CancellationToken cancellationToken = default) =>
         await PostCoreAsync(request, request.AccountingBookCode, producerContext: null, allowHistoricalMappingException: false, cancellationToken);
@@ -480,7 +469,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             Lines = plan.ReversalLines
         };
         // Only this server-derived command can admit inactive historical book mappings. Ordinary
-        // V1/V2 requests cannot set or influence the exception.
+        // V2 requests cannot set or influence the exception.
         return await PostCoreAsync(request, request.AccountingBookCode, producerContext: null,
             allowHistoricalMappingException: true, cancellationToken);
     }

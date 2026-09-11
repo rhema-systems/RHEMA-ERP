@@ -32,24 +32,6 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
     }
 
     [Fact]
-    public void V1_and_V2_evidence_domains_are_distinct()
-    {
-        var v2 = GoldenV2Envelope();
-        var v1 = new FinanceExternalPostingEnvelopeDto
-        {
-            ContractId = v2.ContractId, TenantId = v2.TenantId, SourceDocumentId = v2.SourceDocumentId,
-            SourceDocumentReference = v2.SourceDocumentReference, Description = v2.Description,
-            PostingDate = v2.PostingDate, PostingAction = v2.PostingAction, JournalType = v2.JournalType,
-            BookClassification = v2.AccountingBookCode, FunctionalCurrencyCode = v2.FunctionalCurrencyCode,
-            IdempotencyKey = v2.IdempotencyKey, SourceApproved = v2.SourceApproved,
-            ApprovedByUserId = v2.ApprovedByUserId, ApprovedAtUtc = v2.ApprovedAtUtc,
-            ApprovalReference = v2.ApprovalReference, Lines = v2.Lines
-        };
-
-        FinanceExternalPostingEvidence.Compute(v1).Should().NotBe(FinanceExternalPostingEvidence.Compute(v2));
-    }
-
-    [Fact]
     public void Every_external_contract_maps_to_a_distinct_non_finance_capture_optional_route()
     {
         var contracts = Enum.GetValues<FinanceExternalProducerContractId>();
@@ -103,6 +85,17 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
 
         FinanceExternalPostingEvidence.Compute(envelope).Should().Be(expected);
         envelope.Lines[0].CreditAmount = 101m;
+        FinanceExternalPostingEvidence.Compute(envelope).Should().NotBe(expected);
+    }
+
+    [Fact]
+    public void Source_evidence_hash_binds_the_canonical_accounting_book_code()
+    {
+        var envelope = GoldenV2Envelope();
+        var expected = FinanceExternalPostingEvidence.Compute(envelope);
+
+        envelope.AccountingBookCode = "LOCAL_GAAP";
+
         FinanceExternalPostingEvidence.Compute(envelope).Should().NotBe(expected);
     }
 
@@ -227,7 +220,7 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
         await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*approved payload hash*");
     }
 
-    private static FinanceExternalPostingEnvelopeDto ValidEnvelope(Guid tenant) => WithEvidence(new()
+    private static FinanceExternalPostingEnvelopeV2Dto ValidEnvelope(Guid tenant) => WithEvidence(new()
     {
         ContractId = FinanceExternalProducerContractId.InventoryDisposalProceeds,
         TenantId = tenant,
@@ -235,8 +228,9 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
         SourceDocumentReference = "DISP-001",
         Description = "Approved disposal proceeds",
         PostingDate = DateTime.UtcNow.Date,
+        AccountingBookCode = "IFRS",
         FunctionalCurrencyCode = "GHS",
-        IdempotencyKey = "disposal-proceeds-v1",
+        IdempotencyKey = "disposal-proceeds-v2",
         SourceApproved = true,
         ApprovedByUserId = Guid.NewGuid(),
         ApprovedAtUtc = DateTime.UtcNow,
@@ -286,7 +280,7 @@ public sealed class ExternalFinanceDimensionAdapterContractTests
         ]
     };
 
-    private static FinanceExternalPostingEnvelopeDto WithEvidence(FinanceExternalPostingEnvelopeDto envelope)
+    private static FinanceExternalPostingEnvelopeV2Dto WithEvidence(FinanceExternalPostingEnvelopeV2Dto envelope)
     {
         envelope.SourceEvidenceHash = FinanceExternalPostingEvidence.Compute(envelope);
         return envelope;

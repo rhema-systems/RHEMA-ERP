@@ -67,13 +67,6 @@ public abstract class FinancePostingCommandDto
     public IReadOnlyList<FinanceTaxCalculationSnapshotDto> TaxCalculationSnapshots { get; set; } = Array.Empty<FinanceTaxCalculationSnapshotDto>();
 }
 
-/// <summary>Deprecated V1 posting contract retained only while external module owners migrate.</summary>
-[Obsolete("Use FinancePostingRequestV2Dto with AccountingBookCode.")]
-public sealed class FinancePostingRequestDto : FinancePostingCommandDto
-{
-    public string BookClassification { get; set; } = "IFRS";
-}
-
 /// <summary>
 /// Canonical V2 posting contract. AccountingBookCode selects the ledger basis; detailed account
 /// classification remains Finance-owned metadata resolved from each AccountId.

@@ -9,14 +9,6 @@ namespace ErpSystem.Core.Interfaces.Finance;
 public interface IExternalFinancePostingAdapter
 {
     Task<FinanceSourceDocumentDimensionDto> ValidateDimensionsAsync(
-        FinanceExternalPostingEnvelopeDto envelope,
-        CancellationToken cancellationToken = default);
-
-    Task<FinancePostingResultDto> PostAsync(
-        FinanceExternalPostingEnvelopeDto envelope,
-        CancellationToken cancellationToken = default);
-
-    Task<FinanceSourceDocumentDimensionDto> ValidateDimensionsAsync(
         FinanceExternalPostingEnvelopeV2Dto envelope,
         CancellationToken cancellationToken = default);
 

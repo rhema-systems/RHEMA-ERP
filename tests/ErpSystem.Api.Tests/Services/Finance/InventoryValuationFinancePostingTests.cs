@@ -46,10 +46,10 @@ public sealed class InventoryValuationFinancePostingTests
             ReferenceId = receipt.Id, ReferenceNumber = receipt.ReceiptNumber
         });
         await db.SaveChangesAsync();
-        FinancePostingRequestDto? captured = null;
+        FinancePostingRequestV2Dto? captured = null;
         var posting = new Mock<IFinancePostingEngine>();
-        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
+        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(Result());
 
         await new InventoryReceiptFinancePostingService(db, posting.Object, Dimensions().Object)
@@ -89,10 +89,10 @@ public sealed class InventoryValuationFinancePostingTests
             Movement(tenant, landed.Id, "IMV-LC-1", 40m, null),
             Movement(tenant, landed.Id, "IMV-LC-2", 0m, 10m));
         await db.SaveChangesAsync();
-        FinancePostingRequestDto? captured = null;
+        FinancePostingRequestV2Dto? captured = null;
         var posting = new Mock<IFinancePostingEngine>();
-        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
+        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(Result());
 
         await new InventoryLandedCostFinancePostingService(db, posting.Object, Dimensions().Object).PostLandedCostAsync(landed.Id);

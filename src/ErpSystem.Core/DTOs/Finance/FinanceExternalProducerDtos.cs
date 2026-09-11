@@ -27,13 +27,6 @@ public abstract class FinanceExternalPostingEnvelopeBaseDto
     public IReadOnlyList<FinancePostingLineDto> Lines { get; set; } = Array.Empty<FinancePostingLineDto>();
 }
 
-/// <summary>Deprecated V1 external envelope retained during the coordinated producer migration.</summary>
-[Obsolete("Use FinanceExternalPostingEnvelopeV2Dto with AccountingBookCode.")]
-public sealed class FinanceExternalPostingEnvelopeDto : FinanceExternalPostingEnvelopeBaseDto
-{
-    public string BookClassification { get; set; } = "IFRS";
-}
-
 public sealed class FinanceExternalPostingEnvelopeV2Dto : FinanceExternalPostingEnvelopeBaseDto
 {
     /// <summary>

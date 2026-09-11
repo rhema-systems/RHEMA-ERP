@@ -12,68 +12,7 @@ namespace ErpSystem.Core.Finance.Integration;
 /// </summary>
 public static class FinanceExternalPostingEvidence
 {
-    public static string Compute(FinanceExternalPostingEnvelopeDto envelope)
-    {
-        ArgumentNullException.ThrowIfNull(envelope);
-        var canonical = new StringBuilder();
-        // V1 deliberately retains its published canonical byte sequence so in-flight evidence
-        // remains verifiable. V2 starts with an explicit, disjoint domain marker below.
-        Append(canonical, ((int)envelope.ContractId).ToString(CultureInfo.InvariantCulture));
-        Append(canonical, FinanceExternalProducerContractCatalog.GetRequired(envelope.ContractId).Definition.ContractVersion);
-        Append(canonical, envelope.TenantId.ToString("D"));
-        Append(canonical, envelope.SourceDocumentId.ToString("D"));
-        Append(canonical, Normalize(envelope.SourceDocumentReference));
-        Append(canonical, Normalize(envelope.Description));
-        Append(canonical, Date(envelope.PostingDate));
-        Append(canonical, Normalize(envelope.PostingAction));
-        Append(canonical, Normalize(envelope.JournalType));
-        Append(canonical, Normalize(envelope.BookClassification));
-        Append(canonical, Normalize(envelope.FunctionalCurrencyCode).ToUpperInvariant());
-        Append(canonical, Normalize(envelope.IdempotencyKey));
-        Append(canonical, envelope.SourceApproved ? "1" : "0");
-        Append(canonical, envelope.ApprovedByUserId.ToString("D"));
-        Append(canonical, Date(envelope.ApprovedAtUtc));
-        Append(canonical, Normalize(envelope.ApprovalReference));
-
-        var sourceDimensions = envelope.FinanceDimensions;
-        Append(canonical, sourceDimensions?.ApplyDefaultToEligibleLines == true ? "1" : "0");
-        AppendDimensions(canonical, sourceDimensions?.DefaultDimensions);
-        foreach (var line in sourceDimensions?.Lines?.OrderBy(item => item.SourceLineId).ThenBy(item => item.AccountId)
-                     ?? Enumerable.Empty<FinanceSourceLineDimensionInputDto>())
-        {
-            Append(canonical, line.SourceLineId?.ToString("D") ?? string.Empty);
-            Append(canonical, line.AccountId.ToString("D"));
-            AppendDimensions(canonical, line.Dimensions);
-        }
-
-        foreach (var line in (envelope.Lines ?? Array.Empty<FinancePostingLineDto>())
-                     .OrderBy(item => item.SourceDocumentLineId).ThenBy(item => item.AccountId))
-        {
-            Append(canonical, line.SourceDocumentLineId?.ToString("D") ?? string.Empty);
-            Append(canonical, line.AccountId.ToString("D"));
-            Append(canonical, Normalize(line.Description));
-            Append(canonical, Number(line.DebitAmount));
-            Append(canonical, Number(line.CreditAmount));
-            Append(canonical, Normalize(line.TransactionCurrency).ToUpperInvariant());
-            Append(canonical, Number(line.TransactionDebitAmount));
-            Append(canonical, Number(line.TransactionCreditAmount));
-            Append(canonical, Number(line.ForeignCurrencyAmount));
-            Append(canonical, line.ExchangeRateId?.ToString("D") ?? string.Empty);
-            Append(canonical, Number(line.ExchangeRate));
-            Append(canonical, Normalize(line.ExchangeRateSource));
-            Append(canonical, line.ExchangeRateDate.HasValue ? Date(line.ExchangeRateDate.Value) : string.Empty);
-            Append(canonical, Normalize(line.SourceReferenceNumber));
-            Append(canonical, line.LineNumber?.ToString(CultureInfo.InvariantCulture) ?? string.Empty);
-            Append(canonical, Normalize(line.SegmentString));
-            Append(canonical, Normalize(line.Notes));
-            Append(canonical, Normalize(line.TransactionTag));
-        }
-
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString())))
-            .ToLowerInvariant();
-    }
-
-    /// <summary>Computes V2 evidence in a domain that cannot collide with a V1 payload.</summary>
+    /// <summary>Computes evidence for the final V2-only external posting contract.</summary>
     public static string Compute(FinanceExternalPostingEnvelopeV2Dto envelope) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Canonicalize(envelope)))).ToLowerInvariant();
 

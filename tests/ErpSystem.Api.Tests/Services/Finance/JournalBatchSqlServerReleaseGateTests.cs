@@ -213,7 +213,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             context,
             currentUser.Object,
             Mock.Of<ILogger<FinancePostingEngine>>());
-        var request = new FinancePostingRequestDto
+        var request = new FinancePostingRequestV2Dto
         {
             SourceModule = "PROC",
             OriginModuleCode = "PROC",
@@ -225,7 +225,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             Description = "SQL Server tracked-account posting regression",
             PostingDate = new DateTime(2026, 7, 15),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines =
             [

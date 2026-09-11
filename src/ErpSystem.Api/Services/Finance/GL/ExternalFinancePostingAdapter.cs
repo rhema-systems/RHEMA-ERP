@@ -35,25 +35,12 @@ public sealed class ExternalFinancePostingAdapter : IExternalFinancePostingAdapt
     }
 
     public async Task<FinanceSourceDocumentDimensionDto> ValidateDimensionsAsync(
-        FinanceExternalPostingEnvelopeDto envelope,
-        CancellationToken cancellationToken = default)
-    {
-        var validated = await ValidateEnvelopeAsync(envelope, FinanceExternalPostingEvidence.Compute(envelope), "v1", cancellationToken);
-        return await EnsureFrozenDimensionsAsync(validated, envelope, "dimension capture", cancellationToken);
-    }
-
-    public async Task<FinanceSourceDocumentDimensionDto> ValidateDimensionsAsync(
         FinanceExternalPostingEnvelopeV2Dto envelope,
         CancellationToken cancellationToken = default)
     {
         var validated = await ValidateEnvelopeAsync(envelope, FinanceExternalPostingEvidence.Compute(envelope), "v2", cancellationToken);
         return await EnsureFrozenDimensionsAsync(validated, envelope, "dimension capture", cancellationToken);
     }
-
-    public async Task<FinancePostingResultDto> PostAsync(
-        FinanceExternalPostingEnvelopeDto envelope,
-        CancellationToken cancellationToken = default) =>
-        await PostCoreAsync(envelope, envelope.BookClassification, FinanceExternalPostingEvidence.Compute(envelope), "v1", cancellationToken);
 
     public async Task<FinancePostingResultDto> PostAsync(
         FinanceExternalPostingEnvelopeV2Dto envelope,

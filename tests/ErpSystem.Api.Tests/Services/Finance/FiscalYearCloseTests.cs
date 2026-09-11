@@ -338,9 +338,9 @@ public sealed class FiscalYearCloseTests
         return new Fixture(db, glService, fiscalYear, revenue, expense, retainedEarnings);
     }
 
-    private static FinancePostingRequestDto ActivityRequest(Guid tenantId, string reference, FinancePostingLineDto[] lines)
+    private static FinancePostingRequestV2Dto ActivityRequest(Guid tenantId, string reference, FinancePostingLineDto[] lines)
     {
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "YearActivity",
@@ -351,7 +351,7 @@ public sealed class FiscalYearCloseTests
             Description = $"Activity {reference}",
             PostingDate = new DateTime(2026, 6, 15),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = lines
         };

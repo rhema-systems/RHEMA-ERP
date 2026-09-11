@@ -263,7 +263,7 @@ public sealed class FinancePostingEngineTests
 
         var service = CreateService(db, tenantId);
 
-        await service.PostAsync(new FinancePostingRequestDto
+        await service.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "NormalBalanceDocument",
@@ -274,7 +274,7 @@ public sealed class FinancePostingEngineTests
             Description = "Normal balance direction test",
             PostingDate = new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {
@@ -997,30 +997,21 @@ public sealed class FinancePostingEngineTests
         (await db.AccountBalances.ToListAsync()).Should().OnlyContain(item => item.ClosingBalance == 0m);
     }
 
-    public static TheoryData<bool, string> ExactReversalMutationCases => new()
+    public static TheoryData<string> ExactReversalMutationCases => new()
     {
-        { false, "account" },
-        { false, "side" },
-        { false, "amount" },
-        { false, "currency" },
-        { false, "rate" },
-        { false, "source-line" },
-        { false, "dimensions" },
-        { true, "account" },
-        { true, "side" },
-        { true, "amount" },
-        { true, "currency" },
-        { true, "rate" },
-        { true, "source-line" },
-        { true, "dimensions" }
+        { "account" },
+        { "side" },
+        { "amount" },
+        { "currency" },
+        { "rate" },
+        { "source-line" },
+        { "dimensions" }
     };
 
     [Theory]
     [MemberData(nameof(ExactReversalMutationCases))]
     [Trait("Category", "AccountingBookAuthority")]
-    public async Task PostAsync_ShouldRejectAlteredExactReversalEvidence_ForV1AndV2(
-        bool useV2,
-        string mutation)
+    public async Task PostAsync_ShouldRejectAlteredExactReversalEvidence_ForV2(string mutation)
     {
         var fixture = await CreateExactReversalFixtureAsync();
         await using var db = fixture.Db;
@@ -1077,18 +1068,15 @@ public sealed class FinancePostingEngineTests
             service,
             fixture.TenantId,
             plan,
-            lines,
-            useV2);
+            lines);
 
         await action.Should().ThrowAsync<InvalidOperationException>();
         (await db.JournalEntries.CountAsync()).Should().Be(1);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
+    [Fact]
     [Trait("Category", "AccountingBookAuthority")]
-    public async Task PostAsync_ShouldAcceptUnchangedExactReversalPlan_ForV1AndV2(bool useV2)
+    public async Task PostAsync_ShouldAcceptUnchangedExactReversalPlan_ForV2()
     {
         var fixture = await CreateExactReversalFixtureAsync();
         await using var db = fixture.Db;
@@ -1103,8 +1091,7 @@ public sealed class FinancePostingEngineTests
             service,
             fixture.TenantId,
             plan,
-            plan.ReversalLines,
-            useV2);
+            plan.ReversalLines);
 
         reversal.PostingStatus.Should().Be("Posted");
         (await db.JournalEntries.CountAsync()).Should().Be(2);
@@ -1770,49 +1757,25 @@ public sealed class FinancePostingEngineTests
         FinancePostingEngine service,
         Guid tenantId,
         FinanceReversalPlanDto plan,
-        IReadOnlyList<FinancePostingLineDto> lines,
-        bool useV2)
+        IReadOnlyList<FinancePostingLineDto> lines)
     {
-        if (useV2)
-        {
-            return service.PostAsync(new FinancePostingRequestV2Dto
-            {
-                SourceModule = "TEST",
-                SourceDocumentType = "DirectReversalV2",
-                SourceDocumentId = Guid.NewGuid(),
-                SourceDocumentTenantId = tenantId,
-                ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
-                ReversalReason = plan.Reason,
-                ReversalType = "Exact",
-                PostingAction = "Reverse",
-                Description = "Direct V2 exact reversal",
-                PostingDate = plan.ReversalDate,
-                JournalType = "System Generated",
-                AccountingBookCode = "IFRS",
-                FunctionalCurrencyCode = "GHS",
-                Lines = lines
-            });
-        }
-
-#pragma warning disable CS0618 // V1 remains supported during the coordinated producer cutover.
-        return service.PostAsync(new FinancePostingRequestDto
+        return service.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
-            SourceDocumentType = "DirectReversalV1",
+            SourceDocumentType = "DirectReversalV2",
             SourceDocumentId = Guid.NewGuid(),
             SourceDocumentTenantId = tenantId,
             ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
             ReversalReason = plan.Reason,
             ReversalType = "Exact",
             PostingAction = "Reverse",
-            Description = "Direct V1 exact reversal",
+            Description = "Direct V2 exact reversal",
             PostingDate = plan.ReversalDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = lines
         });
-#pragma warning restore CS0618
     }
 
     private sealed record ExactReversalFixture(

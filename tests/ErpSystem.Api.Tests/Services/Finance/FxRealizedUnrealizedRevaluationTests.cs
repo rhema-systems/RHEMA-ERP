@@ -1934,7 +1934,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             return account;
         }
 
-        private FinancePostingRequestDto CreateForeignPostingRequest(
+        private FinancePostingRequestV2Dto CreateForeignPostingRequest(
             string sourceModule,
             string sourceDocumentType,
             Guid sourceDocumentId,
@@ -2013,7 +2013,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
             lines.Sum(l => l.DebitAmount).Should().Be(functionalAmount);
             lines.Sum(l => l.CreditAmount).Should().Be(functionalAmount);
 
-            return new FinancePostingRequestDto
+            return new FinancePostingRequestV2Dto
             {
                 SourceModule = sourceModule,
                 SourceDocumentType = sourceDocumentType,
@@ -2024,7 +2024,7 @@ public sealed class FxRealizedUnrealizedRevaluationTests
                 Description = $"{sourceModule} {sourceReference}",
                 PostingDate = postingDate,
                 JournalType = "System Generated",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = "GHS",
                 IdempotencyKey = $"{sourceModule}:{sourceDocumentType}:{sourceDocumentId:N}:Post",
                 Lines = lines
@@ -2077,15 +2077,6 @@ public sealed class FxRealizedUnrealizedRevaluationTests
         : IFinancePostingEngine
     {
         private bool _hasThrown;
-
-        public Task<FinancePostingResultDto> PostAsync(
-            FinancePostingRequestDto request,
-            CancellationToken cancellationToken = default) => inner.PostAsync(request, cancellationToken);
-
-        public Task<FinancePostingResultDto> PostAsync(
-            FinancePostingRequestDto request,
-            FinancePostingProducerContext producerContext,
-            CancellationToken cancellationToken = default) => inner.PostAsync(request, producerContext, cancellationToken);
 
         public async Task<FinancePostingResultDto> PostAsync(
             FinancePostingRequestV2Dto request,
