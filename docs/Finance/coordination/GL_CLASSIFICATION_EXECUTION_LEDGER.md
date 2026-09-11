@@ -10,18 +10,18 @@ Execute the approved GL classification and revaluation refactor in bounded phase
 
 | Field | Value |
 |---|---|
-| Phase | Stage B4 — HR/Payroll Finance-account provisioning cutover |
+| Phase | Stage B5 — final V1-removal and deployment-readiness gate |
 | Status | `IN_PROGRESS` |
-| Implementing task | Independent reviewer `/root/stage_a1_review` |
-| Exact base | `fe8fbf5ceb162f2416ec610f0b560550692df135` |
-| Branch | `codex/hr-payroll-finance-account-provisioning-b4` |
-| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-hr-payroll-finance-account-provisioning-b4` |
+| Implementing task | Coordinator subagent `/root/final_readiness` |
+| Exact base | `cfea93f28cb3b41a838a7c2fa628b04e0781db1d` |
+| Branch | `codex/finance-gl-cutover-final-readiness-b5` |
+| Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-final-readiness-b5` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
 | Primary HEAD at activation | `5bbc86a747f69a0e0ba851ab86c9a6d52852c3a9` |
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — active every 15 minutes |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Corrected HR/Payroll candidate `03986811` under independent re-review |
+| Review status | HR/Payroll approved and integrated; final V1/removal-readiness implementation active |
 | Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
 
 ## Authoritative inputs
@@ -2094,3 +2094,29 @@ compare complete relevant Finance state. The ordinary API/test-project build com
 implementer's focused VSTest process made no progress under its watchdog, so no focused pass is claimed;
 independent Sol High re-review is running the exact binary with extended diagnostics plus widened and EF/no-connect
 gates. The two-commit worktree is tracked-clean and no database was accessed.
+
+Independent GPT-5.6 Sol High re-review approved final clean HR/Payroll candidate
+`039868118ad7a7d890493f04891514891659f3cd` with no P1/P2. The exact two-commit range preserves the
+Finance provisioning boundary and payroll economics, while closing exact canonical account/segment/mapping and
+zero-mutation denial evidence. Reviewer gates passed a fresh serialized zero-error test-project build, 3/3
+focused tests, 117/117 widened classification/segment-identity/FX provisioning tests, EF no-pending-model and
+exactly 456 no-connect migrations. No configured database was accessed or mutated.
+
+The coordinator created restore point `codex/finance-pre-hr-payroll-integration-20260911` at primary HEAD
+`590dc830`, integrated the two approved commits locally as `44d72339` and `cfea93f2` without conflict, and
+verified all three task-owned blobs are byte-identical to the reviewed candidate. Protected unrelated primary
+work remains untouched. Stage B4 HR/Payroll is complete; no migration application, push, PR, remote merge or
+configured-database access occurred.
+
+Stage B5 final V1-removal and deployment readiness is activated on GPT-5.6 Sol Medium from fresh exact base
+`cfea93f28cb3b41a838a7c2fa628b04e0781db1d`, branch
+`codex/finance-gl-cutover-final-readiness-b5`, in isolated worktree
+`C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-final-readiness-b5`.
+It must inventory all remaining active V1 producer request/envelope/overload/evidence/catalogue references and
+remove only now-retired Finance compatibility surfaces after confirming every production owner is cut over.
+Immutable historical storage/report fields are not rename targets. Acceptance requires zero active V1 producer
+construction, V2-only canonical JSON/hash and tamper evidence, no pseudo-book at the single-book engine, clean
+Procurement/HR direct-account-writer scans, disabled C6-C8 defaults, full producer compilation, focused/widened
+regression, frontend gates, EF no-pending-model, exactly 456 no-connect migrations, idempotent script generation,
+and an explicit deployment-readiness report listing unapplied migrations/flags and database preflight gates.
+No migration may be applied and configured `RHEMAERP` remains protected.
