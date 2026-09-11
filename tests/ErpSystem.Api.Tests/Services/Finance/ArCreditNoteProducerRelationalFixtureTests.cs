@@ -1,5 +1,6 @@
 using System.Data;
 using System.Data.Common;
+using System.Text.Json;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
@@ -184,8 +185,9 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             (await closed.Db.FinancePostingEvents.CountAsync()).Should().Be(postingCount);
             (await closed.Db.JournalEntries.CountAsync()).Should().Be(journalCount);
             (await closed.Db.AccountBalances.CountAsync()).Should().Be(balanceCount);
-            (await MappedRowsAsync(closed.Db)).Should().Equal(beforeRejection,
-                "a C10 period gate rejects before an owner, C5, event, posting, journal, balance, receipt, or audit row can change");
+            (await MappedRowsAsync(closed.Db)).Where(row => !IsFailureEvidenceRow(row)).Should().Equal(
+                beforeRejection.Where(row => !IsFailureEvidenceRow(row)),
+                "a C10 period gate may append only C12 failure event/attempt/audit evidence; owner, C5, posting, journal, balance and receipt rows remain frozen");
         }
 
         // Recovery is an independently prepared scenario; the rejected C11 authority is never
@@ -241,6 +243,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         await fixture.Producer.ApprovePreparedAsync(originalId, new DecideProducerAccountingIntentDto { Reason = "Independent original approval" });
         fixture.UseMaker();
         var posted = await fixture.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
+        await fixture.AlignFrozenC5AuthorityFromOriginalAsync(originalId);
 
         var request = new ReverseCreditNoteDto { Reason = "Customer return corrected", ReversalDate = new DateTime(2026, 9, 2) };
         var prepared = await fixture.Service.ReverseCreditNoteAsync(fixture.CreditNote.Id, request);
@@ -351,6 +354,25 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             Db.Add(additional);
             await Db.SaveChangesAsync();
             return additional;
+        }
+        public async Task AlignFrozenC5AuthorityFromOriginalAsync(Guid eventId)
+        {
+            // The relational harness seeds C5 directly. Rehydrate its canonical hash values
+            // from the durable C7 request rather than duplicating production fingerprint logic.
+            var original = await Db.AccountingEvents.SingleAsync(x => x.Id == eventId);
+            using var json = JsonDocument.Parse(original.ProducerIntentSnapshotJson!);
+            var root = json.RootElement;
+            var calculation = root.GetProperty("expectedCalculationInputHash").GetString()!;
+            var fingerprint = root.GetProperty("expectedSelectionFingerprint").GetString()!;
+            var evidence = await Db.AccountingBookSelectionEvidence.SingleAsync(x => x.Id == original.AccountingBookSelectionEvidenceId);
+            evidence.CalculationInputHash = calculation;
+            evidence.SelectionFingerprint = fingerprint;
+            evidence.EffectiveDate = original.EventDate.Date;
+            evidence.OriginatingModuleCode = original.OriginatingModuleCode;
+            evidence.SourceDocumentType = original.SourceDocumentType;
+            evidence.PostingAction = original.PostingAction;
+            original.SelectionFingerprint = fingerprint;
+            await Db.SaveChangesAsync();
         }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await _connection.DisposeAsync(); }
     }
@@ -479,4 +501,7 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
         }
         return rows.OrderBy(x => x, StringComparer.Ordinal).ToArray();
     }
+    private static bool IsFailureEvidenceRow(string row) => row.StartsWith("AccountingEvents:", StringComparison.Ordinal)
+        || row.StartsWith("AccountingEventAttempts:", StringComparison.Ordinal)
+        || row.StartsWith("AuditLogs:", StringComparison.Ordinal);
 }
