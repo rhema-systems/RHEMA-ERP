@@ -42,6 +42,51 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
+    public async Task IndependentScopes_UseDurableIdOnlyC11Handoff_ThenCommitAndReplayReadOnly()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        Guid eventId;
+        await using (var maker = await fixture.CreateScopeAsync(fixture.MakerId))
+        {
+            var prepared = await maker.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
+            prepared.JournalEntryId.Should().BeNull("the maker only prepares C7 intent");
+            eventId = await maker.Db.AccountingEvents.Select(x => x.Id).SingleAsync();
+        }
+
+        // This deliberately builds a new connection, DbContext and Finance/Sales service graph.
+        // The checker receives the durable C11 identity only, never a request, selection or book.
+        await using (var checker = await fixture.CreateScopeAsync(fixture.CheckerId))
+        {
+            await checker.Producer.ApprovePreparedAsync(eventId,
+                new DecideProducerAccountingIntentDto { Reason = "Independent scope checker approval" });
+            var approved = await checker.Db.AccountingEvents.SingleAsync(x => x.Id == eventId);
+            approved.ProducerDecisionStatus.Should().Be(ProducerIntentDecisionStatuses.Approved);
+            approved.ProducerDecidedByUserId.Should().Be(fixture.CheckerId);
+        }
+
+        Guid journalId;
+        await using (var owner = await fixture.CreateScopeAsync(fixture.MakerId))
+        {
+            await using var transaction = await owner.Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+            var posted = await owner.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
+            owner.Db.Database.CurrentTransaction.Should().NotBeNull("C12 execution joins the owner-owned transaction");
+            await transaction.CommitAsync();
+            journalId = posted.JournalEntryId!.Value;
+        }
+
+        await using (var retry = await fixture.CreateScopeAsync(fixture.MakerId))
+        {
+            var rowsBeforeRetry = await MappedRowsAsync(retry.Db);
+            var replay = await retry.Service.PostCreditNoteAsync(fixture.CreditNote.Id);
+            replay.JournalEntryId.Should().Be(journalId);
+            (await MappedRowsAsync(retry.Db)).Should().Equal(rowsBeforeRetry,
+                "C15 exact retry reloads the durable receipt/event through an independent context and is read-only");
+        }
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARCreditNotePosting")]
     public async Task PrepareApproveAndPost_UsesRealRelationalProducerEvidence_AndCallerTransaction()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -272,9 +317,11 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
+        private readonly string _connectionString;
         private readonly Mock<ICurrentUserService> _currentUser;
         private readonly Guid _maker;
         private readonly Guid _checker;
+        private readonly Guid _tenant;
         public ApplicationDbContext Db { get; }
         public CreditNote CreditNote { get; }
         public ReturnOrderService Service { get; }
@@ -287,8 +334,8 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
 
         private Fixture(SqliteConnection connection, ApplicationDbContext db, CreditNote creditNote,
             ReturnOrderService service, FinanceProducerIntentService producer, FaultingAudit audit, SqlCapture sql, StateCapture state,
-            Mock<ICurrentUserService> currentUser, Guid maker, Guid checker)
-        { _connection = connection; Db = db; CreditNote = creditNote; Service = service; Producer = producer; Audit = audit; Sql = sql; State = state; _currentUser = currentUser; _maker = maker; _checker = checker; }
+            Mock<ICurrentUserService> currentUser, Guid tenant, Guid maker, Guid checker)
+        { _connection = connection; _connectionString = connection.ConnectionString; Db = db; CreditNote = creditNote; Service = service; Producer = producer; Audit = audit; Sql = sql; State = state; _currentUser = currentUser; _tenant = tenant; _maker = maker; _checker = checker; }
 
         public static async Task<Fixture> CreateAsync(bool postingPeriodOpen = true, decimal creditAmount = 100m)
         {
@@ -341,7 +388,54 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             var service = new ReturnOrderService(new GenericRepository<ReturnOrder>(db), new GenericRepository<ReturnOrderLine>(db), new GenericRepository<CreditNote>(db), new GenericRepository<CreditNoteLine>(db), new GenericRepository<Refund>(db), new UnitOfWork(db), provider.Object, Mock.Of<IDocumentNumberingService>(), workflow.Object,
                 new WorkflowStatusAdapterRegistry([new CreditNoteWorkflowStatusAdapter(), new RefundWorkflowStatusAdapter()]), NullLogger<ReturnOrderService>.Instance,
                 financeAuditService: durableAudit, financeProducerIntents: producer, financeProducerExecution: producer, financeProducerReversals: producer, financeProducerReplayVerifier: producer);
-            return new Fixture(connection, db, credit, service, producer, audit, sql, state, user, maker, checker);
+            return new Fixture(connection, db, credit, service, producer, audit, sql, state, user, tenant, maker, checker);
+        }
+
+        public async Task<Scope> CreateScopeAsync(Guid userId)
+        {
+            var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+            var db = new SalesSqliteDbContext(new DbContextOptionsBuilder<SalesSqliteDbContext>().UseSqlite(connection).Options);
+            var user = new Mock<ICurrentUserService>();
+            user.SetupGet(x => x.TenantId).Returns(_tenant);
+            user.SetupGet(x => x.UserId).Returns(userId.ToString());
+            user.SetupGet(x => x.UserName).Returns(userId == _checker ? "sales-checker" : "sales-maker");
+            user.SetupGet(x => x.IsAuthenticated).Returns(true);
+            var frozenEvidence = await db.AccountingBookSelectionEvidence
+                .Include(x => x.Books).SingleAsync(x => x.TenantId == _tenant);
+            var frozen = new AccountingBookSelectionDto
+            {
+                SelectionEvidenceId = frozenEvidence.Id,
+                EffectiveDate = frozenEvidence.EffectiveDate,
+                OriginatingModuleCode = frozenEvidence.OriginatingModuleCode,
+                SourceDocumentType = frozenEvidence.SourceDocumentType,
+                PostingAction = frozenEvidence.PostingAction,
+                CalculationInputHash = frozenEvidence.CalculationInputHash,
+                SelectionFingerprint = frozenEvidence.SelectionFingerprint,
+                Books = frozenEvidence.Books.OrderBy(x => x.SelectionOrder).Select(x => new AccountingBookSelectionBookDto
+                {
+                    AccountingBookId = x.AccountingBookId,
+                    AccountingBookCode = x.AccountingBookCodeSnapshot,
+                    SelectionOrder = x.SelectionOrder,
+                    AuthorityFingerprint = x.AuthorityFingerprint
+                }).ToList()
+            };
+            var applicability = new Mock<IAccountingBookApplicabilityService>();
+            applicability.Setup(x => x.ResolveAsync(It.IsAny<ResolveAccountingBookApplicabilityDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(frozen);
+            applicability.Setup(x => x.FreezeAsync(It.IsAny<FreezeAccountingBookSelectionDto>(), It.IsAny<CancellationToken>())).ReturnsAsync(frozen);
+            var durableAudit = new FinanceAuditService(db, user.Object, new HttpContextAccessor { HttpContext = new DefaultHttpContext() });
+            var audit = new FaultingAudit(durableAudit);
+            var events = new AccountingEventService(db, user.Object, applicability.Object,
+                new FinancePostingEngine(db, user.Object, NullLogger<FinancePostingEngine>.Instance, audit), audit,
+                Options.Create(new AccountingEventOptions { Enabled = true }));
+            var producer = new FinanceProducerIntentService(applicability.Object, events, events, db, user.Object,
+                Options.Create(new FinanceProducerIntentOptions { Enabled = true }));
+            var provider = new Mock<ICurrentUserProvider>();
+            provider.SetupGet(x => x.TenantId).Returns(_tenant); provider.SetupGet(x => x.UserId).Returns(userId); provider.SetupGet(x => x.Username).Returns(userId == _checker ? "sales-checker" : "sales-maker");
+            var service = new ReturnOrderService(new GenericRepository<ReturnOrder>(db), new GenericRepository<ReturnOrderLine>(db), new GenericRepository<CreditNote>(db), new GenericRepository<CreditNoteLine>(db), new GenericRepository<Refund>(db), new UnitOfWork(db), provider.Object, Mock.Of<IDocumentNumberingService>(), Mock.Of<IWorkflowIntegrationService>(),
+                new WorkflowStatusAdapterRegistry([new CreditNoteWorkflowStatusAdapter(), new RefundWorkflowStatusAdapter()]), NullLogger<ReturnOrderService>.Instance,
+                financeAuditService: durableAudit, financeProducerIntents: producer, financeProducerExecution: producer, financeProducerReversals: producer, financeProducerReplayVerifier: producer);
+            return new Scope(connection, db, service, producer);
         }
 
         public void UseChecker() => _currentUser.SetupGet(x => x.UserId).Returns(_checker.ToString());
@@ -375,6 +469,15 @@ public sealed class ArCreditNoteProducerRelationalFixtureTests
             await Db.SaveChangesAsync();
         }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await _connection.DisposeAsync(); }
+    }
+
+    private sealed class Scope(SqliteConnection connection, ApplicationDbContext db, ReturnOrderService service,
+        FinanceProducerIntentService producer) : IAsyncDisposable
+    {
+        public ApplicationDbContext Db { get; } = db;
+        public ReturnOrderService Service { get; } = service;
+        public FinanceProducerIntentService Producer { get; } = producer;
+        public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await connection.DisposeAsync(); }
     }
 
     private sealed class FaultingAudit(IFinanceAuditService inner) : IFinanceAuditService
