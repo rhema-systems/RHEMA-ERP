@@ -234,12 +234,6 @@ public class LandAcquisitionsController : ControllerBase
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        if (request.ProcedureId == (int)AcquisitionProcedure.LandAssetCreation)
-        {
-            await EnsureFinanceFixedAssetForLandAssetAsync(acquisition, request.Values, cancellationToken);
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-
         var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
         var missingInputs = GetMissingStageInputs(acquisition, request.ProcedureId, documentRequirementsByStage);
         var documentRequirements = documentRequirementsByStage.TryGetValue(request.ProcedureId, out var configuredRequirements)
@@ -838,6 +832,12 @@ public class LandAcquisitionsController : ControllerBase
                 await EnsureStampDutyPayableAsync(acquisition, userId, cancellationToken);
             }
 
+            await EnsureFinanceFixedAssetForCompletedLandCreationAsync(
+                acquisition,
+                request.Procedure,
+                workflowOutcome,
+                cancellationToken);
+
             acquisition.LastModifiedById = userId;
             acquisition.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
@@ -919,6 +919,7 @@ public class LandAcquisitionsController : ControllerBase
             }
 
             var outcome = ToWorkflowOutcome(result);
+            var completedStageOrder = acquisition.StageOrder;
             ApplyWorkflowOutcome(acquisition, outcome, new LandAcquisitionWorkflowActionRequest
             {
                 AcquisitionId = acquisition.Id,
@@ -927,6 +928,11 @@ public class LandAcquisitionsController : ControllerBase
                 Comments = request.Comments
             }, userId);
             await SyncStageFromWorkflowAsync(acquisition, outcome, cancellationToken);
+            await EnsureFinanceFixedAssetForCompletedLandCreationAsync(
+                acquisition,
+                completedStageOrder,
+                outcome,
+                cancellationToken);
 
             acquisition.LastModifiedById = userId;
             acquisition.UpdatedAt = DateTime.UtcNow;
@@ -1433,6 +1439,30 @@ public class LandAcquisitionsController : ControllerBase
         acquiringOwner.UpdatedAt = transferDate;
         acquiringOwner.UpdatedBy = _currentUserService.UserName;
         acquiringOwner.LastModifiedById = GetUserId();
+    }
+
+    private async Task EnsureFinanceFixedAssetForCompletedLandCreationAsync(
+        LandAcquisition acquisition,
+        int completedStageOrder,
+        WorkflowOutcome workflowOutcome,
+        CancellationToken cancellationToken)
+    {
+        if (completedStageOrder != (int)AcquisitionProcedure.LandAssetCreation ||
+            workflowOutcome != WorkflowOutcome.Approved)
+        {
+            return;
+        }
+
+        var snapshots = ReadWorkspaceSnapshots(acquisition);
+        if (!snapshots.TryGetValue((int)AcquisitionProcedure.LandAssetCreation, out var assetCreationSnapshot))
+        {
+            return;
+        }
+
+        await EnsureFinanceFixedAssetForLandAssetAsync(
+            acquisition,
+            SnapshotToObjectDictionary(assetCreationSnapshot),
+            cancellationToken);
     }
 
     private async Task EnsureFinanceFixedAssetForLandAssetAsync(

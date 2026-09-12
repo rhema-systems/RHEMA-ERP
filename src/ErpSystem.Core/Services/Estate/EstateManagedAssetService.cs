@@ -2263,6 +2263,30 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .ToList();
     }
 
+    private static IReadOnlyList<EstateLandDemarcation> GetLeafDescendants(
+        IReadOnlyCollection<EstateLandDemarcation> demarcations,
+        Guid parentDemarcationId)
+    {
+        var leaves = new List<EstateLandDemarcation>();
+        var children = demarcations
+            .Where(item => item.ParentDemarcationId == parentDemarcationId)
+            .ToList();
+
+        foreach (var child in children)
+        {
+            if (demarcations.Any(item => item.ParentDemarcationId == child.Id))
+            {
+                leaves.AddRange(GetLeafDescendants(demarcations, child.Id));
+            }
+            else
+            {
+                leaves.Add(child);
+            }
+        }
+
+        return leaves;
+    }
+
     private static void EnsureDemarcationCostingReconcilesForOutbound(
         EstateManagedAsset asset,
         IReadOnlyCollection<EstateLandDemarcation> demarcations,
@@ -2275,9 +2299,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 "Record the parent land capitalized value before pushing demarcations onward.");
         }
 
-        var leafDemarcations = selectedDemarcation == null
-            ? GetLeafDemarcations(demarcations)
-            : [selectedDemarcation];
+        var leafDemarcations = GetLeafDemarcations(demarcations);
         if (leafDemarcations.Count == 0)
         {
             throw new InvalidOperationException("Add demarcations before pushing land onward.");
@@ -2293,30 +2315,45 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 $"Set costs for every final demarcated parcel before pushing onward. Missing: {string.Join(", ", missingCost)}.");
         }
 
-        if (selectedDemarcation?.ParentDemarcationId is Guid parentId)
+        var parents = demarcations
+            .Where(parent => demarcations.Any(child => child.ParentDemarcationId == parent.Id))
+            .ToList();
+        foreach (var parent in parents)
         {
-            var parent = demarcations.FirstOrDefault(item => item.Id == parentId)
-                ?? throw new InvalidOperationException("The parent demarcation was not found.");
             if (parent.AllocatedCost is not > 0m)
             {
                 throw new InvalidOperationException(
-                    $"Set the parent cost for parcel {parent.DemarcationNumber} before pushing child parcels onward.");
+                    $"Set the parent cost for parcel {parent.DemarcationNumber} before pushing its child parcels onward.");
             }
         }
 
-        if (selectedDemarcation == null)
+        foreach (var parent in parents)
         {
-            var parents = demarcations
-                .Where(parent => demarcations.Any(child => child.ParentDemarcationId == parent.Id))
-                .ToList();
-            foreach (var parent in parents)
+            var parentLeaves = GetLeafDescendants(demarcations, parent.Id);
+            var allocatedToChildren = decimal.Round(
+                parentLeaves.Sum(item => item.AllocatedCost!.Value),
+                2,
+                MidpointRounding.AwayFromZero);
+            var parentCost = decimal.Round(parent.AllocatedCost!.Value, 2, MidpointRounding.AwayFromZero);
+            if (allocatedToChildren != parentCost)
             {
-                if (parent.AllocatedCost is not > 0m)
-                {
-                    throw new InvalidOperationException(
-                        $"Set the parent cost for parcel {parent.DemarcationNumber} before pushing its child parcels onward.");
-                }
+                throw new InvalidOperationException(
+                    $"Demarcation costs for parcel {parent.DemarcationNumber} must equal its parent pool. " +
+                    $"Allocated {allocatedToChildren:N2}, parent pool {parentCost:N2}, " +
+                    $"difference {allocatedToChildren - parentCost:N2}.");
             }
+        }
+
+        var allocatedTotal = decimal.Round(
+            leafDemarcations.Sum(item => item.AllocatedCost!.Value),
+            2,
+            MidpointRounding.AwayFromZero);
+        var roundedExpectedTotal = decimal.Round(expectedTotal, 2, MidpointRounding.AwayFromZero);
+        if (allocatedTotal != roundedExpectedTotal)
+        {
+            throw new InvalidOperationException(
+                $"Demarcation costs must equal the parent land value. Allocated {allocatedTotal:N2}, " +
+                $"parent value {roundedExpectedTotal:N2}, difference {allocatedTotal - roundedExpectedTotal:N2}.");
         }
     }
 
