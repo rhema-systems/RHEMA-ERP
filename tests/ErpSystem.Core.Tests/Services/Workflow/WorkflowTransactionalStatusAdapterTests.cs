@@ -13,6 +13,56 @@ namespace ErpSystem.Core.Tests.Services.Workflow;
 public class WorkflowTransactionalStatusAdapterTests
 {
     [Fact]
+    public void Direct_submission_does_not_fabricate_human_approval_metadata()
+    {
+        IWorkflowStatusAdapter adapter = new WorkOrderWorkflowStatusAdapter();
+        var entity = new WorkOrder();
+        var result = new WorkflowIntegrationResult(new ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult
+        {
+            Success = true, Status = WorkflowInstanceStatus.Completed
+        }, WorkflowOutcome.Approved, approvalRequired: false);
+
+        adapter.ApplySubmitOutcome(entity, result, Guid.NewGuid());
+
+        entity.Status.Should().Be("Approved");
+        entity.ApprovedById.Should().BeNull();
+        entity.ApprovedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public void Governed_submission_keeps_real_completion_metadata()
+    {
+        IWorkflowStatusAdapter adapter = new WorkOrderWorkflowStatusAdapter();
+        var entity = new WorkOrder();
+        var actor = Guid.NewGuid();
+        var result = new WorkflowIntegrationResult(new ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult
+        {
+            Success = true, Status = WorkflowInstanceStatus.Completed, WorkflowInstanceId = Guid.NewGuid()
+        }, WorkflowOutcome.Approved, approvalRequired: true);
+
+        adapter.ApplySubmitOutcome(entity, result, actor);
+
+        entity.ApprovedById.Should().Be(actor);
+        entity.ApprovedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Invalid_direct_result_cannot_change_entity_status()
+    {
+        IWorkflowStatusAdapter adapter = new WorkOrderWorkflowStatusAdapter();
+        var entity = new WorkOrder { Status = "Draft" };
+        var result = new WorkflowIntegrationResult(new ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult
+        {
+            Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = Guid.NewGuid()
+        }, WorkflowOutcome.Pending, approvalRequired: false);
+
+        var act = () => adapter.ApplySubmitOutcome(entity, result, Guid.NewGuid());
+
+        act.Should().Throw<InvalidOperationException>();
+        entity.Status.Should().Be("Draft");
+    }
+
+    [Fact]
     public void Transactional_default_catalog_aliases_have_concrete_adapters()
     {
         var adapters = typeof(WorkflowStatusAdapterRegistry).Assembly

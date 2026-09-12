@@ -390,7 +390,7 @@ public sealed class FleetInspectionService : IFleetInspectionService
             throw new InvalidOperationException(result.ExecutionResult.Message ?? "Failed to start inspection workflow.");
 
         _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType)
-            .ApplySubmitOutcome(entity, result.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, result, _currentUserProvider.UserId);
         await SaveWorkflowStatusAsync(entity);
         return (await GetByIdAsync(entity.Id))!;
     }
@@ -456,7 +456,7 @@ public sealed class FleetInspectionService : IFleetInspectionService
             }
 
             _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType)
-                .ApplySubmitOutcome(inspection, result.Outcome, _currentUserProvider.UserId);
+                .ApplySubmitOutcome(inspection, result, _currentUserProvider.UserId);
             await SaveWorkflowStatusAsync(inspection);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("No active workflow definition", StringComparison.OrdinalIgnoreCase))

@@ -161,7 +161,7 @@ public sealed class QuantitySurveySubcontractService(
             var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.Subcontract, value.Id, value.ApprovalWorkflowDefinitionId);
             if (!result.ExecutionResult.Success || result.Outcome != WorkflowOutcome.Pending)
                 throw Conflict(result.ExecutionResult.Message ?? "The subcontract workflow must stop at an independent approval step.");
-            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Subcontract).ApplySubmitOutcome(value, result.Outcome, UserId);
+            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Subcontract).ApplySubmitOutcome(value, result, UserId);
             value.Status = QuantitySurveySubcontractStatuses.PendingApproval; value.ApprovalStatus = "Pending";
             value.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId; value.SubmittedById = UserId; value.SubmittedAt = DateTime.UtcNow;
         });
@@ -492,7 +492,7 @@ public sealed class QuantitySurveySubcontractService(
             value.RetentionReleasedAmount = amounts.RetentionReleased; value.ApprovedBackChargeAmount = amounts.BackCharge;
             value.ApprovedContraChargeAmount = amounts.ContraCharge; value.TaxAmount = amounts.Tax; value.NetCertifiedAmount = amounts.Net;
             value.AssessmentNote = assessmentNote; value.AssessedById = UserId; value.AssessedAt = DateTime.UtcNow;
-            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.PaymentCertificate).ApplySubmitOutcome(value, result.Outcome, UserId);
+            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.PaymentCertificate).ApplySubmitOutcome(value, result, UserId);
             value.Status = QuantitySurveySubcontractValuationStatuses.PendingApproval; value.ApprovalStatus = "Pending";
             value.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;
         });

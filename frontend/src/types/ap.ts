@@ -85,6 +85,7 @@ export interface VendorInvoice {
     acceptedSupplyValidatedAtUtc?: string;
     status: VendorInvoiceStatus;
     approvalStatus: string;
+    approvalRequired?: boolean;
     expenseAccountId?: string;
     expenseAccountName?: string;
     apAccountId?: string;
@@ -354,6 +355,8 @@ export interface VendorInvoiceUpdateRequest extends VendorInvoiceCreateRequest {
 }
 
 export interface VendorInvoiceLineItem {
+    landedCostItemId?: string | null;
+    taxTreatment?: number | string;
     id: string;
     vendorInvoiceId: string;
     lineItemType: string;
@@ -429,6 +432,7 @@ export interface ApBudgetCell {
 }
 
 export interface VendorPayment {
+    approvalRequired?: boolean;
     id: string;
     paymentNumber: string;
     supplierId: string;
@@ -533,6 +537,12 @@ export interface SupplierDebitNoteApplication {
 }
 
 export interface SupplierDebitNote {
+    approvalRequired?: boolean;
+    inventoryPurchaseReturnId?: string;
+    returnDispatchPostingEventId?: string;
+    returnDispatchJournalEntryId?: string;
+    directInvoiceAppliedAmount?: number;
+    directInvoiceAppliedAt?: string;
     id: string;
     debitNoteNumber: string;
     supplierCreditNoteReference?: string;
@@ -715,6 +725,8 @@ export interface SubmitVendorPaymentRequest {
  * client never guesses which effective-dated policy or evidence subset applies.
  */
 export interface VendorPaymentControl {
+    canUploadEvidence?: boolean;
+    approvalRequired?: boolean;
     paymentId: string;
     policyCode?: string;
     policySetId?: string;
@@ -748,6 +760,8 @@ export interface VendorPaymentEvidenceRequirementStatus {
 }
 
 export interface VendorPaymentEvidenceDocument {
+    evidenceSource?: 'Workflow' | 'Payment';
+    downloadUrl?: string;
     id: string;
     attachmentId: string;
     requirementKey?: string;
@@ -819,6 +833,7 @@ export interface VendorPaymentAuditTrace {
 }
 
 export interface PaymentBatch {
+    approvalRequired?: boolean;
     id: string;
     batchNumber: string;
     description?: string;

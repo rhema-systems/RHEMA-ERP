@@ -34,6 +34,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProcurementSourcingCaseService _sourcingCaseService;
     private readonly IWorkflowService _workflowService;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly ISupplierValidationService _supplierValidation;
     private readonly IProcurementEvaluationCommitteeControlService _evaluationCommittee;
     private readonly IProcurementAwardReadinessService _awardReadiness;
@@ -48,7 +49,8 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         IWorkflowService workflowService,
         ISupplierValidationService supplierValidation,
         IProcurementEvaluationCommitteeControlService evaluationCommittee,
-        IProcurementAwardReadinessService awardReadiness)
+        IProcurementAwardReadinessService awardReadiness,
+        IWorkflowIntegrationService workflowIntegration)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -57,6 +59,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
         _controlEvents = controlEvents;
         _sourcingCaseService = sourcingCaseService;
         _workflowService = workflowService;
+        _workflowIntegration = workflowIntegration;
         _supplierValidation = supplierValidation;
         _evaluationCommittee = evaluationCommittee;
         _awardReadiness = awardReadiness;
@@ -104,7 +107,9 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             throw Validation("RFQ_DEADLINE_PASSED", "The RFQ submission deadline must be in the future at dispatch.");
         if (rule.MinimumQuotationCount <= 0)
             throw Validation("RFQ_MINIMUM_QUOTATIONS_NOT_CONFIGURED", "The exact locked procurement-method rule must configure a positive minimum quotation count.");
-        if (!rule.WorkflowDefinitionId.HasValue)
+        if (!rule.WorkflowDefinitionId.HasValue &&
+            (await _workflowIntegration.HasActiveApprovalInstanceAsync(WorkflowEntityType, rfq.Id) ||
+             await _workflowIntegration.HasActiveApprovalWorkflowAsync(WorkflowEntityType)))
             throw Validation("RFQ_APPROVAL_WORKFLOW_NOT_CONFIGURED", "The exact locked procurement-method rule must select a shared approval workflow before dispatch.");
 
         var selected = supplierIds.Where(item => item != Guid.Empty).Distinct().ToList();
@@ -696,7 +701,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             throw Conflict("RFQ_EVALUATION_NOT_DRAFT", "Only a Draft evaluation or an approved recalled replacement can be submitted.");
         }
         EnsureRowVersion(evaluation.RowVersion, request.RowVersion, "RFQ_EVALUATION_VERSION_CONFLICT");
-        if (!evaluation.WorkflowDefinitionId.HasValue || evaluation.WorkflowDefinitionId != rule.WorkflowDefinitionId)
+        if (evaluation.WorkflowDefinitionId != rule.WorkflowDefinitionId)
             throw Validation("RFQ_APPROVAL_WORKFLOW_NOT_CONFIGURED", "The evaluation does not retain the exact shared workflow selected by the locked method rule.");
         if (evaluation.Lines.Count(item => !item.IsDeleted) != rfq.Items.Count(item => !item.IsDeleted))
             throw Validation("RFQ_EVALUATION_LINE_COVERAGE", "Every RFQ line must be evaluated before submission.");
@@ -707,23 +712,27 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             try
             {
                 var now = DateTime.UtcNow;
-                var workflow = await _workflowService.StartApprovalWorkflowAsync(
-                    WorkflowEntityType,
-                    rfq.Id,
-                    evaluation.WorkflowDefinitionId.Value);
-                if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue)
+                var result = evaluation.WorkflowDefinitionId.HasValue
+                    ? await _workflowIntegration.SubmitAsync(WorkflowEntityType, rfq.Id, evaluation.WorkflowDefinitionId.Value)
+                    : await _workflowIntegration.SubmitAsync(WorkflowEntityType, rfq.Id);
+                var workflow = result.ExecutionResult;
+                if (!workflow.Success || (result.ApprovalRequired &&
+                    (!evaluation.WorkflowDefinitionId.HasValue || !workflow.WorkflowInstanceId.HasValue ||
+                     result.Outcome != WorkflowOutcome.Pending)))
                     throw Conflict("RFQ_WORKFLOW_START_FAILED", workflow.Message ?? "The exact RFQ approval workflow could not be started.");
+                var finalStatus = result.ApprovalRequired
+                    ? ProcurementRfqEvaluationStatus.Submitted : ProcurementRfqEvaluationStatus.Approved;
 
                 // ApprovalActorsJson records only actors who process approval
                 // steps. The evaluator is retained separately as SubmittedByUserId.
                 var approvalActorsJson = JsonSerializer.Serialize(Array.Empty<Guid>(), JsonOptions);
                 var submittedSnapshot = JsonSerializer.Serialize(new
                 {
-                    schemaVersion = "tdc.rfq-evaluation.v1",
+                    schemaVersion = result.ApprovalRequired ? "tdc.rfq-evaluation.v1" : "tdc.rfq-evaluation.v2.no-approval",
                     evaluation.Id,
                     evaluation.RfqId,
                     evaluation.OpeningRegisterId,
-                    Status = ProcurementRfqEvaluationStatus.Submitted,
+                    Status = finalStatus,
                     evaluation.AwardMode,
                     evaluation.RecommendationReason,
                     evaluation.EvidenceReference,
@@ -762,15 +771,24 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
                     normalizedCorrelation,
                     cancellationToken);
 
-                evaluation.Status = ProcurementRfqEvaluationStatus.Submitted;
+                evaluation.Status = finalStatus;
+                evaluation.ApprovalRequired = result.ApprovalRequired;
                 evaluation.SubmittedAtUtc = now;
                 evaluation.SubmittedByUserId = _currentUser.UserId;
                 evaluation.SubmittedByName = ActorName();
                 evaluation.ApprovalActorsJson = approvalActorsJson;
                 evaluation.WorkflowInstanceId = workflow.WorkflowInstanceId;
+                evaluation.ApprovedAtUtc = null;
+                evaluation.ApprovedByUserId = null;
+                evaluation.ApprovedByName = null;
+                evaluation.ApprovalReference = null;
                 evaluation.SnapshotJson = submittedSnapshot;
                 evaluation.IntegrityHash = ComputeHash(submittedSnapshot);
-                rfq.Status = "PendingApproval";
+                if (!result.ApprovalRequired)
+                    await EnsureCommitteeDecisionReadyAsync(rfq.Id, evaluation.Id,
+                        ProcurementEvaluationPhase.Combined, submittedSnapshot,
+                        normalizedCorrelation, cancellationToken);
+                rfq.Status = result.ApprovalRequired ? "PendingApproval" : "Approved";
                 rfq.UpdatedAt = now;
                 rfq.LastModifiedById = _currentUser.UserId;
                 await Evaluations.UpdateAsync(evaluation);
@@ -780,14 +798,18 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
             }
             catch
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
+                if (_unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
                 throw;
             }
         }, cancellationToken);
-        await RecordAsync(rfq, rule, "EvaluationSubmittedForApproval", ProcurementControlEventResult.Allowed,
+        await RecordAsync(rfq, rule, evaluation.ApprovalRequired ? "EvaluationSubmittedForApproval" : "EvaluationCompleted",
+            ProcurementControlEventResult.Allowed,
             new { evaluation.Id, evaluation.SubmittedByUserId },
             new { evaluation.WorkflowDefinitionId, evaluation.WorkflowInstanceId }, normalizedCorrelation, cancellationToken,
-            External($"workflow:{evaluation.WorkflowInstanceId:N}", "RFQ approval workflow", "SRC-005"));
+            evaluation.ApprovalRequired
+                ? External($"workflow:{evaluation.WorkflowInstanceId:N}", "RFQ approval workflow", "SRC-005")
+                : External(evaluation.EvidenceReference, "Completed RFQ evaluation", "SRC-005"));
         return MapEvaluation(evaluation);
     }
 
@@ -1422,7 +1444,7 @@ public sealed class ProcurementRfqControlService : IProcurementRfqControlService
 
     private static ProcurementRfqEvaluationDto MapEvaluation(ProcurementRfqEvaluation item) => new()
     {
-        Id = item.Id, Status = item.Status, AwardMode = item.AwardMode,
+        Id = item.Id, Status = item.Status, ApprovalRequired = item.ApprovalRequired, AwardMode = item.AwardMode,
         RecommendationReason = item.RecommendationReason, EvidenceReference = item.EvidenceReference,
         MethodRuleId = item.MethodRuleId, MethodRuleCode = item.MethodRuleCode,
         WorkflowDefinitionId = item.WorkflowDefinitionId, WorkflowInstanceId = item.WorkflowInstanceId,

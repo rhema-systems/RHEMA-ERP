@@ -311,7 +311,7 @@ public class TrainingNominationService : ITrainingNominationService
         if (workflowResult.ExecutionResult.Success)
         {
             var adapter = _adapterRegistry.GetAdapter(WorkflowEntityType);
-            adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUser.EmployeeId);
+            adapter.ApplySubmitOutcome(entity, workflowResult, _currentUser.EmployeeId);
             entity.UpdatedAt = DateTime.UtcNow;
 
             await _nominationRepository.UpdateAsync(entity);

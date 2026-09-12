@@ -44,6 +44,9 @@
     <Compile Include="Services\Inventory\InventoryDirectedOperationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueValuationTests.cs" />
+    <Compile Include="Services\Inventory\InventoryCurrentCostProjectionTests.cs" />
+    <Compile Include="Services\Inventory\InventoryTransferValuationTests.cs" />
+    <Compile Include="Services\Inventory\InventoryTransferNewBinBalanceTests.cs" />
     <Compile Include="Services\Inventory\InventoryReturnValuationSqlTests.cs" />
     <Compile Include="Services\Inventory\InventoryRequisitionDraftTests.cs" />
     <Compile Include="Services\Inventory\InventoryReturnAdjustmentControlTests.cs" />
@@ -61,6 +64,16 @@
     <Compile Include="Services\Inventory\InventoryStoresArchitectureSqlServerIntegrationTests.cs" />
     <Compile Include="Services\Inventory\E2E010ProjectMaterialLifecycleTests.cs" />
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.cs" />
+    <Compile Include="Services\Inventory\PhysicalCountPostingEligibilityTests.cs" />
+    <Compile Include="Services\Inventory\InventoryOptionalApprovalTests.cs" />
+    <Compile Include="Services\Inventory\PurchaseReturnLifecycleTests.cs" />
+    <Compile Include="Services\Inventory\WarehouseDefaultLocationServiceTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentLocationValuationTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentSequentialFifoMigrationTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentFifoReversalTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentTrackedStateTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentCountFreezeOrderingTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentDirectDisposalSourceTests.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">

@@ -35,7 +35,7 @@ namespace ErpSystem.Tests.Services.Finance
         private readonly Mock<IGenericRepository<UnitAccountBalance>> _mockBalanceRepository;
         private readonly Mock<IGenericRepository<FiscalPeriod>> _mockPeriodRepository;
         private readonly Mock<IDocumentNumberingService> _mockDocumentNumberingService;
-        private readonly Mock<IWorkflowService> _mockWorkflowService;
+        private readonly Mock<IWorkflowIntegrationService> _mockWorkflowService;
         private readonly UnitJournalEntryService _service;
         private readonly Guid _tenantId = Guid.NewGuid();
         private readonly Guid _userId = Guid.NewGuid();
@@ -52,7 +52,9 @@ namespace ErpSystem.Tests.Services.Finance
             _mockBalanceRepository = new Mock<IGenericRepository<UnitAccountBalance>>();
             _mockPeriodRepository = new Mock<IGenericRepository<FiscalPeriod>>();
             _mockDocumentNumberingService = new Mock<IDocumentNumberingService>();
-            _mockWorkflowService = new Mock<IWorkflowService>();
+            _mockWorkflowService = new Mock<IWorkflowIntegrationService>();
+            _mockWorkflowService.Setup(service => service.HasActiveApprovalWorkflowAsync("UnitJournalEntry"))
+                .ReturnsAsync(true);
 
             _mockCurrentUserService.Setup(s => s.TenantId).Returns(_tenantId);
             _mockCurrentUserService.Setup(s => s.UserName).Returns(_userName);
@@ -91,30 +93,31 @@ namespace ErpSystem.Tests.Services.Finance
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync($"UJE-{DateTime.UtcNow.Year}-0001");
             _mockWorkflowService
-                .Setup(s => s.StartApprovalWorkflowAsync("UnitJournalEntry", It.IsAny<Guid>()))
-                .ReturnsAsync(new WorkflowExecutionResult
+                .Setup(s => s.SubmitAsync("UnitJournalEntry", It.IsAny<Guid>()))
+                .ReturnsAsync(new WorkflowIntegrationResult(new WorkflowExecutionResult
                 {
                     Success = true,
-                    Status = WorkflowInstanceStatus.InProgress
-                });
+                    Status = WorkflowInstanceStatus.InProgress,
+                    WorkflowInstanceId = Guid.NewGuid()
+                }, WorkflowOutcome.Pending));
             _mockWorkflowService
                 .Setup(s => s.CanUserApproveAsync("UnitJournalEntry", It.IsAny<Guid>(), It.IsAny<Guid>()))
                 .ReturnsAsync(true);
             _mockWorkflowService
-                .Setup(s => s.ProcessApprovalStepAsync(
+                .Setup(s => s.ProcessApprovalAsync(
                     "UnitJournalEntry",
                     It.IsAny<Guid>(),
                     It.IsAny<Guid>(),
                     It.IsAny<string>(),
                     It.IsAny<string?>()))
                 .ReturnsAsync((string _, Guid _, Guid _, string action, string? _) =>
-                    new WorkflowExecutionResult
+                    new WorkflowIntegrationResult(new WorkflowExecutionResult
                     {
                         Success = true,
                         Status = action == "Approve"
                             ? WorkflowInstanceStatus.Completed
                             : WorkflowInstanceStatus.Cancelled
-                    });
+                    }, action == "Approve" ? WorkflowOutcome.Approved : WorkflowOutcome.Rejected));
 
             _service = new UnitJournalEntryService(
                 _mockUnitOfWork.Object,
@@ -299,6 +302,184 @@ namespace ErpSystem.Tests.Services.Finance
         #endregion
 
         #region Workflow: SubmitForApprovalAsync Tests
+
+        [Fact]
+        public async Task SubmitWithoutActiveApproval_ReadiesEntryWithoutPostingOrHumanApproval()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            _mockWorkflowService.Setup(service => service.HasActiveApprovalWorkflowAsync("UnitJournalEntry"))
+                .ReturnsAsync(false);
+            _mockWorkflowService.Setup(service => service.SubmitAsync("UnitJournalEntry", entry.Id))
+                .Callback(() => entry.Status.Should().Be(UnitJournalEntryStatus.Draft))
+                .ReturnsAsync(DirectSubmission());
+            var result = await _service.SubmitForApprovalAsync(entry.Id);
+            result.Status.Should().Be("ReadyToPost");
+            result.ApprovalRequired.Should().BeFalse();
+            result.WorkflowInstanceId.Should().BeNull();
+            entry.ApprovedBy.Should().BeNull();
+            entry.ApprovedAt.Should().BeNull();
+            entry.ApprovedByName.Should().BeNull();
+            entry.PostedAt.Should().BeNull();
+            _mockBalanceRepository.Verify(repository => repository.AddAsync(It.IsAny<UnitAccountBalance>()), Times.Never);
+            _mockAccountRepository.Verify(repository => repository.UpdateAsync(It.IsAny<UnitAccount>()), Times.Never);
+            _mockUnitOfWork.Verify(work => work.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task RequiredWorkflowFailure_RollsBackAndDoesNotFallBackToDirectPosting()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            _mockWorkflowService.Setup(service => service.SubmitAsync("UnitJournalEntry", entry.Id))
+                .ReturnsAsync(new WorkflowIntegrationResult(new WorkflowExecutionResult
+                    { Success = false, Message = "No eligible active approver." }, WorkflowOutcome.Pending));
+            var submit = async () => await _service.SubmitForApprovalAsync(entry.Id);
+            await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("No eligible active approver.");
+            entry.Status.Should().Be(UnitJournalEntryStatus.Draft);
+            entry.ApprovalRequired.Should().BeTrue();
+            entry.PostedAt.Should().BeNull();
+            _mockUnitOfWork.Verify(work => work.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
+            _mockUnitOfWork.Verify(work => work.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task InvalidDirectOutcome_IsNotAcceptedAsABypass()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            _mockWorkflowService.Setup(service => service.HasActiveApprovalWorkflowAsync("UnitJournalEntry"))
+                .ReturnsAsync(false);
+            _mockWorkflowService.Setup(service => service.SubmitAsync("UnitJournalEntry", entry.Id))
+                .ReturnsAsync(new WorkflowIntegrationResult(new WorkflowExecutionResult
+                    { Success = true, Status = WorkflowInstanceStatus.Waiting }, WorkflowOutcome.Pending, false));
+            var submit = async () => await _service.SubmitForApprovalAsync(entry.Id);
+            await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*approval state changed*");
+            entry.Status.Should().Be(UnitJournalEntryStatus.Draft);
+            _mockUnitOfWork.Verify(work => work.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task MissingRequiredWorkflowInstance_IsNotAccepted()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            _mockWorkflowService.Setup(service => service.SubmitAsync("UnitJournalEntry", entry.Id))
+                .ReturnsAsync(new WorkflowIntegrationResult(new WorkflowExecutionResult
+                    { Success = true, Status = WorkflowInstanceStatus.InProgress }, WorkflowOutcome.Pending));
+            var submit = async () => await _service.SubmitForApprovalAsync(entry.Id);
+            await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*did not retain a workflow instance*");
+            entry.Status.Should().Be(UnitJournalEntryStatus.Draft);
+        }
+
+        [Fact]
+        public async Task ApprovalPolicyChangingDuringSubmission_RollsBackInsteadOfAbandoningPendingApproval()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            _mockWorkflowService.Setup(service => service.SubmitAsync("UnitJournalEntry", entry.Id))
+                .ReturnsAsync(DirectSubmission());
+            var submit = async () => await _service.SubmitForApprovalAsync(entry.Id);
+            await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*configuration changed*");
+            entry.Status.Should().Be(UnitJournalEntryStatus.Draft);
+            entry.ApprovalRequired.Should().BeTrue();
+            _mockUnitOfWork.Verify(work => work.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task ActiveWorkflowThatCompletesDuringSubmission_DoesNotLeaveAStuckPendingEntry()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            var workflowId = Guid.NewGuid();
+            _mockWorkflowService.Setup(service => service.SubmitAsync("UnitJournalEntry", entry.Id))
+                .ReturnsAsync(new WorkflowIntegrationResult(new WorkflowExecutionResult
+                    { Success = true, Status = WorkflowInstanceStatus.Completed, WorkflowInstanceId = workflowId }, WorkflowOutcome.Approved));
+            var result = await _service.SubmitForApprovalAsync(entry.Id);
+            result.Status.Should().Be("Approved");
+            result.ApprovalRequired.Should().BeTrue();
+            result.WorkflowInstanceId.Should().Be(workflowId);
+            entry.ApprovedBy.Should().BeNull();
+            entry.ApprovedAt.Should().BeNull();
+            entry.PostedAt.Should().BeNull();
+        }
+
+        [Fact]
+        public async Task RetiredDefinitionWithExistingApprovalInstance_RetainsApproval()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            _mockWorkflowService.Setup(service => service.HasActiveApprovalWorkflowAsync("UnitJournalEntry"))
+                .ReturnsAsync(false);
+            _mockWorkflowService.Setup(service => service.HasActiveApprovalInstanceAsync("UnitJournalEntry", entry.Id))
+                .ReturnsAsync(true);
+            var result = await _service.SubmitForApprovalAsync(entry.Id);
+            result.Status.Should().Be("PendingApproval");
+            result.ApprovalRequired.Should().BeTrue();
+            result.WorkflowInstanceId.Should().NotBeNull();
+        }
+
+        [Fact]
+        public async Task DirectSubmissionStillValidatesOpenPeriodBeforeCallingWorkflow()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.Draft);
+            var period = CreateFiscalPeriod(entry.FiscalPeriodId, entry.FiscalYearId);
+            period.IsClosed = true;
+            SetupPeriodQueryable([period]);
+            var submit = async () => await _service.SubmitForApprovalAsync(entry.Id);
+            await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*period is not open*");
+            _mockWorkflowService.Verify(service => service.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task DirectReadyEntryPostsThroughExistingUnitBalanceOwner()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.ReadyToPost);
+            entry.ApprovalRequired = false;
+            var account = CreateAccount(entry.Lines.Single().UnitAccountId, 100m);
+            SetupAccountQueryable([account]);
+            _mockAccountRepository.Setup(repository => repository.FirstOrDefaultAsync(It.IsAny<Expression<Func<UnitAccount, bool>>>()))
+                .ReturnsAsync(account);
+            var result = await _service.PostAsync(entry.Id);
+            result.Status.Should().Be("Posted");
+            result.ApprovalRequired.Should().BeFalse();
+            account.CurrentBalance.Should().Be(110m);
+            entry.PostedBy.Should().Be(_userId);
+            entry.ApprovedBy.Should().BeNull();
+            _mockWorkflowService.Verify(service => service.ProcessApprovalAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        }
+
+        [Theory]
+        [InlineData(UnitJournalEntryStatus.Draft)]
+        [InlineData(UnitJournalEntryStatus.Approved)]
+        [InlineData(UnitJournalEntryStatus.PendingApproval)]
+        public async Task DirectFlagDoesNotPermitPostingBeforeValidatedReadiness(UnitJournalEntryStatus status)
+        {
+            var entry = ReadyEntry(status);
+            entry.ApprovalRequired = false;
+            var post = async () => await _service.PostAsync(entry.Id);
+            await post.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Only approved entries*");
+            _mockAccountRepository.Verify(repository => repository.UpdateAsync(It.IsAny<UnitAccount>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task DirectFlagCannotExposeHumanApprovalActions()
+        {
+            var entry = ReadyEntry(UnitJournalEntryStatus.PendingApproval);
+            entry.ApprovalRequired = false;
+            var approve = async () => await _service.ApproveAsync(entry.Id);
+            var reject = async () => await _service.RejectAsync(entry.Id, "Reason");
+            await approve.Should().ThrowAsync<InvalidOperationException>();
+            await reject.Should().ThrowAsync<InvalidOperationException>();
+            _mockWorkflowService.Verify(service => service.CanUserApproveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+        }
+
+        private UnitJournalEntry ReadyEntry(UnitJournalEntryStatus status)
+        {
+            var entry = CreateEntry(status);
+            entry.Lines.Add(CreateLine(entry.Id));
+            SetupEntryQueryableWithIncludes([entry]);
+            SetupAccountQueryable([CreateAccount(entry.Lines.Single().UnitAccountId)]);
+            SetupPeriodQueryable([CreateFiscalPeriod(entry.FiscalPeriodId, entry.FiscalYearId)]);
+            return entry;
+        }
+
+        private static WorkflowIntegrationResult DirectSubmission() => new(new WorkflowExecutionResult
+            { Success = true, Status = WorkflowInstanceStatus.Completed }, WorkflowOutcome.Approved, false);
 
         [Fact]
         public async Task SubmitForApprovalAsync_ChangesStatusToPending_WhenDraft()

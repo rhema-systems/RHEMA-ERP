@@ -81,7 +81,10 @@ public partial class PhysicalCountService
         return true;
     }
 
-    public async Task<bool> ApproveStoresAsync(
+    public Task<bool> ApproveStoresAsync(Guid countId, Guid userId, PhysicalCountDecisionRequest request) =>
+        InCountTransactionAsync(countId, () => ApproveStoresCoreAsync(countId, userId, request));
+
+    private async Task<bool> ApproveStoresCoreAsync(
         Guid countId,
         Guid userId,
         PhysicalCountDecisionRequest request)
@@ -94,7 +97,8 @@ public partial class PhysicalCountService
         var action = request.Approved ? PhysicalCountActionType.StoresApproved : PhysicalCountActionType.Rejected;
         var comment = request.Approved ? request.Comment : request.Reason ?? request.Comment;
         if (await ReplayCountActionAsync(count.Id, action, request.IdempotencyKey, userId,
-                StoresManagerRole, comment, new { request.Approved })) return true;
+                StoresManagerRole, comment, new { request.Approved, request.DecisionCode, request.DecisionRevision })) return true;
+        var decision = await ResolveConfiguredDecisionAsync(request);
         EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the Stores decision.");
         if (count.Status != "PendingStoresApproval")
             throw new InvalidOperationException("The count is not awaiting Stores approval.");
@@ -137,7 +141,7 @@ public partial class PhysicalCountService
         await _countRepository.UpdateAsync(count);
         await AddCountActionAsync(count, action, userId, request.IdempotencyKey,
             request.Approved ? request.Comment : request.Reason ?? request.Comment,
-            new { request.Approved, StockAdjustmentStatus = adjustment?.Status }, StoresManagerRole, request.CorrelationId);
+            new { request.Approved, request.DecisionCode, request.DecisionRevision, Decision = decision, StockAdjustmentStatus = adjustment?.Status }, StoresManagerRole, request.CorrelationId);
         await _unitOfWork.SaveChangesAsync();
         await RecordCountControlEventAsync(count, request.Approved ? "StoresApprove" : "StoresReject",
             request.Approved ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Rejected,
@@ -145,7 +149,10 @@ public partial class PhysicalCountService
         return true;
     }
 
-    public async Task<bool> ApproveFinanceAsync(
+    public Task<bool> ApproveFinanceAsync(Guid countId, Guid userId, PhysicalCountDecisionRequest request) =>
+        InCountTransactionAsync(countId, () => ApproveFinanceCoreAsync(countId, userId, request));
+
+    private async Task<bool> ApproveFinanceCoreAsync(
         Guid countId,
         Guid userId,
         PhysicalCountDecisionRequest request)
@@ -158,7 +165,8 @@ public partial class PhysicalCountService
         var action = request.Approved ? PhysicalCountActionType.FinanceApproved : PhysicalCountActionType.Rejected;
         var comment = request.Approved ? request.Comment : request.Reason ?? request.Comment;
         if (await ReplayCountActionAsync(count.Id, action, request.IdempotencyKey, userId,
-                FinanceReviewerRole, comment, new { request.Approved })) return true;
+                FinanceReviewerRole, comment, new { request.Approved, request.DecisionCode, request.DecisionRevision })) return true;
+        var decision = await ResolveConfiguredDecisionAsync(request);
         EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the Finance decision.");
         if (count.Status != "PendingFinanceApproval")
             throw new InvalidOperationException("The count is not awaiting Finance approval.");
@@ -181,7 +189,7 @@ public partial class PhysicalCountService
         await _countRepository.UpdateAsync(count);
         await AddCountActionAsync(count, action, userId, request.IdempotencyKey,
             request.Approved ? request.Comment : request.Reason ?? request.Comment,
-            new { request.Approved }, FinanceReviewerRole, request.CorrelationId);
+            new { request.Approved, request.DecisionCode, request.DecisionRevision, Decision = decision }, FinanceReviewerRole, request.CorrelationId);
         await _unitOfWork.SaveChangesAsync();
         await RecordCountControlEventAsync(count, request.Approved ? "FinanceApprove" : "FinanceReject",
             request.Approved ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Rejected,
@@ -189,7 +197,10 @@ public partial class PhysicalCountService
         return true;
     }
 
-    public async Task<bool> AttestAuditAsync(
+    public Task<bool> AttestAuditAsync(Guid countId, Guid userId, PhysicalCountDecisionRequest request) =>
+        InCountTransactionAsync(countId, () => AttestAuditCoreAsync(countId, userId, request));
+
+    private async Task<bool> AttestAuditCoreAsync(
         Guid countId,
         Guid userId,
         PhysicalCountDecisionRequest request)
@@ -203,7 +214,8 @@ public partial class PhysicalCountService
         var action = request.Approved ? PhysicalCountActionType.AuditAttested : PhysicalCountActionType.Rejected;
         var comment = request.Approved ? request.Comment : request.Reason ?? request.Comment;
         if (await ReplayCountActionAsync(count.Id, action, request.IdempotencyKey, userId,
-                ProcurementAccessControlRegistry.InternalAuditRole, comment, new { request.Approved })) return true;
+                ProcurementAccessControlRegistry.InternalAuditRole, comment, new { request.Approved, request.DecisionCode, request.DecisionRevision })) return true;
+        var decision = await ResolveConfiguredDecisionAsync(request);
         EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry the audit attestation.");
         if (count.Status != "PendingAuditAttestation")
             throw new InvalidOperationException("The count is not awaiting Internal Audit attestation.");
@@ -226,7 +238,7 @@ public partial class PhysicalCountService
         await _countRepository.UpdateAsync(count);
         await AddCountActionAsync(count, action, userId, request.IdempotencyKey,
             request.Approved ? request.Comment : request.Reason ?? request.Comment,
-            new { request.Approved }, ProcurementAccessControlRegistry.InternalAuditRole, request.CorrelationId);
+            new { request.Approved, request.DecisionCode, request.DecisionRevision, Decision = decision }, ProcurementAccessControlRegistry.InternalAuditRole, request.CorrelationId);
         await _unitOfWork.SaveChangesAsync();
         await RecordCountControlEventAsync(count, request.Approved ? "AuditAttest" : "AuditException",
             request.Approved ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.ReviewRequired,
@@ -234,28 +246,30 @@ public partial class PhysicalCountService
         return true;
     }
 
-    public async Task<bool> PostControlledAdjustmentsAsync(
+    public Task<bool> PostControlledAdjustmentsAsync(
+        Guid countId,
+        Guid userId,
+        PhysicalCountMutationRequest request) =>
+        InCountTransactionAsync(countId, () => PostControlledAdjustmentsCoreAsync(countId, userId, request));
+
+    private async Task<bool> PostControlledAdjustmentsCoreAsync(
         Guid countId,
         Guid userId,
         PhysicalCountMutationRequest request)
     {
         EnsureActor(userId);
-        EnsureRole(FinanceReviewerRole, "Only the independently assigned Finance Reviewer may post the approved count variance.");
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
+        if (count.ApprovalRequired)
+            EnsureRole(FinanceReviewerRole, "Only the independently assigned Finance Reviewer may post the approved count variance.");
+        var postingRole = count.ApprovalRequired ? FinanceReviewerRole : "PostingOperator";
         await EnsureAccessAsync(count, "procurement.inventory.adjust.approve");
         if (await ReplayCountActionAsync(count.Id, PhysicalCountActionType.Posted,
-                request.IdempotencyKey, userId, FinanceReviewerRole, request.Comment, payload: null))
+                request.IdempotencyKey, userId, postingRole, request.Comment, payload: null))
             return true;
         EnsureRowVersion(count.RowVersion, request.RowVersion, "The count changed. Reload and retry posting.");
-        if (count.Status != "ReadyToPost")
-            throw new InvalidOperationException("The count must complete Stores, Finance, and Internal Audit stages before posting.");
-        if (count.CutoffAtUtc.HasValue && DateTime.UtcNow > count.CutoffAtUtc.Value)
-            throw new InvalidOperationException("The count cannot post after its governed year-end cut-off.");
-        if (count.FinanceApprovedById != userId)
-            throw new InvalidOperationException("The Finance Reviewer who approved the variance must perform the governed Finance posting.");
-        if (count.InitiatedById == userId || count.CountedById == userId || count.StoresApprovedById == userId || count.AuditAttestedById == userId)
-            throw new InvalidOperationException("The initiator, counter, Stores approver, or Internal Audit attestor cannot post this count.");
+        var postingStateError = CountPostingStateError(count, userId);
+        if (postingStateError != null) throw new InvalidOperationException(postingStateError);
         await RevalidateRecordedCountEvidenceAsync(count);
 
         StockAdjustmentDetailDto? posted = null;
@@ -283,12 +297,43 @@ public partial class PhysicalCountService
         count.FreezeReleasedAtUtc = DateTime.UtcNow;
         await _countRepository.UpdateAsync(count);
         await AddCountActionAsync(count, PhysicalCountActionType.Posted, userId, request.IdempotencyKey,
-            request.Comment, new { posted?.FinancePostingEventId, posted?.FinanceJournalEntryId }, FinanceReviewerRole,
+            request.Comment, new { posted?.FinancePostingEventId, posted?.FinanceJournalEntryId }, postingRole,
             request.CorrelationId);
         await _unitOfWork.SaveChangesAsync();
         await RecordCountControlEventAsync(count, "Post", ProcurementControlEventResult.Succeeded,
             request.IdempotencyKey, request.CorrelationId, request.Comment);
         return true;
+    }
+
+    private async Task<bool> CanPostCountAsync(PhysicalCount count)
+    {
+        // This is action visibility, not a substitute for the authoritative post:
+        // posting still revalidates evidence, concurrency, stock and Finance.
+        if (!Guid.TryParse(_currentUserService.UserId, out var actor) || !IsCurrentCountActor(actor) ||
+            count.IsDeleted || count.TenantId == Guid.Empty || count.TenantId != _currentUserService.TenantId ||
+            (count.ApprovalRequired && !HasCountRole(FinanceReviewerRole)) || CountPostingStateError(count, actor) != null)
+            return false;
+        return await CanAccessAsync(count, "procurement.inventory.adjust.approve");
+    }
+
+    private static string? CountPostingStateError(PhysicalCount count, Guid actor)
+    {
+        if (count.Status != "ReadyToPost")
+            return "The count must complete Stores, Finance, and Internal Audit stages before posting.";
+        if (count.CutoffAtUtc.HasValue && DateTime.UtcNow > count.CutoffAtUtc.Value)
+            return "The count cannot post after its governed year-end cut-off.";
+        if (!count.ApprovalRequired)
+        {
+            if (count.StoresApprovedById.HasValue || count.FinanceApprovedById.HasValue || count.AuditAttestedById.HasValue || count.ApprovedById.HasValue ||
+                count.StoresApprovedAtUtc.HasValue || count.FinanceApprovedAtUtc.HasValue || count.AuditAttestedAtUtc.HasValue || count.ApprovedDate.HasValue)
+                return "The count approval snapshot is inconsistent. Refresh before posting.";
+            return null;
+        }
+        if (count.FinanceApprovedById != actor)
+            return "The Finance Reviewer who approved the variance must perform the governed Finance posting.";
+        if (count.InitiatedById == actor || count.CountedById == actor || count.StoresApprovedById == actor || count.AuditAttestedById == actor)
+            return "The initiator, counter, Stores approver, or Internal Audit attestor cannot post this count.";
+        return null;
     }
 
     public async Task<IReadOnlyList<InventoryCycleCountScheduleDto>> GetCycleCountSchedulesAsync()
@@ -502,11 +547,13 @@ public partial class PhysicalCountService
         return occurrence;
     }
 
-    private async Task EnsureStockAdjustmentSubmittedAsync(Guid countId, Guid userId, string operationKey, string? comment)
+    private async Task<bool> EnsureStockAdjustmentSubmittedAsync(Guid countId, Guid userId, string operationKey, string? comment)
     {
         var count = await LoadControlledCountAsync(countId)
             ?? throw new ArgumentException($"Physical count {countId} not found");
-        if (!HasLineVariance(count)) return;
+        if (!HasLineVariance(count))
+            // Missing integration must fail closed, including older test/host compositions.
+            return _approvalWorkflows == null || await _approvalWorkflows.HasActiveApprovalWorkflowAsync("StockAdjustment");
         var evidence = await RevalidateRecordedCountEvidenceAsync(count);
         StockAdjustmentDetailDto adjustment;
         if (count.StockAdjustmentId.HasValue)
@@ -516,6 +563,7 @@ public partial class PhysicalCountService
         }
         else
         {
+            var resolvedLocations = ReadResolvedCountLocations(count);
             adjustment = await _stockAdjustmentService.CreateAsync(new CreateStockAdjustmentDto
             {
                 WarehouseId = count.WarehouseId,
@@ -539,7 +587,7 @@ public partial class PhysicalCountService
                     new CreateStockAdjustmentItemDto
                     {
                         InventoryItemId = x.InventoryItemId,
-                        LocationId = x.LocationId ?? count.LocationId,
+                        LocationId = EffectiveCountLocation(x, resolvedLocations) ?? count.LocationId,
                         LotNumber = x.LotNumber,
                         SerialNumber = x.SerialNumber,
                         AdjustmentQuantity = x.VarianceQuantity,
@@ -558,17 +606,30 @@ public partial class PhysicalCountService
                 Comment = comment ?? $"Submitted from controlled physical count {count.CountNumber}."
             });
         }
-        if (adjustment.Status != "PendingApproval")
+        if (adjustment.ApprovalRequired && adjustment.Status != "PendingApproval")
             throw new InvalidOperationException($"The linked stock adjustment must await independent approval; current status is {adjustment.Status}.");
+        if (!adjustment.ApprovalRequired && (adjustment.Status != InventoryOptionalApprovalPolicy.ReadyToPost || count.Status != "UnderReview"))
+            throw new InvalidOperationException("Existing count approval stages cannot be bypassed by changing workflow configuration.");
         count = await LoadControlledCountAsync(countId)
             ?? throw new InvalidOperationException("The physical count disappeared while linking its adjustment.");
         count.StockAdjustmentId = adjustment.Id;
         await _countRepository.UpdateAsync(count);
         await _unitOfWork.SaveChangesAsync();
+        return adjustment.ApprovalRequired;
     }
 
     private async Task<IReadOnlyList<ValidatedPhysicalCountEvidence>> ResolveSubmissionEvidenceAsync(PhysicalCount count)
     {
+        var countActions = await _unitOfWork.Repository<PhysicalCountAction>().GetQueryable(value =>
+                value.TenantId == count.TenantId && value.PhysicalCountId == count.Id && !value.IsDeleted &&
+                value.ActionType == PhysicalCountActionType.CountRecorded)
+            .AsNoTracking().ToListAsync();
+        var importedIds = countActions.Select(PhysicalCountSheetLineage.Read).Where(sheet => sheet != null)
+            .Select(sheet => sheet!.CentralDocumentVersionId).ToHashSet();
+        var currentSheet = PhysicalCountSheetLineage.Current(countActions);
+        // Saved count lines are authoritative, including audited manual corrections.
+        // After a manual edit, an earlier upload remains supporting evidence; it need
+        // not be re-imported just to make its cells match the current count lines.
         var versions = await _unitOfWork.Repository<CentralDocumentVersion>().GetQueryable()
             .Include(value => value.DocumentRecord)
             .Where(value => value.TenantId == count.TenantId && !value.IsDeleted &&
@@ -590,7 +651,8 @@ public partial class PhysicalCountService
                 value.VirusScanStatus == FileVirusScanStatus.Clean)
             .AsNoTracking().Select(value => value.Id).ToListAsync();
         var clean = cleanUploadIds.ToHashSet();
-        var result = versions.Where(value => clean.Contains(value.FileUploadRecordId!.Value))
+        var result = versions.Where(value => clean.Contains(value.FileUploadRecordId!.Value) &&
+                (currentSheet == null || !importedIds.Contains(value.Id) || value.Id == currentSheet.CentralDocumentVersionId))
             .Select(value => new ValidatedPhysicalCountEvidence(
                 value.DocumentRecordId,
                 value.Id,
@@ -599,6 +661,8 @@ public partial class PhysicalCountService
                 value.VersionNumber,
                 $"{count.CountNumber} stock-taking evidence / {value.DocumentRecord.DocumentReference}"))
             .ToList();
+        if (currentSheet != null && !result.Any(value => value.CentralDocumentVersionId == currentSheet.CentralDocumentVersionId))
+            throw new InvalidOperationException("The current count sheet must remain published, clean and linked to this count.");
         if (result.Count == 0)
             throw new InvalidOperationException(
                 "At least one current published, clean central-DMS stock-taking evidence document linked to this physical count is required before submission.");
@@ -785,6 +849,7 @@ public partial class PhysicalCountService
             count.TotalVarianceQuantity,
             count.TotalVarianceValue,
             count.StockAdjustmentId,
+            count.ApprovalRequired,
             Payload = payload
         }, CountJsonOptions);
         var normalizedComment = Normalize(comment, 2000);
@@ -885,7 +950,7 @@ public partial class PhysicalCountService
             SourceId = count.Id,
             SourceReference = count.CountNumber,
             Reason = reason,
-            ResultValues = new { count.Status, count.TotalVarianceQuantity, count.TotalVarianceValue, count.StockAdjustmentId },
+            ResultValues = new { count.Status, count.ApprovalRequired, count.TotalVarianceQuantity, count.TotalVarianceValue, count.StockAdjustmentId },
             CorrelationId = Normalize(correlationId, 100) ?? $"physical-count:{count.Id:N}",
             OccurredAtUtc = DateTime.UtcNow
         });
@@ -915,9 +980,12 @@ public partial class PhysicalCountService
 
     private void EnsureRole(string role, string message)
     {
-        if (!_currentUserService.Roles.Contains(role, StringComparer.OrdinalIgnoreCase))
+        if (!HasCountRole(role))
             throw new ProcurementAccessAuthorizationException(message);
     }
+
+    private bool HasCountRole(string role) =>
+        _currentUserService.Roles.Contains(role, StringComparer.OrdinalIgnoreCase);
 
     private static void EnsureIndependentActor(
         PhysicalCount count,
@@ -940,7 +1008,7 @@ public partial class PhysicalCountService
 
     private static void ReturnForRecount(PhysicalCount count, string reason)
     {
-        count.Status = "RecountRequired";
+        count.Status = "UnderInvestigation";
         count.StockAdjustmentId = null;
         count.StoresApprovedById = null;
         count.StoresApprovedAtUtc = null;
@@ -951,10 +1019,7 @@ public partial class PhysicalCountService
         count.InvestigationSummary = $"{count.InvestigationSummary}\nControl-stage exception: {reason}".Trim();
         foreach (var item in count.Items.Where(x => x.VarianceQuantity != 0))
         {
-            item.RequiresRecount = true;
-            item.RecountedQuantity = null;
-            item.RecountedAtUtc = null;
-            item.RecountedById = null;
+            item.RequiresRecount = false;
         }
     }
 
@@ -997,9 +1062,12 @@ public partial class PhysicalCountService
 
     private void EnsureActor(Guid userId)
     {
-        if (userId == Guid.Empty || !Guid.TryParse(_currentUserService.UserId, out var current) || current != userId)
+        if (!IsCurrentCountActor(userId))
             throw new ProcurementAccessAuthorizationException("The authenticated actor is required.");
     }
+
+    private bool IsCurrentCountActor(Guid userId) =>
+        userId != Guid.Empty && Guid.TryParse(_currentUserService.UserId, out var current) && current == userId;
 
     private Guid RequiredTenantId() => _currentUserService.TenantId is { } tenantId && tenantId != Guid.Empty
         ? tenantId

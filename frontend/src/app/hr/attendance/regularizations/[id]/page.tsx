@@ -143,7 +143,7 @@ export default function RegularizationDetailPage() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <WorkflowTabTrigger value="workflow" />
+          <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
@@ -208,6 +208,7 @@ export default function RegularizationDetailPage() {
         </TabsContent>
 
         <WorkflowTabContent
+          {...workflow.tabProps}
           value="workflow"
           entityType="StaffAttendanceRegularization"
           entityId={id}

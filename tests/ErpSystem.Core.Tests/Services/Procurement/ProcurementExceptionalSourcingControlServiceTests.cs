@@ -6,11 +6,13 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -18,6 +20,70 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementExceptionalSourcingControlServiceTests
 {
+    [Fact]
+    public async Task DirectCompletionRetainsStatutoryEvidenceAndPublishesWithoutInventedApprover()
+    {
+        await using var fixture = new Fixture(ProcurementMethodType.SingleSource);
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderException")).ReturnsAsync(false);
+        fixture.Rule.WorkflowDefinitionId = null;
+        fixture.ExceptionRule.WorkflowDefinitionId = null;
+        await fixture.Context.SaveChangesAsync();
+        var prepared = await fixture.PrepareAsync();
+
+        var completed = await fixture.Service.SubmitApprovalAsync(fixture.Tender.Id,
+            new SubmitProcurementExceptionalApprovalRequest
+            {
+                RowVersion = prepared.RowVersion, BoardApprovalReference = "BOARD-ACTUAL",
+                ManagingDirectorApprovalReference = "MD-ACTUAL", PpaApprovalReference = "PPA-ACTUAL"
+            }, "direct-completion");
+
+        completed.ApprovalRequired.Should().BeFalse();
+        completed.Status.Should().Be(ProcurementExceptionalSourcingControlStatus.Approved);
+        var retained = await fixture.Context.Set<ProcurementExceptionalSourcingControl>().SingleAsync();
+        retained.WorkflowDefinitionId.Should().BeNull();
+        retained.WorkflowInstanceId.Should().BeNull();
+        retained.ApprovedById.Should().BeNull();
+        retained.ApprovedAtUtc.Should().BeNull();
+        retained.ApprovalActorsJson.Should().Be("[]");
+        retained.PpaApprovalReference.Should().Be("PPA-ACTUAL");
+        retained.SubmittedForApprovalById.Should().Be(fixture.CurrentUserId);
+        retained.LifecycleSnapshotJson.Should().Contain("v3.no-approval");
+        (await fixture.Context.Set<Tender>().SingleAsync()).Status.Should().Be("Published");
+        (await fixture.Context.Set<TenderInvitation>().CountAsync()).Should().Be(1);
+        fixture.Workflow.Verify(service => service.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+        fixture.TenderDocuments.Verify(service => service.EnsurePublicationReadyAsync(It.IsAny<ProcurementTenderDocumentSourceType>(),
+            fixture.Tender.Id, It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NoInternalWorkflowDoesNotWaiveStatutoryAuthorityReferences()
+    {
+        await using var fixture = new Fixture(ProcurementMethodType.SingleSource);
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderException")).ReturnsAsync(false);
+        var prepared = await fixture.PrepareAsync();
+        await fixture.Service.Invoking(service => service.SubmitApprovalAsync(fixture.Tender.Id,
+                new SubmitProcurementExceptionalApprovalRequest { RowVersion = prepared.RowVersion }, "missing-authority"))
+            .Should().ThrowAsync<ProcurementExceptionalSourcingValidationException>()
+            .Where(exception => exception.Code == "EXCEPTIONAL_BOARD_APPROVAL_REQUIRED" || exception.Code == "EXCEPTIONAL_MD_APPROVAL_REQUIRED" || exception.Code == "EXCEPTIONAL_PPA_APPROVAL_REQUIRED");
+        fixture.Notifications.Verify(service => service.SendTenderPublishedNotificationAsync(It.IsAny<Guid>(),
+            It.IsAny<List<Guid>>(), It.IsAny<List<string>?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExistingInFlightSourcingInstanceStillRequiresApproval()
+    {
+        await using var fixture = new Fixture(ProcurementMethodType.SingleSource);
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderException")).ReturnsAsync(false);
+        fixture.Workflow.Setup(service => service.HasActiveApprovalInstanceAsync("TenderException", fixture.Tender.Id)).ReturnsAsync(true);
+        var prepared = await fixture.PrepareAsync();
+        var submitted = await fixture.Service.SubmitApprovalAsync(fixture.Tender.Id,
+            new SubmitProcurementExceptionalApprovalRequest { RowVersion = prepared.RowVersion }, "retained-instance");
+        submitted.ApprovalRequired.Should().BeTrue();
+        submitted.Status.Should().Be(ProcurementExceptionalSourcingControlStatus.PendingApproval);
+        submitted.WorkflowInstanceId.Should().Be(fixture.WorkflowInstanceId);
+        (await fixture.Context.Set<TenderInvitation>().CountAsync()).Should().Be(0);
+    }
+
     [Theory]
     [InlineData(ProcurementMethodType.RestrictedTendering, 2)]
     [InlineData(ProcurementMethodType.SingleSource, 1)]
@@ -410,6 +476,7 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
                 .ReturnsAsync(new ProcurementControlEventDto());
             Workflow.Setup(service => service.StartApprovalWorkflowAsync("TenderException", Tender.Id, WorkflowDefinitionId))
                 .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = WorkflowInstanceId });
+            Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderException")).ReturnsAsync(true);
             Workflow.Setup(service => service.CanUserApproveAsync("TenderException", Tender.Id, It.IsAny<Guid>())).ReturnsAsync(true);
             SodGuard.Setup(service => service.EnforceAsync(It.IsAny<ProcurementSodGuardRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((ProcurementSodGuardRequest request, string _, CancellationToken _) =>
@@ -451,7 +518,7 @@ public sealed class ProcurementExceptionalSourcingControlServiceTests
             Service = new ProcurementExceptionalSourcingControlService(_unitOfWork, _currentUser.Object,
                 AccessControl.Object, SodGuard.Object, ControlEvents.Object, SourcingCases.Object,
                 Workflow.Object, SupplierValidation.Object, Notifications.Object, TenderDocuments.Object,
-                AwardReadiness.Object);
+                AwardReadiness.Object, new WorkflowIntegrationService(Workflow.Object, NullLogger<WorkflowIntegrationService>.Instance));
         }
 
         public Guid CurrentTenantId { get; set; }

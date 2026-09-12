@@ -48,13 +48,13 @@ export function getPrequalificationActions(exercise: ProcurementPrequalification
   };
 }
 
-export function validatePrequalificationDraft(request: CreateProcurementPrequalificationExercise) {
+export function validatePrequalificationDraft(request: CreateProcurementPrequalificationExercise, approvalRequired = true) {
   if (!request.reference.trim()) return 'Enter a unique prequalification reference.';
   if (!request.title.trim()) return 'Enter a title.';
   if (request.description.trim().length < 20) return 'Enter a description of at least 20 characters.';
   if (!request.categoryIds.length) return 'Select at least one category.';
   if (!request.policySetId) return 'Select the exact current procurement policy.';
-  if (!request.workflowDefinitionId) return 'Select the exact published sourcing workflow.';
+  if (approvalRequired && !request.workflowDefinitionId) return 'Select the exact published sourcing workflow.';
   if (new Date(request.closesAtUtc) <= new Date(request.opensAtUtc)) return 'Closing date must be after opening date.';
   if (!request.criteria.length) return 'Add at least one criterion.';
   if (new Set(request.criteria.map((item) => item.code.trim().toUpperCase())).size !== request.criteria.length)

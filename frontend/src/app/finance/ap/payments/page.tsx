@@ -52,7 +52,8 @@ export default function VendorPaymentsPage() {
         }),
     });
 
-    const getStatusBadge = (status: string) => {
+    const getStatusBadge = (status: string, approvalRequired = true) => {
+        if (status === 'Authorized' && !approvalRequired) return <Badge className="bg-emerald-100 text-emerald-800">Ready to post</Badge>;
         switch (status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
             case 'Processed': return <Badge className="bg-blue-600">Processed</Badge>;
@@ -156,7 +157,7 @@ export default function VendorPaymentsPage() {
                                                     <span className="text-muted-foreground">-</span>
                                                 )}
                                             </TableCell>
-                                            <TableCell>{getStatusBadge(payment.status)}</TableCell>
+                                        <TableCell>{getStatusBadge(payment.status, payment.approvalRequired)}</TableCell>
                                             <TableCell>
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>

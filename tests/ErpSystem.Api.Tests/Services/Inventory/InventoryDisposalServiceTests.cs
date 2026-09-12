@@ -195,6 +195,130 @@ public sealed class InventoryDisposalServiceTests
         result.CommitteeMembers.Should().HaveCount(3);
     }
 
+    [Fact]
+    public async Task No_workflow_moves_directly_to_execution_without_fabricating_approval_or_committee()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var draft = await fixture.Service.CreateAsync(fixture.Request("direct-draft"));
+        var result = await fixture.Service.SubmitAsync(draft.Id, new SubmitInventoryDisposalRequest
+            { RowVersion = draft.RowVersion, IdempotencyKey = "direct-submit" });
+        result.Status.Should().Be(InventoryDisposalStatus.ReadyForExecution);
+        result.ApprovalRequired.Should().BeFalse();
+        result.WorkflowInstanceId.Should().BeNull();
+        result.ApprovedById.Should().BeNull();
+        result.AuditVerifiedById.Should().BeNull();
+        result.CommitteeMembers.Should().BeEmpty();
+        result.CanStageExecution.Should().BeTrue();
+        result.Actions.First().ActionType.Should().Be(InventoryDisposalActionType.ApprovalNotRequired);
+    }
+
+    [Fact]
+    public async Task Active_workflow_starts_from_draft_without_a_hardcoded_committee()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Workflow.Setup(value => value.HasActiveApprovalWorkflowAsync("InventoryDisposal")).ReturnsAsync(true);
+        var workflowId = Guid.NewGuid();
+        fixture.Workflow.Setup(value => value.SubmitAsync("InventoryDisposal", It.IsAny<Guid>()))
+            .ReturnsAsync(new WorkflowIntegrationResult(new ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult
+                { Success = true, WorkflowInstanceId = workflowId }, WorkflowOutcome.Pending));
+        var draft = await fixture.Service.CreateAsync(fixture.Request("active-draft"));
+        var result = await fixture.Service.SubmitAsync(draft.Id, new SubmitInventoryDisposalRequest
+            { RowVersion = draft.RowVersion, IdempotencyKey = "active-submit" });
+        result.Status.Should().Be(InventoryDisposalStatus.PendingApproval);
+        result.WorkflowInstanceId.Should().Be(workflowId);
+        result.CanApprove.Should().BeFalse("the requester cannot approve its own disposal");
+        result.CanStageExecution.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Draft_edit_retains_old_lines_in_history_and_changes_only_active_quantities()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var draft = await fixture.Service.CreateAsync(fixture.Request("edit-draft"));
+        var result = await fixture.Service.UpdateAsync(draft.Id, new UpdateInventoryDisposalRequest
+        {
+            RowVersion = draft.RowVersion, IdempotencyKey = "edit-save", Reason = "Damaged item",
+            Method = InventoryDisposalMethod.Destruction,
+            Lines = [new() { InventoryItemId = fixture.Item.Id, LocationId = fixture.Location.Id, Quantity = 2m }]
+        });
+        result.Lines.Should().ContainSingle().Which.Quantity.Should().Be(2m);
+        result.TotalQuantity.Should().Be(2m);
+        (await fixture.Db.InventoryDisposalLines.IgnoreQueryFilters().CountAsync(value => value.IsDeleted)).Should().Be(1);
+        result.Actions.First().ActionType.Should().Be(InventoryDisposalActionType.Edited);
+        var blocked = () => fixture.Service.UpdateAsync(draft.Id, new UpdateInventoryDisposalRequest
+        {
+            RowVersion = result.RowVersion, IdempotencyKey = "bad-edit", Method = InventoryDisposalMethod.WriteOff,
+            Reason = "Invalid", Lines = [new() { InventoryItemId = fixture.Item.Id, LocationId = fixture.Location.Id, Quantity = 20m }]
+        });
+        await blocked.Should().ThrowAsync<InventoryDisposalException>();
+    }
+
+    [Fact]
+    public async Task Cancellation_retains_case_and_releases_reserved_disposal_quantity()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var draft = await fixture.Service.CreateAsync(fixture.Request("cancel-draft"));
+        var cancelled = await fixture.Service.CancelAsync(draft.Id, new CancelInventoryDisposalRequest
+            { RowVersion = draft.RowVersion, IdempotencyKey = "cancel", Comment = "Wrong selection" });
+        cancelled.Status.Should().Be(InventoryDisposalStatus.Cancelled);
+        cancelled.CanSubmit.Should().BeFalse();
+        var replacement = fixture.Request("replacement");
+        replacement.Lines.Single().Quantity = 10m;
+        (await fixture.Service.CreateAsync(replacement)).TotalQuantity.Should().Be(10m);
+        (await fixture.Db.InventoryDisposalCases.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Direct_disposal_does_not_require_a_file()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = fixture.Request("draft-no-file");
+        request.Evidence.Clear();
+        request.IdentificationDetails = "";
+        var draft = await fixture.Service.CreateAsync(request);
+        var result = await fixture.Service.SubmitAsync(draft.Id, new SubmitInventoryDisposalRequest
+            { RowVersion = draft.RowVersion, IdempotencyKey = "no-file-submit" });
+        result.Status.Should().Be(InventoryDisposalStatus.ReadyForExecution);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Direct_disposal_stages_and_posts_once_without_another_human_approval(bool postImmediately)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var request = fixture.Request("direct-post");
+        request.Evidence.Clear();
+        var draft = await fixture.Service.CreateAsync(request);
+        var ready = await fixture.Service.SubmitAsync(draft.Id, new SubmitInventoryDisposalRequest
+            { RowVersion = draft.RowVersion, IdempotencyKey = "continue" });
+        var adjustment = new StockAdjustmentDetailDto
+        {
+            Id = Guid.NewGuid(), AdjustmentNumber = "ADJ-DISPOSAL-TEST", Status = "Draft",
+            ApprovalRequired = false, Items = [new() { Id = Guid.NewGuid(), InventoryItemId = fixture.Item.Id,
+                LocationId = fixture.Location.Id, AdjustmentQuantity = -4m }]
+        };
+        fixture.Adjustments.Setup(value => value.CreateAsync(It.IsAny<CreateStockAdjustmentDto>(), fixture.Current.UserId))
+            .ReturnsAsync(adjustment);
+        fixture.Adjustments.Setup(value => value.SubmitAsync(adjustment.Id, fixture.Current.UserId, It.IsAny<StockAdjustmentActionRequest>()))
+            .ReturnsAsync(() => { adjustment.Status = "ReadyToPost"; return adjustment; });
+        fixture.Adjustments.Setup(value => value.GetByIdAsync(adjustment.Id)).ReturnsAsync(adjustment);
+        fixture.Adjustments.Setup(value => value.PostAsync(adjustment.Id, fixture.Current.UserId, It.IsAny<StockAdjustmentActionRequest>()))
+            .ReturnsAsync(() => { adjustment.Status = "Posted"; return adjustment; });
+        var stageRequest = new StageInventoryDisposalExecutionRequest
+            { RowVersion = ready.RowVersion, IdempotencyKey = "prepare", ExecutionReference = ready.DisposalNumber, PostImmediately = postImmediately };
+        var staged = await fixture.Service.StageExecutionAsync(ready.Id, stageRequest);
+        staged.Status.Should().Be(postImmediately ? InventoryDisposalStatus.Completed : InventoryDisposalStatus.AdjustmentPending);
+        var complete = new CompleteInventoryDisposalRequest { RowVersion = staged.RowVersion, IdempotencyKey = "post" };
+        var posted = postImmediately ? staged : await fixture.Service.CompleteAsync(staged.Id, complete);
+        posted.Status.Should().Be(InventoryDisposalStatus.Completed);
+        posted.ApprovedById.Should().BeNull();
+        (postImmediately ? await fixture.Service.StageExecutionAsync(staged.Id, stageRequest) : await fixture.Service.CompleteAsync(staged.Id, complete))
+            .Status.Should().Be(InventoryDisposalStatus.Completed);
+        fixture.Adjustments.Verify(value => value.PostAsync(adjustment.Id, fixture.Current.UserId, It.IsAny<StockAdjustmentActionRequest>()), Times.Once);
+        fixture.Adjustments.Verify(value => value.DecideAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DecideStockAdjustmentRequest>()), Times.Never);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(ApplicationDbContext db, InventoryDisposalService service, MutableCurrentUser current,
@@ -202,7 +326,7 @@ public sealed class InventoryDisposalServiceTests
             Mock<IInventoryTrackingControlService> trackingControls,
             Warehouse warehouse, WarehouseLocation location,
             InventoryItem item, CentralDocumentVersion version, FileUploadRecord upload, Guid auditorId,
-            IReadOnlyList<Guid> committeeMemberIds)
+            IReadOnlyList<Guid> committeeMemberIds, Mock<IWorkflowIntegrationService> workflow)
         {
             Db = db;
             Service = service;
@@ -216,6 +340,7 @@ public sealed class InventoryDisposalServiceTests
             Upload = upload;
             AuditorId = auditorId;
             CommitteeMemberIds = committeeMemberIds;
+            Workflow = workflow;
         }
 
         public ApplicationDbContext Db { get; }
@@ -230,6 +355,8 @@ public sealed class InventoryDisposalServiceTests
         public FileUploadRecord Upload { get; }
         public Guid AuditorId { get; }
         public IReadOnlyList<Guid> CommitteeMemberIds { get; }
+        public Mock<IWorkflowIntegrationService> Workflow { get; }
+        public Mock<IStockAdjustmentService> Adjustments { get; init; } = new();
 
         public CreateInventoryDisposalRequest Request(string key) => new()
         {
@@ -354,12 +481,17 @@ public sealed class InventoryDisposalServiceTests
                     It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<decimal>(),
                     It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
+            var workflow = new Mock<IWorkflowIntegrationService>();
+            workflow.Setup(value => value.SubmitAsync("InventoryDisposal", It.IsAny<Guid>()))
+                .ReturnsAsync(new WorkflowIntegrationResult(new ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult
+                    { Success = true }, WorkflowOutcome.Approved, approvalRequired: false));
+            var adjustments = new Mock<IStockAdjustmentService>();
             var service = new InventoryDisposalService(db, current, access.Object,
-                Mock.Of<IProcurementSodGuardService>(), Mock.Of<IWorkflowIntegrationService>(),
-                Mock.Of<IStockAdjustmentService>(), Mock.Of<IFinancePostingEngine>(),
+                Mock.Of<IProcurementSodGuardService>(), workflow.Object,
+                adjustments.Object, Mock.Of<IFinancePostingEngine>(),
                 trackingControls.Object, events.Object);
             return new Fixture(db, service, current, events, trackingControls, warehouse, location, item, version, upload,
-                auditorId, memberIds);
+                auditorId, memberIds, workflow) { Adjustments = adjustments };
         }
 
         private static ApplicationUser User(Guid id, Guid tenantId, Tenant tenant, string first, string last) => new()

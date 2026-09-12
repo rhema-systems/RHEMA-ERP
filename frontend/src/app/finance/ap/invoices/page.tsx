@@ -42,6 +42,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { workflowApiService } from '@/services/workflow-api.service';
 import type { WorkflowEntitySummaryDto } from '@/types/workflow';
+import { getWorkflowVisibility } from '@/components/workflow/workflowVisibility';
+import { vendorInvoiceStatusLabel } from '@/lib/vendor-invoice-status';
 
 export default function VendorInvoicesPage() {
     const router = useRouter();
@@ -106,9 +108,10 @@ export default function VendorInvoicesPage() {
 
     const submitInvoiceMutation = useMutation({
         mutationFn: (id: string) => accountsPayableService.submitInvoiceForApproval(id),
-        onSuccess: () => {
+        onSuccess: (savedInvoice) => {
             queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
-            toast({ title: 'Success', description: 'Invoice submitted for approval.' });
+            toast({ title: 'Success', description: savedInvoice.approvalRequired === false
+                ? 'Invoice completed. Approval is not required.' : 'Invoice submitted for approval.' });
         },
         onError: (error: any) => {
             toast({ title: 'Error', description: error.message || 'Failed to submit invoice', variant: 'destructive' });
@@ -116,24 +119,29 @@ export default function VendorInvoicesPage() {
     });
 
     React.useEffect(() => {
+        let current = true;
+        setWorkflowSummaryMap({});
         const loadSummaries = async () => {
             const items = invoicesData?.items ?? [];
             if (items.length === 0) return;
-            const pending = items.filter(i => i.status === 'PendingApproval');
+            const pending = items.filter(i => i.status === 'Draft' || i.status === 'PendingApproval');
             if (pending.length === 0) return;
 
             const pairs = await Promise.all(pending.map(async (i) => {
                 try {
                     const s = await workflowApiService.getWorkflowEntitySummary('VendorInvoice', i.id);
+                    if (s.entityId.toLowerCase() !== i.id.toLowerCase() ||
+                        s.entityType.toLowerCase().replace(/[^a-z0-9]/g, '') !== 'vendorinvoice') return null;
                     return [i.id, s] as const;
                 } catch {
                     return null;
                 }
             }));
             const mapped = Object.fromEntries(pairs.filter(Boolean) as Array<[string, WorkflowEntitySummaryDto]>);
-            setWorkflowSummaryMap(prev => ({ ...prev, ...mapped }));
+            if (current) setWorkflowSummaryMap(mapped);
         };
         loadSummaries();
+        return () => { current = false; };
     }, [invoicesData?.items]);
 
     const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,18 +149,18 @@ export default function VendorInvoicesPage() {
         setPage(1);
     };
 
-    const getStatusBadge = (status: string) => {
-        switch (status) {
+    const getStatusBadge = (invoice: Parameters<typeof vendorInvoiceStatusLabel>[0]) => {
+        switch (invoice.status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
             case 'PendingApproval': return <Badge className="bg-yellow-600">Pending Approval</Badge>;
-            case 'Approved': return <Badge className="bg-blue-600">Approved</Badge>;
+            case 'Approved': return <Badge className="bg-blue-600">{vendorInvoiceStatusLabel(invoice)}</Badge>;
             case 'PartiallyPaid': return <Badge className="bg-indigo-600">Partially Paid</Badge>;
             case 'Paid': return <Badge className="bg-green-600">Paid</Badge>;
             case 'Overdue': return <Badge variant="destructive">Overdue</Badge>;
             case 'Voided': return <Badge variant="outline" className="text-muted-foreground">Voided</Badge>;
             case 'Rejected': return <Badge variant="destructive">Rejected</Badge>;
             case 'OnHold': return <Badge variant="secondary" className="bg-orange-500">On Hold</Badge>;
-            default: return <Badge variant="secondary">{status}</Badge>;
+            default: return <Badge variant="secondary">{invoice.status}</Badge>;
         }
     };
 
@@ -259,7 +267,7 @@ export default function VendorInvoicesPage() {
                                             </TableCell>
                                             <TableCell className="text-right">{formatCurrency(invoice.totalAmount, invoice.currencyCode)}</TableCell>
                                             <TableCell className="text-right font-medium">{formatCurrency(invoice.balanceAmount, invoice.currencyCode)}</TableCell>
-                                            <TableCell>{getStatusBadge(invoice.status)}</TableCell>
+                                            <TableCell>{getStatusBadge(invoice)}</TableCell>
                                             <TableCell>
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
@@ -278,12 +286,12 @@ export default function VendorInvoicesPage() {
                                                                 <FileText className="mr-2 h-4 w-4" /> Edit Invoice
                                                             </DropdownMenuItem>
                                                         )}
-                                                        {invoice.status === 'Draft' && !invoice.purchaseOrderId && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
-                                                            <DropdownMenuItem onClick={() => submitInvoiceMutation.mutate(invoice.id)}>
-                                                                <CheckCircle className="mr-2 h-4 w-4" /> Submit for Approval
+                                                        {invoice.status === 'Draft' && !invoice.purchaseOrderId && getWorkflowVisibility({ summary: workflowSummaryMap[invoice.id] }).known && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
+                                                            <DropdownMenuItem disabled={submitInvoiceMutation.isPending} onClick={() => submitInvoiceMutation.mutate(invoice.id)}>
+                                                                <CheckCircle className="mr-2 h-4 w-4" /> {getWorkflowVisibility({ summary: workflowSummaryMap[invoice.id] }).direct ? (invoice.isOpeningBalance ? 'Complete' : 'Post') : 'Submit for Approval'}
                                                             </DropdownMenuItem>
                                                         )}
-                                                        {invoice.status === 'PendingApproval' && !invoice.purchaseOrderId && hasPermission('Finance.AP.Invoices.Approve') && (workflowSummaryMap[invoice.id]?.canCurrentUserApprove ?? true) && (
+                                                        {invoice.status === 'PendingApproval' && invoice.approvalRequired !== false && !invoice.purchaseOrderId && hasPermission('Finance.AP.Invoices.Approve') && getWorkflowVisibility({ summary: workflowSummaryMap[invoice.id] }).showApprovalControls && workflowSummaryMap[invoice.id]?.canCurrentUserApprove === true && (
                                                             <DropdownMenuItem onClick={() => approveInvoiceMutation.mutate(invoice.id)}>
                                                                 <CheckCircle className="mr-2 h-4 w-4" /> Approve
                                                             </DropdownMenuItem>

@@ -78,7 +78,12 @@ export interface InventoryRequisitionItemDto {
   itemName: string;
   requestedQuantity: number;
   approvedQuantity: number;
+  /** Net balance retained for return operations and older API clients. */
   issuedQuantity: number;
+  grossIssuedQuantity?: number;
+  returnedQuantity?: number;
+  netIssuedQuantity?: number;
+  remainingToIssueQuantity?: number;
   unitOfMeasure: string;
   unitCost: number;
   totalCost: number;
@@ -359,6 +364,7 @@ export interface InventoryControlEvidenceDto extends InventoryControlEvidenceReq
 export interface InventoryReturnVoucherLineDto { id: string; requisitionItemId: string; inventoryItemId: string; itemCode: string; itemName: string; locationId?: string; quantity: number; unitCost: number; totalValue: number; lotNumber?: string; batchNumber?: string; serialNumber?: string; expiryDate?: string; }
 export interface InventoryReturnVoucherActionDto { sequence: number; actionType: string; actorUserId: string; actorName: string; occurredAtUtc: string; comment?: string; }
 export interface InventoryReturnVoucherDto {
+  approvalRequired?: boolean;
   id: string; voucherNumber: string; inventoryRequisitionId: string; requisitionNumber: string;
   warehouseId: string; warehouseName: string; status: string; reasonCode: string; reason: string; notes?: string;
   requestedById: string; requestedByName: string; approvedById?: string; approvedAtUtc?: string;

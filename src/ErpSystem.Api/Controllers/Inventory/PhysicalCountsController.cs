@@ -19,7 +19,7 @@ namespace ErpSystem.Api.Controllers.Inventory;
 [ApiController]
 [Route("api/inventory/physical-counts")]
 [Authorize(Policy = "InternalOnly")]
-public class PhysicalCountsController : ControllerBase
+public partial class PhysicalCountsController : ControllerBase
 {
     private readonly IPhysicalCountService _countService;
     private readonly ICurrentUserService _currentUser;
@@ -198,6 +198,10 @@ public class PhysicalCountsController : ControllerBase
             var userId = GetCurrentUserId();
             var count = await _countService.CreateAsync(dto, userId);
             return CreatedAtAction(nameof(GetById), new { id = count.Id }, count);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ControlledError(ex, "create scoped count", Guid.Empty);
         }
         catch (ArgumentException ex)
         {
@@ -444,6 +448,18 @@ public class PhysicalCountsController : ControllerBase
                     UploadedAtUtc = upload.CreatedAt
                 }).ToListAsync(cancellationToken);
 
+            var countActions = await _db.Set<ErpSystem.Core.Entities.Inventory.PhysicalCountAction>().AsNoTracking()
+                .Where(a => a.TenantId == tenantId && a.PhysicalCountId == id && !a.IsDeleted &&
+                    a.ActionType == ErpSystem.Core.Entities.Inventory.PhysicalCountActionType.CountRecorded).ToListAsync(cancellationToken);
+            var imported = countActions.Select(ErpSystem.Core.Services.Inventory.PhysicalCountSheetLineage.Read)
+                .Where(s => s != null).Select(s => s!.CentralDocumentVersionId).ToHashSet();
+            var current = ErpSystem.Core.Services.Inventory.PhysicalCountSheetLineage.Current(countActions);
+            foreach (var item in evidence)
+            {
+                item.IsImportedCountSheet = imported.Contains(item.CentralDocumentVersionId);
+                item.IsCurrentCountSheet = current?.CentralDocumentVersionId == item.CentralDocumentVersionId;
+            }
+
             return Ok(evidence);
         }
         catch (Exception ex)
@@ -477,7 +493,7 @@ public class PhysicalCountsController : ControllerBase
             var count = await _countService.GetByIdAsync(id);
             if (count is null)
                 return NotFound(new { code = "PHYSICAL_COUNT_NOT_FOUND", message = "The physical count was not found in this tenant." });
-            if (count.Status is not ("InProgress" or "RecountRequired"))
+            if (count.Status is not ("InProgress" or "RecountRequired" or "UnderReview" or "UnderInvestigation"))
                 return Conflict(new
                 {
                     code = "PHYSICAL_COUNT_EVIDENCE_STAGE_INVALID",

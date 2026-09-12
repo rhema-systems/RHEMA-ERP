@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -86,64 +87,231 @@ public class LandedCostService : ILandedCostService
         if (landedCost == null) return null;
 
         var grn = await _grnRepository.GetWithItemsAsync(landedCost.GoodsReceiptNoteId);
-        return MapToDetailDto(landedCost, grn);
+        var result = MapToDetailDto(landedCost, grn);
+        var numbers = landedCost.Items.Where(i => !i.IsDeleted && i.InvoiceNumber != null).Select(i => i.InvoiceNumber!).Distinct().ToList();
+        if (numbers.Count > 0)
+        {
+            var invoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i =>
+                i.TenantId == landedCost.TenantId && !i.IsDeleted && numbers.Contains(i.InvoiceNumber)).AsNoTracking().ToListAsync();
+            foreach (var item in result.CostItems)
+                item.InvoiceId = invoices.SingleOrDefault(i => i.InvoiceNumber == item.InvoiceNumber)?.Id;
+        }
+        return result;
     }
 
-    public async Task<LandedCostDto> CreateAsync(CreateLandedCostDto dto, Guid userId)
+    public async Task<List<LandedCostDetailDto>> GetByPurchaseOrderAsync(Guid purchaseOrderId)
     {
-        var grn = await _grnRepository.GetWithItemsAsync(dto.GoodsReceiptNoteId)
-            ?? throw new ArgumentException($"GRN {dto.GoodsReceiptNoteId} not found");
+        var grnIds = await _unitOfWork.Repository<GoodsReceiptNote>().GetQueryable(g =>
+            g.PurchaseOrderId == purchaseOrderId && !g.IsDeleted).Select(g => g.Id).ToListAsync();
+        var ids = await _unitOfWork.Repository<LandedCost>().GetQueryable(c =>
+            !c.IsDeleted && c.Status != "Cancelled" && grnIds.Contains(c.GoodsReceiptNoteId)).Select(c => c.Id).ToListAsync();
+        var result = new List<LandedCostDetailDto>();
+        foreach (var id in ids) { var cost = await GetByIdAsync(id); if (cost != null) result.Add(cost); }
+        return result;
+    }
 
-        if (dto.CostItems == null || dto.CostItems.Count == 0)
-            throw new ArgumentException("At least one landed cost item is required");
-
-        var landedCost = new LandedCost
+    public async Task<List<LandedCostDetailDto>> GetByInvoiceAsync(Guid invoiceId)
+    {
+        var invoice = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i => i.Id == invoiceId && !i.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync() ?? throw new ArgumentException("Invoice not found.");
+        var result = invoice.PurchaseOrderId.HasValue ? await GetByPurchaseOrderAsync(invoice.PurchaseOrderId.Value) : new List<LandedCostDetailDto>();
+        var ids = await _unitOfWork.Repository<LandedCostItem>().GetQueryable(i =>
+            !i.IsDeleted && i.TenantId == invoice.TenantId && i.InvoiceNumber == invoice.InvoiceNumber)
+            .Select(i => i.LandedCostId).Distinct().ToListAsync();
+        foreach (var id in ids.Where(id => result.All(c => c.Id != id)))
         {
-            TenantId = grn.TenantId,
-            LandedCostNumber = await GenerateLandedCostNumberAsync(),
-            GoodsReceiptNoteId = grn.Id,
-            GRNNumber = grn.GRNNumber,
-            CostDate = DateTime.UtcNow,
-            Currency = dto.Currency,
-            Status = "Draft",
-            Notes = dto.Notes
-        };
+            var cost = await GetByIdAsync(id);
+            if (cost != null && cost.Status != "Cancelled") result.Add(cost);
+        }
+        return result;
+    }
 
-        await _landedCostRepository.AddAsync(landedCost);
+    public Task<LandedCostDetailDto> LinkInvoiceAsync(Guid id, Guid itemId, Guid invoiceId, Guid userId)
+        => SaveInTransactionAsync(async () =>
+    {
+        var cost = await _landedCostRepository.GetWithDetailsAsync(id) ?? throw new ArgumentException("Landed cost not found.");
+        var item = cost.Items.SingleOrDefault(i => i.Id == itemId && !i.IsDeleted) ?? throw new ArgumentException("Cost line not found.");
+        var invoice = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i =>
+            i.Id == invoiceId && i.TenantId == cost.TenantId && !i.IsDeleted).Include(i => i.Supplier).SingleOrDefaultAsync()
+            ?? throw new ArgumentException("Invoice not found in this company.");
+        var grn = await _grnRepository.GetWithItemsAsync(cost.GoodsReceiptNoteId) ?? throw new ArgumentException("Receipt not found.");
+        if (cost.Status == "Cancelled" || invoice.Status == VendorInvoiceStatus.Voided || invoice.Status == VendorInvoiceStatus.Rejected || invoice.IsOpeningBalance)
+            throw new InvalidOperationException("Use an active invoice and landed-cost voucher, not an opening balance or cancelled record.");
+        if (invoice.PurchaseOrderId.HasValue && invoice.PurchaseOrderId != grn.PurchaseOrderId)
+            throw new InvalidOperationException("The invoice belongs to a different purchase order.");
+        if (!string.Equals(invoice.CurrencyCode, item.Currency, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The invoice and cost line currencies must match.");
+        // Use the same stable supplier code bridge as AP; supplier names are not identity keys.
+        var partners = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
+            !p.IsDeleted && p.TenantId == cost.TenantId && (p.Id == invoice.SupplierId ||
+                (invoice.Supplier.SupplierCode != "" && p.PartnerCode == invoice.Supplier.SupplierCode))).Take(2).ToListAsync();
+        if (partners.Count != 1 || (item.SupplierId.HasValue && item.SupplierId != partners[0].Id))
+            throw new InvalidOperationException("The invoice supplier does not uniquely match this cost supplier. Review the supplier mapping before linking.");
+        if (!string.IsNullOrWhiteSpace(item.InvoiceNumber) && item.InvoiceNumber != invoice.InvoiceNumber)
+            throw new InvalidOperationException("This charge is already linked to another invoice. Review the existing link instead of replacing it.");
+        item.InvoiceNumber = invoice.InvoiceNumber;
+        item.InvoiceDate = invoice.InvoiceDate;
+        item.SupplierId = partners[0].Id;
+        item.SupplierName = partners[0].PartnerName;
+        item.LastModifiedById = userId; item.UpdatedAt = DateTime.UtcNow;
+        cost.LastModifiedById = userId; cost.UpdatedAt = DateTime.UtcNow;
+        await _landedCostItemRepository.UpdateAsync(item);
+        await _unitOfWork.SaveChangesAsync();
+        return (await GetByIdAsync(id))!;
+    });
 
+    private Task<T> SaveInTransactionAsync<T>(Func<Task<T>> operation)
+    {
+        if (_unitOfWork.HasActiveTransaction) return operation();
+        return _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
+            try
+            {
+                var result = await operation();
+                await _unitOfWork.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        });
+    }
+
+    public Task<LandedCostDto> CreateAsync(CreateLandedCostDto dto, Guid userId)
+    {
+        ValidateCostInput(dto);
+        // Stable across execution-strategy retries, including an uncertain commit result.
+        var requestId = dto.RequestId ?? Guid.NewGuid();
+        return SaveInTransactionAsync(async () =>
+        {
+            var grn = await GetOrCreateGrnFromProcurementReceiptAsync(dto.GoodsReceiptNoteId, userId);
+            var prior = await _landedCostRepository.GetByIdAsync(requestId);
+            if (prior != null)
+            {
+                if (prior.GoodsReceiptNoteId != grn.Id || prior.CreatedById != userId)
+                    throw new InvalidOperationException("This save reference is already in use. Refresh the receipt before adding costs.");
+                var priorItems = await _landedCostItemRepository.GetByLandedCostAsync(prior.Id);
+                var requestedItems = await PrepareCostItemsAsync(dto, grn, prior.Id);
+                if (!prior.Currency.Equals(dto.Currency.Trim(), StringComparison.OrdinalIgnoreCase) || prior.Notes != dto.Notes ||
+                    !priorItems.Where(i => !i.IsDeleted).Select(CostInputKey).OrderBy(s => s)
+                        .SequenceEqual(requestedItems.Select(CostInputKey).OrderBy(s => s)))
+                    throw new InvalidOperationException($"This request was already saved as {prior.LandedCostNumber}. Refresh and edit that draft instead of creating the charge again.");
+                return MapToDto(prior);
+            }
+            var items = await PrepareCostItemsAsync(dto, grn, requestId);
+            var landedCost = new LandedCost
+            {
+                Id = requestId, TenantId = grn.TenantId,
+                LandedCostNumber = await GenerateLandedCostNumberAsync(),
+                GoodsReceiptNoteId = grn.Id, GRNNumber = grn.GRNNumber,
+                CostDate = DateTime.UtcNow, Currency = dto.Currency.Trim().ToUpperInvariant(),
+                Status = "Draft", Notes = dto.Notes, CreatedById = userId,
+                TotalCost = RoundMoney(items.Sum(i => i.AmountInBaseCurrency)),
+                UnallocatedAmount = RoundMoney(items.Sum(i => i.AmountInBaseCurrency))
+            };
+            await _landedCostRepository.AddAsync(landedCost);
+            foreach (var item in items) await _landedCostItemRepository.AddAsync(item);
+            await _unitOfWork.SaveChangesAsync();
+            return MapToDto(landedCost);
+        });
+    }
+
+    public Task<LandedCostDto> UpdateDraftAsync(Guid id, UpdateLandedCostDto dto, Guid userId)
+    {
+        ValidateCostInput(dto);
+        return SaveInTransactionAsync(async () =>
+        {
+            var landedCost = await _landedCostRepository.GetWithDetailsAsync(id)
+                ?? throw new ArgumentException("Landed cost voucher was not found.");
+            if (landedCost.Status != "Draft")
+                throw new InvalidOperationException("Only Draft landed costs can be edited. Allocated, approved and posted costs are locked.");
+            if (landedCost.Items.Any(i => !i.IsDeleted && !string.IsNullOrWhiteSpace(i.InvoiceNumber)))
+                throw new InvalidOperationException("This voucher has linked supplier invoices. Review those invoice links before changing its charges.");
+            if (string.IsNullOrWhiteSpace(dto.EditToken) || dto.EditToken != CostEditToken(landedCost))
+                throw new InvalidOperationException("This voucher has changed. Refresh it before editing again.");
+            if (dto.GoodsReceiptNoteId != landedCost.GoodsReceiptNoteId)
+                throw new ArgumentException("A landed cost voucher cannot be moved to a different receipt.");
+            var grn = await _grnRepository.GetWithItemsAsync(landedCost.GoodsReceiptNoteId)
+                ?? throw new ArgumentException("The linked receipt was not found.");
+            var items = await PrepareCostItemsAsync(dto, grn, id);
+            // Validate everything before replacing the draft. Never overwrite a posted cost or its history.
+            await SoftDeleteAllocationsAsync(id);
+            await _landedCostItemRepository.DeleteRangeAsync(landedCost.Items.Where(i => !i.IsDeleted).ToList());
+            foreach (var item in items) await _landedCostItemRepository.AddAsync(item);
+            landedCost.Currency = dto.Currency.Trim().ToUpperInvariant();
+            landedCost.Notes = dto.Notes;
+            landedCost.TotalCost = RoundMoney(items.Sum(i => i.AmountInBaseCurrency));
+            landedCost.AllocatedAmount = 0;
+            landedCost.UnallocatedAmount = landedCost.TotalCost;
+            landedCost.LastModifiedById = userId;
+            landedCost.UpdatedAt = DateTime.UtcNow;
+            await _landedCostRepository.UpdateAsync(landedCost);
+            await _unitOfWork.SaveChangesAsync();
+            return MapToDto(landedCost);
+        });
+    }
+
+    private static string CostInputKey(LandedCostItem i) => JsonSerializer.Serialize(new {
+        i.PurchaseOrderItemId, i.CostType, i.Description, i.Amount, i.Currency, i.ExchangeRate,
+        i.AllocationMethod, i.SupplierId, i.ReferenceNumber });
+
+    private static void ValidateCostInput(CreateLandedCostDto dto)
+    {
+        if (dto.GoodsReceiptNoteId == Guid.Empty || dto.RequestId == Guid.Empty)
+            throw new ArgumentException("A valid receipt and save reference are required.");
+        if (string.IsNullOrWhiteSpace(dto.Currency) || dto.Currency.Trim().Length > 10)
+            throw new ArgumentException("Voucher currency is required (maximum 10 characters).");
+        if (dto.Notes?.Length > 2000) throw new ArgumentException("Notes must be 2000 characters or fewer.");
+        if (dto.CostItems == null || dto.CostItems.Count == 0 || dto.CostItems.Count > 100)
+            throw new ArgumentException("At least one landed cost item is required");
         foreach (var item in dto.CostItems)
         {
             EnsureAllowedAllocationMethod(item.AllocationMethod);
+            if (!Enum.IsDefined(item.CostType) || string.IsNullOrWhiteSpace(item.Description) || item.Description.Length > 500)
+                throw new ArgumentException("Select a valid cost type and enter a description (maximum 500 characters).");
+            if (item.Amount <= 0 || item.ExchangeRate <= 0 || item.Amount > 999999999999m || item.ExchangeRate > 999999m)
+                throw new ArgumentException("Cost amounts and exchange rates must be positive and within supported limits.");
+            if (RoundMoney(item.Amount * item.ExchangeRate) > 99999999999999m)
+                throw new ArgumentException("The converted charge exceeds the supported amount limit.");
+            if (string.IsNullOrWhiteSpace(item.Currency) || item.Currency.Trim().Length > 10 || item.ReferenceNumber?.Length > 100)
+                throw new ArgumentException("Enter a currency and a reference of no more than 100 characters.");
+            if (item.Currency.Trim().Equals(dto.Currency.Trim(), StringComparison.OrdinalIgnoreCase) && item.ExchangeRate != 1m)
+                throw new ArgumentException("The exchange rate must be 1 when charge and voucher currencies are the same.");
+        }
+        if (dto.CostItems.Sum(i => RoundMoney(i.Amount * i.ExchangeRate)) > 99999999999999m)
+            throw new ArgumentException("The total landed cost exceeds the supported amount limit.");
+    }
 
+    private async Task<List<LandedCostItem>> PrepareCostItemsAsync(CreateLandedCostDto dto, GoodsReceiptNote grn, Guid voucherId)
+    {
+        if (grn.Status == GRNStatus.Cancelled) throw new InvalidOperationException("Cannot add costs to a cancelled receipt.");
+        var eligible = grn.Items.Where(i => !i.IsDeleted && (i.AcceptedQuantity > 0 || i.ReceivedQuantity - i.RejectedQuantity > 0)).ToList();
+        if (eligible.Count == 0) throw new InvalidOperationException("No received stock items are available for landed costs.");
+        var items = new List<LandedCostItem>();
+        foreach (var item in dto.CostItems)
+        {
+            if (item.PurchaseOrderItemId.HasValue && !eligible.Any(i => i.PurchaseOrderItemId == item.PurchaseOrderItemId))
+                throw new ArgumentException("The selected cost target is not a received stock line on this receipt.");
             var supplierName = await ResolveSupplierNameAsync(item.SupplierId);
-            var itemBase = new LandedCostItem
+            if (item.SupplierId.HasValue && supplierName == null) throw new ArgumentException("The selected cost supplier was not found.");
+            items.Add(new LandedCostItem
             {
-                TenantId = grn.TenantId,
-                LandedCostId = landedCost.Id,
-                CostType = item.CostType,
-                Description = item.Description,
-                Amount = item.Amount,
-                Currency = item.Currency,
+                TenantId = grn.TenantId, LandedCostId = voucherId,
+                PurchaseOrderItemId = item.PurchaseOrderItemId,
+                CostType = item.CostType, Description = item.Description.Trim(),
+                Amount = item.Amount, Currency = item.Currency.Trim().ToUpperInvariant(),
                 ExchangeRate = item.ExchangeRate,
                 AmountInBaseCurrency = RoundMoney(item.Amount * item.ExchangeRate),
                 AllocationMethod = item.AllocationMethod,
-                SupplierId = item.SupplierId,
-                SupplierName = supplierName,
+                SupplierId = item.SupplierId, SupplierName = supplierName,
                 ReferenceNumber = item.ReferenceNumber
-            };
-
-            await _landedCostItemRepository.AddAsync(itemBase);
+            });
         }
-
-        // Persist header + lines first, then calculate totals based on saved lines.
-        await _unitOfWork.SaveChangesAsync();
-        await RecalculateHeaderTotalsAsync(landedCost.Id);
-        await _unitOfWork.SaveChangesAsync();
-
-        _logger.LogInformation("Created landed cost {LandedCostNumber} for GRN {GRNNumber}", landedCost.LandedCostNumber, grn.GRNNumber);
-        var reloaded = await _landedCostRepository.GetByIdAsync(landedCost.Id);
-        // Be resilient: if query filters/tenant scoping prevent reload, return the in-memory entity.
-        return reloaded != null ? MapToDto(reloaded) : MapToDto(landedCost);
+        return items;
     }
 
     public async Task<LandedCostDto> InitializeFromPurchaseOrderPlanAsync(Guid goodsReceiptNoteId, Guid userId)
@@ -160,6 +328,8 @@ public class LandedCostService : ILandedCostService
 
         var existing = (await _landedCostRepository.GetByGRNAsync(grn.Id))
             .FirstOrDefault(l => l.Status == "Draft");
+        if (existing != null)
+            throw new InvalidOperationException("A draft landed cost voucher already exists. Edit it instead of overwriting its charges with PO estimates.");
 
         var landedCost = existing ?? new LandedCost
         {
@@ -191,18 +361,30 @@ public class LandedCostService : ILandedCostService
         foreach (var planItem in plan.Items.Where(i => !i.IsDeleted))
         {
             EnsureAllowedAllocationMethod(planItem.AllocationMethod);
+            var receiptFraction = 1m;
+            if (planItem.PurchaseOrderItemId.HasValue)
+            {
+                var targets = grn.Items.Where(i => i.PurchaseOrderItemId == planItem.PurchaseOrderItemId).ToList();
+                if (targets.Count == 0) continue; // Never spread a cost for an unreceived line to other goods.
+                var quantities = GetAllocatableQuantities(grn);
+                var received = targets.Sum(i => quantities.GetValueOrDefault(i.Id));
+                var ordered = targets.Max(i => i.OrderedQuantity);
+                if (received <= 0 || ordered <= 0) continue;
+                receiptFraction = Math.Min(1m, received / ordered);
+            }
             var supplierName = planItem.SupplierName ?? await ResolveSupplierNameAsync(planItem.SupplierId);
 
             var item = new LandedCostItem
             {
                 TenantId = grn.TenantId,
                 LandedCostId = landedCost.Id,
+                PurchaseOrderItemId = planItem.PurchaseOrderItemId,
                 CostType = planItem.CostType,
                 Description = planItem.Description,
-                Amount = planItem.Amount,
+                Amount = RoundMoney(planItem.Amount * receiptFraction),
                 Currency = planItem.Currency,
                 ExchangeRate = planItem.ExchangeRate,
-                AmountInBaseCurrency = RoundMoney(planItem.AmountInPlanCurrency),
+                AmountInBaseCurrency = RoundMoney(planItem.AmountInPlanCurrency * receiptFraction),
                 AllocationMethod = planItem.AllocationMethod,
                 SupplierId = planItem.SupplierId,
                 SupplierName = supplierName,
@@ -238,7 +420,7 @@ public class LandedCostService : ILandedCostService
 
         // If a snapshot already exists for this receipt, reuse it.
         var existingSnapshot = await _unitOfWork.Repository<GoodsReceiptNote>()
-            .GetQueryable(g => g.PurchaseOrderReceiptId == receipt.Id)
+            .GetQueryable(g => g.PurchaseOrderReceiptId == receipt.Id && g.TenantId == receipt.TenantId)
             .IgnoreQueryFilters()
             .Include(g => g.Items)
                 .ThenInclude(i => i.InventoryItem)
@@ -255,7 +437,7 @@ public class LandedCostService : ILandedCostService
         var receiptIdToken = receipt.Id.ToString("N").ToUpperInvariant();
         var receiptPrefix = receipt.Id.ToString("N")[..6].ToUpperInvariant();
         var legacySnapshot = await _unitOfWork.Repository<GoodsReceiptNote>()
-            .GetQueryable(g => g.PurchaseOrderId == receipt.PurchaseOrderId &&
+            .GetQueryable(g => g.TenantId == receipt.TenantId && g.PurchaseOrderId == receipt.PurchaseOrderId &&
                                g.GRNNumber != null &&
                                (g.GRNNumber.Contains(receiptIdToken) ||
                                 g.GRNNumber.Contains(receiptPrefix) ||
@@ -290,7 +472,7 @@ public class LandedCostService : ILandedCostService
         // If another request already created the snapshot (or it exists but is hidden by filters),
         // return it instead of attempting a duplicate insert.
         var existingById = await _unitOfWork.Repository<GoodsReceiptNote>()
-            .GetQueryable(g => g.Id == receipt.Id)
+            .GetQueryable(g => g.Id == receipt.Id && g.TenantId == receipt.TenantId)
             .IgnoreQueryFilters()
             .Include(g => g.Items)
                 .ThenInclude(i => i.InventoryItem)
@@ -774,6 +956,9 @@ public class LandedCostService : ILandedCostService
         var grn = await _grnRepository.GetWithItemsAsync(landedCost.GoodsReceiptNoteId)
             ?? throw new InvalidOperationException("GRN not found for landed cost document");
 
+        if (item.PurchaseOrderItemId.HasValue && dto.Allocations.Any(a =>
+            !grn.Items.Any(i => i.Id == a.GoodsReceiptNoteItemId && i.PurchaseOrderItemId == item.PurchaseOrderItemId)))
+            throw new ArgumentException("Line-specific landed costs can only be allocated to their original PO line.");
         item.AllocationMethod = "Manual";
         await _landedCostItemRepository.UpdateAsync(item);
 
@@ -849,6 +1034,9 @@ public class LandedCostService : ILandedCostService
             {
                 // Validate manual allocations exist and sum correctly
                 var manual = await _landedCostAllocationRepository.FindAsync(a => a.LandedCostId == landedCost.Id && a.LandedCostItemId == costItem.Id);
+                if (costItem.PurchaseOrderItemId.HasValue && manual.Any(a =>
+                    !eligibleGrnItems.Any(i => i.Id == a.GoodsReceiptNoteItemId && i.PurchaseOrderItemId == costItem.PurchaseOrderItemId)))
+                    throw new InvalidOperationException("A line-specific landed cost has an allocation to a different PO line.");
                 var manualSum = manual.Sum(a => RoundMoney(a.AllocatedAmount));
                 if (manualSum != RoundMoney(costItem.AmountInBaseCurrency))
                     throw new InvalidOperationException($"Manual allocations for item '{costItem.Description}' must sum to {RoundMoney(costItem.AmountInBaseCurrency)}.");
@@ -885,6 +1073,7 @@ public class LandedCostService : ILandedCostService
             return PostToInventoryOnlyAsync(landedCostId, userId);
         return _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
+            _unitOfWork.ClearTrackedChanges();
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
             try
             {
@@ -903,6 +1092,7 @@ public class LandedCostService : ILandedCostService
 
     private async Task<bool> PostToInventoryOnlyAsync(Guid landedCostId, Guid userId)
     {
+        await _unitOfWork.AcquireTransactionLockAsync($"InventoryLandedCost:{landedCostId:N}");
         var landedCost = await _landedCostRepository.GetWithDetailsAsync(landedCostId)
             ?? throw new ArgumentException($"Landed cost {landedCostId} not found");
 
@@ -985,9 +1175,9 @@ public class LandedCostService : ILandedCostService
             .GetQueryable()
             .Where(l => itemIds.Contains(l.InventoryItemId) &&
                         l.WarehouseId == grn.WarehouseId &&
-                        l.IsActive &&
+                        !l.IsDeleted &&
                         l.SourceType == ReferenceType.PO.ToString() &&
-                        l.SourceId == grn.Id)
+                        l.SourceId == valuationReceiptId)
             .ToListAsync();
 
         var allocationsByKey = allocations
@@ -1010,7 +1200,6 @@ public class LandedCostService : ILandedCostService
                 : (Guid?)null;
 
             var totalAllocatedAmount = RoundMoney(group.Sum(x => x.AllocatedAmount));
-            var totalAllocatedQty = group.Sum(x => x.Quantity);
 
             if (totalAllocatedAmount == 0)
                 continue;
@@ -1030,68 +1219,11 @@ public class LandedCostService : ILandedCostService
                 var matchingLayers = receiptLayers
                     .Where(l =>
                         l.InventoryItemId == invItem.Id &&
-                        (!locationId.HasValue || l.LocationId == locationId.Value) &&
-                        (string.IsNullOrWhiteSpace(group.Key.LotNumber) || l.LotNumber == group.Key.LotNumber))
+                        l.LocationId == locationId &&
+                        (l.LotNumber ?? "") == (group.Key.LotNumber ?? ""))
                     .ToList();
 
-                // Best-effort traceability: map each allocation row to a FIFO layer created by this receipt.
-                // If there are multiple layers (e.g., multiple receipt lines for the same item/location/lot),
-                // match by closest original quantity and assign each layer at most once.
-                if (matchingLayers.Count > 0)
-                {
-                    var availableLayers = matchingLayers
-                        .OrderByDescending(l => l.OriginalQuantity)
-                        .ThenBy(l => l.LayerDate)
-                        .ToList();
-
-                    var allocRows = group
-                        .Where(a => a.Quantity > 0 && a.InventoryItemId != Guid.Empty)
-                        .OrderByDescending(a => a.Quantity)
-                        .ToList();
-
-                    foreach (var alloc in allocRows)
-                    {
-                        var best = availableLayers
-                            .OrderBy(l => Math.Abs(l.OriginalQuantity - alloc.Quantity))
-                            .ThenByDescending(l => l.RemainingQuantity)
-                            .FirstOrDefault();
-
-                        if (best != null)
-                        {
-                            alloc.InventoryLayerId = best.Id;
-                            availableLayers.Remove(best);
-                        }
-                    }
-                }
-
-                var remainingQty = matchingLayers.Sum(l => l.RemainingQuantity);
-                if (remainingQty <= 0 || totalAllocatedQty <= 0)
-                {
-                    varianceStub = totalAllocatedAmount;
-                }
-                else
-                {
-                    var ratio = Math.Min(1m, remainingQty / totalAllocatedQty);
-                    applyToInventory = RoundMoney(totalAllocatedAmount * ratio);
-                    varianceStub = RoundMoney(totalAllocatedAmount - applyToInventory);
-
-                    if (applyToInventory != 0)
-                    {
-                        var totalRemainingQty = matchingLayers.Sum(l => l.RemainingQuantity);
-                        if (totalRemainingQty > 0)
-                        {
-                            foreach (var layer in matchingLayers)
-                            {
-                                if (layer.RemainingQuantity <= 0) continue;
-
-                                var layerCostInc = applyToInventory * (layer.RemainingQuantity / totalRemainingQty);
-                                var unitInc = layer.RemainingQuantity > 0 ? layerCostInc / layer.RemainingQuantity : 0;
-                                layer.UnitCost += unitInc;
-                                layer.RemainingValue += layerCostInc;
-                            }
-                        }
-                    }
-                }
+                (applyToInventory, varianceStub) = LandedCostFifoValuation.Apply(group, matchingLayers);
             }
             else // WeightedAverage
             {
@@ -1212,39 +1344,9 @@ public class LandedCostService : ILandedCostService
             }
         }
 
-        // Update WarehouseQuantity + InventoryItem average costs to reflect updated balances (best-effort)
-        foreach (var itemId in itemIds)
-        {
-            var warehouseBalances = balanceByKey.Values.Where(b => b.InventoryItemId == itemId && b.WarehouseId == grn.WarehouseId).ToList();
-            var whQty = warehouseBalances.Sum(b => b.QuantityOnHand);
-            var whVal = warehouseBalances.Sum(b => b.TotalValue);
-            var warehouseAvg = whQty > 0 ? whVal / whQty : 0;
-
-            var warehouseQty = await _unitOfWork.Repository<WarehouseQuantity>()
-                .FirstOrDefaultAsync(q => q.InventoryItemId == itemId && q.WarehouseId == grn.WarehouseId && !q.IsDeleted);
-            if (warehouseQty != null)
-            {
-                warehouseQty.AverageCost = warehouseAvg;
-                warehouseQty.LastMovementDate = DateTime.UtcNow;
-                await _unitOfWork.Repository<WarehouseQuantity>().UpdateAsync(warehouseQty);
-            }
-
-            // Item-level average across all warehouses (derived from valuation balances)
-            var allBalances = await _unitOfWork.Repository<InventoryBalance>()
-                .GetQueryable()
-                .Where(b => b.InventoryItemId == itemId)
-                .AsNoTracking()
-                .ToListAsync();
-            var totalQty = allBalances.Sum(b => b.QuantityOnHand);
-            var totalVal = allBalances.Sum(b => b.TotalValue);
-            var itemAvg = totalQty > 0 ? totalVal / totalQty : 0;
-
-            if (inventoryItems.TryGetValue(itemId, out var item))
-            {
-                item.AverageCost = itemAvg;
-                await _unitOfWork.Repository<InventoryItem>().UpdateAsync(item);
-            }
-        }
+        // The central valuation projection updates current item/warehouse/bin
+        // averages from these pending balances in the same SaveChanges. A separate
+        // AsNoTracking query here sees the old value and must not own that calculation.
 
         landedCost.Status = "Posted";
         landedCost.PostedById = userId;
@@ -1337,6 +1439,10 @@ public class LandedCostService : ILandedCostService
         List<GoodsReceiptNoteItem> grnItems,
         Dictionary<Guid, decimal> allocQtyByGrnItem)
     {
+        if (costItem.PurchaseOrderItemId.HasValue)
+            grnItems = grnItems.Where(i => i.PurchaseOrderItemId == costItem.PurchaseOrderItemId).ToList();
+        if (grnItems.Count == 0)
+            throw new InvalidOperationException("The targeted PO line has no received quantity for landed cost allocation.");
         // Replace allocations for this cost item
         var existing = await _landedCostAllocationRepository.FindAsync(a => a.LandedCostId == landedCost.Id && a.LandedCostItemId == costItem.Id);
         await _landedCostAllocationRepository.DeleteRangeAsync(existing);
@@ -1495,6 +1601,12 @@ public class LandedCostService : ILandedCostService
         };
     }
 
+    private static string CostEditToken(LandedCost cost) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+        JsonSerializer.Serialize(new { cost.Id, cost.Status, cost.Currency, cost.Notes, cost.UpdatedAt,
+            Items = cost.Items.Where(i => !i.IsDeleted).OrderBy(i => i.Id).Select(i => new {
+                i.Id, i.CostType, i.Description, i.Amount, i.Currency, i.ExchangeRate, i.AllocationMethod,
+                i.PurchaseOrderItemId, i.SupplierId, i.ReferenceNumber }) }))));
+
     private static LandedCostDetailDto MapToDetailDto(LandedCost landedCost, GoodsReceiptNote? grn)
     {
         var grnItems = grn?.Items?.ToDictionary(i => i.Id, i => i) ?? new Dictionary<Guid, GoodsReceiptNoteItem>();
@@ -1527,6 +1639,9 @@ public class LandedCostService : ILandedCostService
 
         return new LandedCostDetailDto
         {
+            PurchaseOrderId = grn?.PurchaseOrderId,
+            ReceiptId = grn?.PurchaseOrderReceiptId ?? landedCost.GoodsReceiptNoteId,
+            EditToken = CostEditToken(landedCost),
             Id = landedCost.Id,
             LandedCostNumber = landedCost.LandedCostNumber,
             GoodsReceiptNoteId = landedCost.GoodsReceiptNoteId,
@@ -1543,6 +1658,9 @@ public class LandedCostService : ILandedCostService
                 .Where(i => !i.IsDeleted)
                 .Select(i => new LandedCostItemDto
                 {
+                    InvoiceDate = i.InvoiceDate,
+                    InvoiceNumber = i.InvoiceNumber,
+                    PurchaseOrderItemId = i.PurchaseOrderItemId,
                     Id = i.Id,
                     CostType = i.CostType,
                     Description = i.Description ?? string.Empty,

@@ -16,7 +16,7 @@ namespace ErpSystem.Api.Services.Finance.AP;
 /// Controlled AP lifecycle for supplier debit notes. The supplier calls the originating document
 /// a credit note; TDC calls its buyer-side record a debit note because it debits AP control.
 /// </summary>
-public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
+public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService, IInventorySupplierReturnFinanceHandoff
 {
     private const string WorkflowEntityType = "SupplierDebitNote";
     private const string AuditResource = "Finance.APSupplierDebitNote";
@@ -77,6 +77,8 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         CancellationToken cancellationToken = default)
     {
         var notes = BaseQuery(TenantId);
+        if (query.InventoryPurchaseReturnId.HasValue)
+            notes = notes.Where(item => item.InventoryPurchaseReturnId == query.InventoryPurchaseReturnId.Value);
         if (query.VendorId.HasValue)
             notes = notes.Where(item => item.VendorId == query.VendorId.Value);
         if (query.SupplierId.HasValue)
@@ -104,7 +106,9 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             .AsSplitQuery()
             .AsNoTracking()
             .ToListAsync(cancellationToken);
-        return rows.Select(Map).ToList();
+        var results = new List<SupplierDebitNoteDto>();
+        foreach (var row in rows) results.Add(await MapWithApprovalAsync(row));
+        return results;
     }
 
     public async Task<SupplierDebitNoteDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -113,7 +117,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
             .AsSplitQuery()
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
-        return note == null ? null : Map(note);
+        return note == null ? null : await MapWithApprovalAsync(note);
     }
 
     public async Task<SupplierDebitNoteDto?> GetByIdAsync(
@@ -125,7 +129,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         var note = await BaseQuery(TenantId).AsSplitQuery().AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (note is null) return null;
-        var result = Map(note);
+        var result = await MapWithApprovalAsync(note);
         if (_sourceDimensions is not null)
             result.FinanceDimensions = await _sourceDimensions.GetAsync(
                 producer, note.Id, note.DebitNoteDate, DimensionLineContexts(note), cancellationToken);
@@ -304,6 +308,9 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         if (note.Status is not SupplierDebitNoteStatus.Draft and not SupplierDebitNoteStatus.Rejected)
             throw new InvalidOperationException("Only draft or rejected supplier debit notes can be edited.");
 
+        if (note.InventoryPurchaseReturnId.HasValue)
+            throw new InvalidOperationException("RTV_SOURCE_IMMUTABLE: return-credit lines are inherited from the dispatched return and original invoice; they cannot be changed through ordinary debit-note editing.");
+
         ApplyConcurrencyToken(note, dto.RowVersion);
         var before = Snapshot(note);
         var vendor = await GetVendorAsync(dto.VendorId, cancellationToken);
@@ -426,7 +433,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         {
             // A policy may deliberately contain no human step. Preserve the outcome, but stamp
             // the workflow as the approval source rather than pretending that the maker approved it.
-            note.ApprovalSource = "WorkflowAutoApproval";
+            note.ApprovalSource = result.ApprovalRequired ? "WorkflowAutoApproval" : "NoApprovalWorkflow";
             note.ApprovedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
             return await GetRequiredAsync(note.Id, producer, cancellationToken);
@@ -607,6 +614,8 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         }
 
         var request = await BuildPostingRequestAsync(note, producer, cancellationToken);
+        if (note.InventoryPurchaseReturnId.HasValue)
+            await PrepareInventoryReturnPostingAsync(note, request, cancellationToken);
         var result = producer is null
             ? await _posting.PostAsync(request, cancellationToken)
             : await _posting.PostAsync(request, producer, cancellationToken);
@@ -616,6 +625,8 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         note.JournalEntryId = result.JournalEntryId;
         note.PostingEventId = result.PostingEventId;
         note.Status = SupplierDebitNoteStatus.Posted;
+        if (note.InventoryPurchaseReturnId.HasValue)
+            await ApplyInventoryReturnCreditAsync(note, cancellationToken);
         note.UpdatedAt = DateTime.UtcNow;
         note.UpdatedBy = UserName;
         note.LastModifiedById = CurrentUserId == Guid.Empty ? null : CurrentUserId;
@@ -689,6 +700,8 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         string reason,
         CancellationToken cancellationToken)
     {
+        if (note.InventoryPurchaseReturnId.HasValue)
+            throw new InvalidOperationException("RTV_CREDIT_HEADER_CORRECTION_REQUIRED: correct the draft credit reference/date instead; cancelling its retained dispatched-return link is not supported.");
         if (note.Status is not SupplierDebitNoteStatus.Draft and not SupplierDebitNoteStatus.Rejected)
             throw new InvalidOperationException("Only draft or rejected supplier debit notes can be cancelled.");
         note.Status = SupplierDebitNoteStatus.Cancelled;
@@ -719,7 +732,7 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         if (note.Status != SupplierDebitNoteStatus.Posted || !note.PostingEventId.HasValue || !note.JournalEntryId.HasValue)
             throw new InvalidOperationException("Only a posted supplier debit note can be reversed.");
 
-        var applied = EffectiveApplications(note.Applications).Sum(item => item.ApplicationAmount);
+        var applied = EffectiveApplications(note.Applications).Sum(item => item.ApplicationAmount) + note.DirectInvoiceAppliedAmount;
         if (Round(applied) > 0m)
             throw new InvalidOperationException("Reverse the linked payment settlement applications before reversing this supplier debit note.");
 
@@ -1978,15 +1991,30 @@ public sealed class SupplierDebitNoteService : ISupplierDebitNoteService
         }, cancellationToken);
     }
 
+    private async Task<SupplierDebitNoteDto> MapWithApprovalAsync(SupplierDebitNote note)
+    {
+        var dto = Map(note);
+        if (note.Status is SupplierDebitNoteStatus.Draft or SupplierDebitNoteStatus.Rejected)
+            dto.ApprovalRequired = await _workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType) ||
+                await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, note.Id);
+        return dto;
+    }
+
     private SupplierDebitNoteDto Map(SupplierDebitNote note)
     {
         var effectiveApplications = EffectiveApplications(note.Applications);
-        var applied = Round(effectiveApplications.Sum(item => item.ApplicationAmount));
+        var applied = Round(effectiveApplications.Sum(item => item.ApplicationAmount) + note.DirectInvoiceAppliedAmount);
         var remaining = Round(Math.Max(note.TotalAmount - applied, 0m));
         return new SupplierDebitNoteDto
         {
+            ApprovalRequired = note.ApprovalSource != "NoApprovalWorkflow",
             Id = note.Id,
             DebitNoteNumber = note.DebitNoteNumber,
+            InventoryPurchaseReturnId = note.InventoryPurchaseReturnId,
+            ReturnDispatchPostingEventId = note.ReturnDispatchPostingEventId,
+            ReturnDispatchJournalEntryId = note.ReturnDispatchJournalEntryId,
+            DirectInvoiceAppliedAmount = note.DirectInvoiceAppliedAmount,
+            DirectInvoiceAppliedAt = note.DirectInvoiceAppliedAt,
             SupplierCreditNoteReference = note.SupplierCreditNoteReference,
             VendorId = note.VendorId,
             SupplierId = note.SupplierId,

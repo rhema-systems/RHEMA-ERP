@@ -318,7 +318,7 @@ public sealed class QuantitySurveyEscalationCalculationService(
         var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.Escalation, entity.Id, entity.ApprovalWorkflowDefinitionId);
         if (!result.ExecutionResult.Success)
             throw new QuantitySurveyEscalationCalculationConflictException(result.ExecutionResult.Message ?? "The configured escalation workflow could not be started.");
-        workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Escalation).ApplySubmitOutcome(entity, result.Outcome, UserId);
+        workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Escalation).ApplySubmitOutcome(entity, result, UserId);
         if (result.Outcome == WorkflowOutcome.Approved)
         {
             entity.Status = "PendingApproval";

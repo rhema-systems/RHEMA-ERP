@@ -60,7 +60,7 @@ export default function JournalBatchesPage() {
                     <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
                         <Layers3 className="h-8 w-8" /> Journal Batches
                     </h1>
-                    <p className="text-muted-foreground">Control totals, per-entry approval, partial posting, and full-batch reversal.</p>
+                    <p className="text-muted-foreground">Control totals, configured approvals, partial posting, and full-batch reversal.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" onClick={downloadTemplate}><Download className="mr-2 h-4 w-4" />Template</Button>
@@ -80,7 +80,7 @@ export default function JournalBatchesPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Batch register</CardTitle>
-                    <CardDescription>Search or filter by approval status.</CardDescription>
+                    <CardDescription>Search or filter by batch readiness.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid gap-3 md:grid-cols-[1fr_240px]">
@@ -90,12 +90,13 @@ export default function JournalBatchesPage() {
                             <Input id="journal-batch-search" className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Batch number or description" />
                         </div>
                         <div>
-                            <Label className="sr-only" htmlFor="journal-batch-approval-status">Approval status</Label>
+                            <Label className="sr-only" htmlFor="journal-batch-approval-status">Batch readiness</Label>
                             <Select value={approvalStatus} onValueChange={setApprovalStatus}>
                                 <SelectTrigger id="journal-batch-approval-status"><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">All approval statuses</SelectItem>
+                                    <SelectItem value="all">All readiness statuses</SelectItem>
                                     <SelectItem value="Draft">Draft</SelectItem>
+                                    <SelectItem value="ReadyToPost">Ready to post</SelectItem>
                                     <SelectItem value="PendingApproval">Pending approval</SelectItem>
                                     <SelectItem value="PartiallyApproved">Partially approved</SelectItem>
                                     <SelectItem value="Approved">Approved</SelectItem>

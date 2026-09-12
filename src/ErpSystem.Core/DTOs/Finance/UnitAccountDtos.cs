@@ -145,6 +145,8 @@ public class UpdateUnitAccountDto
 /// </summary>
 public class UnitJournalEntryDto
 {
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? WorkflowInstanceId { get; set; }
     public Guid Id { get; set; }
     public string EntryNumber { get; set; } = string.Empty;
     public DateTime EntryDate { get; set; }
@@ -162,6 +164,8 @@ public class UnitJournalEntryDto
 /// </summary>
 public class UnitJournalEntryDetailDto
 {
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? WorkflowInstanceId { get; set; }
     public Guid Id { get; set; }
     public string EntryNumber { get; set; } = string.Empty;
     public DateTime EntryDate { get; set; }

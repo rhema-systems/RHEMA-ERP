@@ -91,7 +91,8 @@ public class UnitJournalEntryConfiguration : IEntityTypeConfiguration<UnitJourna
 {
     public void Configure(EntityTypeBuilder<UnitJournalEntry> builder)
     {
-        builder.ToTable("UnitJournalEntries");
+        builder.ToTable("UnitJournalEntries", table => table.HasTrigger("TR_UnitJournalEntries_OptionalApproval"));
+        builder.Property(entry => entry.ApprovalRequired).HasDefaultValue(true).ValueGeneratedNever();
 
         builder.HasIndex(uje => new { uje.TenantId, uje.EntryNumber }).IsUnique();
         builder.HasIndex(uje => uje.EntryDate);
@@ -371,7 +372,8 @@ public class AllocationRunBatchConfiguration : IEntityTypeConfiguration<Allocati
 {
     public void Configure(EntityTypeBuilder<AllocationRunBatch> builder)
     {
-        builder.ToTable("AllocationRunBatches");
+        builder.ToTable("AllocationRunBatches", table => table.HasTrigger("TR_AllocationRunBatches_ApprovalPolicy"));
+        builder.Property(batch => batch.ApprovalRequired).HasDefaultValue(true);
 
         builder.HasIndex(b => new { b.TenantId, b.BatchNumber }).IsUnique();
         builder.HasIndex(b => new { b.TenantId, b.AllocationRuleId, b.FiscalPeriodId, b.Status });

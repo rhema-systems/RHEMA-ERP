@@ -75,7 +75,7 @@ public partial class ProjectService
         }
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(ProjectBudgetRevisionWorkflowEntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(entity, workflowResult, userId);
         entity.SubmittedAt = DateTime.UtcNow;
         entity.ApprovedAt = string.Equals(entity.Status, "Approved", StringComparison.OrdinalIgnoreCase) ? DateTime.UtcNow : null;
         entity.ApprovedById = string.Equals(entity.Status, "Approved", StringComparison.OrdinalIgnoreCase) ? userId : null;

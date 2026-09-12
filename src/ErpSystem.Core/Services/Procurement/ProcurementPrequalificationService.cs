@@ -37,6 +37,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
     private readonly IWorkflowService _workflowService;
     private readonly ISupplierValidationService _supplierValidation;
     private readonly INotificationService _notifications;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
 
     public ProcurementPrequalificationService(
         IUnitOfWork unitOfWork,
@@ -46,7 +47,8 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
         IProcurementControlEventService controlEvents,
         IWorkflowService workflowService,
         ISupplierValidationService supplierValidation,
-        INotificationService notifications)
+        INotificationService notifications,
+        IWorkflowIntegrationService workflowIntegration)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -56,6 +58,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
         _workflowService = workflowService;
         _supplierValidation = supplierValidation;
         _notifications = notifications;
+        _workflowIntegration = workflowIntegration;
     }
 
     private IGenericRepository<ProcurementPrequalificationExercise> Exercises => _unitOfWork.Repository<ProcurementPrequalificationExercise>();
@@ -116,6 +119,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
         }
         return new ProcurementPrequalificationReadinessDto
         {
+            ApprovalRequired = await _workflowIntegration.HasActiveApprovalWorkflowAsync(ApprovalSourceType),
             Categories = categories.Select(item => new ProcurementPrequalificationCategoryDto
                 { Id = item.Id, Code = item.CategoryCode, Name = item.CategoryName }).ToList(),
             Policies = policies.Select(item => new ProcurementPrequalificationPolicyDto
@@ -204,12 +208,17 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
             (policy.EffectiveTo.HasValue && policy.EffectiveTo.Value < policyMoment))
             throw Validation("PREQUAL_POLICY_INVALID", "Select one current Published procurement policy set.");
 
-        var workflow = await Workflows.GetQueryable(item => item.Id == request.WorkflowDefinitionId &&
-                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
-            .Include(item => item.EntityType).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
-        if (workflow is null || !workflow.IsActive || workflow.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published ||
-            !(workflow.EntityType.Code.Equals("PROCUREMENT_SOURCING", StringComparison.OrdinalIgnoreCase) ||
-              workflow.EntityType.Name.Replace(" ", string.Empty).Equals("ProcurementSourcing", StringComparison.OrdinalIgnoreCase)))
+        var approvalRequired = await _workflowIntegration.HasActiveApprovalWorkflowAsync(ApprovalSourceType);
+        var workflow = request.WorkflowDefinitionId.HasValue
+            ? await Workflows.GetQueryable(item => item.Id == request.WorkflowDefinitionId.Value &&
+                    item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+                .Include(item => item.EntityType).AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            : null;
+        if ((approvalRequired && workflow is null) || (request.WorkflowDefinitionId.HasValue &&
+            (workflow is null || !workflow.IsActive || workflow.LifecycleStatus != WorkflowDefinitionLifecycleStatus.Published ||
+             workflow.EntityType.IsDeleted || !workflow.EntityType.IsActive ||
+             !(workflow.EntityType.Code.Equals("PROCUREMENT_SOURCING", StringComparison.OrdinalIgnoreCase) ||
+               workflow.EntityType.Name.Replace(" ", string.Empty).Equals("ProcurementSourcing", StringComparison.OrdinalIgnoreCase)))))
             throw Validation("PREQUAL_WORKFLOW_INVALID", "Select one active Published Procurement Sourcing workflow definition.");
 
         var now = DateTime.UtcNow;
@@ -222,7 +231,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
             ValidityMonths = request.ValidityMonths, PassingScore = request.PassingScore,
             PolicySetId = policy.Id, PolicySetCode = policy.Code, PolicySetVersion = policy.Version,
             SourceConfigurationProfileId = policy.SourceConfigurationProfileId,
-            WorkflowDefinitionId = workflow.Id, CreatedAt = now, CreatedBy = ActorName(), CreatedById = _currentUser.UserId
+            WorkflowDefinitionId = workflow?.Id, CreatedAt = now, CreatedBy = ActorName(), CreatedById = _currentUser.UserId
         };
         foreach (var item in criterionRequests)
             exercise.Criteria.Add(new ProcurementPrequalificationCriterion
@@ -493,15 +502,37 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             try
             {
-                var workflow = await _workflowService.StartApprovalWorkflowAsync(
-                    ApprovalSourceType, exercise.Id, exercise.WorkflowDefinitionId);
-                if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue)
-                    throw Conflict("PREQUAL_WORKFLOW_START_FAILED", workflow.Message ?? "The exact prequalification approval workflow could not be started.");
+                var workflow = exercise.WorkflowDefinitionId.HasValue
+                    ? await _workflowIntegration.SubmitAsync(ApprovalSourceType, exercise.Id, exercise.WorkflowDefinitionId.Value)
+                    : await _workflowIntegration.SubmitAsync(ApprovalSourceType, exercise.Id);
+                if (!workflow.ExecutionResult.Success || (workflow.ApprovalRequired &&
+                    (!exercise.WorkflowDefinitionId.HasValue || !workflow.ExecutionResult.WorkflowInstanceId.HasValue ||
+                     workflow.Outcome != WorkflowOutcome.Pending)))
+                    throw Conflict("PREQUAL_WORKFLOW_START_FAILED", workflow.ExecutionResult.Message ?? "The exact prequalification workflow could not be started.");
                 var now = DateTime.UtcNow;
-                exercise.WorkflowInstanceId = workflow.WorkflowInstanceId;
+                exercise.ApprovalRequired = workflow.ApprovalRequired;
+                exercise.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
                 exercise.Status = ProcurementPrequalificationStatus.PendingApproval;
                 exercise.SubmittedForApprovalAtUtc = now;
                 exercise.SubmittedForApprovalById = _currentUser.UserId;
+                if (!workflow.ApprovalRequired)
+                {
+                    RequireDecisionEvidence(request.DecisionReference, request.DecisionEvidenceReference, request.Reason);
+                    exercise.WorkflowInstanceId = null;
+                    exercise.DecisionReference = request.DecisionReference!.Trim();
+                    exercise.DecisionEvidenceReference = request.DecisionEvidenceReference!.Trim();
+                    exercise.DecisionReason = request.Reason!.Trim();
+                    exercise.DecidedAtUtc = now;
+                    exercise.DecidedById = _currentUser.UserId;
+                    // Qualified-list insert guards read the persisted exercise state.
+                    // Save the validated direct decision first, inside this same owner
+                    // transaction, then finalize applications and list entries atomically.
+                    exercise.Status = ProcurementPrequalificationStatus.Approved;
+                    TouchExercise(exercise, now);
+                    await Exercises.UpdateAsync(exercise);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await CompleteQualificationAsync(exercise, now, cancellationToken);
+                }
                 TouchExercise(exercise, now);
                 await Exercises.UpdateAsync(exercise);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -509,16 +540,64 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
             }
             catch
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
+                if (_unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync(cancellationToken);
                 throw;
             }
         }, cancellationToken);
-        await RecordAsync(exercise, "PrequalificationDecisionSubmitted", ProcurementControlEventResult.Allowed,
+        if (!exercise.ApprovalRequired) await NotifyApplicantsAsync(exercise, cancellationToken);
+        await RecordAsync(exercise, exercise.ApprovalRequired ? "PrequalificationDecisionSubmitted" : "PrequalificationCompleted", ProcurementControlEventResult.Allowed,
             new { exercise.SubmittedForApprovalById },
             new { exercise.WorkflowDefinitionId, exercise.WorkflowInstanceId, exercise.Status },
             correlation, cancellationToken,
-            External($"workflow:{exercise.WorkflowInstanceId:N}", "Prequalification approval workflow", "DEC-003"));
+            exercise.ApprovalRequired
+                ? External($"workflow:{exercise.WorkflowInstanceId:N}", "Prequalification approval workflow", "DEC-003")
+                : External(exercise.DecisionEvidenceReference, "Prequalification decision", "DEC-003"));
         return await GetAsync(exerciseId, cancellationToken);
+    }
+
+    private static void RequireDecisionEvidence(string? reference, string? evidence, string? reason)
+    {
+        Require(reference, "PREQUAL_DECISION_REFERENCE_REQUIRED", "The decision reference is required.");
+        Require(evidence, "PREQUAL_DECISION_EVIDENCE_REQUIRED", "Signed decision evidence is required.");
+        Require(reason, "PREQUAL_DECISION_REASON_REQUIRED", "A decision reason is required.");
+    }
+
+    private async Task CompleteQualificationAsync(ProcurementPrequalificationExercise exercise,
+        DateTime now, CancellationToken cancellationToken)
+    {
+        var applications = exercise.Applications.Where(item => !item.IsDeleted).ToList();
+        if (applications.Count == 0 || applications.Any(item => item.Status is not
+                ProcurementPrequalificationApplicationStatus.EvaluatedQualified and not
+                ProcurementPrequalificationApplicationStatus.EvaluatedRejected))
+            throw Conflict("PREQUAL_EVALUATIONS_INCOMPLETE", "Every application must retain its completed evaluation before finalizing the decision.");
+        exercise.Status = ProcurementPrequalificationStatus.Approved;
+        foreach (var application in applications)
+        {
+            var qualified = application.Status == ProcurementPrequalificationApplicationStatus.EvaluatedQualified;
+            application.Status = qualified
+                ? ProcurementPrequalificationApplicationStatus.Approved
+                : ProcurementPrequalificationApplicationStatus.Rejected;
+            CaptureApplication(application);
+            await Applications.UpdateAsync(application);
+            if (!qualified) continue;
+            foreach (var categoryId in DeserializeGuidList(application.CategoryIdsJson))
+            {
+                var entry = new ProcurementQualifiedListEntry
+                {
+                    Id = Guid.NewGuid(), TenantId = _currentUser.TenantId, ExerciseId = exercise.Id,
+                    ApplicationId = application.Id, BusinessPartnerId = application.BusinessPartnerId,
+                    CategoryId = categoryId, ValidFromUtc = now, ExpiresAtUtc = now.AddMonths(exercise.ValidityMonths),
+                    Status = ProcurementQualifiedListEntryStatus.Active,
+                    // These legacy column names retain the actual signed business decision,
+                    // including direct completion; they do not manufacture an internal approver.
+                    ApprovalReference = exercise.DecisionReference!,
+                    ApprovalEvidenceReference = exercise.DecisionEvidenceReference!,
+                    CreatedAt = now, CreatedBy = ActorName(), CreatedById = _currentUser.UserId
+                };
+                CaptureEntry(entry);
+                await QualifiedEntries.AddAsync(entry);
+            }
+        }
     }
 
     public async Task<ProcurementPrequalificationExerciseDto> DecideAsync(
@@ -532,9 +611,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
         await EnsureCapabilityAsync(ApprovePermission, exercise.Reference, correlation, cancellationToken);
         EnsureStatus(exercise, ProcurementPrequalificationStatus.PendingApproval, "PREQUAL_DECISION_NOT_PENDING");
         EnsureRowVersion(exercise.RowVersion, request.RowVersion);
-        Require(request.DecisionReference, "PREQUAL_DECISION_REFERENCE_REQUIRED", "The approval or rejection reference is required.");
-        Require(request.DecisionEvidenceReference, "PREQUAL_DECISION_EVIDENCE_REQUIRED", "Signed decision evidence is required.");
-        Require(request.Reason, "PREQUAL_DECISION_REASON_REQUIRED", "A decision reason is required.");
+        RequireDecisionEvidence(request.DecisionReference, request.DecisionEvidenceReference, request.Reason);
         var action = request.Action.Trim().ToLowerInvariant();
         if (action is not "approve" and not "reject")
             throw Validation("PREQUAL_DECISION_ACTION_INVALID", "Action must be Approve or Reject.");
@@ -569,32 +646,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
         exercise.DecidedById = _currentUser.UserId;
         if (action == "approve" && result.Status == WorkflowInstanceStatus.Completed)
         {
-            exercise.Status = ProcurementPrequalificationStatus.Approved;
-            foreach (var application in exercise.Applications.Where(item => !item.IsDeleted))
-            {
-                var qualified = application.Status == ProcurementPrequalificationApplicationStatus.EvaluatedQualified;
-                application.Status = qualified
-                    ? ProcurementPrequalificationApplicationStatus.Approved
-                    : ProcurementPrequalificationApplicationStatus.Rejected;
-                CaptureApplication(application);
-                await Applications.UpdateAsync(application);
-                if (!qualified) continue;
-                foreach (var categoryId in DeserializeGuidList(application.CategoryIdsJson))
-                {
-                    var entry = new ProcurementQualifiedListEntry
-                    {
-                        Id = Guid.NewGuid(), TenantId = _currentUser.TenantId, ExerciseId = exercise.Id,
-                        ApplicationId = application.Id, BusinessPartnerId = application.BusinessPartnerId,
-                        CategoryId = categoryId, ValidFromUtc = now, ExpiresAtUtc = now.AddMonths(exercise.ValidityMonths),
-                        Status = ProcurementQualifiedListEntryStatus.Active,
-                        ApprovalReference = exercise.DecisionReference,
-                        ApprovalEvidenceReference = exercise.DecisionEvidenceReference,
-                        CreatedAt = now, CreatedBy = ActorName(), CreatedById = _currentUser.UserId
-                    };
-                    CaptureEntry(entry);
-                    await QualifiedEntries.AddAsync(entry);
-                }
-            }
+            await CompleteQualificationAsync(exercise, now, cancellationToken);
         }
         else if (action == "reject")
         {
@@ -743,6 +795,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
         return new ProcurementPrequalificationExerciseDto
         {
             Id = summary.Id, Reference = summary.Reference, Title = summary.Title, Status = summary.Status,
+            ApprovalRequired = exercise.ApprovalRequired,
             OpensAtUtc = summary.OpensAtUtc, ClosesAtUtc = summary.ClosesAtUtc,
             ApplicationCount = summary.ApplicationCount, QualifiedCount = summary.QualifiedCount,
             ExpiresAtUtc = summary.ExpiresAtUtc, Description = exercise.Description,
@@ -767,14 +820,14 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
                 .ThenBy(item => item.Category.CategoryName).Select(MapEntry).ToList(),
             Milestones =
             [
-                Milestone("DEC-001", "Approved prequalification scope and criteria", exercise.CreatedAt, exercise.Reference),
+                Milestone("DEC-001", "Prequalification scope and criteria", exercise.CreatedAt, exercise.Reference),
                 Milestone("DEC-002", "Published advertisement", exercise.AdvertisedAtUtc, exercise.AdvertisementReference),
                 Milestone("DEC-003", "Controlled supplier submissions closed", exercise.ClosedAtUtc, $"{exercise.Applications.Count} applications"),
                 Milestone("DEC-004", "Criterion-level evaluation complete",
                     exercise.Applications.Count > 0 && exercise.Applications.All(item => item.EvaluatedAtUtc.HasValue)
                         ? exercise.Applications.Max(item => item.EvaluatedAtUtc) : null,
                     $"{exercise.Applications.Count(item => item.Passed == true)} recommended"),
-                Milestone("DEC-005", "Exact shared approval submitted", exercise.SubmittedForApprovalAtUtc, exercise.WorkflowInstanceId?.ToString()),
+                Milestone("DEC-005", exercise.ApprovalRequired ? "Exact shared approval submitted" : "Decision completed", exercise.SubmittedForApprovalAtUtc, exercise.WorkflowInstanceId?.ToString()),
                 Milestone("DEC-006", "Qualified-list decision", exercise.DecidedAtUtc, exercise.DecisionReference),
                 Milestone("DEC-007", "Reusable eligibility and expiry", exercise.DecidedAtUtc,
                     exercise.QualifiedEntries.Count > 0 ? exercise.QualifiedEntries.Max(item => item.ExpiresAtUtc).ToString("O") : null)
@@ -785,6 +838,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
     private static ProcurementPrequalificationSummaryDto MapSummary(ProcurementPrequalificationExercise exercise) => new()
     {
         Id = exercise.Id, Reference = exercise.Reference, Title = exercise.Title, Status = exercise.Status,
+        ApprovalRequired = exercise.ApprovalRequired,
         OpensAtUtc = exercise.OpensAtUtc, ClosesAtUtc = exercise.ClosesAtUtc,
         ApplicationCount = exercise.Applications.Count(item => !item.IsDeleted),
         QualifiedCount = exercise.QualifiedEntries.Count(item => !item.IsDeleted &&
@@ -930,7 +984,8 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
     {
         item.LifecycleSnapshotJson = JsonSerializer.Serialize(new
         {
-            schemaVersion = "tdc.prequalification.v1", item.Id, item.Reference, item.Title, item.Description,
+            schemaVersion = item.ApprovalRequired ? "tdc.prequalification.v1" : "tdc.prequalification.v2.no-approval",
+            item.ApprovalRequired, item.Id, item.Reference, item.Title, item.Description,
             item.Status, item.CategoryIdsJson, item.OpensAtUtc, item.ClosesAtUtc, item.ValidityMonths,
             item.PassingScore, item.PolicySetId, item.PolicySetCode, item.PolicySetVersion,
             item.SourceConfigurationProfileId, item.WorkflowDefinitionId, item.WorkflowInstanceId,
@@ -941,7 +996,7 @@ public sealed class ProcurementPrequalificationService : IProcurementPrequalific
             }),
             item.AdvertisementReference, item.AdvertisementEvidenceReference, item.AdvertisedAtUtc,
             item.ClosedAtUtc, item.SubmittedForApprovalAtUtc, item.DecisionReference,
-            item.DecisionEvidenceReference, item.DecisionReason, item.DecidedAtUtc
+            item.DecisionEvidenceReference, item.DecisionReason, item.DecidedAtUtc, item.DecidedById
         }, JsonOptions);
         item.IntegrityHash = ComputeHash(item.LifecycleSnapshotJson);
     }

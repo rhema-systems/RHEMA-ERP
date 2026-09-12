@@ -10,6 +10,7 @@ namespace ErpSystem.Core.DTOs.Procurement;
 /// </summary>
 public class ProcurementPlanDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string PlanNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
@@ -706,6 +707,7 @@ public class PlanItemConversionResultDto
 /// </summary>
 public class ProcurementBudgetDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string BudgetCode { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
@@ -822,6 +824,7 @@ public class CreateProcurementBudgetAllocationDto
 /// </summary>
 public class ProcurementBudgetRevisionDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public Guid ProcurementBudgetId { get; set; }
     public int RevisionNumber { get; set; }

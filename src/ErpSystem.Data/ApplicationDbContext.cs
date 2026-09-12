@@ -1175,18 +1175,27 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+        ErpSystem.Data.Configurations.InventorySupplierReturnFinanceConfiguration.Configure(builder);
 
         // Apply entity configurations
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
         builder.ApplyConfiguration(new JournalBatchConfiguration());
+        builder.ApplyConfiguration(new JournalBatchEntryApprovalConfiguration());
         builder.ApplyConfiguration(new JournalBatchItemConfiguration());
         builder.ApplyConfiguration(new JournalBatchItemReviewConfiguration());
         builder.ApplyConfiguration(new JournalBatchPostingRunConfiguration());
         builder.ApplyConfiguration(new JournalBatchPostingRunItemConfiguration());
         builder.ApplyConfiguration(new JournalBatchAttachmentConfiguration());
         builder.ApplyConfiguration(new JournalBatchImportSessionConfiguration());
+        builder.ApplyConfiguration(new VendorInvoiceOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<FinancePurchaseOrder>(new FinancePurchasingOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<FinancePurchaseOrderReceipt>(new FinancePurchasingOptionalApprovalConfiguration());
+        builder.ApplyConfiguration(new JournalEntryOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<PhysicalCount>(new InventoryOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<StockAdjustment>(new InventoryOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<InventoryReturnVoucher>(new InventoryOptionalApprovalConfiguration());
         ConfigureBudgeting(builder);
         ConfigureBankingSettlement(builder);
         builder.ApplyConfiguration(new InventoryLabelProfileConfiguration());
@@ -1234,6 +1243,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryTransferControlItemConfiguration());
         builder.ApplyConfiguration(new InventoryCycleCountScheduleConfiguration());
         builder.ApplyConfiguration(new PhysicalCountControlConfiguration());
+        builder.ApplyConfiguration(new WarehouseDefaultLocationConfiguration());
         builder.ApplyConfiguration(new PhysicalCountItemControlConfiguration());
         builder.ApplyConfiguration(new PhysicalCountActionConfiguration());
         builder.ApplyConfiguration(new PhysicalCountWarehouseQuantityConfiguration());
@@ -1504,7 +1514,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<Invoice>(entity =>
         {
-            entity.ToTable("Invoices");
+            entity.ToTable("Invoices", table => table.HasTrigger("TR_Invoices_OptionalApproval"));
+            entity.Property(e => e.ApprovalRequired).HasDefaultValue(true).ValueGeneratedNever();
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(200).IsRequired();
             entity.Property(e => e.CustomerAddress).HasMaxLength(500);
@@ -2171,6 +2182,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<VendorInvoiceLineItem>(entity =>
         {
+            entity.HasOne<LandedCostItem>().WithMany().HasForeignKey(e => e.LandedCostItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.LandedCostItemId).IsUnique()
+                .HasFilter("[LandedCostItemId] IS NOT NULL AND [IsDeleted] = 0");
             entity.ToTable("VendorInvoiceLineItem", table =>
                 table.HasTrigger("TR_VendorInvoiceLineItem_TDC0504MatchIntegrity"));
             entity.HasOne(e => e.VendorInvoice)
@@ -2613,10 +2628,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique();
         });
 
+        builder.ApplyConfiguration(new VendorPaymentEvidenceLinkConfiguration());
         builder.Entity<VendorPayment>(entity =>
         {
+            entity.Property(item => item.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("VendorPayment", table =>
-                table.HasTrigger("TR_VendorPayment_TDC0506InvoiceProcessorSod"));
+            {
+                table.HasTrigger("TR_VendorPayment_TDC0506InvoiceProcessorSod");
+                table.HasTrigger("TR_VendorPayment_OptionalApproval");
+                table.HasTrigger("TR_VendorPayment_DirectEvidence");
+            });
             entity.HasOne(e => e.Supplier)
                 .WithMany()
                 .HasForeignKey(e => e.SupplierId)
@@ -2726,8 +2747,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<PaymentBatch>(entity =>
         {
+            entity.Property(item => item.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("PaymentBatch", table =>
             {
+                table.HasTrigger("TR_PaymentBatch_OptionalApproval");
                 table.HasTrigger("TR_PaymentBatch_TDC0505Readiness");
                 table.HasTrigger("TR_PaymentBatch_TDC0506InvoiceProcessorSod");
             });
@@ -5509,6 +5532,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<InventoryIssueVoucherLine>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
         builder.Entity<InventoryReturnVoucherLine>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
         builder.Entity<GoodsReceiptNoteItem>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
+        builder.Entity<StockAdjustmentItem>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
 
         // Configure Workflow Engine entities
         ConfigureWorkflowEntities(builder);
@@ -9496,18 +9520,52 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        if (HasInventoryCostProjectionChanges() && Database.IsRelational() && Database.CurrentTransaction == null)
+        {
+            return await Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+            {
+                await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+                var result = await SaveWithInventoryCostProjectionAsync(false, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                ChangeTracker.AcceptAllChanges();
+                return result;
+            });
+        }
+        return await SaveWithInventoryCostProjectionAsync(true, cancellationToken);
+    }
+
+    private async Task<int> SaveWithInventoryCostProjectionAsync(bool acceptAllChanges, CancellationToken cancellationToken)
+    {
+        await SynchronizeInventoryAverageCostsAsync(true, cancellationToken);
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
-        return await base.SaveChangesAsync(cancellationToken);
+        return await base.SaveChangesAsync(acceptAllChanges, cancellationToken);
     }
 
     public override int SaveChanges()
     {
+        if (HasInventoryCostProjectionChanges() && Database.IsRelational() && Database.CurrentTransaction == null)
+        {
+            return Database.CreateExecutionStrategy().Execute(() =>
+            {
+                using var transaction = Database.BeginTransaction();
+                var result = SaveWithInventoryCostProjection(false);
+                transaction.Commit();
+                ChangeTracker.AcceptAllChanges();
+                return result;
+            });
+        }
+        return SaveWithInventoryCostProjection(true);
+    }
+
+    private int SaveWithInventoryCostProjection(bool acceptAllChanges)
+    {
+        SynchronizeInventoryAverageCostsAsync(false, CancellationToken.None).GetAwaiter().GetResult();
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
-        return base.SaveChanges();
+        return base.SaveChanges(acceptAllChanges);
     }
 
     private void NormalizeProcurementAwardReadinessAuditEnvelopes()
@@ -9570,7 +9628,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     }
                     else
                     {
-                        entry.Entity.CreatedAt = DateTime.UtcNow;
+                        // Inventory assigns a strictly increasing server timestamp to
+                        // each new adjustment line. Preserve that FIFO posting order;
+                        // caller DTOs never supply this value. Other audit defaults
+                        // and every existing row's historical timestamp are unchanged.
+                        if (entry.Entity is not StockAdjustmentItem || entry.Entity.CreatedAt == default)
+                            entry.Entity.CreatedAt = DateTime.UtcNow;
                         entry.Entity.UpdatedAt = DateTime.UtcNow;
                     }
                     
@@ -9809,6 +9872,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // ProcurementPlan entity
         builder.Entity<ProcurementPlan>(entity =>
         {
+            entity.Property(p => p.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("ProcurementPlans", table => table.HasTrigger("TR_ProcurementPlans_ApprovalPolicy"));
             entity.HasIndex(p => p.PlanNumber).IsUnique();
             entity.HasIndex(p => p.DepartmentId);
             entity.HasIndex(p => p.FiscalYear);
@@ -9882,6 +9947,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // ProcurementBudget entity
         builder.Entity<ProcurementBudget>(entity =>
         {
+            entity.Property(b => b.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("ProcurementBudgets", table => table.HasTrigger("TR_ProcurementBudgets_ApprovalPolicy"));
             entity.HasIndex(b => new { b.TenantId, b.BudgetCode }).IsUnique();
             entity.HasIndex(b => b.DepartmentId);
             entity.HasIndex(b => b.FiscalYear);
@@ -9918,6 +9985,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // ProcurementBudgetRevision entity
         builder.Entity<ProcurementBudgetRevision>(entity =>
         {
+            entity.Property(r => r.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("ProcurementBudgetRevisions", table => table.HasTrigger("TR_ProcurementBudgetRevisions_ApprovalPolicy"));
             entity.HasIndex(r => r.ProcurementBudgetId);
             entity.HasIndex(r => r.RevisionNumber);
             entity.HasIndex(r => r.Status);
@@ -10318,6 +10387,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     {
         builder.Entity<PurchaseRequisition>(entity =>
         {
+            entity.Property(r => r.ApprovalRequired).HasDefaultValue(true);
             entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasIndex(item => new { item.TenantId, item.SourcePlanItemId });
             entity.HasIndex(item => new { item.TenantId, item.BudgetId });
@@ -10648,6 +10718,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseOrder entity
         builder.Entity<PurchaseOrder>(entity =>
         {
+            entity.Property(po => po.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("PurchaseOrders", table =>
             {
                 table.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
@@ -10717,8 +10788,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseOrderItem entity
         builder.Entity<PurchaseOrderItem>(entity =>
         {
+            entity.Property(item => item.LineType).HasDefaultValue(ItemType.StockItem);
             entity.ToTable("PurchaseOrderItems", table =>
-                table.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected"));
+            {
+                table.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected");
+                table.HasCheckConstraint("CK_PurchaseOrderItems_LineType", "[LineType] IN (1, 2, 3, 4)");
+            });
             entity.HasIndex(poi => poi.PurchaseOrderId);
             entity.HasIndex(poi => poi.InventoryItemId);
 
@@ -10902,6 +10977,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseOrderLandedCostPlanItem entity
         builder.Entity<PurchaseOrderLandedCostPlanItem>(entity =>
         {
+            entity.HasOne<PurchaseOrderItem>().WithMany().HasForeignKey(i => i.PurchaseOrderItemId).OnDelete(DeleteBehavior.NoAction);
             entity.HasIndex(i => i.PurchaseOrderLandedCostPlanId);
             entity.HasIndex(i => i.SupplierId);
 
@@ -10914,7 +10990,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // StockAdjustment entity
         builder.Entity<StockAdjustment>(entity =>
         {
-            entity.ToTable("StockAdjustments", table => table.HasTrigger("TR_StockAdjustments_ControlledLifecycle"));
+            entity.ToTable("StockAdjustments", table =>
+            {
+                table.HasTrigger("TR_StockAdjustments_ControlledLifecycle");
+                table.HasTrigger("TR_StockAdjustments_FifoSequenceGuard");
+            });
             entity.HasIndex(sa => sa.AdjustmentNumber).IsUnique();
             entity.HasIndex(sa => new { sa.TenantId, sa.IdempotencyKey }).IsUnique().HasFilter("[IdempotencyKey] IS NOT NULL");
             entity.HasIndex(sa => sa.AdjustmentDate);
@@ -11328,6 +11408,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // LandedCostItem entity
         builder.Entity<LandedCostItem>(entity =>
         {
+            entity.HasOne<PurchaseOrderItem>().WithMany().HasForeignKey(i => i.PurchaseOrderItemId).OnDelete(DeleteBehavior.NoAction);
             entity.HasIndex(lci => lci.LandedCostId);
 
             entity.HasOne(lci => lci.LandedCost)
@@ -11391,6 +11472,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseReturn entity
         builder.Entity<PurchaseReturn>(entity =>
         {
+            entity.Property(value => value.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("PurchaseReturns", table => table.HasTrigger("TR_PurchaseReturns_OptionalApproval"));
             entity.HasIndex(pr => pr.ReturnNumber).IsUnique();
             entity.HasIndex(pr => pr.SupplierId);
             entity.HasIndex(pr => pr.WarehouseId);

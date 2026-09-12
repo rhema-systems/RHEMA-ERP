@@ -11,6 +11,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
+using ErpSystem.Core.Services.Inventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +46,7 @@ public class InventoryItemsController : ControllerBase
     private readonly IProcurementAccessControlService _access;
     private readonly IAuditLogService? _auditLog;
     private readonly IUnitOfWork? _unitOfWork;
+    private readonly IWarehouseDefaultLocationService? _defaultLocations;
 
     public InventoryItemsController(
         ICurrentUserProvider currentUserProvider,
@@ -66,7 +68,8 @@ public class InventoryItemsController : ControllerBase
         IInventoryItemIdentifierService? identifierService = null,
         IAuditLogService? auditLog = null,
         IUnitOfWork? unitOfWork = null,
-        IInventoryItemProfileService? profileService = null)
+        IInventoryItemProfileService? profileService = null,
+        IWarehouseDefaultLocationService? defaultLocations = null)
     {
         _currentUserProvider = currentUserProvider;
         _inventoryItemRepository = inventoryItemRepository;
@@ -88,6 +91,7 @@ public class InventoryItemsController : ControllerBase
         _profileService = profileService;
         _auditLog = auditLog;
         _unitOfWork = unitOfWork;
+        _defaultLocations = defaultLocations ?? (unitOfWork == null ? null : new WarehouseDefaultLocationService(unitOfWork, currentUserProvider));
     }
 
     /// <summary>
@@ -338,9 +342,37 @@ public class InventoryItemsController : ControllerBase
                 }
             }
 
-            var createdItem = await _inventoryItemRepository.AddAsync(inventoryItem);
-            var auditQueued = await QueueAuditAsync("InventoryItem.Created", createdItem, null);
-            await _inventoryItemRepository.SaveChangesAsync();
+            var assignWarehouse = createDto.DefaultWarehouseId.HasValue && createDto.DefaultWarehouseId != Guid.Empty &&
+                createDto.ItemType is ItemType.StockItem or ItemType.FixedAsset;
+            if (assignWarehouse)
+            {
+                var warehouse = await _warehouseRepository.GetByIdAsync(createDto.DefaultWarehouseId!.Value);
+                if (warehouse == null || warehouse.TenantId != inventoryItem.TenantId || warehouse.IsDeleted || !warehouse.IsActive)
+                    return BadRequest("Select an active default warehouse in the current tenant.");
+                if (_unitOfWork == null || _defaultLocations == null)
+                    throw new InvalidOperationException("Default warehouse assignment is unavailable.");
+            }
+            var createdItem = inventoryItem;
+            var auditQueued = false;
+            async Task PersistCreatedAsync(CancellationToken ct)
+            {
+                createdItem = await _inventoryItemRepository.AddAsync(inventoryItem);
+                auditQueued = await QueueAuditAsync("InventoryItem.Created", createdItem, null);
+                await _inventoryItemRepository.SaveChangesAsync();
+                if (assignWarehouse)
+                {
+                    await _warehouseQuantityRepository.AddAsync(new WarehouseQuantity
+                    {
+                        TenantId = inventoryItem.TenantId, WarehouseId = createDto.DefaultWarehouseId!.Value,
+                        InventoryItemId = createdItem.Id, AverageCost = createdItem.AverageCost,
+                        CreatedById = _currentUserProvider.UserId
+                    });
+                    await _unitOfWork!.SaveChangesAsync(ct);
+                    await _defaultLocations!.EnsureItemAssignmentAsync(createDto.DefaultWarehouseId!.Value, createdItem.Id, _currentUserProvider.UserId, ct);
+                }
+            }
+            if (_unitOfWork != null) await _unitOfWork.ExecuteInTransactionAsync(PersistCreatedAsync, HttpContext.RequestAborted);
+            else await PersistCreatedAsync(HttpContext.RequestAborted);
             if (!auditQueued) await AuditFallbackAsync("InventoryItem.Created", createdItem, null);
 
             var itemDto = _mapper.Map<InventoryItemDto>(createdItem);
@@ -358,6 +390,7 @@ public class InventoryItemsController : ControllerBase
         {
             return Forbid();
         }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating inventory item");
@@ -1302,7 +1335,10 @@ public class InventoryItemsController : ControllerBase
                 CurrentStock = wq.CurrentStock,
                 AvailableStock = wq.AvailableStock,
                 AllocatedStock = wq.AllocatedStock,
-                UnitCost = wq.InventoryItem.StandardCost,
+                // This is stock held by the selected warehouse, not today's
+                // standard/purchase price. Posting still derives exact carrying
+                // value from the governed bin valuation ledger.
+                UnitCost = wq.AverageCost,
                 DailyRentalRate = wq.InventoryItem.DailyRentalRate,
                 CategoryName = wq.InventoryItem.Category?.Name
             });

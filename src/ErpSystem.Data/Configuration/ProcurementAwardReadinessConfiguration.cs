@@ -12,6 +12,9 @@ public sealed class ProcurementAwardReadinessDecisionConfiguration :
         builder.ToTable("ProcurementAwardReadinessDecisions", table =>
         {
             table.HasTrigger("TR_ProcurementAwardReadinessDecisions_Immutable");
+            table.HasTrigger("TR_ProcurementAwardReadinessDecisions_RfqApprovalPolicy");
+            table.HasTrigger("TR_ProcurementAwardReadinessDecisions_TenderApprovalPolicy");
+            table.HasTrigger("TR_ProcurementAwardReadinessDecisions_ExceptionalApprovalPolicy");
             table.HasCheckConstraint("CK_ProcurementAwardReadinessDecisions_State",
                 "[SourceType] BETWEEN 0 AND 2 AND [Method] BETWEEN 0 AND 8 " +
                 "AND [DecisionSequence] >= 1 AND [Status] BETWEEN 0 AND 1 " +

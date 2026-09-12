@@ -1,6 +1,11 @@
 'use client';
+import { ActualLandedCostSummary } from '@/components/procurement/ActualLandedCostSummary';
+import { ReceiptInspectionBadge } from '@/components/procurement/ReceiptInspectionBadge';
 
-import React, { useState, useEffect, useRef } from 'react';
+import { purchaseOrderLineTypeLabel } from '@/lib/purchase-order-line-types';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
+
+import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -60,7 +65,9 @@ import Link from 'next/link';
 import { formatProcurementMoney } from '@/lib/procurement-currency';
 import { useAuth } from '@/hooks/use-auth';
 import { resolvePurchaseOrderActionAccess } from '@/lib/purchase-order-actions';
-import { exportProcurementDocumentPdf, printProcurementDocument } from '@/lib/procurement-document-output';
+import { downloadPurchaseOrderPdf, openPurchaseOrderPrintPdf } from '@/lib/purchase-order-document';
+import { useTenant } from '@/contexts/TenantContext';
+import { apiService } from '@/services/api.service';
 import {
   getPurchaseOrderStatusPresentation,
   isPurchaseOrderStatus,
@@ -99,6 +106,7 @@ const POStatusIcons: Partial<
 export default function PurchaseOrderDetailPage() {
   const router = useRouter();
   const { hasPermission } = useAuth();
+  const { currentTenant } = useTenant();
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   
@@ -113,7 +121,6 @@ export default function PurchaseOrderDetailPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [amendmentEditorRequest, setAmendmentEditorRequest] = useState(0);
   const [documentAction, setDocumentAction] = useState<'print' | 'pdf' | null>(null);
-  const documentRef = useRef<HTMLDivElement>(null);
   
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
@@ -220,13 +227,22 @@ export default function PurchaseOrderDetailPage() {
     return Math.min((receivedQty / orderedQty) * 100, 100);
   };
 
-  const handlePrint = () => {
-    if (!documentRef.current || !order) return;
+  const getDocumentCompany = async () => {
+    if (!currentTenant?.code) throw new Error('Wait for the company details to load before exporting the purchase order.');
+    return apiService.getTenantByCode(currentTenant.code);
+  };
+
+  const handlePrint = async () => {
+    if (!order) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) { toast.error('Allow pop-ups to open the purchase order print document.'); return; }
+    printWindow.opener = null;
     try {
       setDocumentAction('print');
-      printProcurementDocument(documentRef.current, order.orderNumber);
-      toast.success('Purchase order print view opened');
+      openPurchaseOrderPrintPdf(order, await getDocumentCompany(), printWindow);
+      toast.success('Purchase order document opened. Use the PDF viewer\'s Print button.');
     } catch (printError: any) {
+      printWindow.close();
       toast.error(printError?.message || 'Failed to open the purchase order print view');
     } finally {
       setDocumentAction(null);
@@ -234,10 +250,10 @@ export default function PurchaseOrderDetailPage() {
   };
 
   const handleExportPdf = async () => {
-    if (!documentRef.current || !order) return;
+    if (!order) return;
     try {
       setDocumentAction('pdf');
-      await exportProcurementDocumentPdf(documentRef.current, order.orderNumber);
+      downloadPurchaseOrderPdf(order, await getDocumentCompany());
       toast.success('Purchase order PDF downloaded');
     } catch (exportError: any) {
       toast.error(exportError?.message || 'Failed to export the purchase order PDF');
@@ -286,7 +302,7 @@ export default function PurchaseOrderDetailPage() {
   );
 
   return (
-    <div ref={documentRef} className="space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -393,25 +409,19 @@ export default function PurchaseOrderDetailPage() {
           <TabsTrigger value="items">Items ({order.itemCount})</TabsTrigger>
           <TabsTrigger value="receipts">Receipts ({order.receipts?.length || 0})</TabsTrigger>
           <TabsTrigger value="amendments">Amendments</TabsTrigger>
-          <WorkflowTabTrigger value="approval" />
+          <WorkflowTabTrigger value="approval" {...workflow.tabProps} />
         </TabsList>
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
-          <Card className={
-            order.procurementSourceType === 'HistoricalMigration'
-              ? 'border-amber-300 bg-amber-50/60'
-              : 'border-emerald-300 bg-emerald-50/60'
-          }>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5" />
-                Approved Source Lineage
-              </CardTitle>
-              <CardDescription>
+          <ProcurementControlAccordion
+        title="Approved Source Lineage"
+        summary={`${order.procurementSourceType || 'Missing source'} · ${order.procurementSourceReference || 'No reference'}`}
+        notice={order.procurementSourceType === 'HistoricalMigration' ? 'This historical PO needs source remediation before a new approval or issue lifecycle.' : !order.procurementSourceType ? 'The approved source has not been retained.' : undefined}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
                 Immutable requisition, sourcing case, and award-readiness trace.
-              </CardDescription>
-            </CardHeader>
+              </p>
             <CardContent className="grid gap-4 text-sm md:grid-cols-3">
               <div>
                 <Label className="text-muted-foreground">Source</Label>
@@ -448,7 +458,7 @@ export default function PurchaseOrderDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </ProcurementControlAccordion>
 
           <PurchaseOrderComplianceGate
             purchaseOrderId={order.id}
@@ -728,6 +738,7 @@ export default function PurchaseOrderDetailPage() {
           </Card>
 
           {/* Planned Landed Costs (carried to GRN) */}
+          <ActualLandedCostSummary purchaseOrderId={id} poTotal={order.totalAmount} currency={order.currency} />
           {landedCostPlan && (landedCostPlan.items?.length || 0) > 0 && (
             <Card>
               <CardHeader>
@@ -753,6 +764,7 @@ export default function PurchaseOrderDetailPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="min-w-[180px]">Type</TableHead>
+                        <TableHead>Applies to</TableHead>
                         <TableHead>Description</TableHead>
                         <TableHead className="min-w-[220px]">Service Supplier</TableHead>
                         <TableHead className="min-w-[140px]">Allocation</TableHead>
@@ -767,11 +779,14 @@ export default function PurchaseOrderDetailPage() {
                       {landedCostPlan.items.map((i) => (
                         <TableRow key={i.id}>
                           <TableCell className="font-medium">{getLandedCostTypeLabel(i.costType)}</TableCell>
+                          <TableCell>{i.purchaseOrderItemId
+                            ? `Line ${order.items.findIndex(line => line.id === i.purchaseOrderItemId) + 1}: ${order.items.find(line => line.id === i.purchaseOrderItemId)?.itemDescription || "PO item"}`
+                            : "Whole PO"}</TableCell>
                           <TableCell className="max-w-[420px] truncate" title={i.description}>
                             {i.description}
                           </TableCell>
                           <TableCell>{i.supplierName || '-'}</TableCell>
-                          <TableCell>{i.allocationMethod}</TableCell>
+                          <TableCell>{i.purchaseOrderItemId ? "This line only" : i.allocationMethod}</TableCell>
                           <TableCell className="text-right">
                             {i.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
@@ -859,7 +874,8 @@ export default function PurchaseOrderDetailPage() {
                           <TableCell className="font-medium">{index + 1}</TableCell>
                           <TableCell className="font-medium">{item.itemCode}</TableCell>
                           <TableCell>
-                            <div>{item.itemName}</div>
+                            <div>{item.itemName || item.itemDescription}</div>
+                            <div className="text-xs text-muted-foreground">{purchaseOrderLineTypeLabel(item.lineType)}</div>
                             {item.itemDescription && (
                               <div className="text-xs text-muted-foreground mt-1">
                                 {item.itemDescription}
@@ -968,12 +984,12 @@ export default function PurchaseOrderDetailPage() {
                               Received by: {receipt.receivedByName || 'N/A'}
                               {receipt.deliveryNote && ` • DN: ${receipt.deliveryNote}`}
                             </p>
-                            {receipt.requiresInspection && (
-                              <Badge variant="outline" className="mt-1">
-                                <AlertCircle className="h-3 w-3 mr-1" />
-                                Requires Inspection
-                              </Badge>
-                            )}
+                            <ReceiptInspectionBadge
+                              requiresInspection={receipt.requiresInspection}
+                              inspectionDate={receipt.inspectionDate}
+                              inspectionResult={receipt.inspectionResult}
+                              className="mt-1"
+                            />
                           </div>
                         </div>
                         

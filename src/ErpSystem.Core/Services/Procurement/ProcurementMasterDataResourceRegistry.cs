@@ -123,7 +123,7 @@ public static class ProcurementMasterDataResourceRegistry
             "Warehouse location",
             "Controlled warehouse hierarchy, operational use, consignment, zone, position, picking, environmental, dedication, barcode, and capacity attributes; live quantities are excluded.",
             One(ProcurementMasterDataTargetKind.WarehouseLocation, Fields(
-                "WarehouseId", "LocationCode", "Name", "Description", "LocationType", "ParentLocationId", "IsActive", "IsPickingLocation",
+                "WarehouseId", "LocationCode", "Name", "Description", "LocationType", "ParentLocationId", "IsDefault", "IsActive", "IsPickingLocation",
                 "IsReceivingLocation", "IsConsignmentBin", "ConsignmentWarehouseId", "IsQuarantineLocation", "IsInspectionLocation",
                 "IsInTransitLocation", "IsShippingLocation", "IsStagingLocation", "IsReturnLocation", "IsDamageLocation", "LocationHierarchyType",
                 "Zone", "Aisle", "Rack", "Shelf", "Bin", "RowNumber", "ColumnNumber", "LevelNumber", "PickSequence", "ABCClass",

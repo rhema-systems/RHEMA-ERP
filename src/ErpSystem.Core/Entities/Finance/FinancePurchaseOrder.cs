@@ -38,6 +38,8 @@ public class FinancePurchaseOrder : TenantEntity
     /// </summary>
     public int Status { get; set; } = 1;
 
+    public bool ApprovalRequired { get; set; } = true;
+
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = "GHS";
@@ -138,6 +140,8 @@ public class FinancePurchaseOrderReceipt : TenantEntity
     public DateTime ReceiptDate { get; set; } = DateTime.UtcNow;
 
     public FinancePurchaseOrderReceiptStatus Status { get; set; } = FinancePurchaseOrderReceiptStatus.Draft;
+
+    public bool ApprovalRequired { get; set; } = true;
 
     public Guid? WorkflowInstanceId { get; set; }
 

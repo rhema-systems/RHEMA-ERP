@@ -1,8 +1,21 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { toast } from 'sonner';
 
-import type { ProcurementReceiptInspectionOverviewDto } from '@/services/purchasingService';
+vi.mock('@/services/document-management.service', () => ({ documentManagementService: { getRecords: vi.fn().mockResolvedValue([]), getRecord: vi.fn() } }));
+vi.mock('@/services/inventoryManagementService', () => ({ inventoryManagementService: { getWarehouseLocations: vi.fn().mockResolvedValue([]) } }));
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+import { purchasingService, type ProcurementReceiptInspectionOverviewDto, type ProcurementReceiptSourceEvidenceOverviewDto } from '@/services/purchasingService';
+import { documentManagementService, type CentralDocumentRecord, type CentralDocumentRecordDetail } from '@/services/document-management.service';
+import { inventoryManagementService } from '@/services/inventoryManagementService';
+beforeEach(() => {
+  vi.mocked(documentManagementService.getRecords).mockResolvedValue([]);
+  vi.mocked(inventoryManagementService.getWarehouseLocations).mockResolvedValue([]);
+  vi.spyOn(purchasingService, 'getReceiptSourceEvidence').mockResolvedValue({ receiptId: 'receipt-0502', waybillReady: false, evidence: [] } as unknown as ProcurementReceiptSourceEvidenceOverviewDto);
+});
 import {
   buildReceiptInspectionEvidenceRequests,
   receiptInspectionResolutionActionKey,
@@ -80,6 +93,150 @@ const requireCurrentInspection = () => {
 };
 
 describe('ReceiptInspectionControl', () => {
+  it('hides approval decisions for a direct inspection even if a stale capability says otherwise', async () => {
+    const direct = { ...overview, canDecide: true, canAcknowledge: false,
+      current: { ...requireCurrentInspection(), approvalRequired: false } };
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={direct} />);
+    expect(await screen.findByLabelText('Comments (optional)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+    expect(screen.getByText('Record accepted and rejected quantities, then submit to complete the inspection.')).toBeInTheDocument();
+  });
+
+  it.each([false, true])('reports the actual direct submission result (quality hold %s), not human approval', async (qualityHold) => {
+    const current = { ...requireCurrentInspection(), approvalRequired: false, status: 0 as const };
+    const draft = { ...overview, canSubmit: true, canAcknowledge: false, evidenceRequirementKeys: ['Waybill'], current };
+    const waybill = { id: 'direct-waybill', sourceRecordId: 'direct-evidence', sourceEntityType: 'ProcurementReceiptSourceEvidence', documentReference: 'WB-DIRECT', title: 'Delivery.pdf', lifecycleStatus: 'Active', versionStatus: 'Published', currentVersion: 'v1' } as CentralDocumentRecord;
+    vi.mocked(documentManagementService.getRecords).mockResolvedValue([waybill]);
+    vi.mocked(purchasingService.getReceiptSourceEvidence).mockResolvedValue({ receiptId: 'receipt-0502', waybillReady: true,
+      evidence: [{ evidenceKind: 1, isCurrent: true, centralDocumentRecordId: waybill.id, centralDocumentVersionId: 'direct-v1' }],
+    } as ProcurementReceiptSourceEvidenceOverviewDto);
+    vi.mocked(documentManagementService.getRecord).mockResolvedValue({ record: waybill,
+      versions: [{ id: 'direct-v1', documentRecordId: waybill.id, versionNumber: 'v1', status: 'Published', fileUploadRecordId: 'direct-upload' }],
+    } as CentralDocumentRecordDetail);
+    const completed = { ...current, qualityHold, status: qualityHold ? 4 as const : 8 as const };
+    const submit = vi.spyOn(purchasingService, 'submitReceiptInspection').mockResolvedValue(completed);
+    const success = vi.spyOn(toast, 'success');
+    vi.spyOn(purchasingService, 'getReceiptInspectionControl').mockResolvedValue({ ...draft, canSubmit: false, current: completed });
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={draft} />);
+    await screen.findByDisplayValue('WB-DIRECT / v1');
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    await waitFor(() => expect(success).toHaveBeenCalledWith(qualityHold
+      ? 'Inspection completed. Rejected quantities remain on quality hold.'
+      : 'Inspection completed and accepted quantities recorded.'));
+    expect(success).not.toHaveBeenCalledWith('Inspection submitted for independent approval.');
+  });
+
+  it('does not disable saving or submission because an optional comment is empty', async () => {
+    const draft = { ...overview, canEdit: true, canSubmit: true, canAcknowledge: false };
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={draft} />);
+    expect(await screen.findByLabelText('Comments (optional)')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Save inspection' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
+  });
+
+  it('still requires an explicit comment for an independent decision', async () => {
+    const deciding = { ...overview, canDecide: true, canAcknowledge: false };
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={deciding} />);
+    const comment = await screen.findByLabelText('Comments (required for the decision)');
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeDisabled();
+    fireEvent.change(comment, { target: { value: 'Rejected after review' } });
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeEnabled();
+  });
+
+  it('sends a save request without a comment and keeps the inspection lines', async () => {
+    const draft = { ...overview, canEdit: true, canSubmit: true, canAcknowledge: false };
+    const save = vi.spyOn(purchasingService, 'saveReceiptInspection').mockResolvedValue(requireCurrentInspection());
+    vi.spyOn(purchasingService, 'getReceiptInspectionControl').mockResolvedValue(draft);
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={draft} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Save inspection' }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith('receipt-0502', expect.objectContaining({
+      comment: undefined,
+      rowVersion: 'AQID',
+      idempotencyKey: expect.any(String),
+      lines: [expect.objectContaining({ purchaseOrderReceiptItemId: 'receipt-line-0502', acceptedQuantity: 7, rejectedQuantity: 3 })],
+    })));
+    await screen.findByRole('button', { name: 'Save inspection' });
+  });
+
+  it('still asks for required evidence when submitting without an optional comment', async () => {
+    const draft = { ...overview, canEdit: true, canSubmit: true, canAcknowledge: false };
+    const submit = vi.spyOn(purchasingService, 'submitReceiptInspection').mockResolvedValue(requireCurrentInspection());
+    const error = vi.spyOn(toast, 'error');
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={draft} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh inspection evidence' })).toBeEnabled());
+    fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Select current published evidence for Inspection Report.'));
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('automatically links this receipt waybill and submits its exact upload without a comment', async () => {
+    const draft = { ...overview, canEdit: true, canSubmit: true, canAcknowledge: false, evidenceRequirementKeys: ['Waybill'] };
+    const waybill = { id: 'receipt-waybill', sourceRecordId: 'source-evidence-row', sourceEntityType: 'ProcurementReceiptSourceEvidence', documentReference: 'WB-0502', title: 'Our waybill.pdf', lifecycleStatus: 'Active', versionStatus: 'Published', currentVersion: 'v1' } as CentralDocumentRecord;
+    vi.mocked(documentManagementService.getRecords).mockResolvedValue([waybill,
+      { ...waybill, id: 'grn', sourceEntityType: 'ProcurementReceiptDocument', title: 'Wrong GRN' },
+      { ...waybill, id: 'mrn', sourceEntityType: 'ProcurementReceiptDocument', title: 'Wrong MRN' },
+      { ...waybill, id: 'unrelated', sourceRecordId: 'other-receipt', title: 'Someone else report' },
+    ]);
+    vi.mocked(purchasingService.getReceiptSourceEvidence).mockResolvedValue({ receiptId: 'receipt-0502', waybillReady: true,
+      evidence: [{ evidenceKind: 1, isCurrent: true, centralDocumentRecordId: waybill.id, centralDocumentVersionId: 'version-1' }],
+    } as ProcurementReceiptSourceEvidenceOverviewDto);
+    vi.mocked(documentManagementService.getRecord).mockResolvedValue({ record: waybill,
+      versions: [{ id: 'version-1', documentRecordId: waybill.id, versionNumber: 'v1', status: 'Published', fileUploadRecordId: 'this-receipt-upload' }],
+    } as CentralDocumentRecordDetail);
+    const submit = vi.spyOn(purchasingService, 'submitReceiptInspection').mockResolvedValue(requireCurrentInspection());
+    vi.spyOn(purchasingService, 'getReceiptInspectionControl').mockResolvedValue({ ...draft, canSubmit: false });
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={draft} />);
+    await screen.findByDisplayValue('WB-0502 / v1');
+    expect(screen.getByRole('combobox', { name: 'Waybill document for this receipt' })).toHaveTextContent('Our waybill.pdf');
+    expect(screen.queryByText('Wrong GRN')).not.toBeInTheDocument();
+    expect(screen.queryByText('Wrong MRN')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith('case-0502', expect.objectContaining({ comment: undefined,
+      evidence: [expect.objectContaining({ requirementKey: 'Waybill', fileUploadRecordId: 'this-receipt-upload' })],
+    })));
+  });
+
+  it('fails closed if the receipt evidence lookup fails, without discarding entered comments', async () => {
+    vi.mocked(purchasingService.getReceiptSourceEvidence).mockRejectedValue(new Error('Receipt evidence access denied'));
+    const draft = { ...overview, canEdit: true, canSubmit: true, canAcknowledge: false };
+    const submit = vi.spyOn(purchasingService, 'submitReceiptInspection').mockResolvedValue(requireCurrentInspection());
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={draft} />);
+    fireEvent.change(screen.getByLabelText('Comments (optional)'), { target: { value: 'Keep this note' } });
+    await screen.findByText('Receipt evidence access denied');
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(submit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Comments (optional)')).toHaveValue('Keep this note');
+  });
+
+  it('omits irrelevant supplier and resolution badges for named API enum values', () => {
+    const noResponseNeeded = {
+      ...overview, canAcknowledge: false,
+      current: { ...requireCurrentInspection(), supplierAcknowledgementStatus: 'NotRequired', resolutionStatus: 'None' },
+    } as unknown as ProcurementReceiptInspectionOverviewDto;
+    const markup = renderToStaticMarkup(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={noResponseNeeded} external />);
+    expect(markup).not.toContain('Supplier:');
+    expect(markup).not.toContain('Resolution:');
+  });
+
+  it('keeps the quality hold and actions visible while preserving technical history behind disclosure', async () => {
+    render(<ReceiptInspectionControl receiptId="receipt-0502" initialOverview={overview} external />);
+    expect(await screen.findByText('Rejected quantities remain quarantined.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Acknowledge rejection' })).toBeVisible();
+    expect(screen.getByText('DEC-014')).not.toBeVisible();
+    expect(screen.getByText('Formal rejection note issued.')).not.toBeVisible();
+    expect(screen.getByText('AP eligible')).not.toBeVisible();
+    const comment = screen.getByPlaceholderText('State the inspection, decision, acknowledgement, or closure basis.');
+    fireEvent.change(comment, { target: { value: 'Preserve this inspection note' } });
+    const disclosure = screen.getByRole('button', { name: /Inspection history & technical details/ });
+    fireEvent.click(disclosure);
+    expect(screen.getByText('DEC-014')).toBeVisible();
+    expect(screen.getByText('Formal rejection note issued.')).toBeVisible();
+    fireEvent.click(disclosure);
+    expect(comment).toHaveValue('Preserve this inspection note');
+  });
+
   it('submits one controlled evidence reference for every configured requirement', () => {
     const evidence = buildReceiptInspectionEvidenceRequests('SubmitReceiptInspection', [
       {

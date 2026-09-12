@@ -51,6 +51,7 @@ export interface ProcurementExceptionalSourcingReadiness {
 }
 
 export interface ProcurementExceptionalSourcingControl {
+  approvalRequired?: boolean;
   sourceRequisitionId?: string;
   tenderId: string;
   tenderNumber: string;

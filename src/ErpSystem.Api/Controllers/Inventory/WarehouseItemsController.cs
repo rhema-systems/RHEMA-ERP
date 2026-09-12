@@ -6,6 +6,7 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Services.Inventory;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -25,6 +26,7 @@ public class WarehouseItemsController : ControllerBase
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IProcurementAccessControlService _accessControl;
     private readonly ILogger<WarehouseItemsController> _logger;
+    private readonly IWarehouseDefaultLocationService _defaultLocations;
 
     public WarehouseItemsController(
         IWarehouseQuantityRepository warehouseQuantityRepository,
@@ -33,7 +35,8 @@ public class WarehouseItemsController : ControllerBase
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         IProcurementAccessControlService accessControl,
-        ILogger<WarehouseItemsController> logger)
+        ILogger<WarehouseItemsController> logger,
+        IWarehouseDefaultLocationService? defaultLocations = null)
     {
         _warehouseQuantityRepository = warehouseQuantityRepository;
         _warehouseRepository = warehouseRepository;
@@ -42,6 +45,7 @@ public class WarehouseItemsController : ControllerBase
         _currentUserProvider = currentUserProvider;
         _accessControl = accessControl;
         _logger = logger;
+        _defaultLocations = defaultLocations ?? new WarehouseDefaultLocationService(unitOfWork, currentUserProvider);
     }
 
     /// <summary>
@@ -133,19 +137,22 @@ public class WarehouseItemsController : ControllerBase
 
             var result = new BulkAssignmentResultDto();
 
-            foreach (var warehouseId in dto.WarehouseIds)
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
             {
+            foreach (var warehouseId in dto.WarehouseIds.Distinct().OrderBy(value => value))
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"warehouse-default:{tenantId:N}:{warehouseId:N}", ct);
                 var warehouse = await _warehouseRepository.GetByIdAsync(warehouseId);
-                if (warehouse == null)
+                if (warehouse == null || warehouse.TenantId != tenantId || warehouse.IsDeleted || !warehouse.IsActive)
                 {
                     result.Errors.Add($"Warehouse {warehouseId} not found");
                     continue;
                 }
 
-                foreach (var itemId in dto.InventoryItemIds)
+                foreach (var itemId in dto.InventoryItemIds.Distinct())
                 {
                     var item = await _inventoryItemRepository.GetByIdAsync(itemId);
-                    if (item == null)
+                    if (item == null || item.TenantId != tenantId || item.IsDeleted)
                     {
                         result.Errors.Add($"Inventory item {itemId} not found");
                         continue;
@@ -176,17 +183,21 @@ public class WarehouseItemsController : ControllerBase
                     };
 
                     await _warehouseQuantityRepository.AddAsync(warehouseQuantity);
+                    await _unitOfWork.SaveChangesAsync(ct);
+                    await _defaultLocations.EnsureItemAssignmentAsync(warehouseId, itemId, _currentUserProvider.UserId, ct);
                     result.Created++;
                 }
             }
 
             await _unitOfWork.SaveChangesAsync();
+            }, HttpContext.RequestAborted);
 
             _logger.LogInformation("Bulk assignment completed: {Created} created, {Skipped} skipped, {Errors} errors",
                 result.Created, result.Skipped, result.Errors.Count);
 
             return Ok(result);
         }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error assigning items to warehouses");
@@ -311,6 +322,9 @@ public class WarehouseItemsController : ControllerBase
             ReorderLevel = entity.ReorderLevel,
             MaxStock = entity.MaxStock,
             AverageCost = entity.AverageCost,
+            ItemAverageCost = entity.InventoryItem != null && entity.InventoryItem.Id == entity.InventoryItemId &&
+                entity.InventoryItem.TenantId == entity.TenantId && !entity.InventoryItem.IsDeleted
+                ? entity.InventoryItem.AverageCost : null,
             LastMovementDate = entity.LastMovementDate,
             LastStockTakeDate = entity.LastStockTakeDate,
             Notes = entity.Notes,
@@ -340,6 +354,8 @@ public class WarehouseItemDto
     public decimal ReorderLevel { get; set; }
     public decimal MaxStock { get; set; }
     public decimal AverageCost { get; set; }
+    /// <summary>Stored item-wide average, distinct from this assignment's warehouse AverageCost.</summary>
+    public decimal? ItemAverageCost { get; set; }
     public DateTime? LastMovementDate { get; set; }
     public DateTime? LastStockTakeDate { get; set; }
     public string? Notes { get; set; }

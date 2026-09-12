@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getInventoryTransferControlCapability,
   getInventoryTransferProblemMessage,
+  getInventoryTransferStatusLabel,
 } from './inventory-transfer-controls';
 
 const base = {
@@ -16,6 +17,18 @@ const base = {
 };
 
 describe('inventory transfer controls', () => {
+  it('shows direct readiness without calling it human approval', () => {
+    expect(getInventoryTransferStatusLabel('Approved', false)).toBe('Ready to ship');
+    expect(getInventoryTransferStatusLabel('Approved', true)).toBe('Approved');
+    expect(getInventoryTransferStatusLabel('Approved')).toBe('Approved');
+  });
+
+  it('allows the same authorized operator to close a reconciled direct transfer', () => {
+    expect(getInventoryTransferControlCapability({ ...base, approvalRequired: false, kind: 'close',
+      currentUserId: 'receiver-user', hasOpenDiscrepancy: false })).toEqual({ allowed: true });
+    expect(getInventoryTransferControlCapability({ ...base, approvalRequired: false, kind: 'close',
+      currentUserId: 'receiver-user', hasTransferPermission: false, hasOpenDiscrepancy: false }).allowed).toBe(false);
+  });
   it('allows an independent authorized user to resolve an open received discrepancy', () => {
     expect(getInventoryTransferControlCapability({
       ...base,

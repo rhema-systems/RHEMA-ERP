@@ -156,7 +156,7 @@ describe('Procurement budget workflow details', () => {
     fireEvent.click(screen.getByRole('button', { name: /revise budget/i }));
     fireEvent.change(screen.getByLabelText(/new approved amount/i), { target: { value: '125000' } });
     fireEvent.change(screen.getByLabelText(/^reason$/i), { target: { value: 'Additional approved scope' } });
-    fireEvent.click(screen.getByRole('button', { name: /submit revision/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save revision/i }));
 
     await waitFor(() => {
       expect(budgetServiceMock.createRevision).toHaveBeenCalledWith('budget-1', {
@@ -168,9 +168,24 @@ describe('Procurement budget workflow details', () => {
     expect(toast.success).toHaveBeenCalledWith('Budget revision submitted for independent approval');
   });
 
-  it('keeps the revision input and approved amount when its required workflow is missing', async () => {
+  it('reports a directly applied revision without inventing an approval step', async () => {
     budgetServiceMock.getBudgetById.mockResolvedValue({ ...submittedBudget, status: 'Approved' });
-    const failure = 'Budget revisions require a published approval workflow with an independent approver. The approved budget has not changed.';
+    budgetServiceMock.createRevision.mockResolvedValue({ approvalRequired: false, status: 'Approved' });
+
+    render(<ProcurementBudgetDetailPage />);
+    await screen.findByText('PB-2026-0002');
+    fireEvent.click(screen.getByRole('button', { name: /revise budget/i }));
+    fireEvent.change(screen.getByLabelText(/new approved amount/i), { target: { value: '125000' } });
+    fireEvent.change(screen.getByLabelText(/^reason$/i), { target: { value: 'Additional scope' } });
+    fireEvent.click(screen.getByRole('button', { name: /save revision/i }));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Budget revision applied'));
+    expect(toast.success).not.toHaveBeenCalledWith('Budget revision submitted for independent approval');
+  });
+
+  it('keeps the revision input and current amount when its active workflow is invalid', async () => {
+    budgetServiceMock.getBudgetById.mockResolvedValue({ ...submittedBudget, status: 'Approved' });
+    const failure = 'The active workflow has no eligible approver. The budget has not changed.';
     budgetServiceMock.createRevision.mockRejectedValue(new Error(failure));
 
     render(<ProcurementBudgetDetailPage />);
@@ -178,7 +193,7 @@ describe('Procurement budget workflow details', () => {
     fireEvent.click(screen.getByRole('button', { name: /revise budget/i }));
     fireEvent.change(screen.getByLabelText(/new approved amount/i), { target: { value: '125000' } });
     fireEvent.change(screen.getByLabelText(/^reason$/i), { target: { value: 'Additional approved scope' } });
-    fireEvent.click(screen.getByRole('button', { name: /submit revision/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save revision/i }));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(failure));
     expect(screen.getByRole('dialog', { name: /revise approved budget/i })).toBeInTheDocument();

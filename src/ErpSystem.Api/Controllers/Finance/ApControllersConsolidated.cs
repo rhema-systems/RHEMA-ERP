@@ -268,6 +268,15 @@ namespace ErpSystem.Api.Controllers.Finance
             }
         }
 
+        [HttpPost("from-landed-cost/{landedCostId:guid}")]
+        public async Task<ActionResult<List<VendorInvoiceDto>>> CreateFromLandedCost(Guid landedCostId, CreateLandedCostInvoicesDto dto)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write")) return Forbid();
+            try { return Ok(await _invoiceService.CreateFromLandedCostAsync(landedCostId, dto, DimensionProducer, HttpContext.RequestAborted)); }
+            catch (ArgumentException ex) { return BadRequest(new { code = "LANDED_COST_INVOICE_INVALID", message = ex.Message }); }
+            catch (InvalidOperationException ex) { return UnprocessableEntity(new { code = "LANDED_COST_INVOICE_NOT_READY", message = ex.Message }); }
+        }
+
         /// <summary>Creates a new vendor invoice in Draft status with the supplied line items.</summary>
         [HttpPost]
         public async Task<ActionResult<VendorInvoiceDto>> Create([FromBody] VendorInvoiceCreateDto dto)

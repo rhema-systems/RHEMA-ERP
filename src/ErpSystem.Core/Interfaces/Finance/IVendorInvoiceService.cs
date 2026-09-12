@@ -14,6 +14,11 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IVendorInvoiceService
 {
+    Task<PostLandedCostResultDto> PostLandedCostAsync(Guid landedCostId,
+        PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+    Task<List<VendorInvoiceDto>> CreateFromLandedCostAsync(Guid landedCostId,
+        CreateLandedCostInvoicesDto dto, FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
     /// <summary>Read-only Goods entry quantities from governed acceptance, less other committed invoices.</summary>
     Task<ApGoodsInvoiceEntryDto> GetGoodsInvoiceEntryAsync(Guid purchaseOrderId,
         Guid? currentInvoiceId = null, CancellationToken cancellationToken = default);

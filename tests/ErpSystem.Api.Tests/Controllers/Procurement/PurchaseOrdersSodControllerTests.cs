@@ -73,7 +73,7 @@ public sealed class PurchaseOrdersSodControllerTests
         {
             SourceType = ProcurementPurchaseOrderSourceType.ApprovedException,
             SourceId = Guid.NewGuid(), SupplierId = Guid.NewGuid(), RequestedById = Guid.NewGuid(),
-            Items = [new() { InventoryItemId = Guid.NewGuid(), OrderedQuantity = 1, UnitPrice = 750, UnitOfMeasure = "EA" }]
+            Items = [new() { ItemDescription = "Approved ad hoc goods", OrderedQuantity = 1, UnitPrice = 750, UnitOfMeasure = "EA" }]
         });
 
         var failure = result.Result.Should().BeOfType<UnprocessableEntityObjectResult>().Subject;

@@ -68,6 +68,7 @@ export interface ProcurementTenderMilestone {
 }
 
 export interface ProcurementTenderControl {
+  approvalRequired?: boolean;
   tenderId: string;
   tenderNumber: string;
   tenderTitle: string;

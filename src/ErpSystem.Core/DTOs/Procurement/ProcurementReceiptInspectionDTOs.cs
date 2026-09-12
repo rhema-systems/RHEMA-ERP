@@ -15,7 +15,7 @@ public sealed class ProcurementReceiptInspectionLineRequest
 
 public sealed class SaveProcurementReceiptInspectionRequest
 {
-    [Required, StringLength(1000)] public string Comment { get; set; } = string.Empty;
+    [StringLength(1000)] public string? Comment { get; set; }
     [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     public string? RowVersion { get; set; }
     [MinLength(1)] public List<ProcurementReceiptInspectionLineRequest> Lines { get; set; } = new();
@@ -33,7 +33,7 @@ public sealed class ProcurementReceiptInspectionEvidenceRequest
 
 public sealed class SubmitProcurementReceiptInspectionRequest
 {
-    [Required, StringLength(1000)] public string Comment { get; set; } = string.Empty;
+    [StringLength(1000)] public string? Comment { get; set; }
     [Required] public string RowVersion { get; set; } = string.Empty;
     [MinLength(1)] public List<ProcurementReceiptInspectionEvidenceRequest> Evidence { get; set; } = new();
 }
@@ -67,6 +67,7 @@ public sealed class ProcurementReceiptSupplierAcknowledgementRequest
 
 public sealed class ProcurementReceiptInspectionLineDto
 {
+    public ItemType LineType { get; set; } = ItemType.StockItem;
     public Guid Id { get; init; }
     public Guid PurchaseOrderReceiptItemId { get; init; }
     public Guid PurchaseOrderItemId { get; init; }
@@ -132,6 +133,8 @@ public sealed class ProcurementReceiptInspectionDto
     public decimal StockPostedQuantity { get; init; }
     public decimal ApEligibleQuantity { get; init; }
     public decimal ApBlockedQuantity { get; init; }
+    public bool ApprovalRequired { get; init; } = true;
+    public Guid? WorkflowDefinitionId { get; init; }
     public Guid? WorkflowInstanceId { get; init; }
     public string RowVersion { get; init; } = string.Empty;
     public IReadOnlyList<ProcurementReceiptInspectionLineDto> Lines { get; init; } = [];

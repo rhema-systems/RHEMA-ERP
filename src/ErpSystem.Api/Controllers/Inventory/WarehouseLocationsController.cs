@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
+using ErpSystem.Core.Services.Inventory;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -23,6 +24,7 @@ public class WarehouseLocationsController : ControllerBase
     private readonly ILogger<WarehouseLocationsController> _logger;
     private readonly IProcurementMasterDataChangeService? _masterDataChanges;
     private readonly IInventoryNegativeStockControlService _negativeStockControls;
+    private readonly IWarehouseDefaultLocationService _defaultLocations;
 
     public WarehouseLocationsController(
         IWarehouseLocationRepository locationRepository,
@@ -31,7 +33,8 @@ public class WarehouseLocationsController : ControllerBase
         ICurrentUserProvider currentUserProvider,
         ILogger<WarehouseLocationsController> logger,
         IInventoryNegativeStockControlService negativeStockControls,
-        IProcurementMasterDataChangeService? masterDataChanges = null)
+        IProcurementMasterDataChangeService? masterDataChanges = null,
+        IWarehouseDefaultLocationService? defaultLocations = null)
     {
         _locationRepository = locationRepository;
         _warehouseRepository = warehouseRepository;
@@ -40,6 +43,7 @@ public class WarehouseLocationsController : ControllerBase
         _logger = logger;
         _masterDataChanges = masterDataChanges;
         _negativeStockControls = negativeStockControls;
+        _defaultLocations = defaultLocations ?? new WarehouseDefaultLocationService(unitOfWork, currentUserProvider);
     }
 
     /// <summary>
@@ -106,8 +110,10 @@ public class WarehouseLocationsController : ControllerBase
 
             // Verify warehouse exists
             var warehouse = await _warehouseRepository.GetByIdAsync(dto.WarehouseId);
-            if (warehouse == null)
+            if (warehouse == null || warehouse.TenantId != tenantId || warehouse.IsDeleted || !warehouse.IsActive)
                 return BadRequest($"Warehouse with ID {dto.WarehouseId} not found");
+            if (dto.IsDefault && (dto.IsConsignmentBin || dto.ConsignmentWarehouseId.HasValue || !string.Equals(dto.LocationType, "Bin", StringComparison.OrdinalIgnoreCase)))
+                return BadRequest("The default must be a normal Bin, not a consignment location.");
 
             if (dto.IsConsignmentBin)
             {
@@ -136,7 +142,8 @@ public class WarehouseLocationsController : ControllerBase
             }
 
             // Check for duplicate location code
-            var existing = await _locationRepository.GetByLocationCodeAsync(dto.LocationCode);
+            var existing = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(x =>
+                x.TenantId == tenantId && x.WarehouseId == dto.WarehouseId && !x.IsDeleted && x.LocationCode == dto.LocationCode).SingleOrDefaultAsync();
             if (existing != null)
                 return BadRequest($"Location with code '{dto.LocationCode}' already exists");
 
@@ -160,12 +167,21 @@ public class WarehouseLocationsController : ControllerBase
                 CreatedById = _currentUserProvider.UserId
             };
 
-            await _locationRepository.AddAsync(location);
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                await _locationRepository.AddAsync(location);
+                if (dto.IsDefault) await _defaultLocations.SetDefaultAsync(location, _currentUserProvider.UserId, ct);
+                else
+                {
+                    await _unitOfWork.SaveChangesAsync(ct);
+                    await _defaultLocations.GetOrCreateAsync(location.WarehouseId, _currentUserProvider.UserId, ct);
+                }
+            }, HttpContext.RequestAborted);
 
             _logger.LogInformation("Created warehouse location {Code} for tenant {TenantId}", location.LocationCode, tenantId);
             return CreatedAtAction(nameof(GetById), new { id = location.Id }, MapToDto(location));
         }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating warehouse location");
@@ -187,13 +203,23 @@ public class WarehouseLocationsController : ControllerBase
                 return BadRequest(ModelState);
 
             var location = await _locationRepository.GetByIdAsync(id);
-            if (location == null)
+            if (location == null || location.TenantId != _currentUserProvider.TenantId || location.IsDeleted)
                 return NotFound($"Warehouse location with ID {id} not found");
+            var originalWarehouseId = location.WarehouseId;
+            var warehouse = await _warehouseRepository.GetByIdAsync(dto.WarehouseId);
+            if (warehouse == null || warehouse.TenantId != _currentUserProvider.TenantId || warehouse.IsDeleted || !warehouse.IsActive)
+                return BadRequest("Select an active warehouse in the current tenant.");
+            if (location.IsDefault && (!dto.IsDefault || !dto.IsActive || dto.WarehouseId != location.WarehouseId))
+                return BadRequest("Select another default bin for this warehouse before clearing, moving or deactivating the current default.");
+            if (dto.IsDefault && (!dto.IsActive || dto.IsConsignmentBin || dto.ConsignmentWarehouseId.HasValue || !string.Equals(dto.LocationType, "Bin", StringComparison.OrdinalIgnoreCase)))
+                return BadRequest("The default must be an active normal Bin, not a consignment location.");
 
             // Check for duplicate code (if changed)
             if (location.LocationCode != dto.LocationCode)
             {
-                var existing = await _locationRepository.GetByLocationCodeAsync(dto.LocationCode);
+                var existing = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(x =>
+                    x.TenantId == _currentUserProvider.TenantId && x.WarehouseId == dto.WarehouseId && !x.IsDeleted &&
+                    x.Id != id && x.LocationCode == dto.LocationCode).SingleOrDefaultAsync();
                 if (existing != null)
                     return BadRequest($"Location with code '{dto.LocationCode}' already exists");
             }
@@ -242,12 +268,26 @@ public class WarehouseLocationsController : ControllerBase
             location.LastModifiedById = _currentUserProvider.UserId;
             location.UpdatedAt = DateTime.UtcNow;
 
-            await _locationRepository.UpdateAsync(location);
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                foreach (var warehouseId in new[] { originalWarehouseId, dto.WarehouseId }.Distinct().OrderBy(value => value))
+                    await _unitOfWork.AcquireTransactionLockAsync($"warehouse-default:{_currentUserProvider.TenantId:N}:{warehouseId:N}", ct);
+                var currentDefault = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(x =>
+                    x.Id == id && x.TenantId == _currentUserProvider.TenantId && !x.IsDeleted)
+                    .AsNoTracking().Select(x => new { x.IsDefault, x.WarehouseId }).SingleOrDefaultAsync(ct);
+                if (currentDefault == null)
+                    throw new InvalidOperationException("The location changed. Refresh and try again.");
+                if (currentDefault.IsDefault && (!dto.IsDefault || !dto.IsActive || dto.WarehouseId != currentDefault.WarehouseId))
+                    throw new InvalidOperationException("Select another default bin before clearing, moving or deactivating the current default.");
+                await _locationRepository.UpdateAsync(location);
+                if (dto.IsDefault) await _defaultLocations.SetDefaultAsync(location, _currentUserProvider.UserId, ct);
+                else await _unitOfWork.SaveChangesAsync(ct);
+            }, HttpContext.RequestAborted);
 
             _logger.LogInformation("Updated warehouse location {Id}", id);
             return Ok(MapToDto(location));
         }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating warehouse location {Id}", id);
@@ -266,18 +306,28 @@ public class WarehouseLocationsController : ControllerBase
             var protection = await GuardDirectMutationAsync(id, "WarehouseLocation.Delete");
             if (protection is not null) return protection;
             var location = await _locationRepository.GetByIdAsync(id);
-            if (location == null)
+            if (location == null || location.TenantId != _currentUserProvider.TenantId || location.IsDeleted)
                 return NotFound($"Warehouse location with ID {id} not found");
+            if (location.IsDefault)
+                return BadRequest("Select another default bin for this warehouse before deleting the current default.");
 
-            location.IsDeleted = true;
-            location.DeletedAt = DateTime.UtcNow;
-            location.DeletedBy = _currentUserProvider.UserId.ToString();
-            await _locationRepository.UpdateAsync(location);
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"warehouse-default:{_currentUserProvider.TenantId:N}:{location.WarehouseId:N}", ct);
+                if (await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(x => x.Id == id &&
+                        x.TenantId == _currentUserProvider.TenantId && x.IsDefault && !x.IsDeleted).AsNoTracking().AnyAsync(ct))
+                    throw new InvalidOperationException("Select another default bin for this warehouse before deleting the current default.");
+                location.IsDeleted = true;
+                location.DeletedAt = DateTime.UtcNow;
+                location.DeletedBy = _currentUserProvider.UserId.ToString();
+                await _locationRepository.UpdateAsync(location);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }, HttpContext.RequestAborted);
 
             _logger.LogInformation("Deleted warehouse location {Id}", id);
             return NoContent();
         }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting warehouse location {Id}", id);
@@ -585,6 +635,7 @@ public class WarehouseLocationsController : ControllerBase
             Description = entity.Description,
             LocationType = entity.LocationType,
             ParentLocationId = entity.ParentLocationId,
+            IsDefault = entity.IsDefault,
             IsActive = entity.IsActive,
             IsPickingLocation = entity.IsPickingLocation,
             IsReceivingLocation = entity.IsReceivingLocation,

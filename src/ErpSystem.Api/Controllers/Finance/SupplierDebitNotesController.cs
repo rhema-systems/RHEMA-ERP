@@ -19,12 +19,42 @@ public sealed class SupplierDebitNotesController : ControllerBase
 
     public SupplierDebitNotesController(ISupplierDebitNoteService service) => _service = service;
 
+    [HttpGet("inventory-returns/{returnId:guid}/source-invoices")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<ActionResult<IReadOnlyList<InventoryReturnCreditSourceDto>>> ReturnSources(Guid returnId, CancellationToken cancellationToken)
+    {
+        try { return Ok(await _service.GetInventoryReturnCreditSourcesAsync(returnId, cancellationToken)); }
+        catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
+        catch (InvalidOperationException exception) { return BadRequest(new { error = exception.Message }); }
+    }
+
+    [HttpPost("inventory-returns/{returnId:guid}/credit")]
+    [Authorize(Policy = FinancePermissions.ManageApSupplierDebitNotes)]
+    public async Task<ActionResult<SupplierDebitNoteDto>> CreateReturnCredit(Guid returnId,
+        [FromBody] CreateInventoryReturnCreditDto dto, CancellationToken cancellationToken)
+    {
+        try { return Ok(await _service.CreateInventoryReturnCreditAsync(returnId, dto, DimensionProducer, cancellationToken)); }
+        catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
+        catch (InvalidOperationException exception) { return BadRequest(new { error = exception.Message }); }
+    }
+
     [HttpGet]
     [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IReadOnlyList<SupplierDebitNoteDto>>> GetAll(
         [FromQuery] SupplierDebitNoteQueryDto query,
         CancellationToken cancellationToken) =>
         Ok(await _service.GetAllAsync(query, cancellationToken));
+
+    [HttpPut("{id:guid}/inventory-return-header")]
+    [Authorize(Policy = FinancePermissions.ManageApSupplierDebitNotes)]
+    public async Task<ActionResult<SupplierDebitNoteDto>> UpdateReturnCreditHeader(Guid id,
+        [FromBody] UpdateInventoryReturnCreditHeaderDto dto, CancellationToken cancellationToken)
+    {
+        try { return Ok(await _service.UpdateInventoryReturnCreditHeaderAsync(id, dto, DimensionProducer, cancellationToken)); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "Supplier credit changed. Refresh the record before saving your header correction." }); }
+        catch (KeyNotFoundException exception) { return NotFound(new { error = exception.Message }); }
+        catch (InvalidOperationException exception) { return BadRequest(new { error = exception.Message }); }
+    }
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = FinancePermissions.ViewFinance)]

@@ -379,7 +379,7 @@ public sealed class QuantitySurveyPriceIndexImportService : IQuantitySurveyPrice
             var result = await _workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.Escalation, entity.Id, entity.ApprovalWorkflowDefinitionId);
             if (!result.ExecutionResult.Success)
                 throw new QuantitySurveyPriceIndexImportConflictException(result.ExecutionResult.Message ?? "The configured index approval workflow could not be started.");
-            _workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Escalation).ApplySubmitOutcome(entity, result.Outcome, UserId);
+            _workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Escalation).ApplySubmitOutcome(entity, result, UserId);
             if (result.Outcome == WorkflowOutcome.Approved)
             {
                 entity.Status = "PendingApproval";

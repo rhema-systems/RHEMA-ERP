@@ -75,6 +75,7 @@ public class VendorInvoiceDto
     // Status
     public VendorInvoiceStatus Status { get; set; }
     public string ApprovalStatus { get; set; } = "Draft";
+    public bool ApprovalRequired { get; set; } = true;
 
     // GL
     public Guid? ExpenseAccountId { get; set; }
@@ -218,6 +219,7 @@ public class VendorInvoiceQueryDto
 
 public class VendorInvoiceLineItemDto
 {
+    public Guid? LandedCostItemId { get; set; }
     public Guid Id { get; set; }
     public Guid VendorInvoiceId { get; set; }
     public string LineItemType { get; set; } = "Expense";
@@ -248,6 +250,9 @@ public class VendorInvoiceLineItemDto
 
 public class VendorInvoiceLineItemCreateDto
 {
+    // Never accept source links from a generic invoice request.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Guid? LandedCostItemId { get; set; }
     public Guid? Id { get; set; }
     public string LineItemType { get; set; } = "Expense";
     public Guid? GLAccountId { get; set; }
@@ -567,6 +572,7 @@ public class VendorPaymentDto
     public DateTime? WithholdingCertificateDate { get; set; }
     public decimal DiscountTaken { get; set; }
     public VendorPaymentStatus Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? SubmittedById { get; set; }
     public DateTime? SubmittedAt { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
@@ -685,6 +691,8 @@ public sealed class SubmitVendorPaymentDto
 /// </summary>
 public sealed class VendorPaymentControlDto
 {
+    public bool CanUploadEvidence { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public Guid PaymentId { get; set; }
     public string? PolicyCode { get; set; }
     public Guid? PolicySetId { get; set; }
@@ -720,6 +728,8 @@ public sealed class VendorPaymentEvidenceRequirementStatusDto
 
 public sealed class VendorPaymentEvidenceDocumentDto
 {
+    public string EvidenceSource { get; set; } = "Workflow";
+    public string? DownloadUrl { get; set; }
     public Guid Id { get; set; }
     public string AttachmentId { get; set; } = string.Empty;
     public string? RequirementKey { get; set; }
@@ -734,6 +744,16 @@ public sealed class VendorPaymentEvidenceDocumentDto
     public DateTime? VerifiedAt { get; set; }
     public string? VerificationNotes { get; set; }
     public string Sha256 { get; set; } = string.Empty;
+}
+
+public sealed class VendorPaymentEvidenceUploadDto
+{
+    public string RequirementKey { get; set; } = string.Empty;
+    public Guid ClientRequestId { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public byte[] Content { get; set; } = Array.Empty<byte>();
 }
 
 /// <summary>
@@ -934,6 +954,7 @@ public class PaymentBatchDto
     public Guid? BankAccountId { get; set; }
     public string? BankAccountName { get; set; }
     public PaymentBatchStatus Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? CreatedById { get; set; }
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }

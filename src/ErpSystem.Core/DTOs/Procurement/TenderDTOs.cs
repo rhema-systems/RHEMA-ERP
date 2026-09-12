@@ -8,6 +8,7 @@ namespace ErpSystem.Core.DTOs.Procurement;
 /// </summary>
 public class TenderDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
@@ -49,6 +50,7 @@ public class TenderSummaryDto
 /// </summary>
 public class TenderDetailDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public bool UsesControlledTenderLifecycle { get; set; }
     public int BidCount { get; set; }
     public Guid Id { get; set; }

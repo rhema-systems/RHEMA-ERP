@@ -1,7 +1,9 @@
 import * as React from 'react';
 
 import type { WorkflowApprovalActionsProps } from '@/components/workflow/WorkflowApprovalActions';
-import { workflowApiService } from '@/services/workflow-api.service';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
+import type { WorkflowSummaryOptions } from '@/hooks/useWorkflowSummary';
+import type { getWorkflowVisibility } from '@/components/workflow/workflowVisibility';
 import type { WorkflowApprovalChecklistResponseDto, WorkflowEntitySummaryDto, WorkflowSignatureSubmissionDto } from '@/types/workflow';
 
 export interface WorkflowRecordCommandContext {
@@ -37,6 +39,8 @@ export interface WorkflowRecordIntegration {
   error?: string;
   refresh: () => Promise<void>;
   actionProps: WorkflowApprovalActionsProps;
+  tabProps: WorkflowSummaryOptions;
+  visibility: ReturnType<typeof getWorkflowVisibility>;
 }
 
 export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRecordIntegration {
@@ -53,31 +57,9 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     commands,
     onOpenWorkflows,
   } = options;
-  const [summary, setSummary] = React.useState<WorkflowEntitySummaryDto>();
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string>();
-
-  const refresh = React.useCallback(async () => {
-    if (!enabled || !entityType || !entityId) {
-      setSummary(undefined);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(undefined);
-      setSummary(await workflowApiService.getWorkflowEntitySummary(entityType, entityId));
-    } catch (requestError: any) {
-      setSummary(undefined);
-      setError(requestError?.message || 'Unable to load workflow status.');
-    } finally {
-      setLoading(false);
-    }
-  }, [enabled, entityId, entityType]);
-
-  React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const record = useWorkflowSummary({ entityType, entityId, loadWorkflowSummary: enabled });
+  const { summary, loading, error, visibility } = record;
+  const refresh = React.useCallback(async () => { await record.refresh(); }, [record.refresh]);
 
   const afterAction = React.useCallback(async () => {
     if (commands.afterAction) {
@@ -94,6 +76,8 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     status,
     currentStepName,
     workflowSummary: summary,
+    workflowSummaryLoading: loading,
+    workflowSummaryError: error,
     loadWorkflowSummary: false,
     canSubmit,
     canApproveReject,
@@ -122,10 +106,16 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     entityLabel,
     entityNumber,
     entityType,
+    error,
+    loading,
     onOpenWorkflows,
     status,
     summary,
   ]);
 
-  return { summary, loading, error, refresh, actionProps };
+  const tabProps = {
+    entityType, entityId, workflowSummary: summary, workflowSummaryLoading: loading,
+    workflowSummaryError: error, loadWorkflowSummary: false,
+  };
+  return { summary, loading, error, refresh, actionProps, tabProps, visibility };
 }

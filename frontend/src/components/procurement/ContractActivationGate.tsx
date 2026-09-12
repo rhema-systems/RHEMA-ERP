@@ -1,4 +1,5 @@
 'use client';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -253,23 +254,17 @@ export function ContractActivationGate({
 
   return (
     <div className="space-y-4" data-testid="contract-activation-gate">
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-blue-600" />
-              Contract approval and activation gate
-            </CardTitle>
-            <CardDescription>
+      <ProcurementControlAccordion
+        title="Contract approval and activation gate"
+        summary={activationComplete ? 'Contract activated' : `${overview.checks.length} activation checks`}
+        status={<Badge variant="outline">{activationComplete ? 'Activated' : failedChecks.length ? `${failedChecks.length} failed` : overview.contractStatus}</Badge>}
+        notice={failedChecks.length > 0 && checkMessage(failedChecks[0])}
+        actions={<Button type="button" variant="ghost" size="sm" onClick={() => void load()} disabled={busy}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
               Legal, Internal Audit, authority, award, GHANEPS, signature, performance-security,
               and central-DMS evidence are revalidated before activation.
-            </CardDescription>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => void load()} disabled={busy}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
-        </CardHeader>
+            </p>
         <CardContent className="space-y-3">
           {activationComplete ? (
             <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
@@ -298,7 +293,7 @@ export function ContractActivationGate({
             </div>
           )}
         </CardContent>
-      </Card>
+      </ProcurementControlAccordion>
 
       {overview.canSubmit && canManageContract && (
         <Card>
@@ -445,10 +440,10 @@ export function ContractActivationGate({
       )}
 
       {overview.history.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Immutable activation history</CardTitle>
-          </CardHeader>
+        <ProcurementControlAccordion
+        title="Immutable activation history"
+        summary={`${overview.history.length} retained activation record(s)`}
+      >
           <CardContent className="space-y-2">
             {overview.history.map((item) => (
               <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
@@ -464,7 +459,7 @@ export function ContractActivationGate({
               </div>
             ))}
           </CardContent>
-        </Card>
+        </ProcurementControlAccordion>
       )}
     </div>
   );

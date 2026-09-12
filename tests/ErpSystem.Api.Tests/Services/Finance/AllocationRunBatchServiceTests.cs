@@ -18,7 +18,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class AllocationRunBatchServiceTests
+public sealed partial class AllocationRunBatchServiceTests
 {
     [Fact]
     [Trait("Batch", "UnitAccounting")]
@@ -195,6 +195,7 @@ public sealed class AllocationRunBatchServiceTests
         WorkflowInstanceStatus approvalStatus = WorkflowInstanceStatus.Completed)
     {
         var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(item => item.HasActiveApprovalWorkflowAsync("AllocationRunBatch")).ReturnsAsync(true);
         workflow.Setup(item => item.StartApprovalWorkflowAsync("AllocationRunBatch", It.IsAny<Guid>()))
             .ReturnsAsync(new WorkflowExecutionResult
             {

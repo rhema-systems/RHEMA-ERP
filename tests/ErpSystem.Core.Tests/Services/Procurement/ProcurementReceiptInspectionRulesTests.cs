@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -13,6 +15,61 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementReceiptInspectionRulesTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void SaveAndSubmitAllowOptionalCommentsWithoutRemovingOtherRequiredFields(string? comment)
+    {
+        var save = new SaveProcurementReceiptInspectionRequest
+        {
+            Comment = comment, IdempotencyKey = "optional-comment-save",
+            Lines = [new() { PurchaseOrderReceiptItemId = Guid.NewGuid(), AcceptedQuantity = 1 }]
+        };
+        var submit = new SubmitProcurementReceiptInspectionRequest
+        {
+            Comment = comment, RowVersion = "AQID",
+            Evidence = [new() { ActionKey = "SubmitReceiptInspection", RequirementKey = "Waybill", EvidenceReference = "WB-1" }]
+        };
+        Validator.TryValidateObject(save, new ValidationContext(save), [], true).Should().BeTrue();
+        Validator.TryValidateObject(submit, new ValidationContext(submit), [], true).Should().BeTrue();
+        save.IdempotencyKey = "";
+        submit.RowVersion = "";
+        Validator.TryValidateObject(save, new ValidationContext(save), [], true).Should().BeFalse();
+        Validator.TryValidateObject(submit, new ValidationContext(submit), [], true).Should().BeFalse();
+    }
+
+    [Fact]
+    public void OptionalCommentsRetainLengthLimitsAndDecisionReasonRequirements()
+    {
+        var save = new SaveProcurementReceiptInspectionRequest
+        {
+            Comment = new string('x', 1001), IdempotencyKey = "save",
+            Lines = [new() { PurchaseOrderReceiptItemId = Guid.NewGuid(), AcceptedQuantity = 1 }]
+        };
+        Validator.TryValidateObject(save, new ValidationContext(save), [], true).Should().BeFalse();
+        var decision = new DecideProcurementReceiptInspectionRequest { Approved = false, Comment = "", RowVersion = "AQID" };
+        var errors = new List<ValidationResult>();
+        Validator.TryValidateObject(decision, new ValidationContext(decision), errors, true).Should().BeFalse();
+        errors.Should().Contain(result => result.MemberNames.Contains(nameof(decision.Comment)));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RoutineAuditStillRecordsTheActionWhenTheUserOmitsAComment(string? comment)
+    {
+        ProcurementReceiptInspectionService.RoutineInspectionActionComment(comment, "Saved (no comment provided).")
+            .Should().Be("Saved (no comment provided).");
+        ProcurementReceiptInspectionService.RoutineInspectionActionComment("  User note  ", "Saved")
+            .Should().Be("User note");
+        var original = new SaveProcurementReceiptInspectionRequest { Comment = null, IdempotencyKey = "same-operation" };
+        var replay = new SaveProcurementReceiptInspectionRequest { Comment = comment, IdempotencyKey = "same-operation" };
+        ProcurementReceiptInspectionService.SaveActionFingerprint(replay)
+            .Should().Be(ProcurementReceiptInspectionService.SaveActionFingerprint(original));
+    }
+
     [Fact]
     public void ControlEventEvidenceRetainsRequirementsWithoutDuplicatingOneUpload()
     {

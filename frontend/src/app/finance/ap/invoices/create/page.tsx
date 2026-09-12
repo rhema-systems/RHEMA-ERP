@@ -51,6 +51,7 @@ import { purchasingService } from '@/services/purchasingService';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { invoiceTaxTreatment } from '@/lib/landed-cost-tax';
 import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
@@ -80,6 +81,7 @@ const lineItemSchema = z.object({
     quantity: z.coerce.number().min(0.01, 'Quantity must be positive'),
     unitPrice: z.coerce.number().min(0, 'Unit price must be positive'),
     taxGroupId: z.string().optional(),
+    taxTreatment: z.coerce.number().min(1).max(5).optional(),
     discountPercentage: z.coerce.number().min(0).max(100).optional().default(0),
     unit: z.string().optional(),
 });
@@ -418,6 +420,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 quantity: line.quantity,
                 unitPrice: line.unitPrice,
                 taxGroupId: line.taxGroupId || 'none',
+                taxTreatment: invoiceTaxTreatment(line.taxTreatment),
                 discountPercentage: line.discountPercentage || 0,
                 unit: line.unit,
             })),
@@ -526,6 +529,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         headerTaxGroupId = watchTaxGroupId
     ) => {
         if (isOpeningBalance) return null;
+        if (item.taxTreatment !== undefined && item.taxTreatment !== 1) return null;
         const activeGroupId = item.taxGroupId || headerTaxGroupId;
         return activeGroupId && activeGroupId !== 'none' ? activeGroupId : null;
     };
@@ -595,7 +599,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             const lineSubtotal = qty * price * (1 - discount / 100);
 
             // Resolve line tax group or fallback to header
-            const activeGroupId = item.taxGroupId || watchTaxGroupId;
+            const activeGroupId = resolveLineTaxGroupId(item);
             const activeGroup = taxGroupsData?.find(tg => tg.id === activeGroupId);
 
             if (activeGroup && activeGroup.components) {
@@ -830,6 +834,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         unitPrice: Number(item.unitPrice),
                         discountPercentage: Number(item.discountPercentage),
                         taxRate: lineTax.taxRate,
+                        taxTreatment: item.taxTreatment,
                         taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId),
                         unit: item.unit || null,
                         inventoryItemId: item.inventoryItemId || null,
@@ -1600,6 +1605,24 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         </div>
                                         <div className="col-span-3 space-y-2">
                                             <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
+                                            {editInvoice?.lineItems.some(line => line.landedCostItemId) && <>
+                                                <Label>Tax treatment</Label>
+                                                <Controller control={form.control} name={`lineItems.${index}.taxTreatment`}
+                                                    render={({ field }) => <Select value={String(field.value ?? 5)} onValueChange={value => {
+                                                        field.onChange(Number(value));
+                                                        if (value !== '1') form.setValue(`lineItems.${index}.taxGroupId`, 'none');
+                                                    }}>
+                                                        <SelectTrigger aria-label={`Line ${index + 1} tax treatment`}><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="5">Pending review</SelectItem>
+                                                            <SelectItem value="1">Standard — select tax group</SelectItem>
+                                                            <SelectItem value="2">Exempt</SelectItem>
+                                                            <SelectItem value="3">Zero rated</SelectItem>
+                                                            <SelectItem value="4">Out of scope</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>} />
+                                                {form.watch(`lineItems.${index}.taxTreatment`) === 5 && <p className="text-xs text-amber-700">Complete tax review before submitting this draft.</p>}
+                                            </>}
                                             <Controller
                                                 control={form.control}
                                                 name={`lineItems.${index}.taxGroupId`}
@@ -1607,7 +1630,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                     <Select 
                                                         value={watchIsOpeningBalance ? 'none' : (field.value || 'inherit')}
                                                         onValueChange={(val) => field.onChange(val === 'inherit' ? '' : val)}
-                                                        disabled={watchIsOpeningBalance}
+                                                        disabled={watchIsOpeningBalance || (Boolean(editInvoice?.lineItems.some(line => line.landedCostItemId)) && form.watch(`lineItems.${index}.taxTreatment`) !== 1)}
                                                     >
                                                         <SelectTrigger className={cn(watchIsOpeningBalance && 'bg-muted text-muted-foreground')}>
                                                             <SelectValue placeholder="Inherit Default" />
@@ -1618,7 +1641,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                     ? `Inherited: ${taxGroupsData?.find((t: any) => t.id === watchTaxGroupId)?.name || ''}`
                                                                     : 'Inherited: Zero-rated / Exempt'}
                                                             </SelectItem>
-                                                            <SelectItem value="none">Zero-rated / Exempt</SelectItem>
+                                                            <SelectItem value="none">{editInvoice?.lineItems.some(line => line.landedCostItemId) ? 'No tax group selected' : 'Zero-rated / Exempt'}</SelectItem>
                                                             {taxGroupsData?.map((tg: any) => (
                                                                 <SelectItem key={tg.id} value={tg.id}>{tg.name}</SelectItem>
                                                             ))}

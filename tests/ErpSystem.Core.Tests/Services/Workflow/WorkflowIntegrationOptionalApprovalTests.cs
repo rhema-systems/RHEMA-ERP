@@ -59,11 +59,13 @@ public sealed class WorkflowIntegrationOptionalApprovalTests
     }
 
     [Fact]
-    public async Task ExplicitDefinitionSubmissionAlwaysRemainsGoverned()
+    public async Task ExplicitDefinitionSubmissionRemainsGovernedWhenApprovalIsActive()
     {
         var entityId = Guid.NewGuid();
         var definitionId = Guid.NewGuid();
         var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(value => value.HasActiveApprovalWorkflowAsync("EmergencyProcurement"))
+            .ReturnsAsync(true);
         workflow.Setup(value => value.StartApprovalWorkflowAsync("EmergencyProcurement", entityId, definitionId))
             .ReturnsAsync(new WorkflowExecutionResult
             {
@@ -83,6 +85,61 @@ public sealed class WorkflowIntegrationOptionalApprovalTests
             Times.Once);
         workflow.Verify(
             value => value.HasActiveApprovalWorkflowAsync(It.IsAny<string>()),
-            Times.Never);
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SelectedDefinitionDoesNotRequireApprovalWhenNoProcessIsActive()
+    {
+        var workflow = new Mock<IWorkflowService>();
+        var service = new WorkflowIntegrationService(workflow.Object, NullLogger<WorkflowIntegrationService>.Instance);
+        var result = await service.SubmitAsync("StockAdjustment", Guid.NewGuid(), Guid.NewGuid());
+
+        result.ApprovalRequired.Should().BeFalse();
+        result.Outcome.Should().Be(WorkflowOutcome.Approved);
+        result.ExecutionResult.WorkflowInstanceId.Should().BeNull();
+        workflow.Verify(value => value.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task InFlightApprovalIsNotBypassedWhenDefinitionHasBeenDeactivated()
+    {
+        var entityId = Guid.NewGuid();
+        var instanceId = Guid.NewGuid();
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(value => value.HasActiveApprovalInstanceAsync("StockAdjustment", entityId)).ReturnsAsync(true);
+        workflow.Setup(value => value.StartApprovalWorkflowAsync("StockAdjustment", entityId))
+            .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = instanceId });
+        var service = new WorkflowIntegrationService(workflow.Object, NullLogger<WorkflowIntegrationService>.Instance);
+
+        var result = await service.SubmitAsync("StockAdjustment", entityId);
+
+        result.ApprovalRequired.Should().BeTrue();
+        result.Outcome.Should().Be(WorkflowOutcome.Pending);
+        result.ExecutionResult.WorkflowInstanceId.Should().Be(instanceId);
+    }
+
+    [Fact]
+    public async Task ConfigurationLookupFailureDoesNotBecomeAnApprovalBypass()
+    {
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(value => value.HasActiveApprovalWorkflowAsync("StockAdjustment"))
+            .ThrowsAsync(new InvalidOperationException("Configuration unavailable"));
+        var service = new WorkflowIntegrationService(workflow.Object, NullLogger<WorkflowIntegrationService>.Instance);
+
+        var act = () => service.SubmitAsync("StockAdjustment", Guid.NewGuid());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Configuration unavailable");
+        workflow.Verify(value => value.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task EmptyEntityTypeCannotResolveToDirectCompletion(string entityType)
+    {
+        var service = new WorkflowIntegrationService(Mock.Of<IWorkflowService>(), NullLogger<WorkflowIntegrationService>.Instance);
+        var act = () => service.SubmitAsync(entityType, Guid.NewGuid());
+        await act.Should().ThrowAsync<ArgumentException>();
     }
 }

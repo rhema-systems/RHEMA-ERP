@@ -167,7 +167,7 @@ public sealed class ProcurementReviewRegressionTests
     }
 
     [Fact]
-    public void Permitted_vps_startup_repairs_and_publishes_the_uat_po_workflow()
+    public void Routine_startup_does_not_republish_tenant_disabled_uat_workflows()
     {
         var source = ReadRepositoryFile(
             "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs");
@@ -180,17 +180,10 @@ public sealed class ProcurementReviewRegressionTests
             StringComparison.Ordinal);
         var lightweightBody = source[lightweightStart..lightweightEnd];
 
-        lightweightBody.Should().Contain(
-            "StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(");
-        lightweightBody.Should().Contain("_procurementAccessControlSeeder.SeedAsync()");
-        lightweightBody.Should().Contain(
-            "EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync()");
-        lightweightBody.IndexOf("_procurementAccessControlSeeder.SeedAsync()", StringComparison.Ordinal)
-            .Should().BeLessThan(
-                lightweightBody.IndexOf(
-                    "EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync()",
-                    StringComparison.Ordinal),
-                "the Draft workflow and approver configuration must be repaired before publication");
+        lightweightBody.Should().NotContain("EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync");
+        lightweightBody.Should().NotContain("_procurementAccessControlSeeder.SeedAsync");
+        source.Should().Contain("_procurementAccessControlSeeder.SeedAsync(preserveExistingWorkflows: true)",
+            "normal development seeding must preserve existing Draft edits as well as inactive workflows");
     }
 
     [Fact]

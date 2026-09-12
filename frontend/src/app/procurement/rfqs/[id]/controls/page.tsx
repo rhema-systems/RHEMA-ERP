@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import {
   buildInitialEvaluationLines,
   getRfqControlStage,
@@ -46,6 +47,7 @@ const formatAmount = (value: number) =>
 export default function ProcurementRfqControlsPage() {
   const params = useParams<{ id: string }>();
   const rfqId = params.id;
+  const workflow = useWorkflowSummary({ entityType: 'TENDER_EVALUATION', entityId: rfqId });
   const { user, hasPermission } = useAuth();
   const [control, setControl] = useState<ProcurementRfqControlDto | null>(null);
   const [awardGate, setAwardGate] =
@@ -206,7 +208,9 @@ export default function ProcurementRfqControlsPage() {
     return run(
       'submit',
       () => rfqService.submitEvaluation(rfqId, rowVersion),
-      'Evaluation submitted to the configured workflow.'
+      workflow.visibility.direct
+        ? 'Evaluation completed. No approval workflow was required.'
+        : 'Evaluation submitted to the configured workflow.'
     );
   };
 
@@ -244,7 +248,9 @@ export default function ProcurementRfqControlsPage() {
     return run(
       'award',
       () => rfqService.awardAndCreatePurchaseOrders(rfqId, { mode }),
-      'Approved RFQ award handed off to purchase order creation.'
+      control?.evaluation?.approvalRequired === false
+        ? 'Completed RFQ recommendation handed off to purchase order creation.'
+        : 'Approved RFQ award handed off to purchase order creation.'
     );
   };
 
@@ -717,12 +723,12 @@ export default function ProcurementRfqControlsPage() {
                 <Button
                   variant="secondary"
                   onClick={() => void submitCurrentEvaluation()}
-                  disabled={busy !== null}
+                  disabled={busy !== null || !workflow.visibility.known}
                 >
                   {busy === 'submit' && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
-                  Submit for approval
+                  {workflow.visibility.direct ? 'Complete evaluation' : 'Submit for approval'}
                 </Button>
               ) : null}
             </div>
@@ -735,34 +741,35 @@ export default function ProcurementRfqControlsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <ShieldCheck className="h-4 w-4" />
-              Recommendation approval and handoff
+              {control.evaluation.approvalRequired === false ? 'Recommendation and handoff' : 'Recommendation approval and handoff'}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-4">
               <Summary
                 label="Evaluation"
-                value={control.evaluation.status}
+                value={control.evaluation.approvalRequired === false && control.evaluation.status === 'Approved' ? 'Complete' : control.evaluation.status}
                 good={control.evaluation.status === 'Approved'}
               />
               <Summary
                 label="Award mode"
                 value={control.evaluation.awardMode}
               />
-              <Summary
+              {control.evaluation.approvalRequired !== false && <Summary
                 label="Workflow"
                 value={
                   control.evaluation.workflowInstanceId
                     ? `${control.evaluation.workflowInstanceId.slice(0, 12)}…`
                     : 'Not started'
                 }
-              />
+              />}
               <Summary
                 label="Evidence"
                 value={control.evaluation.evidenceReference}
               />
             </div>
-            {control.evaluation.status === 'Submitted' ? (
+            {workflow.error && <p role="alert" className="text-sm text-destructive">{workflow.error}</p>}
+            {control.evaluation.status === 'Submitted' && workflow.visibility.showApprovalControls ? (
               <>
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field label="Approval reference">

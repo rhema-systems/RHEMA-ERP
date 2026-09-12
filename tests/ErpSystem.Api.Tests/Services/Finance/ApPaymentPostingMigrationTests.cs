@@ -9,9 +9,11 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -26,7 +28,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ApPaymentPostingMigrationTests
+public sealed partial class ApPaymentPostingMigrationTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
@@ -855,7 +857,13 @@ public sealed class ApPaymentPostingMigrationTests
         Guid tenantId,
         IFxAccountingService? fxAccountingService = null,
         IWithholdingTaxCertificateService? withholdingTaxService = null,
-        IExchangeRateService? exchangeRateService = null)
+        IExchangeRateService? exchangeRateService = null,
+        IWorkflowService? workflowService = null,
+        IWorkflowApprovalPolicyResolver? approvalPolicyResolver = null,
+        bool useRealPaymentSod = false,
+        ICentralDocumentRepositoryFileService? paymentEvidenceFiles = null,
+        IControlledFileUploadService? paymentEvidenceUploader = null,
+        IFinanceAccessScopeService? paymentEvidenceAccess = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -909,19 +917,26 @@ public sealed class ApPaymentPostingMigrationTests
             tenantSettings.Object,
             Mock.Of<ILogger<VendorPaymentService>>(),
             Mock.Of<IDocumentNumberingService>(),
-            Mock.Of<IWorkflowService>(),
+            workflowService ?? Mock.Of<IWorkflowService>(),
             // Existing posting tests run with access-scope enforcement disabled. The no-op mock
             // isolates those posting assertions while dedicated scope tests exercise fail-closed
             // enforcement separately.
-            Mock.Of<IFinanceAccessScopeService>(),
+            paymentEvidenceAccess ?? Mock.Of<IFinanceAccessScopeService>(),
             new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService,
             fxAccountingService: fxAccountingService,
+            approvalPolicyResolver: approvalPolicyResolver,
             withholdingTaxService: withholdingTaxService,
             procurementControlEvents: procurementControlEvents.Object,
-            invoicePaymentSod: invoicePaymentSod.Object,
-            exchangeRateService: exchangeRateService);
+            invoicePaymentSod: useRealPaymentSod
+                ? new ProcurementInvoicePaymentSodService(new UnitOfWork(db), currentUser.Object,
+                    Mock.Of<IProcurementSodGuardService>(), procurementControlEvents.Object,
+                    Mock.Of<ILogger<ProcurementInvoicePaymentSodService>>())
+                : invoicePaymentSod.Object,
+            exchangeRateService: exchangeRateService,
+            controlledFiles: paymentEvidenceUploader,
+            centralDocuments: paymentEvidenceFiles);
 
         return (service, subledgerPostingMock);
     }

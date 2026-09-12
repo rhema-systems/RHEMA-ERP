@@ -8850,6 +8850,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AllocationRunBatch", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -8998,7 +9003,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "AllocationRuleId", "FiscalPeriodId", "Status");
 
-                    b.ToTable("AllocationRunBatches", (string)null);
+                    b.ToTable("AllocationRunBatches", null, t =>
+                        {
+                            t.HasTrigger("TR_AllocationRunBatches_ApprovalPolicy");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AllocationRunBatchLine", b =>
@@ -14499,6 +14507,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrder", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -14584,7 +14597,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("VendorId");
 
-                    b.ToTable("FinancePurchaseOrders", (string)null);
+                    b.ToTable("FinancePurchaseOrders", null, t =>
+                        {
+                            t.HasTrigger("TR_FinancePurchaseOrders_ApprovalPolicy");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrderItem", b =>
@@ -14704,6 +14720,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrderReceipt", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -14792,7 +14813,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("VendorInvoiceId");
 
-                    b.ToTable("FinancePurchaseOrderReceipts", (string)null);
+                    b.ToTable("FinancePurchaseOrderReceipts", null, t =>
+                        {
+                            t.HasTrigger("TR_FinancePurchaseOrderReceipts_ApprovalPolicy");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrderReceiptItem", b =>
@@ -19504,6 +19528,13 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.Invoice", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -19640,7 +19671,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "ExchangeRateId");
 
-                    b.ToTable("Invoices", (string)null);
+                    b.ToTable("Invoices", null, t =>
+                        {
+                            t.HasTrigger("TR_Invoices_OptionalApproval");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.InvoiceLineItem", b =>
@@ -19780,6 +19814,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("ApprovalStatus")
                         .IsRequired()
@@ -19949,6 +19987,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("JournalBatches", null, t =>
                         {
+                            t.HasTrigger("TR_JournalBatches_OptionalApproval");
                             t.HasCheckConstraint("CK_JournalBatches_ExpectedDebitTotal", "[ExpectedDebitTotal] > 0");
 
                             t.HasCheckConstraint("CK_JournalBatches_ExpectedJournalCount", "[ExpectedJournalCount] IS NULL OR [ExpectedJournalCount] > 0");
@@ -20243,6 +20282,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("JournalBatchItems", null, t =>
                         {
+                            t.HasTrigger("TR_JournalBatchItems_OptionalApproval");
                             t.HasCheckConstraint("CK_JournalBatchItems_SequenceNumber", "[SequenceNumber] > 0");
                         });
                 });
@@ -20729,7 +20769,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("JournalEntries", (string)null);
+                    b.ToTable("JournalEntries", null, t =>
+                        {
+                            t.HasTrigger("TR_JournalEntries_OptionalApprovalSubmission");
+                            t.HasTrigger("TR_JournalEntries_BatchOptionalApproval");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.JournalEntryAttachment", b =>
@@ -21493,6 +21537,10 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -21592,6 +21640,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("PaymentBatch", null, t =>
                         {
+                            t.HasTrigger("TR_PaymentBatch_OptionalApproval");
                             t.HasTrigger("TR_PaymentBatch_TDC0505Readiness");
 
                             t.HasTrigger("TR_PaymentBatch_TDC0506InvoiceProcessorSod");
@@ -25099,6 +25148,13 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.UnitJournalEntry", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -25208,7 +25264,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "EntryNumber")
                         .IsUnique();
 
-                    b.ToTable("UnitJournalEntries", (string)null);
+                    b.ToTable("UnitJournalEntries", null, t => t.HasTrigger("TR_UnitJournalEntries_OptionalApproval"));
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.UnitJournalEntryLine", b =>
@@ -25345,6 +25401,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<int?>("AcceptedSupplyKind")
                         .HasColumnType("int");
@@ -25593,6 +25654,7 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("VendorInvoice", null, t =>
                         {
                             t.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
+                            t.HasTrigger("TR_VendorInvoices_OptionalApproval");
 
                             t.HasTrigger("TR_VendorInvoice_TDC0504MandatoryMatch");
 
@@ -25613,6 +25675,13 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LandedCostItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasIndex("LandedCostItemId")
+                        .IsUnique()
+                        .HasFilter("[LandedCostItemId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.Property<Guid?>("BudgetEntryId")
                         .HasColumnType("uniqueidentifier");
@@ -26269,6 +26338,10 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<decimal>("AllocatedAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -26531,9 +26604,49 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("VendorPayment", null, t =>
                         {
+                            t.HasTrigger("TR_VendorPayment_OptionalApproval");
+                            t.HasTrigger("TR_VendorPayment_DirectEvidence");
                             t.HasTrigger("TR_VendorPayment_TDC0506InvoiceProcessorSod");
                         });
 
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentEvidenceLink", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("CentralDocumentRecordId").HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("CentralDocumentVersionId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("ChecksumSha256").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
+                    b.Property<Guid>("ClientRequestId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("ContentType").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("datetime2");
+                    b.Property<string>("CreatedBy").HasColumnType("nvarchar(max)");
+                    b.Property<Guid?>("CreatedById").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime?>("DeletedAt").HasColumnType("datetime2");
+                    b.Property<string>("DeletedBy").HasColumnType("nvarchar(max)");
+                    b.Property<DateTime?>("ExpiryDate").HasColumnType("datetime2");
+                    b.Property<string>("FileName").IsRequired().HasMaxLength(255).HasColumnType("nvarchar(255)");
+                    b.Property<long>("FileSize").HasColumnType("bigint");
+                    b.Property<Guid>("FileUploadRecordId").HasColumnType("uniqueidentifier");
+                    b.Property<bool>("IsDeleted").HasColumnType("bit");
+                    b.Property<Guid?>("LastModifiedById").HasColumnType("uniqueidentifier");
+                    b.Property<string>("RequestHash").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
+                    b.Property<string>("RequirementKey").IsRequired().HasMaxLength(150).HasColumnType("nvarchar(150)");
+                    b.Property<Guid>("TenantId").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("datetime2");
+                    b.Property<string>("UpdatedBy").HasColumnType("nvarchar(max)");
+                    b.Property<Guid>("VendorPaymentId").HasColumnType("uniqueidentifier");
+                    b.HasKey("Id");
+                    b.HasIndex("CentralDocumentRecordId");
+                    b.HasIndex("CentralDocumentVersionId");
+                    b.HasIndex("FileUploadRecordId");
+                    b.HasIndex("VendorPaymentId");
+                    b.HasIndex("TenantId", "ClientRequestId").IsUnique()
+                        .HasDatabaseName("UX_VendorPaymentEvidenceLinks_Tenant_Request");
+                    b.HasIndex("TenantId", "VendorPaymentId", "RequirementKey", "ChecksumSha256").IsUnique()
+                        .HasDatabaseName("UX_VendorPaymentEvidenceLinks_Tenant_Payment_Requirement_Hash");
+                    b.ToTable("VendorPaymentEvidenceLinks", null, t => t.HasTrigger("TR_VendorPaymentEvidenceLinks_SourceGuard"));
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
@@ -89560,6 +89673,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit");
+
                     b.Property<DateTime?>("ApprovedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -89754,7 +89870,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_InventoryDisposalCases_Method", "[Method] BETWEEN 1 AND 5");
 
-                            t.HasCheckConstraint("CK_InventoryDisposalCases_Status", "[Status] BETWEEN 1 AND 10");
+                            t.HasCheckConstraint("CK_InventoryDisposalCases_Status", "[Status] BETWEEN 1 AND 11");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -92555,6 +92671,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<DateTime?>("ApprovedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -92700,7 +92821,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_InventoryReturnVouchers_ControlledLifecycle");
 
-                            t.HasCheckConstraint("CK_InventoryReturnVouchers_Status", "[Status] BETWEEN 1 AND 5");
+                            t.HasCheckConstraint("CK_InventoryReturnVouchers_Status", "[Status] BETWEEN 1 AND 6");
 
                             t.HasCheckConstraint("CK_InventoryReturnVouchers_TotalValue", "[TotalValue] > 0");
                         });
@@ -93512,6 +93633,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<DateTime?>("ApprovalDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
@@ -95022,6 +95148,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.LandedCostItem", b =>
                 {
+                    b.Property<Guid?>("PurchaseOrderItemId").HasColumnType("uniqueidentifier");
+                    b.HasIndex("PurchaseOrderItemId");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -95121,6 +95249,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("ABCClass")
                         .HasMaxLength(1)
@@ -95454,7 +95587,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_PhysicalCountActions_AppendOnly");
 
-                            t.HasCheckConstraint("CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 13");
+                            t.HasCheckConstraint("CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 16");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -95613,6 +95746,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.PurchaseReturn", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -95777,7 +95915,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("PurchaseReturns");
+                    b.ToTable("PurchaseReturns", t => t.HasTrigger("TR_PurchaseReturns_OptionalApproval"));
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.PurchaseReturnItem", b =>
@@ -95902,6 +96040,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime>("AdjustmentDate")
                         .HasColumnType("datetime2");
@@ -96332,7 +96475,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("UnitCost")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -96963,6 +97106,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDamageLocation")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -97076,6 +97224,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("WarehouseId");
+
+                    b.HasIndex("TenantId", "WarehouseId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_WarehouseLocations_Default")
+                        .HasFilter("[IsDefault] = 1 AND [IsActive] = 1 AND [IsDeleted] = 0");
 
                     b.ToTable("WarehouseLocations");
                 });
@@ -111660,8 +111813,8 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ContentType")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
 
                     b.Property<Guid>("ContractId")
                         .HasColumnType("uniqueidentifier");
@@ -113698,7 +113851,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("ProcurementAwardReadinessDecisions", null, t =>
                         {
+                            t.HasTrigger("TR_ProcurementAwardReadinessDecisions_ExceptionalApprovalPolicy");
                             t.HasTrigger("TR_ProcurementAwardReadinessDecisions_Immutable");
+                            t.HasTrigger("TR_ProcurementAwardReadinessDecisions_RfqApprovalPolicy");
+                            t.HasTrigger("TR_ProcurementAwardReadinessDecisions_TenderApprovalPolicy");
 
                             t.HasCheckConstraint("CK_ProcurementAwardReadinessDecisions_State", "[SourceType] BETWEEN 0 AND 2 AND [Method] BETWEEN 0 AND 8 AND [DecisionSequence] >= 1 AND [Status] BETWEEN 0 AND 1 AND LEN([SourceIntegrityHash]) = 64 AND LEN([IntegrityHash]) = 64 AND ISJSON([RecommendedSubjectIdsJson]) = 1 AND ISJSON([RecommendedBusinessPartnerIdsJson]) = 1 AND ISJSON([RecommendationSnapshotJson]) = 1 AND ISJSON([EvaluationLineageJson]) = 1 AND ISJSON([SupplierLineageJson]) = 1 AND ISJSON([PrequalificationLineageJson]) = 1 AND ISJSON([VerificationLineageJson]) = 1 AND ISJSON([AuthorityLineageJson]) = 1 AND ISJSON([EvidenceLineageJson]) = 1 AND ISJSON([PrerequisiteSnapshotJson]) = 1 AND ISJSON([TimelineSnapshotJson]) = 1 AND ISJSON([BlockedReasonsJson]) = 1");
                         });
@@ -114666,6 +114822,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<decimal>("AllocatedAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -114789,7 +114950,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "BudgetCode")
                         .IsUnique();
 
-                    b.ToTable("ProcurementBudgets");
+                    b.ToTable("ProcurementBudgets", null, t => t.HasTrigger("TR_ProcurementBudgets_ApprovalPolicy"));
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementBudgetAllocation", b =>
@@ -115186,6 +115347,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -115263,7 +115429,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ProcurementBudgetRevisions");
+                    b.ToTable("ProcurementBudgetRevisions", null, t => t.HasTrigger("TR_ProcurementBudgetRevisions_ApprovalPolicy"));
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementCalendarOccurrence", b =>
@@ -118111,6 +118277,10 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<DateTime?>("AcceptedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -118357,7 +118527,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid>("WorkflowDefinitionId")
+                    b.Property<Guid?>("WorkflowDefinitionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("WorkflowInstanceId")
@@ -118394,6 +118564,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("ProcurementExceptionalSourcingControls", null, t =>
                         {
+                            t.HasTrigger("TR_ProcurementExceptionalSourcingControls_ApprovalPolicy");
                             t.HasTrigger("TR_ProcurementExceptionalSourcingControls_Lifecycle");
                         });
 
@@ -120948,6 +121119,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("ApprovalComments")
                         .HasColumnType("nvarchar(max)");
 
@@ -121110,7 +121286,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ProcurementPlans");
+                    b.ToTable("ProcurementPlans", null, t => t.HasTrigger("TR_ProcurementPlans_ApprovalPolicy"));
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementPlanItem", b =>
@@ -122743,6 +122919,10 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<DateTime?>("AdvertisedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -122880,7 +123060,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("ValidityMonths")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("WorkflowDefinitionId")
+                    b.Property<Guid?>("WorkflowDefinitionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("WorkflowInstanceId")
@@ -122907,6 +123087,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("ProcurementPrequalificationExercises", null, t =>
                         {
+                            t.HasTrigger("TR_ProcurementPrequalificationExercises_ApprovalPolicy");
                             t.HasTrigger("TR_ProcurementPrequalificationExercises_Lifecycle");
                         });
 
@@ -124215,7 +124396,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Sequence", "[Sequence] >= 1");
 
-                            t.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Type", "[ActionType] BETWEEN 0 AND 14");
+                            t.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Type", "[ActionType] BETWEEN 0 AND 15");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -124226,6 +124407,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<decimal>("AcceptedQuantity")
                         .HasColumnType("decimal(18,4)");
@@ -124403,7 +124588,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid>("WorkflowDefinitionId")
+                    b.Property<Guid?>("WorkflowDefinitionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("WorkflowInstanceId")
@@ -125531,6 +125716,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementRfqEvaluation", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -125663,6 +125853,7 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ProcurementRfqEvaluations", null, t =>
                         {
                             t.HasTrigger("TR_ProcurementRfqEvaluations_Lifecycle");
+                            t.HasTrigger("TR_ProcurementRfqEvaluations_ApprovalPolicy");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -129832,6 +130023,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementTenderControl", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -130079,6 +130275,7 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ProcurementTenderControls", null, t =>
                         {
                             t.HasTrigger("TR_ProcurementTenderControls_Lifecycle");
+                            t.HasTrigger("TR_ProcurementTenderControls_ApprovalPolicy");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -131956,6 +132153,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("datetime2");
 
@@ -132258,6 +132460,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("PurchaseOrders", null, t =>
                         {
+                            t.HasTrigger("TR_PurchaseOrders_ApprovalPolicy");
                             t.HasTrigger("TR_PurchaseOrders_ApprovedSourceProtected");
 
                             t.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
@@ -132274,6 +132477,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", b =>
                 {
+                    b.Property<int>("LineType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -132390,6 +132598,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("PurchaseOrderItems", null, t =>
                         {
+                            t.HasCheckConstraint("CK_PurchaseOrderItems_LineType", "[LineType] IN (1, 2, 3, 4)");
                             t.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected");
                         });
 
@@ -132466,6 +132675,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderLandedCostPlanItem", b =>
                 {
+                    b.Property<Guid?>("PurchaseOrderItemId").HasColumnType("uniqueidentifier");
+                    b.HasIndex("PurchaseOrderItemId");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -132840,6 +133051,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("AmendmentNotes")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
@@ -133133,6 +133349,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("PurchaseRequisitions", null, t =>
                         {
+                            t.HasTrigger("TR_PurchaseRequisitions_ApprovalPolicy");
                             t.HasTrigger("TR_PurchaseRequisitions_LinkageGuard");
 
                             t.HasCheckConstraint("CK_PurchaseRequisitions_ExceptionLink", "([ApprovedExceptionRuleId] IS NULL AND [ExceptionWorkflowInstanceId] IS NULL AND [ExceptionApprovalReference] IS NULL AND [ExceptionApprovedAtUtc] IS NULL) OR ([ApprovedExceptionRuleId] IS NOT NULL AND [ExceptionWorkflowInstanceId] IS NOT NULL AND [ExceptionApprovalReference] IS NOT NULL AND [ExceptionApprovedAtUtc] IS NOT NULL)");
@@ -134527,6 +134744,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.Tender", b =>
                 {
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<int?>("BidValidityPeriodDays")
                         .HasColumnType("int");
 
@@ -134704,6 +134926,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("Tenders", null, t =>
                         {
+                            t.HasTrigger("TR_Tenders_ApprovalPolicy");
                             t.HasTrigger("TR_Tenders_SourcingReleaseGuard");
                             t.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
                             t.HasTrigger("TR_Tenders_BidValidityTerms_Immutable");
@@ -179211,6 +179434,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorInvoiceLineItem", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.LandedCostItem", null)
+                        .WithMany()
+                        .HasForeignKey("LandedCostItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.BudgetEntry", "BudgetEntry")
                         .WithMany()
                         .HasForeignKey("BudgetEntryId")
@@ -179475,6 +179703,25 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("WithholdingTax");
 
                     b.Navigation("WithholdingTaxAccount");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentEvidenceLink", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentRecord", "CentralDocumentRecord")
+                        .WithMany().HasForeignKey("CentralDocumentRecordId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentVersion", "CentralDocumentVersion")
+                        .WithMany().HasForeignKey("CentralDocumentVersionId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.FileUploadRecord", "FileUploadRecord")
+                        .WithMany().HasForeignKey("FileUploadRecordId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Finance.VendorPayment", "VendorPayment")
+                        .WithMany().HasForeignKey("VendorPaymentId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany().HasForeignKey("TenantId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.Navigation("CentralDocumentRecord");
+                    b.Navigation("CentralDocumentVersion");
+                    b.Navigation("FileUploadRecord");
+                    b.Navigation("VendorPayment");
+                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentAllocation", b =>
@@ -200080,6 +200327,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.LandedCostItem", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", null)
+                        .WithMany().HasForeignKey("PurchaseOrderItemId").OnDelete(DeleteBehavior.NoAction);
                     b.HasOne("ErpSystem.Core.Entities.Inventory.LandedCost", "LandedCost")
                         .WithMany("Items")
                         .HasForeignKey("LandedCostId")
@@ -205770,8 +206019,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowDefinition", "WorkflowDefinition")
                         .WithMany()
                         .HasForeignKey("WorkflowDefinitionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowInstance", "WorkflowInstance")
                         .WithMany()
@@ -206814,8 +207062,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowDefinition", "WorkflowDefinition")
                         .WithMany()
                         .HasForeignKey("WorkflowDefinitionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowInstance", "WorkflowInstance")
                         .WithMany()
@@ -207175,8 +207422,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowDefinition", "WorkflowDefinition")
                         .WithMany()
                         .HasForeignKey("WorkflowDefinitionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Workflow.WorkflowInstance", "WorkflowInstance")
                         .WithMany()
@@ -209447,6 +209693,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderLandedCostPlanItem", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", null)
+                        .WithMany().HasForeignKey("PurchaseOrderItemId").OnDelete(DeleteBehavior.NoAction);
                     b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderLandedCostPlan", "PurchaseOrderLandedCostPlan")
                         .WithMany("Items")
                         .HasForeignKey("PurchaseOrderLandedCostPlanId")
@@ -225134,6 +225382,95 @@ namespace ErpSystem.Data.Migrations
                 {
                     b.Navigation("Notches");
                 });
+            // 20260912235500: Finance-owned Inventory return handoff and direct invoice credit.
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNote", b =>
+            {
+                b.Property<Guid?>("InventoryPurchaseReturnId").HasColumnType("uniqueidentifier");
+                b.Property<Guid?>("ReturnDispatchPostingEventId").HasColumnType("uniqueidentifier");
+                b.Property<Guid?>("ReturnDispatchJournalEntryId").HasColumnType("uniqueidentifier");
+                b.Property<decimal>("DirectInvoiceAppliedAmount").HasColumnType("decimal(18,2)");
+                b.Property<DateTime?>("DirectInvoiceAppliedAt").HasColumnType("datetime2");
+                b.Property<Guid?>("DirectInvoiceAppliedById").HasColumnType("uniqueidentifier");
+                b.HasIndex("InventoryPurchaseReturnId");
+                b.HasIndex("ReturnDispatchPostingEventId");
+                b.HasIndex("ReturnDispatchJournalEntryId");
+                b.HasIndex("TenantId", "InventoryPurchaseReturnId").IsUnique()
+                    .HasDatabaseName("UX_SupplierDebitNotes_Tenant_InventoryReturn")
+                    .HasFilter("[InventoryPurchaseReturnId] IS NOT NULL AND [IsDeleted] = 0");
+                b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturn", null).WithMany()
+                    .HasForeignKey("InventoryPurchaseReturnId").OnDelete(DeleteBehavior.Restrict);
+                b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null).WithMany()
+                    .HasForeignKey("ReturnDispatchPostingEventId").OnDelete(DeleteBehavior.Restrict);
+                b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null).WithMany()
+                    .HasForeignKey("ReturnDispatchJournalEntryId").OnDelete(DeleteBehavior.Restrict);
+                b.ToTable("SupplierDebitNotes", t => t.HasTrigger("TR_SupplierDebitNotes_InventoryReturnCreditGuard"));
+            });
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteLineItem", b =>
+            {
+                b.Property<Guid?>("InventoryPurchaseReturnItemId").HasColumnType("uniqueidentifier");
+                b.HasIndex("InventoryPurchaseReturnItemId");
+                b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturnItem", null).WithMany()
+                    .HasForeignKey("InventoryPurchaseReturnItemId").OnDelete(DeleteBehavior.Restrict);
+            });
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSettings", b =>
+            {
+                b.Property<Guid?>("ReturnToVendorClearingAccountId").HasColumnType("uniqueidentifier");
+                b.Property<Guid?>("PurchaseReturnVarianceAccountId").HasColumnType("uniqueidentifier");
+                b.HasIndex("ReturnToVendorClearingAccountId");
+                b.HasIndex("PurchaseReturnVarianceAccountId");
+                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
+                    .HasForeignKey("ReturnToVendorClearingAccountId").OnDelete(DeleteBehavior.Restrict);
+                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
+                    .HasForeignKey("PurchaseReturnVarianceAccountId").OnDelete(DeleteBehavior.Restrict);
+            });
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.InventorySupplierReturnPosting", b =>
+            {
+                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uniqueidentifier");
+                b.Property<Guid>("TenantId").HasColumnType("uniqueidentifier");
+                b.Property<Guid>("InventoryPurchaseReturnId").HasColumnType("uniqueidentifier");
+                b.Property<Guid>("OriginalVendorInvoiceId").HasColumnType("uniqueidentifier");
+                b.Property<Guid>("PostingEventId").HasColumnType("uniqueidentifier");
+                b.Property<Guid>("JournalEntryId").HasColumnType("uniqueidentifier");
+                b.Property<Guid>("ClearingAccountId").HasColumnType("uniqueidentifier");
+                b.Property<Guid>("InventoryAccountId").HasColumnType("uniqueidentifier");
+                b.Property<decimal>("CarryingAmount").HasColumnType("decimal(18,2)");
+                b.Property<DateTime>("PostingDate").HasColumnType("datetime2");
+                b.Property<DateTime>("CreatedAt").HasColumnType("datetime2");
+                b.Property<DateTime?>("UpdatedAt").HasColumnType("datetime2");
+                b.Property<string>("CreatedBy").HasColumnType("nvarchar(max)");
+                b.Property<string>("UpdatedBy").HasColumnType("nvarchar(max)");
+                b.Property<Guid?>("CreatedById").HasColumnType("uniqueidentifier");
+                b.Property<Guid?>("LastModifiedById").HasColumnType("uniqueidentifier");
+                b.Property<bool>("IsDeleted").HasColumnType("bit");
+                b.Property<DateTime?>("DeletedAt").HasColumnType("datetime2");
+                b.Property<string>("DeletedBy").HasColumnType("nvarchar(max)");
+                b.HasKey("Id");
+                b.HasIndex("TenantId", "InventoryPurchaseReturnId").IsUnique();
+                b.HasIndex("InventoryPurchaseReturnId");
+                b.HasIndex("OriginalVendorInvoiceId");
+                b.HasIndex("PostingEventId");
+                b.HasIndex("JournalEntryId");
+                b.HasIndex("ClearingAccountId");
+                b.HasIndex("InventoryAccountId");
+                b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturn", null).WithMany()
+                    .HasForeignKey("InventoryPurchaseReturnId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.HasOne("ErpSystem.Core.Entities.Finance.VendorInvoice", null).WithMany()
+                    .HasForeignKey("OriginalVendorInvoiceId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null).WithMany()
+                    .HasForeignKey("PostingEventId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null).WithMany()
+                    .HasForeignKey("JournalEntryId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
+                    .HasForeignKey("ClearingAccountId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
+                    .HasForeignKey("InventoryAccountId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant").WithMany()
+                    .HasForeignKey("TenantId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                b.Navigation("Tenant");
+                b.ToTable("InventorySupplierReturnPostings", t => t.HasTrigger("TR_InventorySupplierReturnPostings_Immutable"));
+            });
+            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.StockAdjustment", b =>
+                b.ToTable("StockAdjustments", t => t.HasTrigger("TR_StockAdjustments_FifoSequenceGuard")));
 #pragma warning restore 612, 618
         }
     }

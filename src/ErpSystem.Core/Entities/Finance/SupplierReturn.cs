@@ -115,6 +115,15 @@ public class SupplierReturnLineItem : TenantEntity
 
 public class SupplierDebitNote : TenantEntity
 {
+    /// <summary>Exact Inventory return, distinct from the legacy Finance SupplierReturn FK.</summary>
+    public Guid? InventoryPurchaseReturnId { get; set; }
+    public Guid? ReturnDispatchPostingEventId { get; set; }
+    public Guid? ReturnDispatchJournalEntryId { get; set; }
+    /// <summary>Audited whole-note credit-only settlement of OriginalVendorInvoiceId; never a fabricated payment.</summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal DirectInvoiceAppliedAmount { get; set; }
+    public DateTime? DirectInvoiceAppliedAt { get; set; }
+    public Guid? DirectInvoiceAppliedById { get; set; }
     [Required]
     [MaxLength(50)]
     public string DebitNoteNumber { get; set; } = string.Empty;
@@ -216,6 +225,7 @@ public class SupplierDebitNote : TenantEntity
 
 public class SupplierDebitNoteLineItem : TenantEntity
 {
+    public Guid? InventoryPurchaseReturnItemId { get; set; }
     [Required]
     public Guid SupplierDebitNoteId { get; set; }
     public virtual SupplierDebitNote SupplierDebitNote { get; set; } = null!;

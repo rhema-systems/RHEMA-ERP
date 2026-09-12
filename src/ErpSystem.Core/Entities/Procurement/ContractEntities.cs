@@ -309,7 +309,7 @@ public class ContractDocument : TenantEntity
 
     public Guid? CentralDocumentVersionId { get; set; }
 
-    [MaxLength(50)]
+    [MaxLength(255)]
     public string? ContentType { get; set; }
 
     public long? FileSize { get; set; }

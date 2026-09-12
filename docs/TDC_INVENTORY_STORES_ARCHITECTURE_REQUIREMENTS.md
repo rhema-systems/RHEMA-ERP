@@ -98,6 +98,18 @@ The architecture document requires secure, access-controlled, versioned, auditab
 
 TDC does not define exact Stores job titles, user names, thresholds, or a complete approval matrix in the architecture document. Those are configuration decisions subject to Section 18.2 and must be represented by controlled roles and workflow configuration rather than hard-coded user identities.
 
+## Stock disposal versus fixed-asset disposal
+
+The source was rechecked on **12 September 2026**: **Section16.1** supplies shared item, location, valuation, approval, ledger and audit controls; **Section18.2** leaves precise thresholds, roles and routing to configuration; **Section20.1** includes disposals in Inventory and Stores. These passages do not prescribe a universal three-person committee or separate Internal Audit step for every ordinary stock disposal.
+
+**FR-FA-008 explicitly requires the Board of Survey/procurement-disposal controls for fixed assets.** That is a separate owner and requirement, not authority to impose an unconditional fixed-asset committee on ordinary stock. The current Inventory Disposal screen accepts ordinary `StockItem` records only; fixed assets must use their governed Fixed Asset disposal process.
+
+The agreed implementation uses the configured shared approval workflow when active. When none is active, it records a server-controlled no-approval decision and permits authorized continuation without inventing a reviewer. This direct-mode behavior is an implementation/configuration decision, not a claim that the architecture waives legal, stock, Finance, tenant, security or audit controls. Retained in-flight approvals and historical decisions must remain intact.
+
+Supporting files are optional in the current no-workflow stock-disposal path; the active approval path requires evidence. Any attached file still belongs to central DMS security, versioning, access and audit rules. Final stock and Finance posting remains transactional and duplicate-resistant. UAT must distinguish estimated draft value from authoritative posted value.
+
+Acceptance is recorded in **UAT-INV-018** and the customer walkthrough's **B23**. As of this update, implementation/testing is in progress and live disposal has **not** been verified; `ERR_BLOCKED_BY_CLIENT` is the current browser blocker. Do not infer a pass from the design or code changes.
+
 ## Required exception routes
 
 Figure 10 explicitly requires these correction paths:
@@ -130,7 +142,7 @@ Section 18 requires exceptions to enter a correction/escalation/rework route wit
 | Return | Approved return restores the governed quantity/value and reverses related allocation/accounting/asset custody as applicable. | Excess or duplicate return is rejected. |
 | Transfer | Approved dispatch reduces the source; governed receipt increases the destination; discrepancy remains open until resolved. | Same warehouse, unauthorized actor/location, duplicate dispatch/receipt, or unresolved close is rejected. |
 | Count and variance | Count evidence compares physical to system quantity and approved variance posts once. | Unapproved variance or direct stock editing is impossible. |
-| Damage, obsolescence, write-off, disposal | Evidence, reason, approval, valuation impact, and audit trail are retained. | Maker/checker conflict or missing approval prevents posting. |
+| Damage, obsolescence, write-off, stock disposal | Applicable evidence, reason, configured approval or truthful no-approval decision, valuation impact and audit trail are retained. | Active-route maker/checker conflicts, invalid stock/location/access, duplicate posting or incomplete Finance execution are rejected; fixed assets cannot bypass their separate disposal owner. |
 | Valuation and ledger | Movement register, stock balance, valuation and ledger postings reconcile by period and location. | Unbalanced, missing, duplicate, or unexplained postings surface as exceptions. |
 | Three-way match and AP | PO, GRN/certificate, inspected quantity, VAT invoice, and payment voucher reconcile before payment. | Duplicate invoice, excess invoice, missing receipt/certificate, or mismatch blocks payment unless an approved exception exists. |
 | Reporting | Online inventory, movement, receipt, issue, transfer, count/variance, valuation, reconciliation, exception, and audit views drill to source and export correctly. | Role and data scope prevent unauthorized visibility/export. |

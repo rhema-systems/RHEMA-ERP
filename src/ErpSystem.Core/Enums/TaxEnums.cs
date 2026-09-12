@@ -75,6 +75,8 @@ namespace ErpSystem.Core.Enums
     /// </summary>
     public enum TaxTreatment
     {
+        /// <summary>Draft only: Finance has not reviewed the tax treatment yet.</summary>
+        PendingReview = 5,
         /// <summary>
         /// Standard-rated taxable supply.
         /// </summary>

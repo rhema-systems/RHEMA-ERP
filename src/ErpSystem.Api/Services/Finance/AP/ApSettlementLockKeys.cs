@@ -7,6 +7,9 @@ namespace ErpSystem.Api.Services.Finance.AP;
 /// </summary>
 internal static class ApSettlementLockKeys
 {
+    internal static string Batch(Guid tenantId, Guid batchId) =>
+        $"tdc0505-batch:{tenantId:N}:{batchId:N}";
+
     internal static string Payment(Guid tenantId, Guid paymentId) =>
         $"tdc0505-payment:{tenantId:N}:{paymentId:N}";
 

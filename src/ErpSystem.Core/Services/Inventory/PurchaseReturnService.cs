@@ -17,7 +17,7 @@ namespace ErpSystem.Core.Services.Inventory;
 /// Finance/AP remains the owner of a debit note or payment adjustment; this service owns
 /// the physical-stock lifecycle and its GRN lineage.
 /// </summary>
-public sealed class PurchaseReturnService : IPurchaseReturnService
+public sealed partial class PurchaseReturnService : IPurchaseReturnService
 {
     private const string WorkflowEntityType = "PurchaseReturn";
     private readonly IPurchaseReturnRepository _returns;
@@ -34,6 +34,9 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<PurchaseReturnService> _logger;
+    private readonly IInventoryValuationService _valuation;
+    private readonly IInventoryTrackingControlService _tracking;
+    private readonly ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff? _financeHandoff;
 
     public PurchaseReturnService(
         IPurchaseReturnRepository returns,
@@ -49,7 +52,10 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         IProcurementControlEventService events,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
-        ILogger<PurchaseReturnService> logger)
+        ILogger<PurchaseReturnService> logger,
+        IInventoryValuationService valuation,
+        IInventoryTrackingControlService tracking,
+        ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff? financeHandoff = null)
     {
         _returns = returns;
         _grns = grns;
@@ -65,6 +71,9 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _logger = logger;
+        _valuation = valuation;
+        _tracking = tracking;
+        _financeHandoff = financeHandoff;
     }
 
     public async Task<IEnumerable<PurchaseReturnDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null)
@@ -77,37 +86,33 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
             .AsNoTracking();
         if (fromDate.HasValue) query = query.Where(item => item.ReturnDate >= fromDate.Value.Date);
         if (toDate.HasValue) query = query.Where(item => item.ReturnDate < toDate.Value.Date.AddDays(1));
-        return (await query.OrderByDescending(item => item.ReturnDate).ThenByDescending(item => item.CreatedAt).ToListAsync())
-            .Select(Map);
+        return await MapAccessibleAsync(await query.OrderByDescending(item => item.ReturnDate).ThenByDescending(item => item.CreatedAt).ToListAsync());
     }
 
     public async Task<IEnumerable<PurchaseReturnDto>> GetBySupplierAsync(Guid supplierId)
     {
         await RequireReadAsync();
-        return (await _returns.GetBySupplierAsync(supplierId))
-            .Where(item => item.TenantId == _currentUser.TenantId).Select(Map);
+        return await MapAccessibleAsync(await _returns.GetBySupplierAsync(supplierId));
     }
 
     public async Task<IEnumerable<PurchaseReturnDto>> GetByWarehouseAsync(Guid warehouseId)
     {
         await RequireReadAsync();
         await RequireCapabilityAsync("procurement.inventory.read", warehouseId, null, "Read", warehouseId.ToString("N"));
-        return (await _returns.GetByWarehouseAsync(warehouseId))
-            .Where(item => item.TenantId == _currentUser.TenantId).Select(Map);
+        return await MapAccessibleAsync(await _returns.GetByWarehouseAsync(warehouseId));
     }
 
     public async Task<IEnumerable<PurchaseReturnDto>> GetPendingApprovalAsync()
     {
         await RequireReadAsync();
-        return (await _returns.GetPendingApprovalAsync())
-            .Where(item => item.TenantId == _currentUser.TenantId).Select(Map);
+        return await MapAccessibleAsync(await _returns.GetPendingApprovalAsync());
     }
 
     public async Task<PurchaseReturnDetailDto?> GetByIdAsync(Guid id)
     {
         var value = await RequireReturnAsync(id);
         await RequireCapabilityAsync("procurement.inventory.read", value.WarehouseId, null, "Read", value.ReturnNumber);
-        return MapDetail(value);
+        return await AddActionsAsync(value, MapDetail(value));
     }
 
     public async Task<PurchaseReturnDetailDto?> GetByReturnNumberAsync(string returnNumber)
@@ -115,10 +120,17 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         var value = await _returns.GetByReturnNumberAsync(returnNumber);
         if (value is null || value.TenantId != _currentUser.TenantId) return null;
         await RequireCapabilityAsync("procurement.inventory.read", value.WarehouseId, null, "Read", value.ReturnNumber);
-        return MapDetail(await RequireReturnAsync(value.Id));
+        value = await RequireReturnAsync(value.Id);
+        return await AddActionsAsync(value, MapDetail(value));
     }
 
-    public async Task<PurchaseReturnDto> CreateAsync(CreatePurchaseReturnDto dto, Guid userId)
+    public Task<PurchaseReturnDto> CreateAsync(CreatePurchaseReturnDto dto, Guid userId)
+        => InTransactionAsync(() => CreateCoreAsync(dto, userId));
+
+    public Task<PurchaseReturnDto> UpdateAsync(Guid id, CreatePurchaseReturnDto dto, Guid userId)
+        => InTransactionAsync(() => CreateCoreAsync(dto, userId, id));
+
+    private async Task<PurchaseReturnDto> CreateCoreAsync(CreatePurchaseReturnDto dto, Guid userId, Guid? existingId = null)
     {
         EnsureActor(userId);
         if (dto.GoodsReceiptNoteId is null || dto.GoodsReceiptNoteId == Guid.Empty)
@@ -130,7 +142,8 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         if (dto.Items.GroupBy(item => item.GRNItemId).Any(group => !group.Key.HasValue || group.Count() > 1))
             throw Validation("INV_SUPPLIER_RETURN_DUPLICATE_LINE", "Each selected GRN line may appear only once in a supplier return.");
 
-        var grn = await _grns.GetWithItemsAsync(dto.GoodsReceiptNoteId.Value)
+        await _unitOfWork.AcquireTransactionLockAsync($"supplier-return-source:{_currentUser.TenantId:N}:{dto.GoodsReceiptNoteId:N}");
+        var grn = await LoadAcceptedSourceAsync(dto.GoodsReceiptNoteId.Value)
             ?? throw NotFound("INV_SUPPLIER_RETURN_GRN_NOT_FOUND", "The selected goods receipt note was not found.");
         if (grn.TenantId != _currentUser.TenantId || grn.IsDeleted)
             throw NotFound("INV_SUPPLIER_RETURN_GRN_NOT_FOUND", "The selected goods receipt note was not found.");
@@ -140,8 +153,12 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
             throw Validation("INV_SUPPLIER_RETURN_SOURCE_MISMATCH", "Supplier and warehouse are derived from the selected GRN and cannot be changed.");
 
         await RequireCapabilityAsync("procurement.inventory.issue", grn.WarehouseId, null, "Create", grn.GRNNumber);
-        var previous = await PriorReturnQuantitiesAsync(grn.Id);
-        var created = new PurchaseReturn
+        var existing = existingId.HasValue ? await RequireReturnAsync(existingId.Value) : null;
+        if (existing is not null && (existing.Status != "Draft" || existing.GoodsReceiptNoteId != grn.Id ||
+            await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, existing.Id)))
+            throw Conflict("INV_SUPPLIER_RETURN_DRAFT_REQUIRED", "Only an unsubmitted draft can be edited. Keep its selected GRN; create a new return for a different GRN.");
+        var previous = await PriorReturnQuantitiesAsync(grn.Id, existingId);
+        var created = existing ?? new PurchaseReturn
         {
             Id = Guid.NewGuid(),
             TenantId = _currentUser.TenantId,
@@ -165,20 +182,26 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
             CreatedBy = _currentUser.Username
         };
 
+        var replacementItems = new List<PurchaseReturnItem>();
         foreach (var input in dto.Items)
         {
             var source = grn.Items.SingleOrDefault(item => item.Id == input.GRNItemId!.Value)
                 ?? throw Validation("INV_SUPPLIER_RETURN_LINE_NOT_FOUND", "A selected source line does not belong to the selected GRN.");
+            if (source.IsDeleted || source.TenantId != created.TenantId || source.InventoryItemId != input.InventoryItemId)
+                throw Validation("INV_SUPPLIER_RETURN_LINE_MISMATCH", "The item must match the exact accepted GRN line.");
+            await RequireLocationAsync(grn.WarehouseId, source.StorageLocationId);
+            await RequireCapabilityAsync("procurement.inventory.issue", grn.WarehouseId, source.StorageLocationId, "Create", grn.GRNNumber);
             if (source.AcceptedQuantity <= 0)
                 throw Validation("INV_SUPPLIER_RETURN_LINE_NOT_ACCEPTED", $"{source.ItemCode} has no accepted quantity available for a supplier return.");
             var alreadyReserved = previous.GetValueOrDefault(source.Id);
             if (input.ReturnQuantity > source.AcceptedQuantity - alreadyReserved)
                 throw Conflict("INV_SUPPLIER_RETURN_EXCEEDS_RECEIVED", $"Return quantity exceeds the remaining accepted quantity for {source.ItemCode}.");
 
-            created.Items.Add(new PurchaseReturnItem
+            replacementItems.Add(new PurchaseReturnItem
             {
                 Id = Guid.NewGuid(),
                 TenantId = created.TenantId,
+                PurchaseReturnId = created.Id,
                 InventoryItemId = source.InventoryItemId,
                 GoodsReceiptNoteItemId = source.Id,
                 ItemCode = source.ItemCode,
@@ -200,58 +223,79 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
                 CreatedBy = _currentUser.Username
             });
         }
+        if (existing is not null)
+        {
+            await _unitOfWork.Repository<PurchaseReturnItem>().HardDeleteRangeAsync(existing.Items.ToArray());
+            // HardDeleteRangeAsync executes SQL directly. Its old child entities
+            // must not remain tracked when the navigation is replaced, otherwise
+            // EF tries to soft-delete those already removed rows again. Nothing
+            // has been staged yet; reload the header under the same transaction
+            // and source lock before attaching the validated replacement lines.
+            _unitOfWork.ClearTrackedChanges();
+            existing = await RequireReturnAsync(existing.Id);
+            created = existing;
+        }
+        created.Items = replacementItems;
+        created.ReturnReason = NormalizeReason(dto.ReturnReason);
+        created.ReturnReasonDetails = Normalize(dto.Notes, 2000);
+        created.Notes = Normalize(dto.Notes, 2000);
         created.TotalItems = created.Items.Count;
         created.TotalQuantity = created.Items.Sum(item => item.ReturnQuantity);
         created.TotalValue = created.Items.Sum(item => item.LineValue);
 
-        await _returns.AddAsync(created);
+        if (existing is null) await _returns.AddAsync(created);
+        else await _unitOfWork.Repository<PurchaseReturnItem>().AddRangeAsync(replacementItems);
         await _unitOfWork.SaveChangesAsync();
-        await RecordAsync(created, "Create", ProcurementControlEventResult.Allowed, "Draft supplier return created from an accepted GRN.");
+        await RecordAsync(created, existing is null ? "Create" : $"Edit-{Guid.NewGuid():N}", ProcurementControlEventResult.Allowed,
+            existing is null ? "Draft supplier return created from an accepted GRN." : "Draft supplier-return quantities, lines and reason updated before submission.");
         _logger.LogInformation("Created supplier return {ReturnNumber} from GRN {GrnNumber}", created.ReturnNumber, grn.GRNNumber);
         return Map(created);
     }
 
-    public async Task<bool> SubmitForApprovalAsync(Guid returnId, Guid userId)
+    public Task<bool> SubmitForApprovalAsync(Guid returnId, Guid userId)
+        => InTransactionAsync(() => SubmitCoreAsync(returnId, userId));
+
+    private async Task<bool> SubmitCoreAsync(Guid returnId, Guid userId)
     {
         EnsureActor(userId);
         var value = await RequireReturnAsync(returnId);
         await RequireCapabilityAsync("procurement.inventory.issue", value.WarehouseId, null, "Submit", value.ReturnNumber);
         if (value.Status != "Draft") throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only a draft supplier return can be submitted.");
+        await ValidateSourceAsync(value);
         var workflow = await _workflow.SubmitAsync(WorkflowEntityType, returnId);
         if (!workflow.ExecutionResult.Success)
             throw Conflict("INV_SUPPLIER_RETURN_WORKFLOW_SUBMIT", workflow.ExecutionResult.Message ?? "The supplier-return workflow could not be started.");
-        value.Status = workflow.Outcome switch
-        {
-            WorkflowOutcome.Approved => "Approved",
-            WorkflowOutcome.Rejected => "Rejected",
-            _ => "Submitted"
-        };
-        if (value.Status == "Approved") { value.ApprovedById = userId; value.ApprovedDate = DateTime.UtcNow; }
-        await _returns.UpdateAsync(value);
+        ApplySubmission(value, workflow);
         await _unitOfWork.SaveChangesAsync();
         await RecordAsync(value, "Submit", workflow.Outcome == WorkflowOutcome.Rejected ? ProcurementControlEventResult.Rejected : ProcurementControlEventResult.Allowed,
-            "Supplier return submitted to the shared workflow.");
+            value.ApprovalRequired ? "Supplier return submitted to the shared workflow." : "No active approval workflow; return ready for dispatch. No human approval was recorded.");
         return true;
     }
 
-    public async Task<bool> ApproveAsync(Guid returnId, Guid userId)
+    public Task<bool> ApproveAsync(Guid returnId, Guid userId)
+        => InTransactionAsync(() => ApproveCoreAsync(returnId, userId));
+
+    private async Task<bool> ApproveCoreAsync(Guid returnId, Guid userId)
     {
         EnsureActor(userId);
         var value = await RequireReturnAsync(returnId);
         await RequireCapabilityAsync("procurement.inventory.adjust.approve", value.WarehouseId, null, "Approve", value.ReturnNumber);
-        if (value.Status != "Submitted") throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only a submitted supplier return can be approved.");
+        if (!value.ApprovalRequired || value.Status != "Submitted") throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only a submitted supplier return with an approval workflow can be approved.");
         if (value.RequestedById == userId) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return requester cannot approve the same return.");
         if (!await _workflow.CanUserApproveAsync(WorkflowEntityType, returnId, userId))
             throw Forbidden("INV_SUPPLIER_RETURN_WORKFLOW_FORBIDDEN", "You are not assigned to the active supplier-return workflow step.");
         var result = await _workflow.ProcessApprovalAsync(WorkflowEntityType, returnId, userId, "Approve");
-        if (!result.ExecutionResult.Success || result.Outcome != WorkflowOutcome.Approved)
+        if (!result.ExecutionResult.Success || !result.ApprovalRequired || result.Outcome is not (WorkflowOutcome.Approved or WorkflowOutcome.Pending))
             throw Conflict("INV_SUPPLIER_RETURN_WORKFLOW_APPROVAL", result.ExecutionResult.Message ?? "The supplier-return workflow did not approve this return.");
-        value.Status = "Approved";
-        value.ApprovedById = userId;
-        value.ApprovedDate = DateTime.UtcNow;
-        await _returns.UpdateAsync(value);
+        if (result.Outcome == WorkflowOutcome.Approved)
+        {
+            value.Status = "Approved";
+            value.ApprovedById = userId;
+            value.ApprovedDate = DateTime.UtcNow;
+        }
         await _unitOfWork.SaveChangesAsync();
-        await RecordAsync(value, "Approve", ProcurementControlEventResult.Allowed, "Independent supplier-return approval recorded.");
+        await RecordAsync(value, $"Approve-{userId:N}", ProcurementControlEventResult.Allowed,
+            result.Outcome == WorkflowOutcome.Approved ? "Independent final supplier-return approval recorded." : "Approval step recorded; the next assigned reviewer must complete the workflow.");
         return true;
     }
 
@@ -284,20 +328,25 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
             try
             {
+                _valuation.ResetProcessingAttempt();
                 await _unitOfWork.AcquireTransactionLockAsync($"supplier-return:{_currentUser.TenantId:N}:{returnId:N}");
                 var value = await RequireReturnAsync(returnId);
                 await RequireCapabilityAsync("procurement.inventory.issue", value.WarehouseId, null, "Ship", value.ReturnNumber);
-                if (value.Status != "Approved") throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only an approved supplier return can be dispatched.");
-                if (value.ApprovedById == userId) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return approver cannot dispatch the same return.");
+                if (!CanDispatchState(value)) throw Conflict("INV_SUPPLIER_RETURN_STATE", "The supplier return is not ready for dispatch.");
+                if (value.ApprovalRequired && value.ApprovedById == userId) throw Forbidden("INV_SUPPLIER_RETURN_SOD", "The supplier-return approver cannot dispatch the same return.");
+                if (!value.ApprovalRequired && await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, value.Id))
+                    throw Conflict("INV_SUPPLIER_RETURN_WORKFLOW_RETAINED", "An existing active approval instance must be completed before dispatch.");
+                await ValidateSourceAsync(value);
 
                 foreach (var line in value.Items)
                     await DispatchLineAsync(value, line, userId);
                 value.Status = "Shipped";
                 value.ShippedDate = DateTime.UtcNow;
                 value.TrackingNumber = Normalize(trackingNumber, 100);
-                await _returns.UpdateAsync(value);
                 await _unitOfWork.SaveChangesAsync();
-                await RecordAsync(value, "Ship", ProcurementControlEventResult.Allowed, "Approved goods dispatched back to supplier.");
+                if (_financeHandoff is not null)
+                    await _financeHandoff.TryRecordDispatchAsync(value.Id);
+                await RecordAsync(value, "Ship", ProcurementControlEventResult.Allowed, "Goods dispatched back to supplier. Finance resolution remains pending.");
                 await _unitOfWork.CommitAsync();
                 return true;
             }
@@ -321,7 +370,7 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         value.CreditNoteNumber = creditNoteNumber.Trim();
         value.CreditAmount = amount;
         value.AcknowledgedDate = DateTime.UtcNow;
-        value.Status = "Completed";
+        value.Status = "Acknowledged";
         await _returns.UpdateAsync(value);
         await _unitOfWork.SaveChangesAsync();
         await RecordAsync(value, "RecordCredit", ProcurementControlEventResult.Allowed,
@@ -334,8 +383,8 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         EnsureActor(userId);
         var value = await RequireReturnAsync(returnId);
         await RequireCapabilityAsync("procurement.inventory.issue", value.WarehouseId, null, "Cancel", value.ReturnNumber);
-        if (value.Status is not ("Draft" or "Submitted"))
-            throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only a draft or submitted supplier return can be cancelled.");
+        if (value.Status is not ("Draft" or "Submitted" or "ReadyToDispatch"))
+            throw Conflict("INV_SUPPLIER_RETURN_STATE", "Only an unapproved or direct-ready supplier return can be cancelled before dispatch.");
         if (string.IsNullOrWhiteSpace(reason)) throw Validation("INV_SUPPLIER_RETURN_CANCEL_REASON", "A cancellation reason is required.");
         if (value.Status == "Submitted")
         {
@@ -354,31 +403,57 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
     {
         var warehouse = await _warehouses.GetByIdAsync(parent.WarehouseId)
             ?? throw NotFound("INV_SUPPLIER_RETURN_WAREHOUSE_NOT_FOUND", "The return warehouse was not found.");
+        if (warehouse.IsDeleted || warehouse.TenantId != parent.TenantId)
+            throw NotFound("INV_SUPPLIER_RETURN_WAREHOUSE_NOT_FOUND", "The return warehouse was not found.");
+        await RequireLocationAsync(parent.WarehouseId, line.LocationId);
+        await RequireCapabilityAsync("procurement.inventory.issue", parent.WarehouseId, line.LocationId, "Ship", parent.ReturnNumber);
         var quantity = await _warehouseQuantities.GetByWarehouseAndItemAsync(parent.WarehouseId, line.InventoryItemId)
             ?? throw Conflict("INV_SUPPLIER_RETURN_STOCK_MISSING", $"Warehouse stock is not available for {line.ItemCode}.");
+        if (quantity.TenantId != parent.TenantId || quantity.IsDeleted)
+            throw Conflict("INV_SUPPLIER_RETURN_STOCK_MISSING", "The warehouse stock record is not available in this tenant.");
         if (quantity.AvailableStock < line.ReturnQuantity)
             throw Conflict("INV_SUPPLIER_RETURN_STOCK_INSUFFICIENT", $"Available stock is insufficient to dispatch {line.ItemCode} to the supplier.");
-        InventoryLocation? location = null;
-        if (line.LocationId.HasValue)
-        {
-            location = await _locations.GetByLocationAndItemAsync(line.LocationId.Value, line.InventoryItemId);
-            if (location is not null && location.Quantity < line.ReturnQuantity)
-                throw Conflict("INV_SUPPLIER_RETURN_LOCATION_STOCK_INSUFFICIENT", $"The selected location does not hold enough {line.ItemCode} for the supplier return.");
-        }
+        var location = await _locations.GetByLocationAndItemAsync(line.LocationId!.Value, line.InventoryItemId);
+        if (location is null || location.IsDeleted || location.TenantId != parent.TenantId)
+            throw Conflict("INV_SUPPLIER_RETURN_LOCATION_STOCK_MISSING", $"The source location has no stock record for {line.ItemCode}.");
+        if (location.Quantity - location.AllocatedQuantity < line.ReturnQuantity)
+            throw Conflict("INV_SUPPLIER_RETURN_LOCATION_STOCK_INSUFFICIENT", $"The source location does not hold enough available {line.ItemCode} for the supplier return.");
         var item = await _items.GetByIdAsync(line.InventoryItemId)
             ?? throw NotFound("INV_SUPPLIER_RETURN_ITEM_NOT_FOUND", "An inventory item on the return was not found.");
+        if (item.IsDeleted || item.TenantId != parent.TenantId || line.ReturnQuantity <= 0 || line.StockReversed)
+            throw Conflict("INV_SUPPLIER_RETURN_LINE_INVALID", "The supplier-return line is not eligible for dispatch.");
+
+        var acceptedSource = (await LoadAcceptedSourceAsync(parent.GoodsReceiptNoteId!.Value))?.Items
+            .SingleOrDefault(value => value.Id == line.GoodsReceiptNoteItemId)
+            ?? throw Conflict("INV_SUPPLIER_RETURN_SOURCE_INVALID", "The accepted source line is unavailable.");
+        await _tracking.StageEventAsync(new InventoryTrackingMutationRequest
+        {
+            InventoryItemId = line.InventoryItemId, WarehouseId = parent.WarehouseId,
+            LocationId = line.LocationId, Direction = InventoryTrackingDirection.Issue,
+            Quantity = line.ReturnQuantity, ReferenceType = WorkflowEntityType,
+            ReferenceNumber = parent.ReturnNumber, ReferenceId = parent.Id, ReferenceLineId = line.Id,
+            EventKey = $"supplier-return:{parent.Id:N}:{line.Id:N}:dispatch",
+            LotNumber = line.LotNumber, BatchNumber = line.BatchNumber, SerialNumber = line.SerialNumber,
+            ManufactureDate = acceptedSource.ManufactureDate, ExpiryDate = acceptedSource.ExpiryDate,
+            CorrelationId = $"supplier-return:{parent.Id:N}:dispatch"
+        });
+        var carryingValue = decimal.Round(await _valuation.ProcessIssueAsync(
+            line.InventoryItemId, parent.WarehouseId, line.LocationId, line.ReturnQuantity,
+            InventoryMovementType.SupplierReturn, ReferenceType.Return, parent.ReturnNumber, parent.Id,
+            line.LotNumber, line.SerialNumber), 2, MidpointRounding.AwayFromZero);
 
         quantity.CurrentStock -= line.ReturnQuantity;
         quantity.AvailableStock = quantity.CurrentStock - quantity.AllocatedStock;
         quantity.LastMovementDate = DateTime.UtcNow;
         if (quantity.CurrentStock < 0 || quantity.AvailableStock < 0)
             throw Conflict("INV_SUPPLIER_RETURN_NEGATIVE_STOCK", "Supplier return would create a negative warehouse balance.");
-        await _warehouseQuantities.UpdateAsync(quantity);
+        quantity.UpdatedAt = DateTime.UtcNow;
         if (location is not null)
         {
             location.Quantity -= line.ReturnQuantity;
+            location.AvailableQuantity = location.Quantity - location.AllocatedQuantity;
             location.LastMovementDate = DateTime.UtcNow;
-            await _locations.UpdateAsync(location);
+            location.UpdatedAt = DateTime.UtcNow;
         }
         if (!warehouse.IsConsignmentWarehouse)
         {
@@ -387,16 +462,15 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
             item.LastStockDate = DateTime.UtcNow;
             if (item.CurrentStock < 0 || item.AvailableStock < 0)
                 throw Conflict("INV_SUPPLIER_RETURN_NEGATIVE_STOCK", "Supplier return would create a negative inventory balance.");
-            await _items.UpdateAsync(item);
+            item.UpdatedAt = DateTime.UtcNow;
         }
         line.StockReversed = true;
         line.StockReversedAt = DateTime.UtcNow;
-        await _unitOfWork.Repository<PurchaseReturnItem>().UpdateAsync(line);
         var movement = new StockMovement
         {
             Id = Guid.NewGuid(), TenantId = parent.TenantId, InventoryItemId = line.InventoryItemId,
             WarehouseId = parent.WarehouseId, LocationId = line.LocationId, MovementType = "SupplierReturn",
-            Quantity = -line.ReturnQuantity, UnitCost = line.UnitCost, TotalValue = -line.LineValue,
+            Quantity = -line.ReturnQuantity, UnitCost = decimal.Round(carryingValue / line.ReturnQuantity, 4, MidpointRounding.AwayFromZero), TotalValue = -carryingValue,
             MovementDate = DateTime.UtcNow, ReferenceType = ReferenceType.Return,
             ReferenceId = parent.Id, ReferenceNumber = parent.ReturnNumber, LotNumber = line.LotNumber,
             BatchNumber = line.BatchNumber, SerialNumber = line.SerialNumber, Notes = parent.ReturnReasonDetails,
@@ -406,10 +480,12 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         await _consignment.TryCreateFromStockMovementAsync(movement);
     }
 
-    private async Task<Dictionary<Guid, decimal>> PriorReturnQuantitiesAsync(Guid grnId)
+    private async Task<Dictionary<Guid, decimal>> PriorReturnQuantitiesAsync(Guid grnId, Guid? excludedReturnId = null)
         => await _unitOfWork.Repository<PurchaseReturnItem>().GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
-                item.PurchaseReturn.GoodsReceiptNoteId == grnId && item.PurchaseReturn.Status != "Cancelled")
+                (!excludedReturnId.HasValue || item.PurchaseReturnId != excludedReturnId.Value) &&
+                item.GoodsReceiptNoteItemId.HasValue && !item.PurchaseReturn.IsDeleted &&
+                item.PurchaseReturn.GoodsReceiptNoteId == grnId && item.PurchaseReturn.Status != "Cancelled" && item.PurchaseReturn.Status != "Rejected")
             .GroupBy(item => item.GoodsReceiptNoteItemId!.Value)
             .Select(group => new { Id = group.Key, Quantity = group.Sum(item => item.ReturnQuantity) })
             .ToDictionaryAsync(item => item.Id, item => item.Quantity);
@@ -417,19 +493,30 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
     private async Task<PurchaseReturn> RequireReturnAsync(Guid id)
     {
         var value = await _returns.GetWithItemsAsync(id);
-        if (value is null || value.TenantId != _currentUser.TenantId)
+        if (value is null || value.IsDeleted || value.TenantId != _currentUser.TenantId)
             throw NotFound("INV_SUPPLIER_RETURN_NOT_FOUND", "The supplier return was not found.");
         return value;
     }
 
-    private Task RequireReadAsync() => RequireCapabilityAsync("procurement.inventory.read", null, null, "Read", "supplier-returns");
+    private async Task RequireReadAsync()
+    {
+        EnsureActor(_currentUser.UserId);
+        // Inventory read is warehouse-scoped. A null-warehouse capability request
+        // is invalid even for an authorized Stores operator; validate actual scopes.
+        var warehouseIds = await _unitOfWork.Repository<Warehouse>().GetQueryable(value =>
+                value.TenantId == _currentUser.TenantId && !value.IsDeleted && value.IsActive)
+            .AsNoTracking().Select(value => value.Id).ToListAsync();
+        foreach (var warehouseId in warehouseIds)
+            if (await CanAsync("procurement.inventory.read", warehouseId)) return;
+        throw Forbidden("INV_SUPPLIER_RETURN_FORBIDDEN", "The current user has no assigned warehouse granting inventory read access.");
+    }
 
     private async Task RequireCapabilityAsync(string permission, Guid? warehouseId, Guid? locationId, string action, string reference)
     {
         var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = permission, WarehouseId = warehouseId, LocationId = locationId,
-            RequireLocationScope = false, SourceType = "PurchaseReturn", SourceReference = reference
+            RequireLocationScope = locationId.HasValue, SourceType = "PurchaseReturn", SourceReference = reference
         }, $"supplier-return:{action.ToLowerInvariant()}:{reference}");
         if (!decision.Allowed) throw Forbidden("INV_SUPPLIER_RETURN_FORBIDDEN", decision.Message);
     }
@@ -442,7 +529,7 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
             EventType = "SupplierReturn", Action = action, Result = result, RuleCode = "INV-SUPPLIER-RETURN",
             SourceType = "PurchaseReturn", SourceId = value.Id, SourceReference = value.ReturnNumber,
             Reason = reason, InputValues = new { value.GoodsReceiptNoteId, value.SupplierId, value.WarehouseId },
-            ResultValues = new { value.Status, value.TotalQuantity, value.TotalValue, value.CreditNoteNumber, value.CreditAmount },
+            ResultValues = new { value.Status, value.ApprovalRequired, value.TotalQuantity, value.TotalValue, value.CreditNoteNumber, value.CreditAmount },
             CorrelationId = $"supplier-return:{value.Id:N}", OccurredAtUtc = DateTime.UtcNow
         });
     }
@@ -455,6 +542,7 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
 
     private static PurchaseReturnDto Map(PurchaseReturn value) => new()
     {
+        ApprovalRequired = value.ApprovalRequired,
         Id = value.Id, ReturnNumber = value.ReturnNumber, ReturnDate = value.ReturnDate, SupplierId = value.SupplierId,
         SupplierName = value.SupplierName ?? string.Empty, WarehouseId = value.WarehouseId,
         WarehouseName = value.Warehouse?.Name ?? string.Empty, GoodsReceiptNoteId = value.GoodsReceiptNoteId,
@@ -466,6 +554,7 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
 
     private static PurchaseReturnDetailDto MapDetail(PurchaseReturn value) => new()
     {
+        ApprovalRequired = value.ApprovalRequired,
         Id = Map(value).Id, ReturnNumber = value.ReturnNumber, ReturnDate = value.ReturnDate, SupplierId = value.SupplierId,
         SupplierName = value.SupplierName ?? string.Empty, WarehouseId = value.WarehouseId, WarehouseName = value.Warehouse?.Name ?? string.Empty,
         GoodsReceiptNoteId = value.GoodsReceiptNoteId, GRNNumber = value.GRNNumber, Status = value.Status,
@@ -476,6 +565,7 @@ public sealed class PurchaseReturnService : IPurchaseReturnService
         CreditNoteNumber = value.CreditNoteNumber, CreditNoteAmount = value.CreditAmount,
         Items = value.Items.Select(item => new PurchaseReturnItemDto
         {
+            LocationId = item.LocationId, LocationName = item.Location?.Name,
             Id = item.Id, InventoryItemId = item.InventoryItemId, ItemCode = item.ItemCode ?? string.Empty,
             ItemName = item.ItemName ?? string.Empty, ReturnQuantity = item.ReturnQuantity,
             UnitOfMeasure = item.UnitOfMeasure ?? string.Empty, UnitCost = item.UnitCost, TotalCost = item.LineValue,

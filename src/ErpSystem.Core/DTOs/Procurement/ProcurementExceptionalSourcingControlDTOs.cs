@@ -56,6 +56,7 @@ public sealed class ProcurementExceptionalSourcingControlDto
     public string ExceptionRuleCode { get; set; } = string.Empty;
     public string AuthorityRouteReference { get; set; } = string.Empty;
     public ProcurementExceptionalSourcingControlStatus Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public string Justification { get; set; } = string.Empty;
     public string JustificationEvidenceReference { get; set; } = string.Empty;
     public string SupplierSelectionEvidenceReference { get; set; } = string.Empty;
@@ -163,6 +164,9 @@ public sealed class ProcurementExceptionalEvidenceRequest
 
 public sealed class SubmitProcurementExceptionalApprovalRequest
 {
+    [StringLength(300)] public string? BoardApprovalReference { get; set; }
+    [StringLength(300)] public string? ManagingDirectorApprovalReference { get; set; }
+    [StringLength(300)] public string? PpaApprovalReference { get; set; }
     [Required] public string RowVersion { get; set; } = string.Empty;
 }
 

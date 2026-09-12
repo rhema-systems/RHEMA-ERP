@@ -74,6 +74,7 @@ export interface DepartmentDto {
 // ============================================================================
 
 export interface ProcurementPlanDto {
+  approvalRequired?: boolean;
   id: string;
   planNumber: string;
   title: string;
@@ -515,6 +516,7 @@ export interface UpdateProcurementPlanItemDto extends CreateProcurementPlanItemD
 // ============================================================================
 
 export interface ProcurementBudgetDto {
+  approvalRequired?: boolean;
   id: string;
   budgetCode: string;
   title: string;
@@ -582,6 +584,7 @@ export interface CreateProcurementBudgetAllocationDto {
 }
 
 export interface ProcurementBudgetRevisionDto {
+  approvalRequired?: boolean;
   id: string;
   procurementBudgetId: string;
   revisionNumber: number;

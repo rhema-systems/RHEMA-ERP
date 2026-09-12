@@ -7,6 +7,7 @@ public sealed class ProcurementPurchaseOrderSodReadinessDto
     public string Status { get; init; } = string.Empty;
     public Guid CurrentActorUserId { get; init; }
     public bool CanApprove { get; init; }
+    public bool ApprovalRequired { get; init; } = true;
     public bool CanReceive { get; init; }
     public string Code { get; init; } = string.Empty;
     public string Message { get; init; } = string.Empty;

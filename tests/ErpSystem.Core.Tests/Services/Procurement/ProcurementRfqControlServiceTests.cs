@@ -6,6 +6,8 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
+using Microsoft.Extensions.Logging.Abstractions;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -18,6 +20,85 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementRfqControlServiceTests
 {
+    [Fact]
+    public async Task NoActiveWorkflowCompletesEvaluationWithoutFabricatingApprovalAndRetainsAwardGate()
+    {
+        await using var fixture = new Fixture();
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TENDER_EVALUATION"))
+            .ReturnsAsync(false);
+        await fixture.OpenAsync();
+        await fixture.Service.SaveEvaluationAsync(fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "direct-save");
+        var evaluation = await fixture.Context.ProcurementRfqEvaluations.SingleAsync();
+        evaluation.RowVersion = [1, 2, 3];
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.SubmitEvaluationAsync(fixture.Rfq.Id,
+            new SubmitProcurementRfqEvaluationRequest { RowVersion = Convert.ToBase64String(evaluation.RowVersion) }, "direct-complete");
+
+        result.Status.Should().Be(ProcurementRfqEvaluationStatus.Approved);
+        result.ApprovalRequired.Should().BeFalse();
+        result.WorkflowInstanceId.Should().BeNull();
+        result.ApprovedAtUtc.Should().BeNull();
+        result.ApprovedByName.Should().BeNull();
+        result.ApprovalReference.Should().BeNull();
+        evaluation.ApprovedByUserId.Should().BeNull();
+        evaluation.ApprovalActorsJson.Should().Be("[]");
+        evaluation.SubmittedByUserId.Should().Be(fixture.UserId);
+        evaluation.SnapshotJson.Should().Contain("tdc.rfq-evaluation.v2.no-approval");
+        fixture.Workflow.Verify(service => service.StartApprovalWorkflowAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+        await fixture.Service.GetApprovedAwardAsync(fixture.Rfq.Id, "direct-handoff");
+        fixture.AwardReadiness.Verify(service => service.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.RequestForQuotation, fixture.Rfq.Id,
+            It.IsAny<EvaluateProcurementAwardReadinessRequest>(), "direct-handoff", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false, "EVALUATION_SCORE_PROJECTION_MISMATCH")]
+    [InlineData(true, "EVALUATION_SCORE_RECALL_UNRESOLVED")]
+    public async Task DirectEvaluationCannotSkipCommitteeSnapshotOrRecallControls(bool recall, string code)
+    {
+        await using var fixture = new Fixture();
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TENDER_EVALUATION"))
+            .ReturnsAsync(false);
+        await fixture.OpenAsync();
+        await fixture.Service.SaveEvaluationAsync(fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "guard-save");
+        var evaluation = await fixture.Context.ProcurementRfqEvaluations.SingleAsync();
+        evaluation.RowVersion = [1];
+        await fixture.Context.SaveChangesAsync();
+        fixture.IncludeApprovedRecall = recall;
+        fixture.TamperCommitteeSnapshot = !recall;
+
+        await fixture.Service.Invoking(service => service.SubmitEvaluationAsync(fixture.Rfq.Id,
+                new SubmitProcurementRfqEvaluationRequest { RowVersion = "AQ==" }, "guard-complete"))
+            .Should().ThrowAsync<ProcurementRfqControlConflictException>().Where(exception => exception.Code == code);
+        fixture.ControlEvents.Verify(service => service.RecordAsync(
+            It.Is<ProcurementControlEventWriteRequest>(request => request.Action == "EvaluationCompleted"),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RetiredDefinitionWithRetainedInstanceStillRequiresExactApproval()
+    {
+        await using var fixture = new Fixture();
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TENDER_EVALUATION"))
+            .ReturnsAsync(false);
+        fixture.Workflow.Setup(service => service.HasActiveApprovalInstanceAsync("TENDER_EVALUATION", fixture.Rfq.Id))
+            .ReturnsAsync(true);
+        await fixture.OpenAsync();
+        await fixture.Service.SaveEvaluationAsync(fixture.Rfq.Id, fixture.ValidEvaluationRequest(), "retained-save");
+        var evaluation = await fixture.Context.ProcurementRfqEvaluations.SingleAsync();
+        evaluation.RowVersion = [1];
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.SubmitEvaluationAsync(fixture.Rfq.Id,
+            new SubmitProcurementRfqEvaluationRequest { RowVersion = "AQ==" }, "retained-submit");
+
+        result.ApprovalRequired.Should().BeTrue();
+        result.Status.Should().Be(ProcurementRfqEvaluationStatus.Submitted);
+        result.WorkflowInstanceId.Should().Be(fixture.WorkflowInstanceId);
+    }
+
     [Fact]
     public async Task DispatchRequiresCurrentLineageMinimumQualifiedSuppliersAndConfiguredWorkflow()
     {
@@ -553,6 +634,8 @@ public sealed class ProcurementRfqControlServiceTests
             ControlEvents.Setup(service => service.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementControlEventDto());
+            Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TENDER_EVALUATION"))
+                .ReturnsAsync(true);
             Workflow.Setup(service => service.StartApprovalWorkflowAsync(
                     "TENDER_EVALUATION", Rfq.Id, WorkflowDefinitionId))
                 .ReturnsAsync(new WorkflowExecutionResult
@@ -607,7 +690,8 @@ public sealed class ProcurementRfqControlServiceTests
             Service = new ProcurementRfqControlService(
                 _unitOfWork, _currentUser.Object, _accessControl.Object, SodGuard.Object,
                 ControlEvents.Object, SourcingCases.Object, Workflow.Object, SupplierValidation.Object,
-                EvaluationCommittee.Object, AwardReadiness.Object);
+                EvaluationCommittee.Object, AwardReadiness.Object,
+                new WorkflowIntegrationService(Workflow.Object, NullLogger<WorkflowIntegrationService>.Instance));
         }
 
         public Guid TenantId { get; }

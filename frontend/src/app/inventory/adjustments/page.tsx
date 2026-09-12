@@ -23,9 +23,12 @@ import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { currencyService } from '@/services/financeCommonService';
 import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
+import { useAuth } from '@/hooks/use-auth';
+import { canDecideInventoryRecord, canPostInventoryRecord } from '@/lib/inventory-approval-actions';
 
 export default function StockAdjustmentsPage() {
   const { toast } = useToast();
+  const { user, hasPermission } = useAuth();
   const [receipts, setReceipts] = useState<StockAdjustmentDto[]>([]);
   const [filteredReceipts, setFilteredReceipts] = useState<StockAdjustmentDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,8 +151,10 @@ export default function StockAdjustmentsPage() {
   const handleSubmit = async (id: string) => {
     try {
       setActionLoading(true);
-      await stockAdjustmentService.submit(id);
-      toast({ title: 'Submitted', description: 'The adjustment is pending independent approval; stock and Finance are unchanged.' });
+      const result = await stockAdjustmentService.submit(id);
+      toast({ title: 'Submitted', description: result.approvalRequired === false
+        ? 'The adjustment is ready for Post; stock and Finance are unchanged.'
+        : 'The adjustment is pending independent approval; stock and Finance are unchanged.' });
       await fetchData();
     } catch (err) {
       console.error('Error:', err);
@@ -167,7 +172,7 @@ export default function StockAdjustmentsPage() {
     try {
       setActionLoading(true);
       await stockAdjustmentService.post(actionReceiptId);
-      toast({ title: 'Posted', description: 'The approved adjustment was posted atomically to inventory and Finance.' });
+      toast({ title: 'Posted', description: 'The adjustment was posted atomically to inventory and Finance.' });
       fetchData();
     } catch (err) {
       console.error('Error:', err);
@@ -249,7 +254,7 @@ export default function StockAdjustmentsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Controlled Stock Adjustments</h1>
-          <p className="text-muted-foreground">Maker-checker adjustments with exact locations, central-DMS evidence, audit, and Finance posting</p>
+          <p className="text-muted-foreground">Stock adjustments with exact locations, supporting evidence, and Finance posting</p>
         </div>
         <Button onClick={openCreateDialog}><Plus className="mr-2 h-4 w-4" />New Adjustment</Button>
       </div>
@@ -309,6 +314,7 @@ export default function StockAdjustmentsPage() {
                 <SelectItem value="Draft">Draft</SelectItem>
                 <SelectItem value="PendingApproval">Pending Approval</SelectItem>
                 <SelectItem value="Approved">Approved</SelectItem>
+                <SelectItem value="ReadyToPost">Ready to Post</SelectItem>
                 <SelectItem value="Rejected">Rejected</SelectItem>
                 <SelectItem value="Posted">Posted</SelectItem>
                 <SelectItem value="Reversed">Reversed</SelectItem>
@@ -371,17 +377,17 @@ export default function StockAdjustmentsPage() {
                           {receipt.status === 'Draft' && (
                             <>
                               <Button variant="ghost" size="sm" onClick={() => openEditDialog(receipt)} title="Edit"><Pencil className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="sm" className="text-blue-600" disabled={actionLoading} onClick={() => void handleSubmit(receipt.id)} title="Submit for approval"><Send className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="sm" className="text-blue-600" disabled={actionLoading || !hasPermission('procurement.inventory.adjust.request')} onClick={() => void handleSubmit(receipt.id)} title="Submit"><Send className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleDeleteClick(receipt.id)} title="Delete"><XCircle className="h-4 w-4" /></Button>
                             </>
                           )}
-                          {receipt.status === 'PendingApproval' && (
+                          {canDecideInventoryRecord(receipt, user?.id, hasPermission('procurement.inventory.adjust.approve')) && (
                             <>
                               <Button variant="ghost" size="sm" className="text-green-600" onClick={() => handleApproveClick(receipt.id, true)} title="Approve"><CheckCircle className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleApproveClick(receipt.id, false)} title="Reject"><XCircle className="h-4 w-4" /></Button>
                             </>
                           )}
-                          {receipt.status === 'Approved' && (
+                          {canPostInventoryRecord(receipt, user?.id, hasPermission('procurement.inventory.adjust.approve')) && (
                             <Button variant="ghost" size="sm" className="text-green-600" onClick={() => handlePostClick(receipt.id)} title="Post to Inventory and Finance"><FileCheck className="h-4 w-4" /></Button>
                           )}
                           {receipt.status === 'Posted' && (
@@ -425,7 +431,7 @@ export default function StockAdjustmentsPage() {
       <ConfirmationDialog
         open={showPostDialog}
         onOpenChange={setShowPostDialog}
-        title="Post approved adjustment"
+        title="Post adjustment"
         description="This atomically changes stock and creates the balanced Finance posting."
         confirmText="Post Inventory and Finance"
         onConfirm={confirmPost}

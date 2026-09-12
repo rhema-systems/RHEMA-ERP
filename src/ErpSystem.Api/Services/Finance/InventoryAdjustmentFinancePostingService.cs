@@ -23,11 +23,14 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
     public async Task<InventoryAdjustmentFinancePostingResult> PostAsync(StockAdjustment adjustment, CancellationToken cancellationToken = default)
     {
         var isOpeningStock = adjustment.ReasonCode == StockAdjustmentReasonCodes.InitialStock;
+        var eligibleOpeningState = adjustment.ApprovalRequired
+            ? adjustment.Status == "Approved" && adjustment.ApprovedById.HasValue && adjustment.ApprovedAt.HasValue
+            : adjustment.Status == "ReadyToPost" && !adjustment.ApprovedById.HasValue && !adjustment.ApprovedAt.HasValue;
         if (isOpeningStock &&
-            (adjustment.Status != "Approved" || !adjustment.ApprovedById.HasValue || !adjustment.ApprovedAt.HasValue ||
+            (!eligibleOpeningState ||
              string.IsNullOrWhiteSpace(adjustment.PayloadHash) || string.IsNullOrWhiteSpace(adjustment.IntegrityHash)))
             throw new InvalidOperationException(
-                "Finance can consume only independently approved, immutable INITIAL_STOCK evidence.");
+                "Finance requires immutable INITIAL_STOCK evidence that is approved, or ready to post with approval recorded as not required.");
         var settings = await _db.FinanceSettings.AsNoTracking()
             .SingleOrDefaultAsync(x => x.TenantId == adjustment.TenantId && !x.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");

@@ -1,4 +1,7 @@
 'use client';
+import { LandedCostInvoiceLink } from '@/components/procurement/LandedCostInvoiceLink';
+import { LandedCostSupplierSummary } from '@/components/procurement/LandedCostSupplierSummary';
+import { LandedCostSupplierInvoices } from '@/components/procurement/LandedCostSupplierInvoices';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -46,8 +49,10 @@ import { ReceiptInspectionControl } from '@/components/procurement/ReceiptInspec
 import { ReceiptDocumentControl } from '@/components/procurement/ReceiptDocumentControl';
 import { ReceiptSourceEvidenceControl } from '@/components/procurement/ReceiptSourceEvidenceControl';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
+import { ReceiptLandedCostEntry } from '@/components/procurement/ReceiptLandedCostEntry';
 
 const GRNStatuses = [
+  { value: 'Accepted', label: 'Accepted', color: 'border-green-200 bg-green-100 text-green-800', icon: CheckCircle },
   { value: 'Pending', label: 'Pending', color: 'bg-yellow-100 text-yellow-800', icon: Clock },
   { value: 'Pending Inspection', label: 'Pending Inspection', color: 'bg-yellow-100 text-yellow-800', icon: AlertTriangle },
   { value: 'Inspection In Progress', label: 'Inspection In Progress', color: 'bg-blue-100 text-blue-800', icon: Clock },
@@ -215,27 +220,6 @@ export default function PurchaseReceiptDetailPage() {
     }
   };
 
-  const postLandedCostToInventory = async () => {
-    if (!selectedLandedCostId) return;
-    try {
-      setLandedCostPosting(true);
-      await inventoryManagementService.postLandedCostToInventory(selectedLandedCostId);
-      await fetchLandedCosts(false);
-      try {
-        const detail = await inventoryManagementService.getLandedCostById(selectedLandedCostId);
-        setLandedCostDetail(detail);
-      } catch {
-        // ignore; user can re-select voucher to reload
-      }
-      toast.success('Landed cost posted to inventory');
-    } catch (err: any) {
-      console.error('Error posting landed cost to inventory:', err);
-      toast.error(err?.message || 'Failed to post landed cost to inventory');
-    } finally {
-      setLandedCostPosting(false);
-    }
-  };
-
   useEffect(() => {
     if (id) {
       fetchReceipt();
@@ -283,7 +267,7 @@ export default function PurchaseReceiptDetailPage() {
     const statusConfig = GRNStatuses.find(s => s.value === status);
     const Icon = statusConfig?.icon || FileText;
     return (
-      <Badge className={statusConfig?.color || 'bg-gray-100'}>
+      <Badge variant="outline" className={statusConfig?.color || 'border-gray-200 bg-gray-100 text-gray-800'}>
         <Icon className="h-3 w-3 mr-1" />
         {statusConfig?.label || status}
       </Badge>
@@ -350,7 +334,7 @@ export default function PurchaseReceiptDetailPage() {
           </div>
         </div>
         
-        <div className="flex items-center gap-2 print:hidden"><Button variant="outline" onClick={() => setActiveTab('documents')}><Printer className="h-4 w-4 mr-2" />GRN / MRN register</Button></div>
+        <div className="flex items-center gap-2 print:hidden"><Button variant="outline" onClick={() => setActiveTab('documents')}><Printer className="h-4 w-4 mr-2" />GRN register</Button></div>
       </div>
 
       {/* Breadcrumbs */}
@@ -380,7 +364,7 @@ export default function PurchaseReceiptDetailPage() {
           <TabsTrigger value="details">Receipt Details</TabsTrigger>
           <TabsTrigger value="items">Items Received</TabsTrigger>
           <TabsTrigger value="landed-cost">Landed Cost</TabsTrigger>
-          <TabsTrigger value="documents">GRN / MRN</TabsTrigger>
+          <TabsTrigger value="documents">GRN</TabsTrigger>
           {receipt.requiresInspection && (
             <TabsTrigger value="inspection">Quality Inspection</TabsTrigger>
           )}
@@ -670,7 +654,7 @@ export default function PurchaseReceiptDetailPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Voucher is created from the PO planned landed costs and applies only to received lines.
+                    Receipt costs apply only to received stock lines. PO estimates can be copied optionally.
                   </p>
                 </div>
 
@@ -690,23 +674,25 @@ export default function PurchaseReceiptDetailPage() {
                     {landedCostAllocating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     Allocate
                   </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={postLandedCostToInventory}
-                    disabled={
-                      !selectedLandedCostId ||
-                      landedCostLoading ||
-                      landedCostAllocating ||
-                      landedCostPosting ||
-                      (landedCostDetail?.status !== 'Allocated' && landedCostDetail?.status !== 'Approved')
-                    }
-                  >
-                    {landedCostPosting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    Post to Inventory
-                  </Button>
+                  {landedCostDetail && <LandedCostSupplierInvoices voucher={landedCostDetail}
+                    disabled={landedCostLoading || landedCostAllocating || landedCostPosting}
+                    onBusyChange={setLandedCostPosting} onCreated={() => {
+                      void fetchLandedCosts(false);
+                      void inventoryManagementService.getLandedCostById(landedCostDetail.id).then(setLandedCostDetail)
+                        .catch(() => toast.error('Posting response received. Refresh to load the latest voucher and invoice links.'));
+                    }} />}
                 </div>
               </div>
 
+              <ReceiptLandedCostEntry receipt={receipt} selected={landedCostDetail}
+                disabled={landedCostLoading || landedCostAllocating || landedCostPosting}
+                onSaved={voucher => {
+                  setLandedCostDetail(null);
+                  setLandedCosts(previous => [voucher, ...previous.filter(c => c.id !== voucher.id)]);
+                  setSelectedLandedCostId(voucher.id);
+                  void inventoryManagementService.getLandedCostById(voucher.id).then(setLandedCostDetail)
+                    .catch(() => toast.error('Costs saved. Refresh to load the voucher details.'));
+                }} />
               {landedCostLoading ? (
                 <div className="flex items-center justify-center py-10">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -717,7 +703,7 @@ export default function PurchaseReceiptDetailPage() {
                     No landed cost voucher exists for this GRN yet.
                   </p>
                   <Button onClick={initializeLandedCostFromPo} disabled={landedCostLoading}>
-                    Create from PO Planned Costs
+                    Copy PO estimates (optional)
                   </Button>
                 </div>
               ) : !landedCostDetail ? (
@@ -793,9 +779,12 @@ export default function PurchaseReceiptDetailPage() {
                             <TableBody>
                               {landedCostDetail.costItems.map((ci) => (
                                 <TableRow key={ci.id}>
-                                  <TableCell className="font-medium">{getLandedCostTypeLabel(ci.costType)}</TableCell>
+                                  <TableCell className="font-medium">{getLandedCostTypeLabel(ci.costType)}
+                                    <div className="text-xs font-normal text-muted-foreground">{ci.purchaseOrderItemId ? receipt.items?.find(i => i.purchaseOrderItemId === ci.purchaseOrderItemId)?.itemName || 'Specific received item' : 'All received stock items'}</div>
+                                  </TableCell>
                                   <TableCell>{ci.supplierName || '-'}</TableCell>
-                                  <TableCell>{ci.description}</TableCell>
+                                  <TableCell>{ci.description}<div className="mt-2 text-xs"><LandedCostInvoiceLink voucherId={landedCostDetail.id} item={ci}
+                                    onChanged={() => { void inventoryManagementService.getLandedCostById(landedCostDetail.id).then(setLandedCostDetail); }} /></div></TableCell>
                                   <TableCell className="text-right">
                                     {new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(ci.amount)}
                                   </TableCell>
@@ -809,6 +798,8 @@ export default function PurchaseReceiptDetailPage() {
                       )}
                     </CardContent>
                   </Card>
+
+                  <LandedCostSupplierSummary lines={landedCostDetail.costItems} />
 
                   {/* Allocations */}
                   <Card>

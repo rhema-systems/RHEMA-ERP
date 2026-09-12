@@ -367,6 +367,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
 
         state.Authority = new ProcurementAwardReadinessAuthorityDto
         {
+            ApprovalRequired = evaluation.ApprovalRequired,
             MethodRuleId = evaluation.MethodRuleId,
             MethodRuleCode = evaluation.MethodRuleCode,
             AuthorityRouteId = rfq.SourcingCase?.AuthorityRouteId,
@@ -417,7 +418,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             EvaluationId = evaluation.Id,
             Phase = ProcurementEvaluationPhase.Combined,
             Status = evaluation.Status.ToString(),
-            CompletedAtUtc = evaluation.ApprovedAtUtc,
+            CompletedAtUtc = evaluation.ApprovalRequired ? evaluation.ApprovedAtUtc : evaluation.SubmittedAtUtc,
             EvidenceReference = evaluation.EvidenceReference,
             IntegrityHash = evaluation.IntegrityHash
         });
@@ -438,14 +439,15 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             null);
         AddEvidence(state, "RFQ_EVALUATION", "Signed RFQ evaluation recommendation",
             null, evaluation.EvidenceReference);
-        AddEvidence(state, "RFQ_APPROVAL", "RFQ authority approval", evaluation.WorkflowInstanceId,
-            evaluation.ApprovalReference);
+        if (evaluation.ApprovalRequired)
+            AddEvidence(state, "RFQ_APPROVAL", "RFQ authority approval", evaluation.WorkflowInstanceId,
+                evaluation.ApprovalReference);
         if (rfq.OpeningRegister is not null)
             state.Timeline.Add(Timeline("OpeningRegisterClosed", rfq.OpeningRegister.ClosedAtUtc,
                 rfq.OpeningRegister.OpenedByUserId, rfq.OpeningRegister.EvidenceReference,
                 rfq.OpeningRegister.IntegrityHash));
         if (evaluation.SubmittedAtUtc.HasValue)
-            state.Timeline.Add(Timeline("RecommendationSubmitted", evaluation.SubmittedAtUtc.Value,
+            state.Timeline.Add(Timeline(evaluation.ApprovalRequired ? "RecommendationSubmitted" : "RecommendationCompleted", evaluation.SubmittedAtUtc.Value,
                 evaluation.SubmittedByUserId, evaluation.EvidenceReference, evaluation.IntegrityHash));
         if (evaluation.ApprovedAtUtc.HasValue)
             state.Timeline.Add(Timeline("RecommendationApproved", evaluation.ApprovedAtUtc.Value,
@@ -493,6 +495,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             control.IntegrityHash);
         state.Authority = new ProcurementAwardReadinessAuthorityDto
         {
+            ApprovalRequired = control.ApprovalRequired,
             MethodRuleId = control.MethodRuleId,
             MethodRuleCode = control.MethodRuleCode,
             AuthorityRouteId = control.AuthorityRouteId,
@@ -520,7 +523,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         };
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Recommendation,
             "TENDER_RECOMMENDATION_APPROVED",
-            bid is not null && control.ApprovedAtUtc.HasValue &&
+            bid is not null && (control.ApprovalRequired ? control.ApprovedAtUtc.HasValue : control.SubmittedForApprovalAtUtc.HasValue) &&
             !string.IsNullOrWhiteSpace(control.FinancialEvaluationEvidenceReference),
             "The approved NCT/ICT recommendation identifies one current tender bid and supplier.",
             "Complete and approve the financial recommendation.",
@@ -581,8 +584,9 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             null, control.TechnicalEvaluationEvidenceReference);
         AddEvidence(state, "TENDER_FINANCIAL_RECOMMENDATION", "Signed financial recommendation",
             null, control.FinancialEvaluationEvidenceReference);
-        AddEvidence(state, "TENDER_AUTHORITY_APPROVAL", "Tender authority approval",
-            control.WorkflowInstanceId, control.AuthorityApprovalReference);
+        if (control.ApprovalRequired)
+            AddEvidence(state, "TENDER_AUTHORITY_APPROVAL", "Tender authority approval",
+                control.WorkflowInstanceId, control.AuthorityApprovalReference);
         if (control.TechnicalEvaluatedAtUtc.HasValue)
             state.Timeline.Add(Timeline("TechnicalEvaluationCompleted",
                 control.TechnicalEvaluatedAtUtc.Value,
@@ -736,7 +740,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             control.Status == ProcurementExceptionalSourcingControlStatus.Recommended &&
             tender.Status is not "Awarded" and not "Cancelled",
             petty ? "The Petty Purchase has an approved quotation recommendation and is not awarded." : "The exceptional source has reached a negotiated recommendation and is not awarded.",
-            petty ? "Complete independent approval and quotation recommendation before award." : "Complete approval, negotiation, and recommendation before award.",
+            petty ? "Complete sourcing and quotation recommendation before award." : "Complete sourcing, negotiation, and recommendation before award.",
             "ProcurementExceptionalSourcingControl", control.Id, control.IntegrityHash);
         state.Authority = new ProcurementAwardReadinessAuthorityDto
         {
@@ -746,10 +750,11 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             AuthorityRouteReference = control.AuthorityRouteReference,
             WorkflowDefinitionId = control.WorkflowDefinitionId,
             WorkflowInstanceId = control.WorkflowInstanceId,
-            ApprovalReference = control.PpaApprovalReference ??
+            ApprovalRequired = control.ApprovalRequired,
+            ApprovalReference = control.ApprovalRequired ? control.PpaApprovalReference ??
                                 control.ManagingDirectorApprovalReference ??
                                 control.BoardApprovalReference ??
-                                (petty && control.WorkflowInstanceId.HasValue ? $"workflow:{control.WorkflowInstanceId.Value:N}" : null),
+                                (petty && control.WorkflowInstanceId.HasValue ? $"workflow:{control.WorkflowInstanceId.Value:N}" : null) : null,
             ApprovedAtUtc = control.ApprovedAtUtc,
             ApprovedByUserId = control.ApprovedById,
             ApprovalActorUserIds = ParseGuids(control.ApprovalActorsJson)
@@ -788,7 +793,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Evaluation,
             petty ? "PETTY_QUOTATION_REVIEWED" : "EXCEPTIONAL_NEGOTIATION_EVALUATED",
             petty ? bid is not null && bid.TotalBidAmount > 0 && bid.TotalBidAmount <= tender.EstimatedValue &&
-                control.ApprovedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
+                (control.ApprovalRequired ? control.ApprovedAtUtc.HasValue : control.SubmittedForApprovalAtUtc.HasValue) && control.RecommendedAtUtc.HasValue &&
                 !string.IsNullOrWhiteSpace(control.SupplierSelectionEvidenceReference) :
             control.NegotiatedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
             !string.IsNullOrWhiteSpace(control.NegotiationMinutesEvidenceReference) &&
@@ -814,12 +819,20 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                 control.NegotiationId, control.NegotiationMinutesEvidenceReference);
         AddEvidence(state, "EXCEPTIONAL_RECOMMENDATION", petty ? "Approved quotation recommendation" : "Negotiated recommendation",
             control.RecommendedBidId, control.RecommendationEvidenceReference);
-        AddEvidence(state, "EXCEPTIONAL_AUTHORITY", "Exceptional authority approval",
-            control.WorkflowInstanceId, state.Authority.ApprovalReference);
+        if (control.ApprovalRequired)
+            AddEvidence(state, "EXCEPTIONAL_AUTHORITY", "Exceptional authority approval",
+                control.WorkflowInstanceId, state.Authority.ApprovalReference);
+        AddEvidence(state, "EXCEPTIONAL_BOARD_EVIDENCE", "Recorded Board authority evidence", null, control.BoardApprovalReference);
+        AddEvidence(state, "EXCEPTIONAL_MD_EVIDENCE", "Recorded Managing Director authority evidence", null, control.ManagingDirectorApprovalReference);
+        AddEvidence(state, "EXCEPTIONAL_PPA_EVIDENCE", "Recorded PPA authority evidence", null, control.PpaApprovalReference);
         if (control.ApprovedAtUtc.HasValue)
             state.Timeline.Add(Timeline("ExceptionalAuthorityApproved",
                 control.ApprovedAtUtc.Value, control.ApprovedById,
                 state.Authority.ApprovalReference, control.IntegrityHash));
+        if (!control.ApprovalRequired && control.SubmittedForApprovalAtUtc.HasValue)
+            state.Timeline.Add(Timeline("ExceptionalSourcingCompleted",
+                control.SubmittedForApprovalAtUtc.Value, control.SubmittedForApprovalById,
+                control.SupplierSelectionEvidenceReference, control.IntegrityHash));
         if (control.NegotiatedAtUtc.HasValue)
             state.Timeline.Add(Timeline("NegotiationCompleted",
                 control.NegotiatedAtUtc.Value, null,
@@ -1092,6 +1105,15 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         ReadinessState state,
         CancellationToken cancellationToken)
     {
+        // Only a persisted source-owned decision can make this prerequisite not applicable.
+        // Missing workflow IDs on legacy/controlled records never imply a bypass.
+        if (!state.Authority.ApprovalRequired)
+        {
+            Add(state, ProcurementAwardReadinessPrerequisiteGroup.AuthorityAndWorkflow,
+                "AUTHORITY_WORKFLOW_NOT_REQUIRED", ProcurementAwardReadinessPrerequisiteStatus.NotApplicable,
+                "The source was completed when no active approval workflow was required.", null);
+            return;
+        }
         if (!state.Authority.WorkflowDefinitionId.HasValue ||
             !state.Authority.WorkflowInstanceId.HasValue)
         {
@@ -1514,7 +1536,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .ThenBy(item => item.EventType).ToList();
         state.SourceIntegrityHash = ComputeHash(Serialize(new
         {
-            schemaVersion = "tdc.award-readiness-source.v1",
+            schemaVersion = state.Authority.ApprovalRequired ? "tdc.award-readiness-source.v1" : "tdc.award-readiness-source.v2.no-approval",
             source.Type,
             source.Id,
             source.Reference,

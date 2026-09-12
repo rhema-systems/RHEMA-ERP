@@ -36,7 +36,8 @@ public sealed class ProcurementReceiptInspectionCase : TenantEntity
     public int PolicyVersion { get; set; }
     public Guid AuthorityRuleId { get; set; }
     [Required, StringLength(200)] public string AuthorityName { get; set; } = string.Empty;
-    public Guid WorkflowDefinitionId { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? WorkflowDefinitionId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
     public Guid CreatedByUserId { get; set; }
     [Required, StringLength(300)] public string CreatedByName { get; set; } = string.Empty;
@@ -56,7 +57,7 @@ public sealed class ProcurementReceiptInspectionCase : TenantEntity
     public PurchaseOrderReceipt PurchaseOrderReceipt { get; set; } = null!;
     public PurchaseOrderReceipt? ReplacementPurchaseOrderReceipt { get; set; }
     public ProcurementReceiptInspectionCase? ReplacementInspectionCase { get; set; }
-    public WorkflowDefinition WorkflowDefinition { get; set; } = null!;
+    public WorkflowDefinition? WorkflowDefinition { get; set; }
     public WorkflowInstance? WorkflowInstance { get; set; }
     public ICollection<ProcurementReceiptInspectionLine> Lines { get; set; } =
         new List<ProcurementReceiptInspectionLine>();

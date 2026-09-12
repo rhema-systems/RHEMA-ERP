@@ -235,7 +235,7 @@ public sealed class QuantitySurveyMaterialReconciliationService(
             await ValidateFrozenAsync(value, token);
             var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.MaterialDeduction, value.Id, value.ApprovalWorkflowDefinitionId);
             if (!result.ExecutionResult.Success) throw Conflict(result.ExecutionResult.Message ?? "The material-deduction workflow could not be started.");
-            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.MaterialDeduction).ApplySubmitOutcome(value, result.Outcome, UserId);
+            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.MaterialDeduction).ApplySubmitOutcome(value, result, UserId);
             value.Status = QuantitySurveyMaterialReconciliationStatuses.PendingApproval; value.ApprovalStatus = "Pending";
             value.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId; value.SubmittedById = UserId; value.SubmittedAt = DateTime.UtcNow;
         });

@@ -4,18 +4,26 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ErpSystem.Data.Configuration;
 
+public sealed class JournalBatchEntryApprovalConfiguration : IEntityTypeConfiguration<JournalEntry>
+{
+    public void Configure(EntityTypeBuilder<JournalEntry> entity)
+        => entity.ToTable("JournalEntries", table => table.HasTrigger("TR_JournalEntries_BatchOptionalApproval"));
+}
+
 public sealed class JournalBatchConfiguration : IEntityTypeConfiguration<JournalBatch>
 {
     public void Configure(EntityTypeBuilder<JournalBatch> entity)
     {
         entity.ToTable("JournalBatches", table =>
         {
+            table.HasTrigger("TR_JournalBatches_OptionalApproval");
             table.HasCheckConstraint("CK_JournalBatches_ExpectedDebitTotal", "[ExpectedDebitTotal] > 0");
             table.HasCheckConstraint("CK_JournalBatches_ExpectedJournalCount", "[ExpectedJournalCount] IS NULL OR [ExpectedJournalCount] > 0");
         });
 
         entity.Property(x => x.BatchType).HasConversion<string>().HasMaxLength(20);
         entity.Property(x => x.ApprovalStatus).HasConversion<string>().HasMaxLength(30);
+        entity.Property(x => x.ApprovalRequired).HasDefaultValue(true).ValueGeneratedNever();
         entity.Property(x => x.PostingStatus).HasConversion<string>().HasMaxLength(30);
         entity.Property(x => x.ReversalStatus).HasConversion<string>().HasMaxLength(30);
         entity.Property(x => x.RowVersion).IsRowVersion();
@@ -50,7 +58,10 @@ public sealed class JournalBatchItemConfiguration : IEntityTypeConfiguration<Jou
     public void Configure(EntityTypeBuilder<JournalBatchItem> entity)
     {
         entity.ToTable("JournalBatchItems", table =>
-            table.HasCheckConstraint("CK_JournalBatchItems_SequenceNumber", "[SequenceNumber] > 0"));
+        {
+            table.HasTrigger("TR_JournalBatchItems_OptionalApproval");
+            table.HasCheckConstraint("CK_JournalBatchItems_SequenceNumber", "[SequenceNumber] > 0");
+        });
 
         entity.Property(x => x.ReviewStatus).HasConversion<string>().HasMaxLength(30);
         entity.Property(x => x.PostingStatus).HasConversion<string>().HasMaxLength(30);

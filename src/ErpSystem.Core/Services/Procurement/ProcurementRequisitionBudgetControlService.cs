@@ -641,7 +641,7 @@ public sealed class ProcurementRequisitionBudgetControlService : IProcurementReq
             return Block(result, "PR_BUDGET_NOT_APPROVED",
                 $"Budget {budget.BudgetCode} is {budget.Status} and cannot accept commitments.",
                 "Select a Finance-approved budget.");
-        if (!budget.ApprovedById.HasValue || !budget.ApprovedDate.HasValue)
+        if (budget.ApprovalRequired && (!budget.ApprovedById.HasValue || !budget.ApprovedDate.HasValue))
             return Block(result, "PR_BUDGET_APPROVAL_INCOMPLETE",
                 "The linked budget lacks Finance approval lineage.",
                 "Complete budget approval with approver and approval timestamp.");

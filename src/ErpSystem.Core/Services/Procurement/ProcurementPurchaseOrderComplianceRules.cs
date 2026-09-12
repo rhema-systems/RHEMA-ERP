@@ -45,8 +45,8 @@ public static class ProcurementPurchaseOrderComplianceRules
             !string.Equals(value.BudgetStatus, "Active", StringComparison.OrdinalIgnoreCase))
             return Invalid("PO_BUDGET_NOT_APPROVED",
                 "The committed procurement budget is no longer approved or active.");
-        if (!value.BudgetApprovedAtUtc.HasValue || !value.BudgetApprovedById.HasValue ||
-            value.BudgetApprovedById.Value == Guid.Empty)
+        if (value.BudgetApprovalRequired && (!value.BudgetApprovedAtUtc.HasValue || !value.BudgetApprovedById.HasValue ||
+            value.BudgetApprovedById.Value == Guid.Empty))
             return Invalid("PO_BUDGET_APPROVAL_INCOMPLETE",
                 "The committed procurement budget lacks complete Finance approval lineage.");
 
@@ -176,7 +176,8 @@ public sealed record ProcurementCommitmentLifecycleSnapshot(
     DateTime? BudgetEffectiveToUtc,
     decimal RequiredExposure,
     string RequiredCurrency,
-    DateTime AtUtc);
+    DateTime AtUtc,
+    bool BudgetApprovalRequired = true);
 
 public sealed record ProcurementCommitmentLifecycleResult(
     bool IsValid,

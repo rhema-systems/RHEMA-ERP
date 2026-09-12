@@ -12,6 +12,9 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { format } from 'date-fns';
 import { useAuth } from '@/hooks/use-auth';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Textarea } from '@/components/ui/textarea';
 
 const FINANCE_PO_APPROVER_ROLES = [
     'SuperAdmin',
@@ -33,6 +36,9 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
     const [loading, setLoading] = useState(true);
     const [action, setAction] = useState<'submit' | 'approve' | 'reject' | null>(null);
     const canApproveRole = hasAnyRole(FINANCE_PO_APPROVER_ROLES);
+    const workflow = useWorkflowSummary({ entityType: 'FinancePurchaseOrder', entityId: id });
+    const [rejectOpen, setRejectOpen] = useState(false);
+    const [rejectReason, setRejectReason] = useState('');
 
     useEffect(() => {
         loadPO();
@@ -82,9 +88,11 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
     const handleSubmitForApproval = async () => {
         try {
             setAction('submit');
-            await financePurchaseOrderService.submitPurchaseOrderForApproval(id);
-            toast({ title: 'Submitted', description: 'PO submitted for approval.' });
+            const saved = await financePurchaseOrderService.submitPurchaseOrderForApproval(id);
+            toast({ title: saved.approvalRequired === false ? 'PO finalized' : 'Submitted',
+                description: saved.approvalRequired === false ? 'The PO is ready for receiving.' : 'PO submitted for approval.' });
             await loadPO();
+            await workflow.refresh();
         } catch (error: any) {
             toast({ title: 'Error', description: error.message || 'Failed to submit PO for approval', variant: 'destructive' });
         } finally {
@@ -102,8 +110,8 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
             return;
         }
 
-        const reason = window.prompt('Enter rejection reason');
-        if (!reason?.trim()) return;
+        const reason = rejectReason.trim();
+        if (!reason) return false;
 
         try {
             setAction('reject');
@@ -113,6 +121,7 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
             router.push('/finance/ap/purchase-orders');
         } catch (error: any) {
             toast({ title: 'Error', description: error.message || 'Failed to reject PO', variant: 'destructive' });
+            return false;
         } finally {
             setAction(null);
         }
@@ -143,7 +152,8 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
     const isPendingApproval = po.status === 9 || po.status === 'PendingApproval' || po.status === 'Pending Approval';
     const isRejected = po.status === 10 || po.status === 'Rejected';
     const canSubmitForApproval = isDraft || isRejected;
-    const canApprove = canApproveRole && isPendingApproval;
+    const canApprove = canApproveRole && isPendingApproval && workflow.visibility.showApprovalControls &&
+        workflow.summary?.canCurrentUserApprove === true;
     const canReject = canApprove;
     const canReceive = po.status === 2 || po.status === 'Approved' || po.status === 3 || po.status === 'PartiallyReceived';
 
@@ -161,7 +171,7 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
 
         if (isDraft) return <Badge variant="secondary" className="px-3 py-1 text-sm bg-slate-700/50 text-slate-300">Draft</Badge>;
         if (isPendingApproval) return <Badge className="px-3 py-1 text-sm bg-amber-600/20 text-amber-400 border border-amber-500/30">Pending Approval</Badge>;
-        if (isApproved) return <Badge className="px-3 py-1 text-sm bg-blue-600/20 text-blue-400 border border-blue-500/30">Approved</Badge>;
+        if (isApproved) return <Badge className="px-3 py-1 text-sm bg-blue-600/20 text-blue-400 border border-blue-500/30">{po.approvalRequired === false ? 'Ready for receiving' : 'Approved'}</Badge>;
         if (isPartiallyReceived) return <Badge className="px-3 py-1 text-sm bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">Partially Received</Badge>;
         if (isReceived) return <Badge className="px-3 py-1 text-sm bg-green-600/20 text-green-400 border border-green-500/30">Received</Badge>;
         if (isPartiallyInvoiced) return <Badge className="px-3 py-1 text-sm bg-cyan-600/20 text-cyan-400 border border-cyan-500/30">Partially Invoiced</Badge>;
@@ -174,7 +184,7 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
 
     const getStatusText = (status: number | string) => {
         if (status === 1 || status === 'Draft') return 'Draft';
-        if (status === 2 || status === 'Approved') return 'Approved';
+        if (status === 2 || status === 'Approved') return po.approvalRequired === false ? 'Ready for receiving' : 'Approved';
         if (status === 3 || status === 'PartiallyReceived') return 'Partially Received';
         if (status === 4 || status === 'Received') return 'Received';
         if (status === 5 || status === 'PartiallyInvoiced') return 'Partially Invoiced';
@@ -192,6 +202,12 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
 
     return (
         <>
+        <ConfirmationDialog open={rejectOpen} onOpenChange={setRejectOpen} title="Reject purchase order"
+            confirmText="Reject" variant="destructive" onConfirm={handleReject}
+            confirmDisabled={!rejectReason.trim()} isLoading={action === 'reject'}>
+            <Textarea aria-label="Rejection reason" placeholder="Reason for rejection" value={rejectReason}
+                onChange={event => setRejectReason(event.target.value)} />
+        </ConfirmationDialog>
         <div className="finance-po-no-print space-y-8 p-8 max-w-[1400px] mx-auto print:hidden">
             {/* Header Actions */}
             <div className="flex justify-between items-center no-print">
@@ -203,10 +219,11 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
                     {getStatusBadge(po.status)}
                 </div>
                 <div className="space-x-2">
+                    {workflow.error && <span role="alert" className="text-sm text-red-700">{workflow.error} <Button variant="link" onClick={() => void workflow.refresh()}>Retry</Button></span>}
                     {canSubmitForApproval && (
-                        <Button onClick={handleSubmitForApproval} disabled={action !== null} className="bg-amber-600 hover:bg-amber-700 font-medium px-5">
+                        <Button onClick={handleSubmitForApproval} disabled={action !== null || !workflow.visibility.known} className="bg-amber-600 hover:bg-amber-700 font-medium px-5">
                             {action === 'submit' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                            Submit for Approval
+                            {!workflow.visibility.known ? 'Checking approval status…' : workflow.visibility.direct ? 'Finalize' : 'Submit for Approval'}
                         </Button>
                     )}
                     {canApprove && (
@@ -216,7 +233,7 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
                         </Button>
                     )}
                     {canReject && (
-                        <Button variant="destructive" onClick={handleReject} disabled={action !== null} className="font-medium px-5">
+                        <Button variant="destructive" onClick={() => setRejectOpen(true)} disabled={action !== null} className="font-medium px-5">
                             {action === 'reject' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
                             Reject
                         </Button>
@@ -520,8 +537,8 @@ export default function PurchaseOrderDetailsPage({ params }: { params: Promise<{
 
             <div className="mt-16 grid grid-cols-3 gap-10 text-center text-sm">
                 <div className="border-t border-black pt-2">Prepared By</div>
-                <div className="border-t border-black pt-2">Reviewed By</div>
-                <div className="border-t border-black pt-2">Approved By</div>
+                {po.approvalRequired !== false && <div className="border-t border-black pt-2">Reviewed By</div>}
+                {po.approvalRequired !== false && <div className="border-t border-black pt-2">Approved By</div>}
             </div>
         </section>
         </>

@@ -6,8 +6,8 @@
 // CORE ENUMS
 // ============================================
 
-export type UnitJournalEntryStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Reversed';
-export type AllocationRunBatchStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Cancelled';
+export type UnitJournalEntryStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Reversed' | 'ReadyToPost';
+export type AllocationRunBatchStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Cancelled' | 'ReadyToPost';
 export type NumeratorDenominatorType = 'FinancialAccount' | 'UnitAccount' | 'Constant';
 export type RatioResultFormat = 'Decimal' | 'Percentage' | 'Currency';
 
@@ -52,6 +52,8 @@ export interface UnitAccount {
 }
 
 export interface UnitJournalEntry {
+    approvalRequired?: boolean;
+    workflowInstanceId?: string;
     id: string;
     entryNumber: string;
     entryDate: string;
@@ -406,6 +408,7 @@ export interface AllocationLineResult {
 }
 
 export interface AllocationRunBatch {
+    approvalRequired?: boolean;
     id: string;
     batchNumber: string;
     allocationRuleId: string;

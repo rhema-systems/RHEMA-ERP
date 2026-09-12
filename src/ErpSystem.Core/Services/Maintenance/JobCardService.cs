@@ -463,7 +463,7 @@ public class JobCardService : IJobCardService
             // Start approval workflow
             var workflowResult = await _workflowIntegrationService.SubmitAsync("JobCard", id);
             var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("JobCard");
-            statusAdapter.ApplySubmitOutcome(jobCard, workflowResult.Outcome, currentEmployeeId.Value);
+            statusAdapter.ApplySubmitOutcome(jobCard, workflowResult, currentEmployeeId.Value);
 
             jobCard.SubmittedDate = DateTime.UtcNow;
             jobCard.SubmittedById = currentEmployeeId.Value;

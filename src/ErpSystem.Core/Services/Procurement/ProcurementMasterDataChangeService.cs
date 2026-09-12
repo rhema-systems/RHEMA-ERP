@@ -16,6 +16,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using ErpSystem.Core.Services.Inventory;
 
 namespace ErpSystem.Core.Services.Procurement;
 
@@ -1125,7 +1126,11 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             case InventoryCategory item: await _unitOfWork.Repository<InventoryCategory>().UpdateAsync(item); break;
             case UnitOfMeasure item: await _unitOfWork.Repository<UnitOfMeasure>().UpdateAsync(item); break;
             case Warehouse item: await _unitOfWork.Repository<Warehouse>().UpdateAsync(item); break;
-            case WarehouseLocation item: await _unitOfWork.Repository<WarehouseLocation>().UpdateAsync(item); break;
+            case WarehouseLocation item:
+                await _unitOfWork.Repository<WarehouseLocation>().UpdateAsync(item);
+                if (item.IsDefault)
+                    await new WarehouseDefaultLocationService(_unitOfWork, _currentUser).SetDefaultAsync(item, _currentUser.UserId, cancellationToken);
+                break;
             case ProcurementSettings item: await _unitOfWork.Repository<ProcurementSettings>().UpdateAsync(item); break;
             default: throw new ProcurementMasterDataChangeConflictException("The protected target adapter is not configured.");
         }
@@ -1306,6 +1311,12 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
             case WarehouseLocation location:
                 if (!await ExistsTenantAsync<Warehouse>(location.WarehouseId, cancellationToken))
                     throw new ProcurementMasterDataChangeValidationException("WAREHOUSE_NOT_FOUND", "WarehouseId must identify a current-tenant warehouse.");
+                var originalLocation = await _unitOfWork.Repository<WarehouseLocation>().GetQueryable(value => value.Id == location.Id &&
+                    value.TenantId == _currentUser.TenantId && !value.IsDeleted).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+                if (originalLocation?.IsDefault == true && (!location.IsDefault || !location.IsActive || location.WarehouseId != originalLocation.WarehouseId))
+                    throw new ProcurementMasterDataChangeValidationException("DEFAULT_LOCATION_REPLACEMENT_REQUIRED", "Select another default bin before clearing, moving or deactivating the current default.");
+                if (location.IsDefault && !WarehouseDefaultLocationService.IsEligible(location))
+                    throw new ProcurementMasterDataChangeValidationException("DEFAULT_LOCATION_INVALID", "The default must be an active normal Bin, not a consignment or special-purpose location.");
                 if (location.ParentLocationId == location.Id)
                     throw new ProcurementMasterDataChangeValidationException("LOCATION_PARENT_SELF", "A warehouse location cannot be its own parent.");
                 if (location.ParentLocationId.HasValue)

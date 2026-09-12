@@ -26,14 +26,14 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<UnitJournalEntryService> _logger;
         private readonly IDocumentNumberingService _documentNumberingService;
-        private readonly IWorkflowService _workflowService;
+        private readonly IWorkflowIntegrationService _workflowService;
 
         public UnitJournalEntryService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             ILogger<UnitJournalEntryService> logger,
             IDocumentNumberingService documentNumberingService,
-            IWorkflowService workflowService)
+            IWorkflowIntegrationService workflowService)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
@@ -94,7 +94,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         public async Task<IReadOnlyList<UnitJournalEntryDto>> GetPendingApprovalAsync(CancellationToken cancellationToken = default)
         {
             var entries = await _unitOfWork.Repository<UnitJournalEntry>()
-                .GetQueryable(e => e.TenantId == TenantId && e.Status == UnitJournalEntryStatus.PendingApproval && !e.IsDeleted)
+                .GetQueryable(e => e.TenantId == TenantId && e.ApprovalRequired && e.Status == UnitJournalEntryStatus.PendingApproval && !e.IsDeleted)
                 .Include(e => e.Lines)
                 .OrderBy(e => e.EntryDate)
                 .ToListAsync(cancellationToken);
@@ -225,45 +225,81 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitJournalEntryDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            var entry = await _unitOfWork.Repository<UnitJournalEntry>()
-                .GetQueryable(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted)
-                .Include(e => e.Lines)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (entry == null)
-                throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
-
-            if (entry.Status is not (UnitJournalEntryStatus.Draft or UnitJournalEntryStatus.Rejected))
-                throw new InvalidOperationException("Only draft or rejected entries can be submitted for approval.");
-
-            await ValidateEntryReadyForPostingAsync(entry, requireOpenPeriod: true, cancellationToken);
-
-            var previousStatus = entry.Status;
-            var previousRejectionReason = entry.RejectionReason;
-            entry.Status = UnitJournalEntryStatus.PendingApproval;
-            entry.RejectionReason = null;
-            entry.UpdatedAt = DateTime.UtcNow;
-            entry.UpdatedBy = UserName;
-
-            await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("UnitJournalEntry", id);
-            if (!workflowResult.Success)
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                entry.Status = previousStatus;
-                entry.RejectionReason = previousRejectionReason;
-                entry.UpdatedAt = DateTime.UtcNow;
-                entry.UpdatedBy = UserName;
-                await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                UnitJournalEntry? entry = null;
+                UnitJournalEntryStatus previousStatus = UnitJournalEntryStatus.Draft;
+                string? previousRejectionReason = null;
+                bool previousApprovalRequired = true;
+                Guid? previousWorkflowInstanceId = null;
+                try
+                {
+                    entry = await _unitOfWork.Repository<UnitJournalEntry>()
+                        .GetQueryable(e => e.Id == id && e.TenantId == TenantId && !e.IsDeleted)
+                        .Include(e => e.Lines).FirstOrDefaultAsync(cancellationToken)
+                        ?? throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
+                    previousStatus = entry.Status;
+                    previousRejectionReason = entry.RejectionReason;
+                    previousApprovalRequired = entry.ApprovalRequired;
+                    previousWorkflowInstanceId = entry.WorkflowInstanceId;
+                    if (entry.Status is not (UnitJournalEntryStatus.Draft or UnitJournalEntryStatus.Rejected))
+                        throw new InvalidOperationException("Only draft or rejected entries can be submitted.");
+                    await ValidateEntryReadyForPostingAsync(entry, requireOpenPeriod: true, cancellationToken);
 
-                throw new InvalidOperationException(workflowResult.Message ?? "Unable to start unit journal entry approval workflow.");
-            }
+                    // Only active approvals need the pending staging state. A direct submission
+                    // must transition from its original editable state, never from a legacy
+                    // pending record whose approval history would otherwise be abandoned.
+                    var approvalRequired = await _workflowService.HasActiveApprovalInstanceAsync("UnitJournalEntry", id) ||
+                        await _workflowService.HasActiveApprovalWorkflowAsync("UnitJournalEntry");
+                    entry.RejectionReason = null;
+                    entry.UpdatedAt = DateTime.UtcNow;
+                    entry.UpdatedBy = UserName;
+                    if (approvalRequired)
+                    {
+                        entry.Status = UnitJournalEntryStatus.PendingApproval;
+                        await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    var workflow = await _workflowService.SubmitAsync("UnitJournalEntry", id);
+                    if (!workflow.ExecutionResult.Success)
+                        throw new InvalidOperationException(workflow.ExecutionResult.Message ?? "Unable to submit the unit journal entry.");
+                    if (workflow.ApprovalRequired != approvalRequired)
+                        throw new InvalidOperationException("The unit journal approval configuration changed. Reload and retry.");
+                    if (workflow.ApprovalRequired && (!workflow.ExecutionResult.WorkflowInstanceId.HasValue ||
+                        workflow.ExecutionResult.WorkflowInstanceId == Guid.Empty))
+                        throw new InvalidOperationException("The active approval process did not retain a workflow instance.");
+                    if (!workflow.ApprovalRequired && (workflow.ExecutionResult.WorkflowInstanceId.HasValue ||
+                        workflow.Outcome != WorkflowOutcome.Approved || workflow.ExecutionResult.Status != WorkflowInstanceStatus.Completed ||
+                        entry.ApprovedBy.HasValue || entry.ApprovedAt.HasValue ||
+                        !string.IsNullOrEmpty(entry.ApprovedByName)))
+                        throw new InvalidOperationException("The unit journal approval state changed. Reload and retry.");
 
-            _logger.LogInformation("Unit journal entry {EntryNumber} submitted for approval by {User}", entry.EntryNumber, UserName);
-
-            return MapToDto(entry);
+                    entry.ApprovalRequired = workflow.ApprovalRequired;
+                    entry.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
+                    entry.Status = workflow.ApprovalRequired
+                        ? workflow.Outcome == WorkflowOutcome.Approved ? UnitJournalEntryStatus.Approved : UnitJournalEntryStatus.PendingApproval
+                        : UnitJournalEntryStatus.ReadyToPost;
+                    await _unitOfWork.Repository<UnitJournalEntry>().UpdateAsync(entry);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    _logger.LogInformation("Unit journal entry {EntryNumber} submitted by {User}; approval required: {ApprovalRequired}",
+                        entry.EntryNumber, UserName, entry.ApprovalRequired);
+                    return MapToDto(entry);
+                }
+                catch
+                {
+                    await TryRollbackAsync(cancellationToken);
+                    if (entry is not null)
+                    {
+                        entry.Status = previousStatus;
+                        entry.RejectionReason = previousRejectionReason;
+                        entry.ApprovalRequired = previousApprovalRequired;
+                        entry.WorkflowInstanceId = previousWorkflowInstanceId;
+                    }
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         public async Task<UnitJournalEntryDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default)
@@ -276,7 +312,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (entry == null)
                 throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
 
-            if (entry.Status != UnitJournalEntryStatus.PendingApproval)
+            if (!entry.ApprovalRequired || entry.Status != UnitJournalEntryStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending entries can be approved.");
 
             if (UserId == Guid.Empty)
@@ -285,7 +321,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (!await _workflowService.CanUserApproveAsync("UnitJournalEntry", id, UserId))
                 throw new InvalidOperationException("This unit journal entry is assigned to another workflow approver.");
 
-            var workflowResult = await _workflowService.ProcessApprovalStepAsync("UnitJournalEntry", id, UserId, "Approve");
+            var workflowResult = (await _workflowService.ProcessApprovalAsync("UnitJournalEntry", id, UserId, "Approve")).ExecutionResult;
             if (!workflowResult.Success)
                 throw new InvalidOperationException(workflowResult.Message ?? "Unable to process unit journal entry approval.");
 
@@ -323,7 +359,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (entry == null)
                 throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
 
-            if (entry.Status != UnitJournalEntryStatus.PendingApproval)
+            if (!entry.ApprovalRequired || entry.Status != UnitJournalEntryStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending entries can be rejected.");
 
             if (UserId == Guid.Empty)
@@ -332,7 +368,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (!await _workflowService.CanUserApproveAsync("UnitJournalEntry", id, UserId))
                 throw new InvalidOperationException("This unit journal entry is assigned to another workflow approver.");
 
-            var workflowResult = await _workflowService.ProcessApprovalStepAsync("UnitJournalEntry", id, UserId, "Reject", reason);
+            var workflowResult = (await _workflowService.ProcessApprovalAsync("UnitJournalEntry", id, UserId, "Reject", reason)).ExecutionResult;
             if (!workflowResult.Success)
                 throw new InvalidOperationException(workflowResult.Message ?? "Unable to process unit journal entry rejection.");
 
@@ -374,8 +410,12 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     if (entry == null)
                         throw new ArgumentException($"Unit journal entry with ID '{id}' not found.");
 
-                    if (entry.Status != UnitJournalEntryStatus.Approved)
-                        throw new InvalidOperationException("Only approved entries can be posted.");
+                    var ready = entry.ApprovalRequired
+                        ? entry.Status == UnitJournalEntryStatus.Approved
+                        : entry.Status == UnitJournalEntryStatus.ReadyToPost && !entry.WorkflowInstanceId.HasValue &&
+                            !entry.ApprovedBy.HasValue && !entry.ApprovedAt.HasValue && string.IsNullOrEmpty(entry.ApprovedByName);
+                    if (!ready)
+                        throw new InvalidOperationException("Only approved entries or submitted entries with no required approval can be posted.");
 
                     var period = await ValidateEntryReadyForPostingAsync(entry, requireOpenPeriod: true, cancellationToken);
                     var now = DateTime.UtcNow;
@@ -791,6 +831,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 SourceDocument = entry.SourceDocument,
                 FiscalPeriodId = entry.FiscalPeriodId,
                 Status = entry.Status.ToString(),
+                ApprovalRequired = entry.ApprovalRequired,
+                WorkflowInstanceId = entry.WorkflowInstanceId,
                 LineCount = entry.Lines?.Count(l => !l.IsDeleted) ?? 0,
                 CreatedAt = entry.CreatedAt,
                 CreatedBy = entry.CreatedBy
@@ -809,6 +851,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 FiscalPeriodId = entry.FiscalPeriodId,
                 FiscalPeriodName = entry.FiscalPeriod?.PeriodName,
                 Status = entry.Status.ToString(),
+                ApprovalRequired = entry.ApprovalRequired,
+                WorkflowInstanceId = entry.WorkflowInstanceId,
                 ApprovedAt = entry.ApprovedAt,
                 PostedAt = entry.PostedAt,
                 RejectionReason = entry.RejectionReason,

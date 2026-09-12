@@ -414,6 +414,110 @@ public sealed class InventoryTrackingControlServiceTests : IAsyncLifetime
 
     private InventoryTrackingControlService NewService() => new(_unitOfWork, _currentUser.Object, _access.Object);
 
+    [Theory]
+    [InlineData(InventoryTrackingDirection.AdjustmentIn, "StockAdjustment")]
+    [InlineData(InventoryTrackingDirection.AdjustmentOut, "StockAdjustment")]
+    [InlineData(InventoryTrackingDirection.AdjustmentIn, "StockAdjustmentReversal")]
+    [InlineData(InventoryTrackingDirection.AdjustmentOut, "StockAdjustmentReversal")]
+    public async Task Adjustment_tracking_uses_the_posting_capability_not_the_maker_permission(
+        InventoryTrackingDirection direction, string referenceType)
+    {
+        var category = Category("ADJUSTMENT-POST");
+        var item = Item(category.Id);
+        var warehouse = Warehouse();
+        var location = new WarehouseLocation
+        {
+            TenantId = _tenantId, WarehouseId = warehouse.Id, LocationCode = "POST-BIN", Name = "Posting bin", IsActive = true
+        };
+        await _context.AddRangeAsync(category, item, warehouse, location);
+        await _context.SaveChangesAsync();
+        _access.Setup(value => value.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest request, string _, CancellationToken __) =>
+                new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = request.PermissionCode == "procurement.inventory.adjust.approve" &&
+                        request.WarehouseId == warehouse.Id && request.LocationId == location.Id && request.RequireLocationScope
+                });
+        var request = Request(item.Id, warehouse.Id, direction);
+        request.LocationId = location.Id;
+        request.ReferenceType = referenceType;
+
+        await _service.StageEventAsync(request);
+
+        _context.Set<InventoryTraceabilityEvent>().Local.Should().ContainSingle(value =>
+            value.Direction == direction && value.LocationId == location.Id && value.ActorUserId == _userId);
+        _access.Verify(value => value.CheckCapabilityAsync(It.Is<ProcurementAccessCapabilityRequest>(capability =>
+            capability.PermissionCode == "procurement.inventory.adjust.approve" && capability.WarehouseId == warehouse.Id &&
+            capability.LocationId == location.Id && capability.RequireLocationScope),
+            $"{referenceType}:{request.ReferenceId:N}", It.IsAny<CancellationToken>()), Times.Once);
+        _access.Verify(value => value.CheckCapabilityAsync(It.Is<ProcurementAccessCapabilityRequest>(capability =>
+            capability.PermissionCode == "procurement.inventory.adjust.request"),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(InventoryTrackingDirection.AdjustmentIn, "maker-only")]
+    [InlineData(InventoryTrackingDirection.AdjustmentOut, "maker-only")]
+    [InlineData(InventoryTrackingDirection.AdjustmentIn, "different-warehouse")]
+    [InlineData(InventoryTrackingDirection.AdjustmentOut, "different-warehouse")]
+    [InlineData(InventoryTrackingDirection.AdjustmentIn, "different-bin")]
+    [InlineData(InventoryTrackingDirection.AdjustmentOut, "different-bin")]
+    public async Task Adjustment_tracking_still_denies_a_maker_or_an_unassigned_posting_scope(
+        InventoryTrackingDirection direction, string denial)
+    {
+        var category = Category("DENIED-ADJUSTMENT");
+        var item = Item(category.Id);
+        var warehouse = Warehouse();
+        var location = new WarehouseLocation
+        {
+            TenantId = _tenantId, WarehouseId = warehouse.Id, LocationCode = "DENIED-BIN", Name = "Scoped bin", IsActive = true
+        };
+        await _context.AddRangeAsync(category, item, warehouse, location);
+        await _context.SaveChangesAsync();
+        var permittedWarehouse = denial == "different-warehouse" ? Guid.NewGuid() : warehouse.Id;
+        var permittedLocation = denial == "different-bin" ? Guid.NewGuid() : location.Id;
+        var permittedPermission = denial == "maker-only" ? "procurement.inventory.adjust.request" : "procurement.inventory.adjust.approve";
+        _access.Setup(value => value.CheckCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProcurementAccessCapabilityRequest capability, string _, CancellationToken __) =>
+                new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = capability.PermissionCode == permittedPermission && capability.WarehouseId == permittedWarehouse &&
+                        capability.LocationId == permittedLocation && capability.RequireLocationScope,
+                    Message = "Posting permission and exact warehouse/bin scope are required."
+                });
+        var request = Request(item.Id, warehouse.Id, direction);
+        request.LocationId = location.Id;
+        request.ReferenceType = "StockAdjustment";
+
+        var act = () => _service.StageEventAsync(request);
+
+        await act.Should().ThrowAsync<InventoryTrackingAuthorizationException>();
+        _context.Set<InventoryTraceabilityEvent>().Local.Should().BeEmpty();
+        _access.Verify(value => value.EnforceCapabilityAsync(It.Is<ProcurementAccessCapabilityRequest>(capability =>
+            capability.PermissionCode == "procurement.inventory.adjust.approve" && capability.WarehouseId == warehouse.Id &&
+            capability.LocationId == location.Id && capability.RequireLocationScope),
+            $"StockAdjustment:{request.ReferenceId:N}", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(InventoryTrackingDirection.AdjustmentIn)]
+    [InlineData(InventoryTrackingDirection.AdjustmentOut)]
+    public async Task Adjustment_tracking_posting_permission_does_not_allow_a_foreign_tenant_item(InventoryTrackingDirection direction)
+    {
+        var category = Category("FOREIGN-ADJUSTMENT");
+        var item = Item(category.Id, value => value.TenantId = Guid.NewGuid());
+        var warehouse = Warehouse();
+        await _context.AddRangeAsync(category, item, warehouse);
+        await _context.SaveChangesAsync();
+
+        var act = () => _service.StageEventAsync(Request(item.Id, warehouse.Id, direction));
+
+        await act.Should().ThrowAsync<InventoryTrackingControlException>().Where(value => value.Code == "INV_TRACKING_ITEM_NOT_FOUND");
+        _context.Set<InventoryTraceabilityEvent>().Local.Should().BeEmpty();
+    }
+
     private InventoryCategory Category(string code, Guid? parentId = null, Action<InventoryCategory>? configure = null)
     {
         var value = new InventoryCategory

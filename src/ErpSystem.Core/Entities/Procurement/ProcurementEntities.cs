@@ -231,6 +231,8 @@ public class PurchaseOrder : TenantEntity
     public string Status { get; set; } = "Draft"; // Draft, Approved, Sent, Acknowledged, PartiallyReceived, Received, Cancelled
 
     public Guid? RequestedById { get; set; }
+    /// <summary>Server-captured requirement at submission; existing records remain approval-controlled.</summary>
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public DateTime? CancelledAtUtc { get; set; }
@@ -441,6 +443,9 @@ public class PurchaseOrder : TenantEntity
 /// </summary>
 public class PurchaseOrderItem : TenantEntity
 {
+    /// <summary>Controls fulfilment independently of whether a catalogue record has been selected.</summary>
+    public ItemType LineType { get; set; } = ItemType.StockItem;
+
     [Required]
     public Guid PurchaseOrderId { get; set; }
 
@@ -841,6 +846,8 @@ public class PurchaseRequisition : TenantEntity
     // === END ENHANCED FIELDS ===
 
     // Approval
+    /// <summary>Server-captured requirement at submission; never supplied by a create/update DTO.</summary>
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
 

@@ -303,7 +303,7 @@ public sealed class QuantitySurveyContractClaimService(
             await ValidateFrozenAsync(value, token);
             var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.Claim, value.Id, value.ApprovalWorkflowDefinitionId);
             if (!result.ExecutionResult.Success) throw Conflict(result.ExecutionResult.Message ?? "The claim workflow could not be started.");
-            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Claim).ApplySubmitOutcome(value, result.Outcome, UserId);
+            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Claim).ApplySubmitOutcome(value, result, UserId);
             if (result.Outcome != WorkflowOutcome.Pending) throw Conflict("The claim workflow must stop at an independent approval step.");
             value.Status = QuantitySurveyContractClaimStatuses.PendingApproval; value.ApprovalStatus = "Pending";
             value.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;

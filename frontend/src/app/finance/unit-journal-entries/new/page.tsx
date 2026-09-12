@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FileSpreadsheet, Plus, Save, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { getProcurementProblemMessage as getApiProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +23,7 @@ import {
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 import { useDocumentSequence } from '@/hooks/use-document-sequence';
+import { useAuth } from '@/hooks/use-auth';
 import { FinanceDocumentTypes } from '@/types/document-numbering';
 import type { FiscalPeriod } from '@/types/finance';
 import type { UnitAccount } from '@/types/unit-accounts';
@@ -53,6 +55,7 @@ function defaultDateForPeriod(period: FiscalPeriod, currentDate: string) {
 }
 
 export default function NewUnitJournalEntryPage() {
+    const { hasPermission } = useAuth();
     const router = useRouter();
     const entrySequence = useDocumentSequence('Finance', FinanceDocumentTypes.UnitJournalEntry);
     const today = new Date().toISOString().split('T')[0];
@@ -98,7 +101,7 @@ export default function NewUnitJournalEntryPage() {
                     }));
                 }
             } catch (error: any) {
-                toast.error(error?.message || 'Failed to load unit journal entry lookups.');
+                toast.error(getApiProblemMessage(error, 'Failed to load unit journal entry lookups.'));
             } finally {
                 if (isMounted) {
                     setIsLoadingLookups(false);
@@ -200,15 +203,22 @@ export default function NewUnitJournalEntryPage() {
             });
 
             if (submitForApproval) {
-                await unitAccountsDataService.submitUnitJournalEntry(created.id);
-                toast.success(`Unit journal entry ${created.entryNumber} submitted for approval.`);
+                try {
+                    const submitted = await unitAccountsDataService.submitUnitJournalEntry(created.id);
+                    toast.success(submitted.approvalRequired === false
+                        ? `Unit journal entry ${created.entryNumber} is ready to post.`
+                        : `Unit journal entry ${created.entryNumber} submitted for approval.`);
+                } catch (error: any) {
+                    // Creation already succeeded. Open that saved draft, so retry does not create another entry.
+                    toast.error(getApiProblemMessage(error, `Draft ${created.entryNumber} was saved, but submission failed.`));
+                }
             } else {
                 toast.success(`Unit journal entry ${created.entryNumber} saved as draft.`);
             }
 
             router.push(`/finance/unit-journal-entries/${created.id}`);
         } catch (error: any) {
-            toast.error(error?.message || 'Failed to save unit journal entry.');
+            toast.error(getApiProblemMessage(error, 'Failed to save unit journal entry.'));
         } finally {
             setIsSaving(false);
         }
@@ -442,16 +452,16 @@ export default function NewUnitJournalEntryPage() {
                                 </Button>
                             </Link>
                             <div className="flex gap-2">
-                                <Button type="submit" variant="secondary" disabled={isSaving || isLoadingLookups}>
+                                <Button type="submit" variant="secondary" disabled={isSaving || isLoadingLookups || !hasPermission('Finance.JournalEntries.Create')}>
                                     <Save className="mr-2 h-4 w-4" />
                                     Save as Draft
                                 </Button>
                                 <Button
                                     type="button"
                                     onClick={(e) => handleSubmit(e, true)}
-                                    disabled={isSaving || isLoadingLookups}
+                                    disabled={isSaving || isLoadingLookups || !hasPermission('Finance.JournalEntries.Create') || !hasPermission('Finance.JournalEntries.SubmitForApproval')}
                                 >
-                                    Submit for Approval
+                                    Save and Submit
                                 </Button>
                             </div>
                         </div>

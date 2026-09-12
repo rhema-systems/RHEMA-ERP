@@ -13,6 +13,8 @@ using ErpSystem.Api.Services.Finance.AP;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Core.Services.Workflow;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ErpSystem.Api.Controllers.Finance;
 
@@ -44,6 +46,7 @@ public class FinancePurchaseOrderController : ControllerBase
     private readonly IWorkflowService _workflowService;
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ILogger<FinancePurchaseOrderController> _logger;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
 
     public FinancePurchaseOrderController(
         ApplicationDbContext dbContext,
@@ -51,7 +54,8 @@ public class FinancePurchaseOrderController : ControllerBase
         INotificationService notificationService,
         IWorkflowService workflowService,
         IDocumentNumberingService documentNumberingService,
-        ILogger<FinancePurchaseOrderController> logger)
+        ILogger<FinancePurchaseOrderController> logger,
+        IWorkflowIntegrationService? workflowIntegration = null)
     {
         _dbContext = dbContext;
         _currentUserService = currentUserService;
@@ -59,6 +63,8 @@ public class FinancePurchaseOrderController : ControllerBase
         _workflowService = workflowService;
         _documentNumberingService = documentNumberingService;
         _logger = logger;
+        _workflowIntegration = workflowIntegration ?? new WorkflowIntegrationService(workflowService,
+            NullLogger<WorkflowIntegrationService>.Instance);
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -284,30 +290,52 @@ public class FinancePurchaseOrderController : ControllerBase
             return BadRequest("At least one purchase order line is required before submitting for approval.");
         }
 
-        var previousStatus = purchaseOrder.Status;
-        purchaseOrder.Status = PendingApproval;
-        purchaseOrder.UpdatedAt = DateTime.UtcNow;
-        purchaseOrder.UpdatedBy = _currentUserService.UserName;
-        purchaseOrder.LastModifiedById = TryGetCurrentUserId();
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        var workflowResult = await _workflowService.StartApprovalWorkflowAsync("FinancePurchaseOrder", id);
-        if (!workflowResult.Success)
+        return await _dbContext.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            purchaseOrder.Status = previousStatus;
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            purchaseOrder = await _dbContext.FinancePurchaseOrders.AsTracking()
+                .Include(po => po.Items.Where(i => !i.IsDeleted))
+                .FirstAsync(po => po.Id == id && po.TenantId == TenantId && !po.IsDeleted, cancellationToken);
+            await _dbContext.Entry(purchaseOrder).ReloadAsync(cancellationToken);
+            var previousStatus = purchaseOrder.Status;
+            try
+            {
+            if (purchaseOrder.Status != Draft && purchaseOrder.Status != Rejected)
+                throw new InvalidOperationException("Only draft or rejected finance purchase orders can be finalized.");
+            if (!purchaseOrder.Items.Any())
+                throw new InvalidOperationException("At least one purchase order line is required.");
+            var approvalRequired = await _workflowIntegration.HasActiveApprovalInstanceAsync("FinancePurchaseOrder", id) ||
+                await _workflowIntegration.HasActiveApprovalWorkflowAsync("FinancePurchaseOrder");
+            if (approvalRequired)
+            {
+                purchaseOrder.Status = PendingApproval;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+            var result = await _workflowIntegration.SubmitAsync("FinancePurchaseOrder", id);
+            if (!result.ExecutionResult.Success || result.ApprovalRequired != approvalRequired ||
+                (approvalRequired && !result.ExecutionResult.WorkflowInstanceId.HasValue) ||
+                (!approvalRequired && (result.ExecutionResult.WorkflowInstanceId.HasValue ||
+                    result.Outcome != WorkflowOutcome.Approved || result.ExecutionResult.Status != WorkflowInstanceStatus.Completed)))
+                throw new InvalidOperationException(result.ExecutionResult.Message ?? "Unable to finalize the finance purchase order.");
+
+            purchaseOrder.ApprovalRequired = result.ApprovalRequired;
+            purchaseOrder.Status = result.Outcome == WorkflowOutcome.Approved ? Approved : PendingApproval;
             purchaseOrder.UpdatedAt = DateTime.UtcNow;
             purchaseOrder.UpdatedBy = _currentUserService.UserName;
             purchaseOrder.LastModifiedById = TryGetCurrentUserId();
             await _dbContext.SaveChangesAsync(cancellationToken);
-            return BadRequest(workflowResult.Message ?? "Unable to start finance purchase order approval workflow.");
-        }
-
-        var saved = await BasePurchaseOrderQuery(TenantId)
-            .AsSplitQuery()
-            .FirstAsync(po => po.Id == id, cancellationToken);
-
-        return Ok(MapPurchaseOrder(saved));
+            await transaction.CommitAsync(cancellationToken);
+            var saved = await BasePurchaseOrderQuery(TenantId).AsSplitQuery().FirstAsync(po => po.Id == id, cancellationToken);
+            return (ActionResult<FinancePurchaseOrderDto>)Ok(MapPurchaseOrder(saved));
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                purchaseOrder.Status = previousStatus;
+                _dbContext.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     [HttpPost("{id:guid}/approve")]
@@ -495,6 +523,7 @@ public class FinancePurchaseOrderController : ControllerBase
                 ? purchaseOrder.OrderDate.AddDays(purchaseOrder.PaymentTerm.DiscountDays)
                 : null,
             Status = purchaseOrder.Status,
+            ApprovalRequired = purchaseOrder.ApprovalRequired,
             CurrencyCode = purchaseOrder.CurrencyCode,
             ExchangeRate = purchaseOrder.ExchangeRate,
             TotalAmount = purchaseOrder.TotalAmount,
@@ -799,6 +828,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
     private readonly IWorkflowService _workflowService;
     private readonly FinancePurchaseOrderReceiptPostingService _receiptPostingService;
     private readonly ILogger<FinancePurchaseOrderReceiptController> _logger;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
 
     public FinancePurchaseOrderReceiptController(
         ApplicationDbContext dbContext,
@@ -806,7 +836,8 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         IDocumentNumberingService documentNumberingService,
         IWorkflowService workflowService,
         FinancePurchaseOrderReceiptPostingService receiptPostingService,
-        ILogger<FinancePurchaseOrderReceiptController> logger)
+        ILogger<FinancePurchaseOrderReceiptController> logger,
+        IWorkflowIntegrationService? workflowIntegration = null)
     {
         _dbContext = dbContext;
         _currentUserService = currentUserService;
@@ -814,6 +845,8 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         _workflowService = workflowService;
         _receiptPostingService = receiptPostingService;
         _logger = logger;
+        _workflowIntegration = workflowIntegration ?? new WorkflowIntegrationService(workflowService,
+            NullLogger<WorkflowIntegrationService>.Instance);
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -988,49 +1021,59 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
         }
 
         var userId = TryGetCurrentUserId();
-        var now = DateTime.UtcNow;
-        receipt.Status = FinancePurchaseOrderReceiptStatus.PendingApproval;
-        receipt.SubmittedAt = now;
-        receipt.SubmittedById = userId;
-        receipt.UpdatedAt = now;
-        receipt.UpdatedBy = _currentUserService.UserName;
-        receipt.RejectedAt = null;
-        receipt.RejectedById = null;
-        receipt.RejectionReason = null;
+        if (!userId.HasValue || userId.Value == Guid.Empty)
+            return Unauthorized("An authenticated Finance user is required to finalize a receipt.");
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        var workflowResult = await _workflowService.StartApprovalWorkflowAsync("FinancePurchaseOrderReceipt", id);
-        if (!workflowResult.Success)
+        return await _dbContext.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            receipt.Status = FinancePurchaseOrderReceiptStatus.Draft;
-            receipt.SubmittedAt = null;
-            receipt.SubmittedById = null;
-            receipt.UpdatedAt = DateTime.UtcNow;
-            receipt.UpdatedBy = _currentUserService.UserName;
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            return BadRequest(workflowResult.Message ?? "Unable to start finance GRV approval workflow.");
-        }
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                receipt = await _dbContext.FinancePurchaseOrderReceipts.AsTracking()
+                    .Include(r => r.Items.Where(i => !i.IsDeleted))
+                    .FirstAsync(r => r.Id == id && r.TenantId == tenantId && !r.IsDeleted, cancellationToken);
+                await _dbContext.Entry(receipt).ReloadAsync(cancellationToken);
+                if (receipt.Status != FinancePurchaseOrderReceiptStatus.Draft || !receipt.Items.Any())
+                    throw new InvalidOperationException("Only a draft finance receipt with saved lines can be finalized.");
 
-        receipt.WorkflowInstanceId = workflowResult.WorkflowInstanceId ?? receipt.WorkflowInstanceId;
-        await _dbContext.SaveChangesAsync(cancellationToken);
+                var approvalRequired = await _workflowIntegration.HasActiveApprovalInstanceAsync("FinancePurchaseOrderReceipt", id) ||
+                    await _workflowIntegration.HasActiveApprovalWorkflowAsync("FinancePurchaseOrderReceipt");
+                var now = DateTime.UtcNow;
+                receipt.SubmittedAt = now;
+                receipt.SubmittedById = userId;
+                receipt.UpdatedAt = now;
+                receipt.UpdatedBy = _currentUserService.UserName;
+                if (approvalRequired)
+                {
+                    receipt.Status = FinancePurchaseOrderReceiptStatus.PendingApproval;
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+                }
+                var result = await _workflowIntegration.SubmitAsync("FinancePurchaseOrderReceipt", id);
+                if (!result.ExecutionResult.Success || result.ApprovalRequired != approvalRequired ||
+                    (approvalRequired && !result.ExecutionResult.WorkflowInstanceId.HasValue) ||
+                    (!approvalRequired && (result.ExecutionResult.WorkflowInstanceId.HasValue ||
+                        result.Outcome != WorkflowOutcome.Approved || result.ExecutionResult.Status != WorkflowInstanceStatus.Completed)))
+                    throw new InvalidOperationException(result.ExecutionResult.Message ?? "Unable to finalize the finance receipt.");
 
-        if (workflowResult.Status == WorkflowInstanceStatus.Completed && userId.HasValue)
-        {
-            await _receiptPostingService.ApproveAndPostAsync(
-                tenantId,
-                receipt.Id,
-                userId.Value,
-                _currentUserService.UserName,
-                null,
-                cancellationToken);
-        }
-
-        var saved = await BaseReceiptQuery(tenantId)
-            .AsSplitQuery()
-            .FirstAsync(r => r.Id == receipt.Id, cancellationToken);
-
-        return Ok(MapReceipt(saved));
+                receipt.ApprovalRequired = result.ApprovalRequired;
+                receipt.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;
+                if (!result.ApprovalRequired)
+                    await _receiptPostingService.CompleteWithoutApprovalAndPostAsync(tenantId, id, userId.Value, cancellationToken);
+                else if (result.ExecutionResult.Status == WorkflowInstanceStatus.Completed)
+                    await _receiptPostingService.ApproveAndPostAsync(tenantId, id, userId.Value,
+                        _currentUserService.UserName, null, cancellationToken);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                var saved = await BaseReceiptQuery(tenantId).AsSplitQuery().FirstAsync(r => r.Id == id, cancellationToken);
+                return (ActionResult<FinancePurchaseOrderReceiptDto>)Ok(MapReceipt(saved));
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _dbContext.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     [HttpPost("{id:guid}/convert-to-vendor-invoice")]
@@ -1256,6 +1299,7 @@ public class FinancePurchaseOrderReceiptController : ControllerBase
             ReceiptDate = receipt.ReceiptDate,
             Remarks = receipt.Remarks,
             Status = (int)receipt.Status,
+            ApprovalRequired = receipt.ApprovalRequired,
             StatusName = receipt.Status.ToString(),
             WorkflowInstanceId = receipt.WorkflowInstanceId,
             VendorInvoiceId = receipt.VendorInvoiceId,

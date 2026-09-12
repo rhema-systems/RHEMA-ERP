@@ -1,5 +1,7 @@
 'use client';
 
+import { purchaseOrderLineType, requiresPurchaseOrderStock, type PurchaseOrderLineType } from '@/lib/purchase-order-line-types';
+
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -69,6 +71,7 @@ import {
 } from '@/lib/procurement-receipt-item';
 
 interface ReceiptItemFormData extends ReceivePurchaseOrderItemDto {
+  lineType?: PurchaseOrderLineType;
   inventoryItemId?: string;
   missingItemDecision: ReceiptMissingItemDecision;
   itemCode: string;
@@ -241,9 +244,10 @@ export default function ReceivePurchaseOrderPage() {
           return {
           purchaseOrderItemId: item.id,
           inventoryItemId: item.inventoryItemId,
-          missingItemDecision: controlledInventoryItemExists
-            ? 'existing'
-            : 'pending',
+          lineType: item.lineType,
+          missingItemDecision: (!requiresPurchaseOrderStock(item.lineType) || controlledInventoryItemExists)
+            ? 'existing' as const
+            : 'pending' as const,
           itemCode: item.itemCode?.trim() || '-',
           itemName: displayItemName,
           orderedQuantity: item.orderedQuantity,
@@ -257,8 +261,8 @@ export default function ReceivePurchaseOrderPage() {
           acceptedQuantity: 0,
           rejectedQuantity: 0,
           locationId: '',
-          poWarehouseId: normalizeGuid(item.warehouseId || data.deliveryWarehouseId),
-          warehouseId: normalizeGuid(item.warehouseId || data.deliveryWarehouseId),
+          poWarehouseId: requiresPurchaseOrderStock(item.lineType) ? normalizeGuid(item.warehouseId || data.deliveryWarehouseId) : '',
+          warehouseId: requiresPurchaseOrderStock(item.lineType) ? normalizeGuid(item.warehouseId || data.deliveryWarehouseId) : '',
           warehouseName: item.warehouseName || 'Warehouse',
           serialNumber: '',
           lotNumber: '',
@@ -566,12 +570,17 @@ export default function ReceivePurchaseOrderPage() {
     }
 
     // Enforce put-away location selection per receipt line
-    const missingLocations = itemsToReceive.filter(item => !item.locationId || !item.locationId.trim());
+    const missingLocations = itemsToReceive.filter(item => requiresPurchaseOrderStock(item.lineType) && (!item.locationId || !item.locationId.trim()));
     if (missingLocations.length > 0) {
       toast.error('Please select a storage location for each received line item');
       return;
     }
     
+    if (itemsToReceive.some(item => purchaseOrderLineType(item.lineType) === 2 && !item.notes?.trim())) {
+      toast.error('Enter the completion or acceptance evidence reference for each service line');
+      return;
+    }
+
     // Check for rejection reasons
     const itemsWithRejections = itemsToReceive.filter(item => item.rejectedQuantity > 0);
     const missingRejectionReasons = itemsWithRejections.filter(item => !item.rejectionReason?.trim());
@@ -608,8 +617,8 @@ export default function ReceivePurchaseOrderPage() {
           receivedQuantity: item.receivedQuantity,
           acceptedQuantity: item.acceptedQuantity,
           rejectedQuantity: item.rejectedQuantity,
-          warehouseId: item.warehouseId || undefined,
-          locationId: item.locationId || undefined,
+          warehouseId: requiresPurchaseOrderStock(item.lineType) ? item.warehouseId || undefined : undefined,
+          locationId: requiresPurchaseOrderStock(item.lineType) ? item.locationId || undefined : undefined,
           serialNumber: item.serialNumber || undefined,
           lotNumber: item.lotNumber || undefined,
           expirationDate: item.expirationDate || undefined,
@@ -624,7 +633,7 @@ export default function ReceivePurchaseOrderPage() {
       };
 
       const result = await purchasingService.receivePurchaseOrder(id, receiptData);
-      toast.success('Goods receipt created successfully');
+      toast.success('Receipt / acceptance record created successfully');
       router.push(`/procurement/purchase-receipts/${result.id}`);
     } catch (error: any) {
       console.error('Error creating receipt:', error);
@@ -975,6 +984,7 @@ export default function ReceivePurchaseOrderPage() {
                         <Input readOnly value={getPendingQuantity(item)} className="h-9 bg-muted" />
                       </div>
 
+                      {requiresPurchaseOrderStock(item.lineType) && <>
                       <div className="space-y-2">
                         <Label htmlFor={`warehouse-${index}`} className="text-xs">Warehouse</Label>
                         <Select
@@ -1052,6 +1062,7 @@ export default function ReceivePurchaseOrderPage() {
                         </Select>
                       </div>
 
+                      </>}
                       <div className="space-y-2">
                         <Label htmlFor={`quality-${index}`} className="text-xs">Quality</Label>
                         <Select
@@ -1086,7 +1097,7 @@ export default function ReceivePurchaseOrderPage() {
                       </div>
                     )}
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {requiresPurchaseOrderStock(item.lineType) && <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="space-y-2">
                         <Label htmlFor={`serial-${index}`} className="text-xs">Serial</Label>
                         <Input
@@ -1119,7 +1130,7 @@ export default function ReceivePurchaseOrderPage() {
                           className="h-9"
                         />
                       </div>
-                    </div>
+                    </div>}
                     
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                       <div className="space-y-2">
@@ -1134,7 +1145,7 @@ export default function ReceivePurchaseOrderPage() {
                       </div>
                       
                       <div className="space-y-2">
-                        <Label htmlFor={`item-notes-${index}`} className="text-xs">Item Notes</Label>
+                        <Label htmlFor={`item-notes-${index}`} className="text-xs">{purchaseOrderLineType(item.lineType) === 2 ? 'Completion / acceptance evidence reference *' : 'Item Notes'}</Label>
                         <Textarea
                           id={`item-notes-${index}`}
                           value={item.notes}

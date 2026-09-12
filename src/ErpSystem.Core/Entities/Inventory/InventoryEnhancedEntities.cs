@@ -395,6 +395,8 @@ public class InventoryTransfer : TenantEntity
 
     // Status
     public TransferStatus Status { get; set; } = TransferStatus.Draft;
+    // Captured only on submission; historical transfers retain required approval.
+    public bool ApprovalRequired { get; set; } = true;
 
     // Personnel
     public Guid? RequestedById { get; set; }
@@ -622,6 +624,7 @@ public class PhysicalCount : TenantEntity
     public string Status { get; set; } = "Draft";
 
     // Options
+    public bool ApprovalRequired { get; set; } = true;
     public bool FreezeInventory { get; set; } = false;
     public bool IncludeZeroStock { get; set; } = false;
     public bool BlindCount { get; set; } = false; // Hide system qty from counters
@@ -917,6 +920,7 @@ public class LandedCost : TenantEntity
 /// </summary>
 public class LandedCostItem : TenantEntity
 {
+    public Guid? PurchaseOrderItemId { get; set; }
     [Required]
     public Guid LandedCostId { get; set; }
 
@@ -1024,6 +1028,9 @@ public class LandedCostAllocation : TenantEntity
 /// </summary>
 public class PurchaseReturn : TenantEntity
 {
+    // Captured by the server at submission; historical returns retain their approval obligation.
+    public bool ApprovalRequired { get; set; } = true;
+
     [Required]
     [MaxLength(50)]
     public string ReturnNumber { get; set; } = string.Empty;

@@ -30,6 +30,7 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IJournalEntryService _journalEntryService;
         private readonly IGeneralLedgerService _generalLedgerService;
         private readonly IWorkflowService _workflowService;
+        private readonly IWorkflowIntegrationService _workflowIntegration;
         private readonly ICurrentUserService _currentUserService;
         private readonly IFinanceAuditService _financeAuditService;
         private readonly ApplicationDbContext _dbContext;
@@ -42,11 +43,15 @@ namespace ErpSystem.Api.Controllers.Finance
             ICurrentUserService currentUserService,
             IFinanceAuditService financeAuditService,
             ApplicationDbContext dbContext,
-            IFinanceBudgetControlService budgetControl)
+            IFinanceBudgetControlService budgetControl,
+            IWorkflowIntegrationService? workflowIntegration = null)
         {
             _journalEntryService = journalEntryService;
             _generalLedgerService = generalLedgerService;
             _workflowService = workflowService;
+            _workflowIntegration = workflowIntegration ?? new ErpSystem.Core.Services.Workflow.WorkflowIntegrationService(
+                workflowService,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ErpSystem.Core.Services.Workflow.WorkflowIntegrationService>.Instance);
             _currentUserService = currentUserService;
             _financeAuditService = financeAuditService;
             _dbContext = dbContext;
@@ -575,24 +580,30 @@ namespace ErpSystem.Api.Controllers.Finance
                 await _budgetControl.ReserveManualJournalAsync(id);
 
                 WorkflowExecutionResult workflowResult;
+                WorkflowIntegrationResult submission;
                 try
                 {
-                    workflowResult = await _workflowService.StartApprovalWorkflowAsync("JournalEntry", id);
+                    submission = await _workflowIntegration.SubmitAsync("JournalEntry", id);
+                    workflowResult = submission.ExecutionResult;
                 }
                 catch
                 {
                     await _budgetControl.ReleaseManualJournalAsync(id, "Journal approval workflow failed to start.");
                     throw;
                 }
-                if (!workflowResult.Success)
+                if (!workflowResult.Success || (!submission.ApprovalRequired &&
+                    (submission.Outcome != WorkflowOutcome.Approved || workflowResult.WorkflowInstanceId.HasValue)))
                 {
                     await _budgetControl.ReleaseManualJournalAsync(id, workflowResult.Message ?? "Journal workflow did not start.");
-                    return BadRequest(workflowResult.Message ?? "Unable to start approval workflow.");
+                    return BadRequest(!workflowResult.Success
+                        ? workflowResult.Message ?? "Unable to start approval workflow."
+                        : "The no-approval decision is inconsistent. Refresh and retry submission.");
                 }
 
-                var currentWorkflowStep = await _workflowService.GetCurrentWorkflowStepAsync("JournalEntry", id);
-                if (currentWorkflowStep == null ||
-                    string.Equals(currentWorkflowStep.StepName, "Draft", StringComparison.OrdinalIgnoreCase))
+                var currentWorkflowStep = submission.ApprovalRequired
+                    ? await _workflowService.GetCurrentWorkflowStepAsync("JournalEntry", id) : null;
+                if (submission.ApprovalRequired && (currentWorkflowStep == null ||
+                    string.Equals(currentWorkflowStep.StepName, "Draft", StringComparison.OrdinalIgnoreCase)))
                 {
                     await _workflowService.CancelWorkflowAsync("JournalEntry", id, "Journal workflow did not advance to an approval step.");
                     await _budgetControl.ReleaseManualJournalAsync(id, "Journal workflow did not advance to an approval step.");
@@ -603,11 +614,14 @@ namespace ErpSystem.Api.Controllers.Finance
                 // workflow and release its budget commitment instead of leaving split state.
                 try
                 {
-                    await _journalEntryService.UpdateApprovalStatusAsync(id, "Pending Approval", "Pending");
+                    await _journalEntryService.UpdateApprovalStatusAsync(id,
+                        submission.ApprovalRequired ? "Pending Approval" : "Approved",
+                        submission.ApprovalRequired ? "Pending" : "Not Required");
                 }
                 catch
                 {
-                    await _workflowService.CancelWorkflowAsync("JournalEntry", id, "Journal submission failed after workflow start.");
+                    if (submission.ApprovalRequired)
+                        await _workflowService.CancelWorkflowAsync("JournalEntry", id, "Journal submission failed after workflow start.");
                     await _budgetControl.ReleaseManualJournalAsync(id, "Journal submission failed after workflow start.");
                     throw;
                 }

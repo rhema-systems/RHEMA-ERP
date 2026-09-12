@@ -56,7 +56,12 @@ public sealed class ProcurementRfqEvaluationConfiguration : IEntityTypeConfigura
 {
     public void Configure(EntityTypeBuilder<ProcurementRfqEvaluation> builder)
     {
-        builder.ToTable("ProcurementRfqEvaluations", table => table.HasTrigger("TR_ProcurementRfqEvaluations_Lifecycle"));
+        builder.ToTable("ProcurementRfqEvaluations", table =>
+        {
+            table.HasTrigger("TR_ProcurementRfqEvaluations_Lifecycle");
+            table.HasTrigger("TR_ProcurementRfqEvaluations_ApprovalPolicy");
+        });
+        builder.Property(item => item.ApprovalRequired).HasDefaultValue(true);
         builder.HasIndex(item => new { item.TenantId, item.RfqId }).IsUnique();
         builder.HasOne(item => item.Rfq).WithOne(item => item.Evaluation).HasForeignKey<ProcurementRfqEvaluation>(item => item.RfqId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.OpeningRegister).WithMany().HasForeignKey(item => item.OpeningRegisterId).OnDelete(DeleteBehavior.Restrict);

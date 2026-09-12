@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Services.Workflow;
@@ -34,7 +35,7 @@ namespace ErpSystem.Api.Services.Finance.AP
     /// <summary>
     /// Manages vendor payments, allocations, early-payment discounts, and payment batches.
     /// </summary>
-    public class VendorPaymentService : IVendorPaymentService
+    public partial class VendorPaymentService : IVendorPaymentService
     {
         private const int DefaultOutstandingInvoicePageSize = 50;
         private const int MaximumOutstandingInvoicePageSize = 100;
@@ -87,7 +88,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             IProcurementControlEventService? procurementControlEvents = null,
             IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
             IExchangeRateService? exchangeRateService = null,
-            IApSupplierIdentityService? apSupplierIdentityService = null)
+            IApSupplierIdentityService? apSupplierIdentityService = null,
+            IControlledFileUploadService? controlledFiles = null,
+            ICentralDocumentRepositoryFileService? centralDocuments = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -107,6 +110,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             _invoicePaymentSod = invoicePaymentSod;
             _exchangeRateService = exchangeRateService;
             _apSupplierIdentityService = apSupplierIdentityService;
+            _controlledFiles = controlledFiles;
+            _centralDocuments = centralDocuments;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -636,6 +641,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (payment.TotalAmount <= 0m)
                 throw new InvalidOperationException("A payment must have a positive amount before submission.");
 
+            if (!await IsPaymentApprovalRequiredAsync("VendorPayment", payment.Id))
+                return await SubmitWithoutApprovalAsync(id, dto, cancellationToken);
+
             var baseCurrency = (await _tenantSettingsService.GetBaseCurrencyAsync()).Trim().ToUpperInvariant();
             var functionalAmount = decimal.Round(
                 payment.TotalAmount * (payment.ExchangeRate <= 0m ? 1m : payment.ExchangeRate),
@@ -797,6 +805,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 cancellationToken);
 
             var control = DeserializePaymentControlSnapshot(payment.ApprovalControlSnapshotJson);
+            var approvalRequired = payment.Status == VendorPaymentStatus.Draft
+                ? await IsPaymentApprovalRequiredAsync("VendorPayment", payment.Id)
+                : payment.ApprovalRequired;
             WorkflowApprovalPolicyResolution? previewResolution = null;
             if (control == null && payment.Status == VendorPaymentStatus.Draft && _approvalPolicyResolver != null)
             {
@@ -881,6 +892,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                     };
                 })
                 .ToList();
+            List<VendorPaymentEvidenceDocumentDto>? directEvidenceDocuments = null;
+            if (!approvalRequired)
+            {
+                var directEvidence = await GetPaymentEvidenceReadinessAsync(payment, control, cancellationToken);
+                requirementStatuses = directEvidence.Requirements;
+                directEvidenceDocuments = directEvidence.Documents;
+            }
             var evidenceSatisfied = requirementStatuses.All(item => item.IsSatisfied);
             var blockingReasons = requirementStatuses
                 .Where(item => !item.IsSatisfied)
@@ -892,6 +910,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 blockingReasons.Add("The evidence exception is pending Managing Director approval.");
             if (payment.RequiresManagingDirectorApproval && !payment.ManagingDirectorApprovedById.HasValue)
                 blockingReasons.Add("Managing Director approval is still required.");
+            if (!approvalRequired && control.RequiresManagingDirectorApproval)
+                blockingReasons.Add("The payment policy requires separate Managing Director authority; it has not been waived.");
+            if (!approvalRequired && control.SignaturePolicy?.IsRequired == true)
+                blockingReasons.Add("The payment policy requires a mandatory signature; it has not been waived.");
             if (!string.IsNullOrWhiteSpace(payment.ApprovalControlSnapshotJson) &&
                 !string.IsNullOrWhiteSpace(payment.ApprovalControlSnapshotHash))
             {
@@ -903,8 +925,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                 }
             }
 
+            var canUploadEvidence = !approvalRequired && payment.Status == VendorPaymentStatus.Draft && !payment.PaymentBatchId.HasValue;
+            if (canUploadEvidence)
+            {
+                var permittedBanks = await _financeAccessScopeService.GetPermittedBankAccountIdsAsync(FinanceAccessLevel.Operate, cancellationToken);
+                var paymentBank = await ResolveBankAccountIdForScopeAsync(payment.BankAccountId, cancellationToken);
+                canUploadEvidence = permittedBanks == null || (paymentBank.HasValue && permittedBanks.Contains(paymentBank.Value));
+            }
             return new VendorPaymentControlDto
             {
+                ApprovalRequired = approvalRequired,
+                CanUploadEvidence = canUploadEvidence,
                 PaymentId = payment.Id,
                 PolicyCode = payment.AppliedApprovalPolicyCode ?? previewResolution?.PolicyCode,
                 PolicySetId = payment.AppliedApprovalPolicySetId ?? previewResolution?.PolicySetId,
@@ -919,10 +950,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 EvidenceExceptionRequested = payment.EvidenceExceptionRequested,
                 EvidenceExceptionApproved = payment.EvidenceExceptionApprovedById.HasValue,
                 EvidenceRequirementsSatisfied = evidenceSatisfied,
-                CanSubmit = payment.Status == VendorPaymentStatus.Draft && previewResolution != null,
+                CanSubmit = payment.Status == VendorPaymentStatus.Draft &&
+                    (approvalRequired ? previewResolution != null : CanCompleteWithoutApproval(control) && evidenceSatisfied && blockingReasons.Count == 0),
                 MinimumExceptionReasonLength = Math.Max(control.MinimumExceptionReasonLength, 1),
                 EvidenceRequirements = requirementStatuses,
-                EvidenceDocuments = evidence.Select(item => new VendorPaymentEvidenceDocumentDto
+                EvidenceDocuments = directEvidenceDocuments ?? evidence.Select(item => new VendorPaymentEvidenceDocumentDto
                 {
                     Id = item.Id,
                     AttachmentId = item.AttachmentId,
@@ -1007,6 +1039,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                         "AP_PAYMENT_SUBMISSION_STATE_INVALID",
                         "Only draft manual payments can be submitted for authorization.");
 
+                if (!await IsPaymentApprovalRequiredAsync("VendorPayment", payment.Id))
+                {
+                    var completed = await SubmitWithoutApprovalAsync(id, new SubmitVendorPaymentDto(), cancellationToken);
+                    if (ownsTransaction) await _unitOfWork.CommitAsync(cancellationToken);
+                    return completed;
+                }
+
                 var effectiveAllocations = GetEffectiveAllocations(payment.Allocations);
                 EnsureAllocationTotalIsValid(payment, effectiveAllocations);
                 foreach (var allocation in effectiveAllocations.OrderBy(item => item.VendorInvoiceId))
@@ -1059,7 +1098,8 @@ namespace ErpSystem.Api.Services.Finance.AP
         private async Task<VendorPaymentDto> PostAsync(
             Guid id,
             CancellationToken cancellationToken,
-            bool executionStrategyScope)
+            bool executionStrategyScope,
+            bool batchProcessorScope = false)
         {
             if (_financePostingEngine == null)
                 throw new InvalidOperationException("Central finance posting engine is not configured for AP payment posting.");
@@ -1069,7 +1109,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     "The authoritative invoice/payment SOD service is not configured.");
             if (!_unitOfWork.HasActiveTransaction && !executionStrategyScope)
                 return await _unitOfWork.ExecuteInStrategyAsync(
-                    () => PostAsync(id, cancellationToken, executionStrategyScope: true),
+                    () => PostAsync(id, cancellationToken, executionStrategyScope: true, batchProcessorScope),
                     cancellationToken);
 
             var ownsTransaction = !_unitOfWork.HasActiveTransaction;
@@ -1084,6 +1124,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 await _unitOfWork.AcquireTransactionLockAsync(
                     ApSettlementLockKeys.Payment(TenantId, id), cancellationToken);
                 payment = await LoadPaymentForPostingAsync(id, cancellationToken);
+                if (payment.PaymentBatchId.HasValue && !payment.JournalEntryId.HasValue && !batchProcessorScope)
+                    throw new VendorPaymentControlException("AP_PAYMENT_BATCH_DIRECT_POST_BLOCKED",
+                        "Batch-owned payments must be posted through Process on their payment batch.");
                 var invoiceIds = payment.Allocations.Where(item => !item.IsDeleted)
                     .Select(item => item.VendorInvoiceId)
                     .Concat(payment.SupplierDebitNoteApplications.Where(item => !item.IsDeleted)
@@ -2876,7 +2919,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             note.Applications.Where(item => !created.Contains(item)))
                         .Sum(item => item.ApplicationAmount));
                     var requestNoteUsed = noteConsumedInRequest.GetValueOrDefault(note.Id);
-                    var noteAvailable = RoundMoney(note.TotalAmount - noteUsed - requestNoteUsed);
+                    var noteAvailable = RoundMoney(note.TotalAmount - note.DirectInvoiceAppliedAmount - noteUsed - requestNoteUsed);
                     if (requestedAmount > noteAvailable + 0.01m)
                         throw new InvalidOperationException(
                             $"Application exceeds the {noteAvailable:N2} remaining balance on supplier debit note '{note.DebitNoteNumber}'.");
@@ -3671,6 +3714,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             var batchNumber = await GenerateBatchNumberAsync(cancellationToken);
             var now = DateTime.UtcNow;
             var batchId = Guid.NewGuid();
+            if (CurrentUserId == Guid.Empty)
+                throw new UnauthorizedAccessException("An authenticated Finance user is required to create a payment batch.");
+            var approvalRequired = await IsPaymentApprovalRequiredAsync("PaymentBatch", batchId);
 
             var invoices = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i =>
@@ -3749,7 +3795,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentMethod = paymentMethod,
                 PaymentMethodId = configuredPaymentMethod?.Id,
                 BankAccountId = dto.BankAccountId,
-                Status = PaymentBatchStatus.PendingApproval,
+                Status = approvalRequired ? PaymentBatchStatus.PendingApproval : PaymentBatchStatus.Approved,
+                ApprovalRequired = approvalRequired,
                 CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId,
                 Notes = dto.Notes,
                 CreatedAt = now,
@@ -3770,6 +3817,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new VendorPaymentControlException(
                     "AP_PAYMENT_BATCH_CURRENCY_MISMATCH",
                     "A payment batch must contain invoices in exactly one currency. Create a separate batch for each currency.");
+            }
+            if (!approvalRequired && !string.Equals(selectedCurrencies[0], baseCurrencyCode, StringComparison.OrdinalIgnoreCase))
+            {
+                // The legacy batch factory below retains a placeholder rate of one. It
+                // cannot establish functional-currency authority thresholds for a foreign
+                // payment. A direct payment with validated settlement FX remains available.
+                throw new VendorPaymentControlException(
+                    "AP_PAYMENT_BATCH_SETTLEMENT_RATE_REQUIRED",
+                    "This foreign-currency batch needs a validated settlement exchange rate before completion. Record a direct payment with the correct rate; a rate of one cannot be assumed.");
             }
             // A payment is denominated in exactly one currency. Splitting on
             // both dimensions prevents unconverted mixed-currency totals and
@@ -3866,13 +3922,24 @@ namespace ErpSystem.Api.Services.Finance.AP
             // appended. The shared control-event service saves immediately; attaching a
             // partially built batch-owned payment earlier would flush an incomplete graph
             // (payment FK before batch/selection evidence) during that save.
+            if (!approvalRequired)
+            {
+                foreach (var item in batch.Items)
+                    await CaptureNoApprovalPaymentPolicyAsync(item.VendorPayment, new SubmitVendorPaymentDto(), cancellationToken);
+            }
             await _unitOfWork.Repository<PaymentBatch>().AddAsync(batch);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("PaymentBatch", batch.Id);
-            if (!workflowResult.Success)
+            if (approvalRequired)
             {
-                throw new InvalidOperationException(workflowResult.Message ?? "Unable to start payment batch approval workflow.");
+                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("PaymentBatch", batch.Id);
+                if (!workflowResult.Success || !workflowResult.WorkflowInstanceId.HasValue)
+                    throw new InvalidOperationException(workflowResult.Message ?? "Unable to start payment batch approval workflow.");
+            }
+            else
+            {
+                foreach (var item in batch.Items)
+                    await RecordNoApprovalPaymentAuditAsync(item.VendorPayment, cancellationToken);
             }
 
             if (ownsTransaction)
@@ -3989,6 +4056,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (batch.Status != PaymentBatchStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending batches can be approved.");
+            if (!batch.ApprovalRequired)
+                throw new InvalidOperationException("This batch does not require approval. Use Process instead.");
 
             if (CurrentUserId == Guid.Empty)
                 throw new InvalidOperationException("Unable to resolve the current approver.");
@@ -4086,7 +4155,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             var claimAt = DateTime.UtcNow;
             var interruptedBefore = claimAt.AddMinutes(-30);
             var processorId = CurrentUserId == Guid.Empty ? (Guid?)null : CurrentUserId;
-            var claimed = await _unitOfWork.Repository<PaymentBatch>()
+            var claimed = await ClaimBatchProcessingAsync(batchId, interruptedBefore, async () =>
+                await _unitOfWork.Repository<PaymentBatch>()
                 .GetQueryable(batch =>
                     batch.TenantId == TenantId &&
                     batch.Id == batchId &&
@@ -4100,7 +4170,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         .SetProperty(batch => batch.ProcessedDate, claimAt)
                         .SetProperty(batch => batch.UpdatedAt, claimAt)
                         .SetProperty(batch => batch.UpdatedBy, UserName),
-                    cancellationToken);
+                    cancellationToken), cancellationToken);
 
             if (claimed == 0)
             {
@@ -4216,7 +4286,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         EnsureBatchResumeAllocationsMatch(item, existingAllocations);
                     }
 
-                    await PostAsync(payment.Id, cancellationToken);
+                    await PostAsync(payment.Id, cancellationToken, executionStrategyScope: false, batchProcessorScope: true);
 
                     MarkBatchItemProcessed(item);
                     processedCount++;
@@ -4934,6 +5004,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (payment.TenantId != tenantId)
                 throw new InvalidOperationException("Vendor payment belongs to another tenant.");
 
+            if (!payment.ApprovalRequired && !payment.JournalEntryId.HasValue)
+                await ValidateNoApprovalPaymentSnapshotAsync(payment, cancellationToken);
+
             if (!payment.JournalEntryId.HasValue &&
                 payment.Status != VendorPaymentStatus.Authorized &&
                 payment.Status != VendorPaymentStatus.Processed)
@@ -5101,7 +5174,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .ToListAsync(cancellationToken);
                 if (RoundMoney(GetEffectiveSupplierDebitNoteApplications(noteHistory)
                         .Sum(item => item.ApplicationAmount)) >
-                    RoundMoney(application.SupplierDebitNote.TotalAmount) + 0.01m)
+                    RoundMoney(application.SupplierDebitNote.TotalAmount - application.SupplierDebitNote.DirectInvoiceAppliedAmount) + 0.01m)
                     throw new InvalidOperationException(
                         $"Applications exceed supplier debit note '{application.SupplierDebitNote.DebitNoteNumber}'.");
             }
@@ -6191,6 +6264,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DiscountTaken = payment.DiscountTaken,
                 Status = payment.Status,
                 SubmittedById = payment.SubmittedById,
+                ApprovalRequired = payment.ApprovalRequired,
                 SubmittedAt = payment.SubmittedAt,
                 WorkflowInstanceId = payment.WorkflowInstanceId,
                 AppliedApprovalPolicySetId = payment.AppliedApprovalPolicySetId,
@@ -6346,6 +6420,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 BankAccountId = batch.BankAccountId,
                 BankAccountName = batch.BankAccount?.AccountName,
                 Status = batch.Status,
+                ApprovalRequired = batch.ApprovalRequired,
                 CreatedById = batch.CreatedById,
                 ApprovedById = batch.ApprovedById,
                 ApprovedDate = batch.ApprovedDate,

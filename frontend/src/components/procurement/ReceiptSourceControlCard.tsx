@@ -1,10 +1,11 @@
 'use client';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 
 import React from 'react';
-import { AlertTriangle, CheckCircle2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { CardContent } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -34,23 +35,16 @@ export function ReceiptSourceControlCard({
   const allowed = readiness?.canReceive === true;
 
   return (
-    <Card className={allowed ? 'border-emerald-200' : 'border-amber-300'}>
-      <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="h-5 w-5" />
-              Governed receipt source
-            </CardTitle>
-            <CardDescription>
+    <ProcurementControlAccordion
+        title="Governed receipt source"
+        summary={readiness?.sourceReference || 'Approved PO source and receipt capacity'}
+        status={<Badge variant="outline">{loading ? 'Checking' : error || !readiness ? 'Blocked — unavailable' : allowed ? 'Ready' : 'Blocked'}</Badge>}
+        notice={!loading && (error || (!allowed && (readiness?.message || 'Receipt controls are unavailable. Retry before continuing.')))}
+        actions={onRetry && <Button type="button" variant="ghost" size="sm" aria-label="Refresh receipt source readiness" onClick={onRetry} disabled={loading}><RefreshCw className="h-4 w-4" /></Button>}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
               Server-derived PO source, remaining quantity, and receipt tolerance.
-            </CardDescription>
-          </div>
-          <Badge variant={allowed ? 'default' : 'secondary'}>
-            {loading ? 'Checking' : allowed ? 'Ready' : 'Blocked'}
-          </Badge>
-        </div>
-      </CardHeader>
+            </p>
       <CardContent className="space-y-4">
         {loading && (
           <div className="flex items-center gap-2 rounded-md border p-3 text-sm text-muted-foreground">
@@ -139,6 +133,6 @@ export function ReceiptSourceControlCard({
           </>
         )}
       </CardContent>
-    </Card>
+    </ProcurementControlAccordion>
   );
 }

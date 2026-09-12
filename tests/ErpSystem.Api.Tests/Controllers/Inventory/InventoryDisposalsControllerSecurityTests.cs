@@ -17,7 +17,7 @@ namespace ErpSystem.Api.Tests.Controllers.Inventory;
 public sealed class InventoryDisposalsControllerSecurityTests
 {
     [Fact]
-    public void Register_is_internal_only_and_exposes_only_two_reads_and_eight_post_mutations()
+    public void Register_is_internal_only_and_exposes_two_reads_nine_post_mutations_and_draft_edit()
     {
         var type = typeof(InventoryDisposalsController);
         type.GetCustomAttribute<AuthorizeAttribute>(inherit: true)!.Policy.Should().Be("InternalOnly");
@@ -26,7 +26,8 @@ public sealed class InventoryDisposalsControllerSecurityTests
 
         var actions = type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
         actions.Count(value => value.GetCustomAttribute<HttpGetAttribute>() is not null).Should().Be(2);
-        actions.Count(value => value.GetCustomAttribute<HttpPostAttribute>() is not null).Should().Be(8);
+        actions.Count(value => value.GetCustomAttribute<HttpPostAttribute>() is not null).Should().Be(9);
+        actions.Count(value => value.GetCustomAttribute<HttpPutAttribute>() is not null).Should().Be(1);
         foreach (var action in actions)
             action.GetCustomAttribute<AllowAnonymousAttribute>(inherit: true).Should().BeNull();
     }

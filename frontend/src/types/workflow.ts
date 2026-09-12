@@ -384,6 +384,8 @@ export interface WorkflowEntitySummaryDto {
   entityId: string;
   hasActiveInstance: boolean;
   approvalRequired: boolean;
+  /** Retained approval history, including completed or cancelled instances. */
+  hasWorkflowHistory?: boolean;
   workflowInstanceId?: string;
   workflowName?: string;
   status?: WorkflowInstanceStatus;

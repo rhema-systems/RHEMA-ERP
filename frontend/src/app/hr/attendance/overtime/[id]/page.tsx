@@ -162,7 +162,7 @@ export default function OvertimeRequestDetailPage() {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <WorkflowTabTrigger value="workflow" />
+          <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
@@ -232,6 +232,7 @@ export default function OvertimeRequestDetailPage() {
         </TabsContent>
 
         <WorkflowTabContent
+          {...workflow.tabProps}
           value="workflow"
           entityType="StaffOvertimeRequest"
           entityId={id}

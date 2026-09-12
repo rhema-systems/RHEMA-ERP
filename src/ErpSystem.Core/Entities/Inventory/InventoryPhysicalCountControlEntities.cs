@@ -17,7 +17,10 @@ public enum PhysicalCountActionType
     AuditAttested = 10,
     Rejected = 11,
     Posted = 12,
-    Cancelled = 13
+    Cancelled = 13,
+    ReviewStarted = 14,
+    DefaultLocationsResolved = 15,
+    ApprovalNotRequired = 16
 }
 
 public sealed class InventoryCycleCountSchedule : TenantEntity

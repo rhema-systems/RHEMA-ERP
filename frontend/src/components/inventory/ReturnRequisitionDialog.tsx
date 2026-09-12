@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { CheckCircle, Download } from 'lucide-react';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { canDecideInventoryRecord, canPostInventoryRecord } from '@/lib/inventory-approval-actions';
 import {
   inventoryRequisitionService,
   InventoryRequisitionDetailDto,
@@ -64,6 +68,7 @@ const normalizeStatus = (status: number | string | undefined): number => {
 
 export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onSuccess }: ReturnRequisitionDialogProps) {
   const { toast } = useToast();
+  const { user, hasPermission } = useAuth();
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [requisition, setRequisition] = useState<InventoryRequisitionDetailDto | null>(null);
@@ -75,13 +80,26 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
   const [dmsRecords, setDmsRecords] = useState<CentralDocumentRecord[]>([]);
   const [evidence, setEvidence] = useState<InventoryControlEvidenceRequest[]>([]);
   const [vouchers, setVouchers] = useState<InventoryReturnVoucherDto[]>([]);
+  const [decision, setDecision] = useState<{ voucher: InventoryReturnVoucherDto; action: 'approve' | 'reject' | 'reverse' } | null>(null);
+  const [decisionComment, setDecisionComment] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [reviewMode, setReviewMode] = useState(false);
+  const canRequestReturn = Boolean(user?.id && hasPermission('procurement.inventory.issue'));
+  const isReviewing = reviewMode || !canRequestReturn;
+  const canActOnVoucher = (voucher: InventoryReturnVoucherDto) => Boolean(
+    user?.id && voucher.requestedById && user.id.toLowerCase() !== voucher.requestedById.toLowerCase()
+    && hasPermission('procurement.inventory.adjust.approve')
+  );
   const trackingExceptions = useAvailableInventoryTrackingExceptions(open && Boolean(requisitionId));
 
   useEffect(() => {
+    setDecision(null);
+    setDecisionComment('');
+    setActionError('');
     if (open && requisitionId) {
       void loadRequisition();
     }
-  }, [open, requisitionId]);
+  }, [open, requisitionId, user?.id]);
 
   const loadRequisition = async () => {
     if (!requisitionId) return;
@@ -97,6 +115,10 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
       setReasonCodes(reasons);
       setDmsRecords(records.filter((record) => record.lifecycleStatus === 'Active' && record.versionStatus === 'Published' && Boolean(record.currentVersion)));
       setVouchers(returnVouchers);
+      // Keep an approval session in review mode even after its status changes.
+      // A broad permission grant must not mix a new request with a decision.
+      setReviewMode(returnVouchers.some((voucher) => canActOnVoucher(voucher)
+        && ['PendingApproval', 'Approved', 'ReadyToPost'].includes(voucher.status)));
       setReturnItems(detail.items.map((item) => ({
         itemId: item.id,
         inventoryItemId: item.inventoryItemId,
@@ -126,13 +148,28 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
     }
   };
 
-  const runVoucherAction = async (voucher: InventoryReturnVoucherDto, action: 'approve' | 'reject' | 'post' | 'reverse') => {
-    const comment = (reason || notes).trim();
-    if (action !== 'post' && !comment) {
-      toast({ title: 'Comment required', description: 'Enter a detailed reason/comment before this controlled action.', variant: 'destructive' });
-      return;
+  const openDecision = (voucher: InventoryReturnVoucherDto, action: 'approve' | 'reject' | 'reverse') => {
+    setDecisionComment('');
+    setActionError('');
+    setDecision({ voucher, action });
+  };
+
+  const runVoucherAction = async (voucher: InventoryReturnVoucherDto, action: 'approve' | 'reject' | 'post' | 'reverse', comment = '') => {
+    const allowed = action === 'post'
+      ? canPostInventoryRecord(voucher, user?.id, hasPermission('procurement.inventory.adjust.approve'))
+      : action === 'approve' || action === 'reject'
+        ? canDecideInventoryRecord(voucher, user?.id, hasPermission('procurement.inventory.adjust.approve'))
+        : canActOnVoucher(voucher);
+    if (!allowed) {
+      setActionError('This action requires an authorized user other than the return requester.');
+      return false;
+    }
+    if ((action === 'reject' || action === 'reverse') && !comment.trim()) {
+      setActionError(`Enter a ${action === 'reject' ? 'rejection' : 'reversal'} reason.`);
+      return false;
     }
     try {
+      setActionError('');
       setProcessing(true);
       const updated = action === 'approve' ? await inventoryRequisitionService.decideReturnVoucher(voucher, true, comment)
         : action === 'reject' ? await inventoryRequisitionService.decideReturnVoucher(voucher, false, comment)
@@ -141,8 +178,12 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
       setVouchers((items) => items.map((item) => item.id === updated.id ? updated : item));
       toast({ title: 'Return control updated', description: `${updated.voucherNumber} is now ${updated.status}.` });
       onSuccess();
+      return true;
     } catch (error) {
-      toast({ title: 'Action blocked', description: error instanceof Error ? error.message : 'The controlled return action failed.', variant: 'destructive' });
+      const message = getProcurementProblemMessage(error, 'The return action failed.');
+      setActionError(message);
+      toast({ title: 'Action blocked', description: message, variant: 'destructive' });
+      return false;
     } finally {
       setProcessing(false);
     }
@@ -190,7 +231,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
   };
 
   const handleReturn = async () => {
-    if (!requisitionId || !requisition) {
+    if (!requisitionId || !requisition || !canRequestReturn || isReviewing) {
       return;
     }
 
@@ -199,8 +240,8 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
       toast({ title: 'Validation Error', description: 'Enter at least one return quantity', variant: 'destructive' });
       return;
     }
-    if (!reason.trim()) {
-      toast({ title: 'Validation Error', description: 'Enter the detailed reason for this return', variant: 'destructive' });
+    if (!reasonCode || !reasonCodes[reasonCode]) {
+      toast({ title: 'Validation Error', description: 'Select a return reason', variant: 'destructive' });
       return;
     }
     if ((reasonCode === 'DEFECTIVE' || reasonCode === 'OTHER') && evidence.length === 0) {
@@ -231,12 +272,15 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
         evidence,
       };
       const voucher = await inventoryRequisitionService.returnItems(requisitionId, dto);
-      toast({ title: 'Return submitted', description: `${voucher.voucherNumber} is pending independent approval; stock has not changed.` });
+      toast({ title: 'Return submitted', description: voucher.approvalRequired === false
+        ? `${voucher.voucherNumber} is ready for Post; stock has not changed.`
+        : `${voucher.voucherNumber} is pending independent approval; stock has not changed.` });
       onSuccess();
       onOpenChange(false);
     } catch (error: unknown) {
       console.error('Error returning requisition items', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to return items';
+      const errorMessage = getProcurementProblemMessage(error, 'Failed to return items');
+      setActionError(errorMessage);
       toast({ title: 'Error', description: errorMessage, variant: 'destructive' });
     } finally {
       setProcessing(false);
@@ -246,13 +290,15 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
   const totalReturning = returnItems.reduce((sum, item) => sum + item.returningQuantity, 0);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            Return Issued Items
+            {isReviewing ? 'Review Stock Returns' : 'Return Issued Items'}
             {requisition ? <span className="ml-2 text-muted-foreground">#{requisition.requisitionNumber}</span> : null}
           </DialogTitle>
+          <DialogDescription className="sr-only">Return issued stock or review a saved return voucher.</DialogDescription>
         </DialogHeader>
 
         {loading ? (
@@ -273,6 +319,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
               </CardContent>
             </Card>
 
+            {!isReviewing ? <>
             <div className="flex items-center justify-between">
               <h4 className="font-medium">Issued Items Available For Return</h4>
               <Button variant="outline" size="sm" onClick={returnAll}>Return All Issued</Button>
@@ -319,12 +366,13 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
             </Table>
 
             <div className="space-y-2">
-              <Label>Controlled return reason</Label>
+              <Label htmlFor="return-reason-code">Return reason</Label>
               <Select value={reasonCode} onValueChange={setReasonCode}>
-                <SelectTrigger><SelectValue placeholder="Select reason" /></SelectTrigger>
+                <SelectTrigger id="return-reason-code"><SelectValue placeholder="Select reason" /></SelectTrigger>
                 <SelectContent>{Object.entries(reasonCodes).map(([code, label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}</SelectContent>
               </Select>
-              <Textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Required detailed reason" />
+              <Label htmlFor="return-details">Details (optional)</Label>
+              <Textarea id="return-details" rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Add details if needed" />
             </div>
 
             <div className="space-y-2">
@@ -344,6 +392,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
             <div className="rounded-md bg-muted p-3 text-sm">
               Total return quantity: <span className="font-medium">{totalReturning}</span>
             </div>
+            </> : null}
 
             <div className="space-y-2">
               <h4 className="font-medium">Store Return Voucher register</h4>
@@ -352,23 +401,52 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                   <div><div className="font-medium">{voucher.voucherNumber}</div><div className="text-muted-foreground">{voucher.reasonCode} · {voucher.lines.length} line(s) · {voucher.totalValue.toFixed(2)}</div></div>
                   <div className="flex items-center gap-2"><Badge variant="outline">{voucher.status}</Badge>
                     <Button size="sm" variant="ghost" onClick={() => void downloadVoucher(voucher)} title="Download Store Return Voucher"><Download className="h-4 w-4" /></Button>
-                    {voucher.status === 'PendingApproval' ? <><Button size="sm" onClick={() => void runVoucherAction(voucher, 'approve')} disabled={processing}>Approve</Button><Button size="sm" variant="destructive" onClick={() => void runVoucherAction(voucher, 'reject')} disabled={processing}>Reject</Button></> : null}
-                    {voucher.status === 'Approved' ? <Button size="sm" onClick={() => void runVoucherAction(voucher, 'post')} disabled={processing}>Post stock</Button> : null}
-                    {voucher.status === 'Posted' ? <Button size="sm" variant="outline" onClick={() => void runVoucherAction(voucher, 'reverse')} disabled={processing}>Reverse</Button> : null}
+                    {canDecideInventoryRecord(voucher, user?.id, hasPermission('procurement.inventory.adjust.approve')) ? <><Button size="sm" onClick={() => openDecision(voucher, 'approve')} disabled={processing}>Approve</Button><Button size="sm" variant="destructive" onClick={() => openDecision(voucher, 'reject')} disabled={processing}>Reject</Button></> : null}
+                    {voucher.approvalRequired !== false && voucher.status === 'PendingApproval' && !canActOnVoucher(voucher) ? <span className="text-muted-foreground">Awaiting independent approval</span> : null}
+                    {canPostInventoryRecord(voucher, user?.id, hasPermission('procurement.inventory.adjust.approve')) ? <Button size="sm" onClick={() => void runVoucherAction(voucher, 'post')} disabled={processing}>Post</Button> : null}
+                    {voucher.status === 'Posted' && canActOnVoucher(voucher) ? <Button size="sm" variant="outline" onClick={() => openDecision(voucher, 'reverse')} disabled={processing}>Reverse</Button> : null}
                   </div>
+                  {isReviewing ? <div className="w-full space-y-1 border-t pt-2">
+                    <p>Requested by: {voucher.requestedByName}</p>
+                    <p>Return reason: {reasonCodes[voucher.reasonCode] || voucher.reasonCode}</p>
+                    {voucher.reason && voucher.reason !== reasonCodes[voucher.reasonCode] ? <p>Details: {voucher.reason}</p> : null}
+                    {voucher.notes ? <p>Notes: {voucher.notes}</p> : null}
+                    {voucher.lines.map((line) => <p key={line.id}>{line.itemCode} · {line.itemName} — return quantity: {line.quantity}</p>)}
+                    {voucher.evidence?.map((item) => <p key={item.id}>Evidence: {item.evidenceReference}</p>)}
+                  </div> : null}
                 </div>
               ))}
             </div>
           </div>
         ) : null}
 
+        {actionError && !decision ? <p role="alert" className="text-sm text-destructive">{actionError}</p> : null}
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={() => void handleReturn()} disabled={processing || loading || totalReturning <= 0}>
-            {processing ? 'Submitting...' : 'Submit Return For Approval'}
-          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{isReviewing ? 'Close' : 'Cancel'}</Button>
+          {!isReviewing ? <Button onClick={() => void handleReturn()} disabled={processing || loading || totalReturning <= 0}>
+            {processing ? 'Submitting...' : 'Submit return'}
+          </Button> : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmationDialog
+      open={open && Boolean(decision)}
+      onOpenChange={(value) => { if (!value && !processing) setDecision(null); }}
+      title={decision?.action === 'approve' ? 'Approve return' : decision?.action === 'reject' ? 'Reject return' : 'Reverse return'}
+      description={decision?.voucher.voucherNumber}
+      confirmText={decision?.action === 'approve' ? 'Approve return' : decision?.action === 'reject' ? 'Reject return' : 'Reverse return'}
+      variant={decision?.action === 'approve' ? 'default' : 'destructive'}
+      isLoading={processing}
+      confirmDisabled={decision?.action !== 'approve' && !decisionComment.trim()}
+      onConfirm={() => decision ? runVoucherAction(decision.voucher, decision.action, decisionComment.trim()) : false}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="return-decision-comment">{decision?.action === 'approve' ? 'Comments (optional)' : 'Reason (required)'}</Label>
+        <Textarea id="return-decision-comment" value={decisionComment} maxLength={1000} onChange={(event) => setDecisionComment(event.target.value)} />
+        {actionError ? <p role="alert" className="text-sm text-destructive">{actionError}</p> : null}
+      </div>
+    </ConfirmationDialog>
+    </>
   );
 }

@@ -216,7 +216,7 @@ public sealed class QuantitySurveyVariationService(
             }
             var result = await workflow.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.Variation, value.Id, value.ApprovalWorkflowDefinitionId!.Value);
             if (!result.ExecutionResult.Success) throw Conflict(result.ExecutionResult.Message ?? "The variation workflow could not be started.");
-            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Variation).ApplySubmitOutcome(value, result.Outcome, UserId);
+            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Variation).ApplySubmitOutcome(value, result, UserId);
             value.Status = ProjectVariationOrderStatuses.PendingApproval; value.ApprovalStatus = "Pending";
             value.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId; value.SubmittedById = UserId; value.SubmittedAt = DateTime.UtcNow;
         });

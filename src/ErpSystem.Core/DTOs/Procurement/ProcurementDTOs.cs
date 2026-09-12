@@ -163,6 +163,7 @@ public class SupplierItemCatalogDto
 /// </summary>
 public class PurchaseOrderSummaryDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public string OrderType { get; set; } = "Standard";
@@ -284,6 +285,7 @@ public sealed class PurchaseOrderBudgetCommitmentHistoryDto
 /// </summary>
 public class PurchaseOrderItemDto
 {
+    public ItemType LineType { get; set; } = ItemType.StockItem;
     public Guid Id { get; set; }
     public Guid PurchaseOrderId { get; set; }
     public Guid InventoryItemId { get; set; }
@@ -318,6 +320,7 @@ public class PurchaseOrderItemDto
 /// </summary>
 public class CreatePurchaseOrderDto
 {
+    public UpsertPurchaseOrderLandedCostPlanDto? PlannedLandedCostPlan { get; set; }
     [Required]
     public ProcurementPurchaseOrderSourceType? SourceType { get; set; }
 
@@ -365,8 +368,9 @@ public class CreatePurchaseOrderDto
 /// </summary>
 public class CreatePurchaseOrderItemDto
 {
-    [Required]
-    public Guid InventoryItemId { get; set; }
+    public Guid? Id { get; set; }
+    public Guid? InventoryItemId { get; set; }
+    public ItemType LineType { get; set; } = ItemType.StockItem;
 
     public string? SupplierItemCode { get; set; }
     public string? ItemDescription { get; set; }
@@ -532,6 +536,7 @@ public class ReceivePurchaseOrderItemDto
 /// </summary>
 public class PurchaseRequisitionSummaryDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public DateTime RequisitionDate { get; set; }

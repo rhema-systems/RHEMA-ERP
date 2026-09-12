@@ -150,6 +150,8 @@ public class SalesAllocationService : ISalesAllocationService
 
         var normalizedSourceItemId = NormalizeRequired(dto.SourceItemId, "Source item ID");
         var status = NormalizeStatus(dto.Status);
+        if (!string.Equals(status, "Reserved", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Create the allocation as Reserved, then submit it to complete the configured lifecycle.");
         if (ActiveStatuses.Contains(status)
             && await HasActiveAllocationAsync(source.Id, normalizedSourceItemId))
         {
@@ -209,6 +211,16 @@ public class SalesAllocationService : ISalesAllocationService
             ?? throw new InvalidOperationException("The selected sales allocation was not found.");
 
         var nextStatus = NormalizeStatus(dto.Status);
+        if (nextStatus is "PendingApproval" or "Approved" or "Rejected")
+            throw new InvalidOperationException("Approval status can only be changed through the allocation workflow.");
+
+        if (nextStatus is "Allocated" or "Sold" or "Leased")
+        {
+            if (allocation.Status is not ("Approved" or "Allocated" or "Sold" or "Leased"))
+                throw new InvalidOperationException("Submit the reserved allocation first. Submission completes directly when approval is not required.");
+            if (await _workflowIntegrationService.HasActiveApprovalInstanceAsync(WorkflowEntityType, id))
+                throw new InvalidOperationException("Complete the existing allocation approval process before changing its completion status.");
+        }
         if (ActiveStatuses.Contains(nextStatus)
             && await HasActiveAllocationAsync(allocation.SaleableSourceId, allocation.SourceItemId, allocation.Id))
         {
@@ -278,14 +290,15 @@ public class SalesAllocationService : ISalesAllocationService
         }
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
-        adapter.ApplySubmitOutcome(allocation, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(allocation, workflowResult, userId);
 
         allocation.UpdatedBy = _currentUserProvider.Username;
         allocation.LastModifiedById = userId;
         allocation.UpdatedAt = DateTime.UtcNow;
 
         await _unitOfWork.Repository<SalesAllocation>().UpdateAsync(allocation);
-        await AddHistoryAsync(allocation, "Submitted", previousStatus, allocation.Status, "Submitted for approval");
+        await AddHistoryAsync(allocation, "Submitted", previousStatus, allocation.Status,
+            workflowResult.ApprovalRequired ? "Submitted for approval" : "Allocated — approval not required");
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Submitted Sales allocation {AllocationId} for approval", allocation.Id);

@@ -71,5 +71,6 @@ public enum ProcurementReceiptInspectionActionType
     ReplacementReceived = 11,
     Closed = 12,
     RevalidationFailed = 13,
-    Cancelled = 14
+    Cancelled = 14,
+    Completed = 15
 }

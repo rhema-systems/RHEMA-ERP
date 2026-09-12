@@ -219,7 +219,7 @@ export default function CreateReceiptPage() {
                                     onChange={(e) => handlePOChange(e.target.value)}
                                     className="w-full p-2.5 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 transition"
                                 >
-                                    <option value="">-- Select Approved PO --</option>
+                                    <option value="">-- Select PO ready for receiving --</option>
                                     {purchaseOrders.map(po => (
                                         <option key={po.id} value={po.id}>
                                             {po.orderNumber} - {po.vendorName || 'Unknown Vendor'} ({po.currencyCode})
@@ -308,7 +308,7 @@ export default function CreateReceiptPage() {
                                 <div className="h-full flex flex-col justify-center items-center p-12 text-center border-2 border-dashed rounded-lg border-muted/50 bg-muted/5">
                                     <Package className="h-10 w-10 text-muted mb-4 animate-pulse" />
                                     <h3 className="font-semibold text-muted-foreground text-lg">No Purchase Order Selected</h3>
-                                    <p className="text-sm text-muted-foreground/60 max-w-sm mt-1">Please select an Approved Purchase Order in the sidebar to load the receipt line items.</p>
+                                    <p className="text-sm text-muted-foreground/60 max-w-sm mt-1">Select a purchase order ready for receiving to load its line items.</p>
                                 </div>
                             ) : loading ? (
                                 <div className="p-8 text-center text-muted-foreground">Loading PO lines...</div>

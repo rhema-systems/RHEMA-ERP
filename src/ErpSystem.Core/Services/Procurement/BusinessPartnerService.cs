@@ -306,7 +306,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         }
 
         var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("BusinessPartner");
-        statusAdapter.ApplySubmitOutcome(partner, workflowResult.Outcome, submittedById);
+        statusAdapter.ApplySubmitOutcome(partner, workflowResult, submittedById);
 
         await _partnerRepository.UpdateAsync(partner);
     }

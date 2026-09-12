@@ -13,6 +13,7 @@ public interface IWorkflowIntegrationService
     /// workflow for the current tenant and entity type.
     /// </summary>
     Task<bool> HasActiveApprovalWorkflowAsync(string entityType);
+    Task<bool> HasActiveApprovalInstanceAsync(string entityType, Guid entityId);
 
     /// <summary>
     /// Starts the approval workflow and returns a normalized outcome
