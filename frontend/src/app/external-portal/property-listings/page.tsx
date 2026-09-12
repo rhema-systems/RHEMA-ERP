@@ -7,17 +7,14 @@ import {
   CalendarDays,
   CheckCircle2,
   FileText,
-  Paperclip,
   Filter,
   Home,
   ImageIcon,
   Loader2,
   MapPin,
-  Phone,
   Ruler,
   Search,
   Send,
-  UserRound,
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -25,7 +22,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -33,20 +29,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import {
   externalEstateListingsService,
   type ExternalCustomerProfile,
+  type ExternalListingEnquiry,
   type ExternalEstateListing,
-  type ExternalListingRequest,
 } from '@/services/external-estate-listings.service';
-import {
-  procedureCaseService,
-  type ProcedureCaseSubmissionDocumentRequirement,
-} from '@/services/procedure-case.service';
-
-type ListingIntent = 'Sale' | 'Rent';
 
 function formatMoney(value?: number | null, currency = 'GHS') {
   if (value == null) return 'Price on request';
@@ -87,18 +76,6 @@ function listingTypeLabel(value: string) {
   if (value === 'Sale') return 'For sale';
   if (value === 'Rent') return 'For rent';
   return value;
-}
-
-function availableIntents(
-  listing?: ExternalEstateListing | null
-): ListingIntent[] {
-  if (!listing) return [];
-  if (listing.externalListingType === 'SaleAndRent') return ['Rent', 'Sale'];
-  return listing.externalListingType === 'Sale' ? ['Sale'] : ['Rent'];
-}
-
-function defaultIntent(listing?: ExternalEstateListing | null): ListingIntent {
-  return listing?.externalListingType === 'Sale' ? 'Sale' : 'Rent';
 }
 
 function areaLabel(listing: ExternalEstateListing) {
@@ -235,18 +212,11 @@ export default function ExternalPropertyListingsPage() {
   const [search, setSearch] = React.useState('');
   const [location, setLocation] = React.useState('');
   const [listingType, setListingType] = React.useState('all');
-  const [requestIntent, setRequestIntent] =
-    React.useState<ListingIntent>('Rent');
-  const [offerAmount, setOfferAmount] = React.useState('');
-  const [message, setMessage] = React.useState('');
-  const [documentRequirements, setDocumentRequirements] = React.useState<
-    ProcedureCaseSubmissionDocumentRequirement[]
-  >([]);
-  const [submissionFiles, setSubmissionFiles] = React.useState<Record<string, File>>({});
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [submittingListingId, setSubmittingListingId] = React.useState<string | null>(null);
   const [createdRequest, setCreatedRequest] =
-    React.useState<ExternalListingRequest | null>(null);
+    React.useState<ExternalListingEnquiry | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const selectedCustomer = React.useMemo(
@@ -255,41 +225,9 @@ export default function ExternalPropertyListingsPage() {
       null,
     [customerProfiles, selectedCustomerId]
   );
-  const applicantName = selectedCustomer?.partnerName || '';
-  const contact =
-    selectedCustomer?.primaryEmail || selectedCustomer?.primaryPhone || '';
-
   const selected = React.useMemo(
     () => listings.find((listing) => listing.id === selectedId) || listings[0],
     [listings, selectedId]
-  );
-
-  const requestOptions = React.useMemo(
-    () => availableIntents(selected),
-    [selected]
-  );
-  const activeRequestIntent = requestOptions.includes(requestIntent)
-    ? requestIntent
-    : defaultIntent(selected);
-
-  const visibleDocumentRequirements = React.useMemo(
-    () =>
-      documentRequirements.filter((requirement) => {
-        if (requirement.appliesTo === 'All' || requirement.appliesTo === activeRequestIntent) {
-          return true;
-        }
-        if (requirement.appliesTo) {
-          return false;
-        }
-
-        // Compatibility for workflow versions saved before applicability was introduced.
-        const name = requirement.name.toLowerCase();
-        if (activeRequestIntent === 'Sale') {
-          return !name.includes('rental') && !name.includes('tenancy');
-        }
-        return !name.includes('purchase') && !name.includes('financing');
-      }),
-    [activeRequestIntent, documentRequirements]
   );
 
   const loadListings = React.useCallback(async () => {
@@ -342,100 +280,43 @@ export default function ExternalPropertyListingsPage() {
   }, []);
 
   React.useEffect(() => {
-    let mounted = true;
-    void procedureCaseService
-      .getSubmissionDocumentRequirements(
-        'PropertyManagement',
-        'EstatePropertyManagementListingApplication'
-      )
-      .then((requirements) => {
-        if (mounted) setDocumentRequirements(requirements);
-      })
-      .catch(() => {
-        if (mounted) setDocumentRequirements([]);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  React.useEffect(() => {
     void loadListings();
   }, [loadListings]);
 
-  React.useEffect(() => {
-    setRequestIntent(defaultIntent(selected));
-    setOfferAmount('');
-    setSubmissionFiles({});
-    setCreatedRequest(null);
-  }, [selected?.id, selected?.externalListingType]);
-
-  const submitRequest = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selected) return;
-
+  const submitEnquiry = async (listing: ExternalEstateListing) => {
+    setSelectedId(listing.id);
     if (!selectedCustomer) {
-      setError('Select the Business Partner placing this request.');
-      return;
-    }
-    if (
-      activeRequestIntent === 'Sale' &&
-      (!offerAmount || Number(offerAmount) <= 0)
-    ) {
-      setError('Enter a positive bid amount before submitting your bid.');
+      setError('Select the Business Partner placing this enquiry.');
       return;
     }
 
     setIsSubmitting(true);
+    setSubmittingListingId(listing.id);
     setCreatedRequest(null);
     setError(null);
     try {
-      const created = await externalEstateListingsService.createRequest(
-        selected.id,
+      const created = await externalEstateListingsService.createEnquiry(
+        listing.id,
         {
-          requestType: activeRequestIntent,
           businessPartnerId: selectedCustomer.id,
-          offerAmount:
-            activeRequestIntent === 'Sale' ? Number(offerAmount) : undefined,
-          message: message.trim(),
         }
       );
-      const documents = created.documents || [];
-      for (const requirement of visibleDocumentRequirements) {
-        const file = submissionFiles[requirement.name];
-        const document = documents.find(
-          (item) => item.providedBy === 'Customer' && item.name === requirement.name
-        );
-        if (file && !document) {
-          throw new Error(
-            `${requirement.name} could not be linked to the submitted request. Open the request and upload it again.`
-          );
-        }
-        if (file && document) {
-          await externalEstateListingsService.uploadCustomerIntakeDocument(
-            created.id,
-            document.id,
-            file
-          );
-        }
-      }
       setCreatedRequest(created);
       toast({
-        title: 'Request submitted',
-        description: `${created.referenceNumber || created.title} is now in ${created.currentStageName}.`,
+        title: 'Enquiry sent',
+        description: `${created.referenceNumber || created.title} is now with Sales.`,
         variant: 'success',
       });
-      setMessage('');
-      setSubmissionFiles({});
       await loadListings();
     } catch (submitError) {
       setError(
         submitError instanceof Error
           ? submitError.message
-          : 'Could not submit request for this listing.'
+          : 'Could not submit enquiry for this listing.'
       );
     } finally {
       setIsSubmitting(false);
+      setSubmittingListingId(null);
     }
   };
 
@@ -447,8 +328,8 @@ export default function ExternalPropertyListingsPage() {
             Property Listings
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Browse available estate units and submit a purchase bid or rental
-            request.
+            Browse available estate units and send purchase, rent, or lease
+            enquiries to Sales.
           </p>
         </div>
         <Badge variant="outline" className="w-fit">
@@ -503,7 +384,7 @@ export default function ExternalPropertyListingsPage() {
 
       {error ? (
         <Alert variant="destructive">
-          <AlertTitle>Request not completed</AlertTitle>
+          <AlertTitle>Enquiry not completed</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -511,10 +392,37 @@ export default function ExternalPropertyListingsPage() {
       {createdRequest ? (
         <Alert className="border-green-200 bg-green-50 text-green-800">
           <CheckCircle2 className="h-4 w-4 text-green-700" />
-          <AlertTitle>Request submitted</AlertTitle>
+          <AlertTitle>Enquiry sent to Sales</AlertTitle>
           <AlertDescription>
             {createdRequest.referenceNumber || createdRequest.title} is now in{' '}
-            {createdRequest.currentStageName}.
+            {createdRequest.currentStageName}. Sales will complete their process
+            before handing the transaction back to Estate.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {areProfilesLoading ? (
+        <Alert>
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <AlertTitle>Loading customer account</AlertTitle>
+          <AlertDescription>
+            We are checking the Business Partner account linked to your portal login.
+          </AlertDescription>
+        </Alert>
+      ) : customerProfiles.length === 0 ? (
+        <Alert>
+          <FileText className="h-4 w-4" />
+          <AlertTitle>Business Partner required</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>
+              Register and obtain approval for a Customer Business Partner before
+              sending a property enquiry.
+            </p>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/external-portal/business-partner">
+                Open Business Partner Registration
+              </Link>
+            </Button>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -535,16 +443,19 @@ export default function ExternalPropertyListingsPage() {
           ) : null}
 
           {listings.map((listing) => {
-            const active = selected?.id === listing.id;
+            const active = selectedId === listing.id;
             return (
-              <button
+              <div
                 key={listing.id}
-                type="button"
-                onClick={() => setSelectedId(listing.id)}
                 className={`overflow-hidden rounded-md border bg-white text-left shadow-sm transition ${
                   active ? 'border-blue-600 ring-2 ring-blue-100' : ''
                 }`}
               >
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(listing.id)}
+                  className="block w-full text-left"
+                >
                 <ListingImage listing={listing} />
                 <div className="space-y-3 p-4">
                   <div className="flex items-start justify-between gap-3">
@@ -571,14 +482,15 @@ export default function ExternalPropertyListingsPage() {
                     <span className="text-slate-500">{areaLabel(listing)}</span>
                   </div>
                 </div>
-              </button>
+                </button>
+              </div>
             );
           })}
         </div>
 
         <Card className="h-fit">
           <CardHeader>
-            <CardTitle className="text-base">Customer bid / request</CardTitle>
+            <CardTitle className="text-base">Property values</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             {selected ? (
@@ -586,7 +498,7 @@ export default function ExternalPropertyListingsPage() {
                 <div className="space-y-4">
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-slate-50">
-                      {activeRequestIntent === 'Sale' ? (
+                      {selected.externalListingType === 'Sale' ? (
                         <Building2 className="h-5 w-5 text-blue-700" />
                       ) : (
                         <Home className="h-5 w-5 text-blue-700" />
@@ -642,29 +554,29 @@ export default function ExternalPropertyListingsPage() {
 
                   <div className="rounded-md bg-slate-50 p-4">
                     <div className="text-xs text-slate-500">
-                      {activeRequestIntent === 'Sale'
+                      {selected.externalListingType === 'Sale'
                         ? 'Sale price'
                         : isLandListing(selected)
                           ? 'Annual ground rent'
-                        : 'Rent per month'}
+                          : 'Rent per month'}
                     </div>
                     <div className="mt-1 text-xl font-semibold text-slate-900">
                       {formatMoney(
-                        activeRequestIntent === 'Sale'
+                        selected.externalListingType === 'Sale'
                           ? (selected.externalSalePrice ??
                               selected.externalListingPrice)
                           : isLandListing(selected)
                             ? selected.groundRentPayable
-                          : (selected.externalMonthlyRent ??
+                            : (selected.externalMonthlyRent ??
                               selected.externalListingPrice),
                         selected.externalListingCurrency
                       )}
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
-                      {activeRequestIntent === 'Rent'
+                      {selected.externalListingType !== 'Sale'
                         ? `${formatLeaseTerm(
                             selected.externalLeaseTermMonths
-                          )} · billing starts after agreement and move-in`
+                          )} · Sales will continue the enquiry`
                         : listingTypeLabel(selected.externalListingType)}
                     </div>
                   </div>
@@ -676,180 +588,27 @@ export default function ExternalPropertyListingsPage() {
                   ) : null}
                 </div>
 
-                {areProfilesLoading ? (
-                  <div className="flex items-center justify-center gap-2 rounded-md border py-8 text-sm text-slate-500">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading Business Partners
-                  </div>
-                ) : customerProfiles.length === 0 ? (
-                  <Alert>
-                    <Building2 className="h-4 w-4" />
-                    <AlertTitle>Business Partner required</AlertTitle>
-                    <AlertDescription className="space-y-3">
-                      <p>
-                        Register and obtain approval for a Customer Business
-                        Partner before submitting a property transaction.
-                      </p>
-                      <Button asChild size="sm" variant="outline">
-                        <Link href="/external-portal/business-partner">
-                          Open Business Partner Registration
-                        </Link>
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                ) : (
-                <form className="space-y-4" onSubmit={submitRequest}>
-                  <div className="space-y-2">
-                    <Label>Business Partner</Label>
-                    <Select
-                      value={selectedCustomerId}
-                      onValueChange={setSelectedCustomerId}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select customer account" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {customerProfiles.map((profile) => (
-                          <SelectItem key={profile.id} value={profile.id}>
-                            {profile.partnerName} ·{' '}
-                            {profile.customerAccountNumber}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-slate-500">
-                      Select the customer or company represented in this
-                      transaction.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Request type</Label>
-                    <Select
-                      value={activeRequestIntent}
-                      onValueChange={(value) =>
-                        setRequestIntent(value as ListingIntent)
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {requestOptions.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option === 'Sale'
-                              ? 'Buy this property'
-                              : 'Rent this property'}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Customer name</Label>
-                    <div className="relative">
-                      <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input
-                        value={applicantName}
-                        className="bg-slate-50 pl-9"
-                        readOnly
-                        required
-                      />
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      From your registered customer profile.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Registered contact</Label>
-                    <div className="relative">
-                      <Phone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input
-                        value={contact}
-                        className="bg-slate-50 pl-9"
-                        readOnly
-                        required
-                      />
-                    </div>
-                  </div>
-                  {activeRequestIntent === 'Sale' ? (
-                    <div className="space-y-2">
-                      <Label>
-                        Bid amount ({selected.externalListingCurrency || 'GHS'})
-                      </Label>
-                      <Input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        value={offerAmount}
-                        onChange={(event) => setOfferAmount(event.target.value)}
-                        placeholder="Enter your purchase offer"
-                        required
-                      />
-                    </div>
-                  ) : null}
-                  <div className="space-y-2">
-                    <Label>Message</Label>
-                    <Textarea
-                      className="min-h-[120px]"
-                      value={message}
-                      onChange={(event) => setMessage(event.target.value)}
-                      placeholder="Preferred viewing time, financing, lease period, or other notes."
-                    />
-                  </div>
-                  {visibleDocumentRequirements.length > 0 ? (
-                  <div className="space-y-3 rounded-md border p-4">
-                    <div className="flex items-center gap-2">
-                      <Paperclip className="h-4 w-4 text-blue-700" />
-                      <Label>Supporting documents</Label>
-                    </div>
-                    {visibleDocumentRequirements.map((requirement, index) => (
-                      <div key={requirement.name} className="space-y-2">
-                        <Label
-                          htmlFor={`submission-document-${index}`}
-                          className="text-sm font-normal"
-                        >
-                          {requirement.name}{requirement.isMandatory ? ' *' : ''}
-                        </Label>
-                        <Input
-                          id={`submission-document-${index}`}
-                          type="file"
-                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                          required={requirement.isMandatory}
-                          onChange={(event) => {
-                            const file = event.target.files?.[0];
-                            setSubmissionFiles((current) => {
-                              const next = { ...current };
-                              if (file) next[requirement.name] = file;
-                              else delete next[requirement.name];
-                              return next;
-                            });
-                          }}
-                        />
-                      </div>
-                    ))}
-                    <p className="text-xs text-slate-500">
-                      Attach available evidence now. Additional documents can be requested during review.
-                    </p>
-                  </div>
-                  ) : null}
-                  <Button
-                    className="w-full"
-                    disabled={isSubmitting || requestOptions.length === 0}
-                  >
-                    {isSubmitting ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="mr-2 h-4 w-4" />
-                    )}
-                    {activeRequestIntent === 'Sale' ? 'Submit bid' : 'Submit request'}
-                  </Button>
-                </form>
-                )}
+                <Button
+                  className="w-full"
+                  disabled={
+                    isSubmitting ||
+                    areProfilesLoading ||
+                    customerProfiles.length === 0
+                  }
+                  onClick={() => void submitEnquiry(selected)}
+                >
+                  {submittingListingId === selected.id ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="mr-2 h-4 w-4" />
+                  )}
+                  Enquiry
+                </Button>
               </>
             ) : (
               <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">
                 <FileText className="mx-auto mb-3 h-8 w-8 text-slate-400" />
-                Select a listing to submit a request.
+                Select a listing to view property values.
               </div>
             )}
           </CardContent>

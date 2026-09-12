@@ -1,4 +1,5 @@
 using System.Globalization;
+using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
@@ -8,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procedures;
+using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Models;
 using ErpSystem.Core.Services.Estate;
 using ErpSystem.Api.Services.DocumentManagement;
@@ -35,6 +37,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     private readonly IFileStorageService _fileStorageService;
     private readonly ICentralDocumentRenditionService _renditionService;
     private readonly INotificationService _notificationService;
+    private readonly IOpportunityService _opportunityService;
 
     public EstateExternalDocumentsController(
         ApplicationDbContext db,
@@ -42,7 +45,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         IProcedureCaseService procedureCaseService,
         IFileStorageService fileStorageService,
         ICentralDocumentRenditionService renditionService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IOpportunityService opportunityService)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -50,6 +54,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         _fileStorageService = fileStorageService;
         _renditionService = renditionService;
         _notificationService = notificationService;
+        _opportunityService = opportunityService;
     }
 
     [HttpGet("/api/estate/external/customer-profiles")]
@@ -2020,6 +2025,158 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
     }
 
+    [HttpPost("/api/estate/external/listings/{listingId:guid}/enquiries")]
+    public async Task<IActionResult> CreateListingEnquiry(
+        Guid listingId,
+        [FromBody] CreateExternalListingRequest request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
+            .FirstOrDefaultAsync(item => item.Id == listingId
+                && item.TenantId == tenantId
+                && (item.AssetType == EstateManagedAssetType.Land
+                    || item.AssetType == EstateManagedAssetType.Property
+                    || item.AssetType == EstateManagedAssetType.Facility), cancellationToken);
+        var demarcationListing = asset is null
+            ? await _db.EstateLandDemarcations
+                .AsNoTracking()
+                .Include(item => item.EstateManagedAsset)
+                .FirstOrDefaultAsync(item => item.Id == listingId
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.IsPublishedToExternalPortal
+                    && item.ExternalListingStatus == "Published"
+                    && item.BoundaryVerified
+                    && item.EstateManagedAsset.TenantId == tenantId
+                    && !item.EstateManagedAsset.IsDeleted
+                    && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                    && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                    && !item.EstateManagedAsset.ProjectId.HasValue
+                    && !item.EstateManagedAsset.IsPublishedToExternalPortal,
+                    cancellationToken)
+            : null;
+        asset ??= demarcationListing?.EstateManagedAsset;
+
+        if (asset == null)
+        {
+            return NotFound(new { success = false, message = "Listing was not found or is not available." });
+        }
+
+        var portalUserId = GetUserId();
+        if (portalUserId is null)
+        {
+            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+        }
+
+        if (!request.BusinessPartnerId.HasValue)
+        {
+            return BadRequest(new { success = false, message = "Select the customer account placing this enquiry." });
+        }
+
+        var customer = await FindPortalCustomerAsync(
+            tenantId,
+            portalUserId.Value,
+            request.BusinessPartnerId.Value,
+            cancellationToken);
+        if (customer is null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "The selected customer account is not linked to your portal login."
+            });
+        }
+
+        var listingType = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
+        var listingReference = demarcationListing is null
+            ? asset.AssetCode
+            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
+        var listingName = demarcationListing is null
+            ? asset.Name
+            : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+        var listingCurrency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
+        var listingSalePrice = demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice;
+        var listingPrice = demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
+        var listingMonthlyRent = demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent;
+        var requestedType = string.IsNullOrWhiteSpace(request.RequestType)
+            ? null
+            : NormalizeListingRequestType(request.RequestType, listingType);
+        var publishedAmount = requestedType == "Purchase"
+            ? listingSalePrice ?? listingPrice
+            : requestedType == "Lease"
+                ? listingMonthlyRent ?? listingPrice
+                : listingSalePrice ?? listingPrice ?? listingMonthlyRent;
+        var reference = BuildExternalReference("ENQ");
+        var enquiryLabel = requestedType == "Purchase"
+            ? "Purchase enquiry"
+            : requestedType == "Lease"
+                ? "Lease enquiry"
+                : "Property enquiry";
+        var description = $"{enquiryLabel} for {listingReference} - {listingName} by {customer.PartnerName} ({customer.CustomerAccountNumber}).";
+        var notes = Truncate(string.Join(Environment.NewLine, new[]
+        {
+            description,
+            $"Estate enquiry reference: {reference}",
+            $"Estate listing id: {listingId}",
+            $"Estate parent asset id: {asset.Id}",
+            demarcationListing is null ? null : $"Estate demarcation id: {demarcationListing.Id}",
+            $"Listing reference: {listingReference}",
+            $"Available listing type: {listingType}",
+            requestedType is null ? null : $"Requested transaction: {requestedType}",
+            string.IsNullOrWhiteSpace(request.Message) ? null : $"Customer message: {request.Message.Trim()}"
+        }.Where(line => !string.IsNullOrWhiteSpace(line))), 2000);
+
+        try
+        {
+            var opportunity = await _opportunityService.CreateAsync(new CreateOpportunityDto
+            {
+                Name = Truncate($"{enquiryLabel} - {listingName}", 200),
+                Description = Truncate(description, 2000),
+                CustomerId = customer.Id,
+                Stage = "Prospecting",
+                Probability = 10,
+                Amount = publishedAmount ?? 0m,
+                Currency = string.IsNullOrWhiteSpace(listingCurrency) ? customer.Currency ?? "GHS" : listingCurrency,
+                ExpectedCloseDate = DateTime.UtcNow.Date.AddDays(30),
+                LeadSource = "External Portal - Estate Listings",
+                OpportunityType = requestedType == "Purchase"
+                    ? "Estate Property Sale"
+                    : requestedType == "Lease"
+                        ? "Estate Property Lease"
+                        : "Estate Property Enquiry",
+                Notes = notes
+            });
+
+            return Ok(new
+            {
+                success = true,
+                data = new
+                {
+                    Id = opportunity.Id,
+                    ReferenceNumber = reference,
+                    Title = opportunity.Name,
+                    Module = "Sales",
+                    EntityType = "Opportunity",
+                    Status = opportunity.Stage,
+                    CurrentStageName = "Sales enquiry",
+                    CurrentAssignedRole = "Sales",
+                    CreatedAt = DateTime.UtcNow,
+                    SalesOpportunityId = opportunity.Id,
+                    SalesOpportunityName = opportunity.Name,
+                    EstateListingId = listingId,
+                    EstateListingReference = listingReference,
+                    EstateParentAssetId = asset.Id,
+                    EstateDemarcationId = demarcationListing?.Id
+                }
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
     private HashSet<string> BuildIdentityTerms()
     {
         var terms = new[]
@@ -2965,6 +3122,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
     private static string BuildExternalReference(string prefix)
         => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength];
 
     private static IDictionary<string, string?> BuildFieldValues(
         ExternalEstateRequestDefinition definition,

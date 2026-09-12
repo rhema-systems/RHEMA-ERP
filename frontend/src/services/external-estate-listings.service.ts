@@ -47,6 +47,24 @@ export interface ExternalListingRequest {
   documents?: ExternalListingRequestDocument[];
 }
 
+export interface ExternalListingEnquiry {
+  id: string;
+  module: string;
+  entityType: string;
+  title: string;
+  referenceNumber?: string | null;
+  status: string;
+  currentStageName: string;
+  currentAssignedRole?: string | null;
+  createdAt: string;
+  salesOpportunityId?: string | null;
+  salesOpportunityName?: string | null;
+  estateListingId?: string | null;
+  estateListingReference?: string | null;
+  estateParentAssetId?: string | null;
+  estateDemarcationId?: string | null;
+}
+
 export interface ExternalListingRequestDocument {
   id: string;
   name: string;
@@ -114,6 +132,17 @@ class ExternalEstateListingsService {
   ): Promise<ExternalListingRequest> {
     const response = await apiService.post<ApiResponse<ExternalListingRequest>>(
       `/estate/external/listings/${listingId}/requests`,
+      payload
+    );
+    return response.data;
+  }
+
+  async createEnquiry(
+    listingId: string,
+    payload: CreateExternalListingRequest
+  ): Promise<ExternalListingEnquiry> {
+    const response = await apiService.post<ApiResponse<ExternalListingEnquiry>>(
+      `/estate/external/listings/${listingId}/enquiries`,
       payload
     );
     return response.data;
