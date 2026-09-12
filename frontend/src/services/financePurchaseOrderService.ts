@@ -29,6 +29,7 @@ export interface FinancePurchaseOrderItem {
 
 export interface FinancePurchaseOrder {
     id: string;
+    approvalRequired?: boolean;
     tenantId?: string;
     orderNumber?: string;
     vendorId: string;
@@ -67,6 +68,7 @@ export interface FinancePurchaseOrderReceiptItem {
 
 export interface FinancePurchaseOrderReceipt {
     id: string;
+    approvalRequired?: boolean;
     financePurchaseOrderId: string;
     vendorInvoiceId?: string | null;
     receiptNumber?: string;

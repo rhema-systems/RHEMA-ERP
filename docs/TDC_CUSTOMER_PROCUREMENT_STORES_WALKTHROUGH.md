@@ -2,6 +2,11 @@
 
 **Supplier onboarding, budget, procurement, receipt, invoice matching and Stores**<br>
 Prepared: **7 September 2026, 09:04 UTC account check** · Environment: **localhost:3000 / DEFAULT**<br>
+Receipt-flow update: **9 September 2026 — GRN-only walkthrough; rehearsal screen verified**.<br>
+Invoice-flow update: **10 September 2026 — separate landed-cost drafts from the goods invoice**.<br>
+Physical-count update: **12 September 2026 — B20 separates counter, Stores, Finance and Audit; remaining verification is listed explicitly**.<br>
+Transfer/return update: **12 September 2026 — B21 inter-bin transfer and automatic completion passed; B22 supplier-return edit and physical dispatch passed. Supplier-return Finance settlement remains pending.**<br>
+Disposal update: **12 September 2026 — B23 implementation/testing in progress; live disposal not yet verified.**<br>
 All amounts are **GHS**. All examples are **LOCAL UAT SIMULATION ONLY**.
 
 ## Start here — which script should I use today?
@@ -12,7 +17,9 @@ The Goods supplier-onboarding example reached approved supplier-portal access, w
 
 ### Important before the customer arrives
 
-- **Access:** temporary Stores/Audit roles were removed after testing. New receipt, inspection, Stores issue/return and count actions need authorized role/scope setup first. Contract approval also used a temporary independent reviewer role that was removed. See the account matrix. No access changes were made while preparing this guide.
+- **GRN-only testing:** use the [rehearsal receipt](http://127.0.0.1:3002/procurement/purchase-receipts/490b5d42-1a70-438a-9240-08de2223df82) and confirm the **REHEARSAL** banner. Refresh if needed; the tab is **GRN**, with no MRN step. Stay on **127.0.0.1:3002** for every test and account change; this guide's **localhost:3000** links open the original UAT, not the rehearsal. Both production frontends have now been rebuilt and started; see B23's deployment checkpoint.
+- **Control details:** on the updated frontend, policy/compliance/gate details use **Show details / Hide details** accordions. Status and any current blocker remain visible; expand the relevant row for evidence or history. Collapsing a row does not bypass a check or remove a required action.
+- **Stores access — corrected 9 September in both copies:** **`manager` (John Manager)** records and submits the receipt inspection using `TDC_STORES_OFFICER`. **`procurementapprover`** independently reviews it using the restored `TDC_STORES_MANAGER` role and a fresh active **DEMO-PM** assignment. Re-login as the approver after this access change. Neither account should approve its own work. These assignments remain available during the ongoing local UAT; review them for removal after demonstrations. Audit/count Finance and contract-review access still need their separate preparation checks.
 - **Use existing records for today's demonstration.** Do not reset data, resubmit completed approvals or create another invoice for the fully invoiced main receipt.
 - **Do not pull, rebuild, restart or change policies immediately before the demonstration.** The tested local checkout is not a claim that every fix is merged into the customer's deployment. Local preparation baseline: `e5ad6446c6`; Petty delivery work is in PR 205. Keep the currently running environment stable.
 - **Sign in once before the session and open the intended pages.** Local development pages have had slow initial compilation and occasional loading/chunk errors. A successful HTTP health check is not a browser rehearsal.
@@ -29,10 +36,10 @@ These are the local test-account mappings, not a statement that the architecture
 | Username | Responsibility / relevant role | Use in this script | Current preparation note |
 | --- | --- | --- | --- |
 | `procurementofficer` | Procurement Officer / `TDC_PROCUREMENT_OFFICER` | Supplier application-fee verification/token-delivery controls; budget, market analysis, plan, PR, tender, publication, committee organization, award notification, PO maker and contract activation submitter | Role present; current browser account at preparation. Not the supplier document-review/registration approver. |
-| `financereviewer` | Finance Reviewer / `TDC_FINANCE_REVIEWER` | Budget approval; third plan review | Role present; count Finance scope used in UAT is inactive |
+| `financereviewer` | Finance Reviewer / `TDC_FINANCE_REVIEWER` | Budget approval; third plan review; count Finance review and posting | Count Finance responsibility restored in both copies on 12 September; current rehearsal Finance review and posting verified |
 | `manager` | John Manager / `TDC_USER_DEPARTMENT_HEAD` | First plan review | Role present |
 | `procurementapprover` | Head of Procurement / `TDC_HEAD_OF_PROCUREMENT` | Supplier document verification and registration approval; second plan review, tender/PO approval; configured document/bond review; tested contract draft creator | Role present; do not approve its own contract or use as final Harbourline award approver: supplier-onboarding segregation blocked the latter in UAT |
-| `employee` | Jane Employee / `TDC_MANAGING_DIRECTOR` | Final plan and PR approval; independent award approval; Stores requester and recipient | MD role present; temporary Internal Audit role is absent |
+| `employee` | Jane Employee / `TDC_MANAGING_DIRECTOR` | Final plan and PR approval; independent award approval; Stores requester and recipient; count Audit review | Count `TDC_INTERNAL_AUDIT` role/responsibility restored in both copies on 12 September; MD role alone is insufficient |
 | `tdc0102-checker-201531` | Specification Checker / `TDC_EVALUATOR` | Committee Chair and evaluator | Role present; retain actual tender-specific appointment |
 | `procurementevaluator` | Procurement Submitter / `TDC_EVALUATOR` | Committee Secretary and evaluator | Role present; username differs from display name |
 | `finance.manager` | Yaw Osei / Finance Manager and `TDC_EVALUATOR` | Committee voting member/evaluator; second invoice approval | Both roles present; different responsibilities remain separate workflow actions |
@@ -45,17 +52,17 @@ These are the local test-account mappings, not a statement that the architecture
 
 ### Access that must be prepared for new transactions
 
-The following accounts successfully performed these actions earlier **with explicitly approved temporary access**. They are not currently ready for the same actions solely because their username is in this guide.
+The following accounts use explicitly approved local-UAT access. Manager receiving and procurementapprover Stores Manager access were restored on 9 September; the count Finance/Audit responsibilities were restored in both copies on 12 September. Contract-review access still needs its separate preparation check. A listed username alone does not confirm every permission.
 
 | Intended actor | Additional access used in the test | Scope / independence |
 | --- | --- | --- |
-| `manager` | `TDC_STORES_OFFICER` | DEMO-PM warehouse, LOC-001; distinct from requisition requester and Stores approver. Existing warehouse assignment alone is insufficient without the Security role. |
-| `procurementapprover` | `TDC_STORES_MANAGER` | DEMO-PM; matching responsibility assignment must be active and unexpired. Distinct from receiving/issuing maker. |
+| `manager` | `TDC_STORES_OFFICER` — restored 9 September in main UAT and rehearsal | Existing DEMO-PM warehouse scope, including LOC-001, retained. Distinct from requisition requester and Stores approver. Rehearsal receipt-source check verified Ready; refresh/re-login in the environment you will demonstrate. |
+| `procurementapprover` | `TDC_STORES_MANAGER` — restored 9 September in main UAT and rehearsal | Fresh active DEMO-PM assignment, including its locations; no overnight expiry during ongoing UAT. Distinct from `manager`, who receives/submits. Sign out/in before reviewing the submitted inspection. |
 | `manager` | `TDC_HEAD_OF_PROCUREMENT` for the Supply contract review | Independent of Procurement Approver (recorded creator) and Procurement Officer (activation submitter). This temporary role was removed. An equivalent independent authorized reviewer can be used only after preparation. |
-| `financereviewer` | Active count Finance responsibility assignment | Restricted to DEMO-PM for count review/posting. |
-| `employee` | `TDC_INTERNAL_AUDIT` plus Audit responsibility assignment | Restricted to DEMO-PM for the count test, separate from counter/Stores/Finance reviewers. Removed after UAT. |
+| `financereviewer` | Active count Finance responsibility assignment — restored in both copies, 12 September | Project Demo Warehouse (DEMO-PM), all its locations; count Finance review/posting only. Separate from counter and Stores reviewer. |
+| `employee` | `TDC_INTERNAL_AUDIT` plus Audit responsibility assignment — restored in both copies, 12 September | Project Demo Warehouse (DEMO-PM), all its locations; separate from counter/Stores/Finance. Keep for the authorized UAT, then review temporary access for removal. |
 
-Have the authorized administrator and the Finance owner confirm the appropriate demo assignments through existing administration screens before new work. Do not bypass missing access or change Finance implementation. Re-login after any authorized role change. Remove temporary additions after the demonstration.
+Have the authorized administrator and the Finance owner confirm the remaining demo assignments through existing administration screens before new work. Do not bypass missing access or change Finance implementation. Re-login after any authorized role change. Keep the restored manager receiving and procurementapprover Stores approval access available while this UAT is ongoing; review temporary access for removal only after the relevant demonstrations are finished.
 
 ## Part A — 30-minute completed-record demonstration
 
@@ -69,10 +76,10 @@ Have the authorized administrator and the Finance owner confirm the appropriate 
 | 7–9 | Same | [APP submissions](http://localhost:3000/procurement/planning/app-submissions), then [PR-2026-0001](http://localhost:3000/procurement/purchase-requisitions/b9a17bc2-eb37-44ba-8601-dbf7c64250fc) | “The approved plan has a controlled manual exchange record. This is a simulated acknowledgement, not an actual GHANEPS transmission. The PR retains its source lines and approval.” |
 | 9–13 | Same | [Tender TND-2026-0001](http://localhost:3000/procurement/tenders/55d2a153-a1ee-4217-9a8d-6014cd27a520), then [bid](http://localhost:3000/procurement/bids/5367ed43-04bf-4b1e-a6c3-4d6b174b6b90) | “Approved PR → sourcing decision → approved tender → controlled publication → supplier bid. After closing, committee attendance/quorum and opening permitted evaluation.” Show one GHS 52,000 bid and evaluation history. Proposal files are not tax-clearance evidence. |
 | 13–17 | Same | [Award](http://localhost:3000/procurement/awards/7b579964-b892-46a8-a713-475087cae333), [PO-2026-0001](http://localhost:3000/procurement/purchase-orders/a0eae5c8-1915-4c68-9e94-001354ae5a34), [Supply contract](http://localhost:3000/procurement/contracts/8a6347b8-b82b-4393-8b1c-db9e01c86a14) | “The award, PO and active Supply contract represent the same GHS 52,000 purchase, not two purchases. Commitment must not double. The performance-bond lifecycle was simulated.” Contract activation preceded receiving. |
-| 17–20 | Same if read access permits; otherwise pre-authorized Stores viewer | On the main PO, open Receipts / GRN-MRN areas | Show REC260001 Accepted, inspection Closed, GRN-2026-0002 and MRN-2026-0002 Issued/Reconciled. “Only accepted goods move into stock and become eligible for invoicing.” Avoid an unverified live PDF promise. |
+| 17–20 | Same if read access permits; otherwise pre-authorized Stores viewer | On the main PO, open the saved receipt → GRN | Show REC260001 Accepted, inspection Closed and GRN-2026-0002 Issued/Reconciled. “Only accepted goods move into stock and become eligible for invoicing.” Avoid an unverified live PDF promise. |
 | 20–24 | Sign out; sign in `ap.officer` | [Invoice VI-2026-00002](http://localhost:3000/finance/ap/invoices/64e2e5a3-efe7-468c-a57f-cde051c67b76) | Show GHS 52,000, matching Passed, Approved and Paid Amount zero. Explain `accounts.officer` → `finance.manager` → `financial.controller`; show history instead of repeating approvals. “The invoice was entered against accepted receipt quantities; it was not automatically generated as a supplier invoice PDF.” |
 | 24–28 | Prepared authorized Stores viewer only | [Warehouse Items](http://localhost:3000/inventory/warehouse-items), [Requisitions](http://localhost:3000/inventory/requisitions), [Physical Counts](http://localhost:3000/inventory/physical-counts) | Show 2 PVC issued, recipient acknowledgement, 1 returned, and the historical zero-variance count. Current PVC is 19; Barcode is now 21 after Petty. If view access is unavailable, use the recorded results below and explicitly say this part is evidence review, not a live click demonstration. |
-| 28–30 | `procurementofficer` | [Petty PO-2026-0002](http://localhost:3000/procurement/purchase-orders/f00862f4-712a-481b-8ee3-044489ff3934) | Show one Barcode at GHS 750, Received, REC260002 and issued GRN/MRN. Explain the shorter approved-quotation route. Close with the outstanding RFQ/QBS/QCBS/Emergency tests, not a claim that they passed. |
+| 28–30 | `procurementofficer` | [Petty PO-2026-0002](http://localhost:3000/procurement/purchase-orders/f00862f4-712a-481b-8ee3-044489ff3934) | Show one Barcode at GHS 750, Received, REC260002 and issued GRN. Explain the shorter approved-quotation route. Close with the outstanding RFQ/QBS/QCBS/Emergency tests, not a claim that they passed. |
 
 **Optional supplier view:** if the supplier login is already prechecked, substitute two minutes of tender review with [My Bid](http://localhost:3000/external-portal/my-bids/5367ed43-04bf-4b1e-a6c3-4d6b174b6b90). Sign out of the staff account first. Show submitted proposal and bond history; do not upload or resubmit anything.
 
@@ -374,9 +381,15 @@ As `procurementofficer`, confirm quorum after the members' attendance is complet
 
 ### B12. Bond, PO and required Supply contract
 
+**Fresh rehearsal starting from the current UAT copy:** continue **PO-2026-0003** and its existing active **CTR-2026-00002**. Do not create a second PO or contract from the same award. The creation steps below apply only when those records do not already exist.
+
+**Signed contract upload:** open **Contracts → CTR-2026-00002 → Documents → Upload Document**. Set **Document Type: Signed copy**, choose **CTR-2026-00002-SIMULATED-UAT-Supply-Contract.pdf**, enter **Simulated UAT only — not legally executed**, then click **Upload Document**. Open the saved document and check the contract number, Harbourline supplier, GHS 52,000 total and both simulated signature sections. Refresh the PO's contract-signature check. The test file is prepared; upload and the refreshed check are not yet verified. Do not use the unrelated supplier-registration PDF as contract evidence.
+
 **Bond, when required:** `procurementofficer` requests it with a clearly labelled simulated template; supplier uploads a simulated submission from My Bid → Performance Bond; the assigned independent reviewer reviews it. This is lifecycle testing, not a genuine bank guarantee.
 
 **PO maker:** `procurementofficer` → award → **Create Purchase Order / Contract** → Purchase Order. Retain supplier, award and item lineage, GHS 52,000, warehouse **DEMO-PM** and line prices 700/1,900. Submit; **`procurementapprover`** independently approves. Check the formal budget commitment and the procurement's contract requirement.
+
+**PO line type:** choose **Stock goods**, **Non-stock goods**, or **Service** as appropriate. Catalogue selection is optional: an ad hoc line needs its approved description, quantity, unit and price. For this goods walkthrough, keep Barcode and PVC as **Stock goods**; map or create their inventory records before stock receipt. Non-stock/service lines do not require a stock warehouse and must not generate inventory movements. Choosing an ad hoc line does not permit changing the approved source terms.
 
 **Contract maker:** sign in as `procurementapprover`, the draft-creator account recorded in the tested contract history; return to the award's same action → **Contract** → type **Supply**, value 52,000, agreed simulated dates/45-day term and the required evidence. Retention is an architecture requirement to capture, but **5% is not an architecture-prescribed default**. The historical Supply test used **0% as an explicit UAT assumption**; positive retention needs its agreed clause/release terms.
 
@@ -384,33 +397,164 @@ Return as `procurementofficer` and submit through **Approval & activation**. **`
 
 **Pass:** PO approved; required Supply contract Active **before receipt**; one GHS 52,000 purchase exposure, not GHS 104,000 for the same PO/contract. If contract is required but inactive, stop before receiving. Do not assume every Goods purchase is contract-exempt.
 
+**Check the PO document before issue:** open the saved PO → **Export PDF**. Check the company, supplier, PO number/status, every item, quantity, unit, price, delivery details, agreed terms and **GHS 52,000** total. The export is a purchase-order document, not a copy of the screen's internal readiness panels. Draft/unapproved exports are marked **NOT FOR ISSUE**. **Print** opens the same PDF; use the PDF viewer's Print button. Planned landed-cost estimates are not added to the supplier's PO total by this export.
+
 ### B13. Receive and inspect — accepted quantities only
 
-**Receiver:** prepared `manager / TDC_STORES_OFFICER` → approved PO → receipt action. Warehouse **DEMO-PM / Project Demo Warehouse**, location **LOC-001**. Enter delivered quantities **20 Barcode and 20 PVC** for the full-delivery demonstration; keep inspection required where configured.
+**Account:** `manager` (John Manager). Use **127.0.0.1:3002** for rehearsal; **localhost:3000** is the original UAT. The Stores Officer role was restored in both copies on 9 September. The PO must still be Approved and its required contract Active.
 
-Attach the simulated delivery/waybill file through **GRN/MRN → Supplier delivery evidence → Choose File → Attach**. Then select that actual saved evidence on the inspection form. A typed waybill number alone did not satisfy the tested evidence requirement.
+**1. Create the receipt — on the Receive Goods page**
 
-Save inspection results (20 accepted for each line, zero damaged/short in the full-acceptance case) and Submit. **Prepared `procurementapprover / TDC_STORES_MANAGER`** independently approves inspection.
+1. Open the approved PO → **Receive Goods**. At the top, above **Purchase Order Summary**, check **Governed receipt source: Ready** and **Receiving responsibility: Available to you**. These are automatic status checks, not approval buttons. Use the circular refresh icon only if a status is stale after correcting a problem.
+2. Complete **Receipt Date** and the supplier's **Delivery Note Number**. Leave **Requires Quality Inspection** switched on for this walkthrough.
+3. For this full-delivery example, enter **Received: 20** for each item. Select **DEMO-PM / Project Demo Warehouse** and **LOC-001 – Main on both lines**. Use actual delivered quantities for a different delivery.
+4. Click **Create Receipt** once. After a successful save, the system opens the **saved receipt details page**. Note its receipt number. If saving fails, stay on the form and resolve the displayed error.
 
-**Pass:** Receipt Accepted, inspection Closed, exactly the accepted quantities posted once. If only 10 units were accepted, only those 10 become eligible for stock and invoicing; ordered quantities are not a substitute for acceptance.
+**2. Attach the waybill — on the saved receipt page**
 
-### B14. Complete controlled GRN/MRN issuance
+5. Stay as `manager`. Select the **GRN** tab at the top of the saved receipt. The **GRN register** button opens the same tab. **This upload is not on the earlier Receive Goods form.**
+6. Under **Supplier delivery evidence**, select **Evidence type: Waybill**, enter **Document reference** and **Document date**, then use the file chooser under **Clean-scanned file** to select the simulated waybill PDF or image. Click **Attach**.
+7. Confirm **Waybill ready**, **Attached** and the correct filename. Entering a delivery-note/waybill number alone does not attach a file.
 
-**Prepared `procurementapprover`:** record the Approving Officer attestation on each receipt document. **Prepared `manager`:** record the separate Stores attestation, then **Issue GRN**, followed by **Issue MRN** once its prerequisite is satisfied.
+**3. Record and submit inspection — on the same saved receipt**
 
-**Pass:** Both documents Issued/Reconciled, distinct signatories and retained DMS versions. MRN and exact attestation counts are configured implementation controls, not a claim that the architecture universally mandates this exact screen. Test PDF opening separately; saved/issued status does not prove a visible PDF was delivered.
+On the updated frontend, **Inspection history & technical details** starts collapsed. DEC policy references and posting/audit details are for reference, not fields you need to complete. Quantities, required evidence, comments and action buttons remain visible.
 
-### B15. Record the supplier invoice against accepted supply
+8. Select **Quality Inspection**. If the page says no inspection case exists and shows **Initialize inspection**, click it once.
+9. For the full-acceptance example, record **Accepted: 20**, **Rejected: 0** on each line and appropriate inspection notes, then click **Save inspection**. **Inspection actions → Comments (optional)** is only for an additional note; leave it blank if not needed. Neither **Save inspection** nor **Submit** requires a comment. An independent approval/rejection or exception decision still requires its own reason.
+10. Under **Controlled evidence**, the **Published DMS document** list contains only current published evidence linked to this receipt or inspection, including its saved delivery attachments. Generated GRN/MRN documents and other receipts' documents are excluded. For **Waybill**, the file already attached in step 6 is linked automatically; confirm its filename and **Linked evidence**. If it is missing after an upload, click **Refresh inspection evidence**. For any additional requirement (such as an inspection report), select its correct receipt-linked published document. An attached waybill does not replace an inspection report. If the required report is absent, have it prepared/published and linked to this receipt or inspection through Document Management. Click **Submit** only after the displayed requirements are complete; do not select a GRN or MRN as substitute evidence.
 
-**Maker:** `ap.officer` → Finance → Accounts Payable → [Invoices](http://localhost:3000/finance/ap/invoices) → [Record Invoice](http://localhost:3000/finance/ap/invoices/create).
+**4. Independent approval**
 
-Select Harbourline from the saved supplier records, then the **new PO** and a unique simulated supplier-invoice reference. Review receipt-derived available quantities. For a fully accepted, previously uninvoiced delivery, the expected lines are **20 × 700** and **20 × 1,900**, total **52,000**. Use the invoice's actual agreed tax treatment; do not invent a tax rate to force this example total.
+11. After **`manager`** successfully submits and the inspection shows **Pending approval**, sign out and sign in as **`procurementapprover`**. Its **`TDC_STORES_MANAGER`** role and fresh active DEMO-PM scope were configured in **both local databases on 9 September**. Reopen the **same receipt number in the same environment** → **Quality Inspection** → review quantities and evidence → enter the approval **Comments** → **Approve**. Do not approve as `manager`. The access repair did not submit or approve the inspection for you; a Draft inspection must first be submitted in step 10.
 
-Save once and reopen the saved invoice. This is **manually initiated, receipt-linked invoice entry**, not an automatically generated supplier invoice from the GRN. If no accepted quantities remain, do not enter ordered quantities manually to force a duplicate invoice.
+**Pass:** Receipt Accepted, inspection Closed, exactly the accepted quantities posted once. If only 10 units were accepted, only those 10 become eligible for stock and invoicing. Continue to **B14 on this same receipt's GRN tab**; attaching the waybill does not itself issue a GRN.
 
-Select **Re-evaluate** matching. Review PO, accepted GRN/certificate and invoice supplier/currency/quantities/prices under the configured tolerances. Resolve discrepancies through the source process before Submit for Approval.
+**Accounting checkpoint:** Approving accepted stock also creates the receipt's GL journal automatically, using **Finance → Settings → Inventory Control** (debit) and **GRV Accrual Control** (credit). This is separate from issuing the GRN document and from any later landed-cost posting. The local rehearsal REC260003 posted GHS 52,000 to Inventory (1200) / GRV Accrual Control (2110); do not manually post it again.
 
-**Pass:** Mandatory three-way matching Passed; exact PO-line/accepted-supply lineage retained. Invoice entry does not create another goods receipt or duplicate stock movement.
+**Display check:** after inspection completion, **PO → Receipts** and the receipt details page should both show **Inspection Complete**. An unfinished inspection shows **Inspection Required**. Do not repeat a completed inspection because the receipt was originally marked as requiring one.
+
+### B14. Complete GRN issuance
+
+**Where:** on the saved receipt → **GRN** tab (or **GRN register** button). There is **no MRN step**.
+
+**Already issued?** Skip signing and issuing. Review the GRN and continue to B15; use **Open PDF** only to check the output. Do not cancel or reissue it to repeat the demonstration.
+
+For a GRN that has not yet been issued:
+
+1. Confirm inspection approval is complete. Read **Receipt document checks**; expand **Show details** only if you need to resolve a failed check.
+2. **`procurementapprover`:** on the GRN card, select **Signatory role → Approving Officer** → **Sign**. Skip if that signature is already present.
+3. Sign out and log in as **`manager`**, reopening the same receipt in the same environment. Select **Signatory role → Stores** → **Sign**. Skip if already signed. A signing comment is optional.
+4. With both configured signatures present and checks passing, the account authorized to issue enters **Action comment / cancellation reason** → clicks **Issue** on the GRN card. This issue comment is required; it is separate from optional inspection comments. If **Issue** is unavailable, resolve the displayed check or use the configured authorized issuer; do not repeat inspection approval.
+
+**Pass:** GRN **Issued**, with **GRN reconciliation: Reconciled** under **GRN history & technical details**. Continue to **B15** against the same accepted receipt, using only quantities not already invoiced. PDF presentation is a separate check; issued status alone does not prove the PDF opened.
+
+**Verified rehearsal checkpoint — 9 September:** **REC260003 → GRN-2026-0004** showed **Issued**, both signatures, four history events and **6 of 6 checks passed / Ready**. No MRN card or action was displayed. This is a completed checkpoint to review, not a request to create another receipt or issue another GRN.
+
+**Historical records:** existing MRNs and their audit history remain stored. Earlier MRN references in this guide record past tests, not current operator steps. Approval checks and saved policies remain in force.
+
+### B15. Landed costs and supplier invoices
+
+**Keep the two flows separate:** landed-cost invoices are generated by **Post**. The goods invoice is recorded separately against accepted GRN quantities.
+
+**Stay in the same environment:** [Rehearsal invoices — 127.0.0.1:3002](http://127.0.0.1:3002/finance/ap/invoices) · [Main UAT invoices — localhost:3000](http://localhost:3000/finance/ap/invoices). Rehearsal deployment does not update main UAT automatically.
+
+**Continuing the current rehearsal?** LC26090977 already has its GHS 310 and GHS 50 invoices. Start at **B15b**; do not repeat B15a.
+
+#### B15a. Post new landed costs — `manager`
+
+Skip this step if there are no extra charges or all the voucher's invoices are already linked. Use the receiving account with the receipt's warehouse access.
+
+1. Open the saved receipt → **Landed Cost → Add receipt costs**. No PO estimate is required.
+2. Enter each charge's type, description, amount, currency/exchange rate and **Cost supplier**. Under **Applies to**, choose all received stock items and an allocation method, or one received item. Review → **Save draft costs**.
+3. Click **Allocate**. Check that allocated charges equal the voucher total and unallocated is **0**.
+4. Click **Post**. Confirm each supplier, supplier invoice reference and invoice date → **Confirm Post**. Capture tax later, not here.
+
+**Pass:** inventory posted and one AP draft per supplier/currency/bill reference, with invoice links. This does not change the goods PO total or approve/pay the invoices.
+
+**Inventory posted but invoices missing?** Use **Retry Post → Finish invoice drafts**. Do not allocate again or add duplicate charges.
+
+<details>
+<summary>Allocation formula and GHS 360 worked example</summary>
+
+**Allocate** splits charges across eligible received items; it does not post inventory or create invoices.
+
+**Shared charge (ByValue):** `Line allocation = charge amount × (eligible receipt line value ÷ total eligible receipt line value)`. Calculate each charge separately in the voucher currency. For this fully accepted receipt, line value is quantity × original unit cost, before landed costs.
+
+**Item-specific charge:** choose that item under **Applies to**. Only its matching eligible receipt lines share the charge; when there is one matching line, it receives 100%.
+
+**Example — REC260003 / LC26090977, all amounts in GHS:** freight **310** shared **ByValue**, plus handling **50** for PVC Pipe only. The eligible receipt value is **38,000 + 14,000 = 52,000**.
+
+| Received item | Receipt value | Shared freight calculation | Item-only handling | Total allocation |
+| --- | ---: | --- | ---: | ---: |
+| PVC Pipe 50mm | 20 × 1,900 = 38,000 | 310 × 38,000 ÷ 52,000 = 226.54 | 50.00 | **276.54** |
+| Barcode Device Kit | 20 × 700 = 14,000 | 310 × 14,000 ÷ 52,000 = 83.46 | 0.00 | **83.46** |
+| **Total** | **52,000.00** | **310.00** | **50.00** | **360.00** |
+
+**Per-unit check:** `Additional cost per unit = line's total allocation ÷ eligible quantity`; `New unit cost = original unit cost + additional cost per unit`. PVC: **1,900 + 276.54 ÷ 20 = 1,913.8270**. Barcode: **700 + 83.46 ÷ 20 = 704.1730**. Count each line's 20 units once, even when it receives both freight and handling.
+
+**Other methods:** ByQuantity uses eligible quantity instead of value; ByWeight/ByVolume use eligible quantity × the item's saved unit weight/volume; Equal splits the charge equally between eligible receipt lines, not individual units. The selected method applies only within the charge's **Applies to** scope. Allocations are rounded to two decimals, with the final line taking any rounding remainder so the charge reconciles exactly.
+
+**Expected allocation:** Total **360.00**, Allocated **360.00**, Unallocated **0.00**. LC26090977 is already posted in rehearsal; review it without reposting.
+
+</details>
+
+#### B15b. Review generated landed-cost invoices — `ap.officer`
+
+**Do not click Record Invoice for these charges.**
+
+1. Go to **Finance → Accounts Payable → Invoices** and open the existing landed-cost draft, or use its link on the receipt.
+2. Click **Edit invoice**. Check supplier, charges, invoice reference and date.
+3. Set each line's **Tax treatment**. For **Standard**, select the applicable purchase **Tax Group**; otherwise select the correct exempt/zero-rated/out-of-scope treatment. Do not leave **Pending review**.
+4. Click **Save Changes**, check the updated totals, then **Submit for Approval** when the invoice checks pass. Follow its configured approval workflow; stop before payment.
+
+**Current rehearsal — LC26090977 (GHS 360 before tax):**
+
+| Existing invoice | Supplier | Charge before tax |
+| --- | --- | ---: |
+| VI-2026-00003 | Adom Construction Ltd | GHS 310 |
+| VI-2026-00004 | Seabright Demo Goods Ltd | GHS 50 |
+
+**Pass:** existing drafts updated with the correct tax treatment; no duplicate invoices or inventory posting. If already submitted, review its status instead of submitting again.
+
+<details>
+<summary>View cost links or link an already-recorded bill</summary>
+
+**View:** PO → **Overview → Actual receipt landed costs → Show details**. On an invoice, check **Linked to this invoice**.
+
+**Already recorded elsewhere?** As `ap.officer`: receipt → **Landed Cost → Cost Lines → Link invoice** → select the existing bill. Check supplier, currency and charge. Do not generate another invoice for it.
+
+Posting a landed-cost invoice clears the landed-cost accrual and credits the supplier payable; it does not add inventory value again.
+
+</details>
+
+#### B15c. Record the goods invoice — accepted GRN quantities only — `ap.officer`
+
+**Only do this if the goods invoice has not already been recorded.** This is Harbourline's goods bill, separate from the freight/handling invoices above.
+
+1. Go to **Finance → Accounts Payable → Invoices**. Search for the existing goods invoice first. If absent, click **Record Invoice**.
+2. Select **Harbourline Goods Supply Ltd**, the approved PO and the supplier invoice reference/date.
+3. Use only **accepted receipt quantities not already invoiced**. For the full example: **20 × 700 + 20 × 1,900 = GHS 52,000 before tax**. Do not add the separately invoiced landed costs.
+4. Enter the actual tax details → **Save** once → reopen the saved invoice.
+5. Continue to **B15d — Three-way invoice matching** before submitting for approval.
+
+**No accepted quantities available?** Stop; do not manually enter ordered quantities to create another invoice.
+
+**Pass:** goods invoice saved with the PO and accepted receipt linked. Landed-cost draft generation does not create this goods invoice.
+
+#### B15d. Three-way invoice matching — `ap.officer`
+
+**Match these three records: approved PO ↔ accepted GRN ↔ goods supplier invoice.** This step is for Harbourline's goods invoice, not the GHS 310 and GHS 50 landed-cost invoices.
+
+1. Go to **Finance → Accounts Payable → Invoices** → open the saved **goods invoice**.
+2. On the invoice details page, find **Mandatory three-way matching** → click **Re-evaluate**.
+3. Review **Control checks**: the supplier and currency must match; prices must agree with the PO within configured tolerances; cumulative invoiced quantities must not exceed accepted receipt quantities within those tolerances. Rejected or unreceived goods must not be invoiced.
+4. For this no-variance UAT case, confirm **Approval ready**, **Control passed**, and the individual checks **Passed**. Review any **Variances** before proceeding.
+5. If **Approval blocked** or **Hard stop active** appears, stop and resolve the displayed issue. Otherwise click **Submit for Approval** → continue to **B16**.
+
+**Example:** 20 Barcode Device Kits × GHS 700 and 20 PVC Pipes × GHS 1,900 = **GHS 52,000 before tax**, only when all those quantities are accepted and not already billed on another invoice.
+
+**Pass:** the matching result allows approval and retains the PO/accepted-GRN links. If the invoice is already approved, review the result without submitting it again.
 
 ### B16. Complete three independent invoice reviews
 
@@ -426,7 +570,7 @@ Open the same saved invoice after each sign-out/sign-in:
 
 **Prepared Stores viewer:** Inventory → Items & Catalogue → [Warehouse Items](http://localhost:3000/inventory/warehouse-items) → DEMO-PM. Record the new receipt's movements and before/after quantity/value. Do not confuse the historical count or a legacy movement list with the current posted inventory ledger.
 
-**Requester:** `employee` → [Inventory Requisitions](http://localhost:3000/inventory/requisitions) → create request for Operations, **2 PVC Pipe 50mm**, warehouse DEMO-PM, location LOC-001, required date and a simulated departmental-use reason. Save and Submit through the ERP confirmation.
+**Requester:** sign in as `employee` → **Inventory → My requisitions → New Requisition** ([open register](http://localhost:3000/inventory/requisitions)). Select Operations, **Project Demo Warehouse (DEMO-PM)**, required date and a departmental-use reason. Leave location as **All locations** if unknown; the stores officer selects the actual location when issuing. Cost centre is automatic. Under **Items → Add Item → Select an item**, search **PVC Pipe 50mm**, select it, enter **2**, then **Add → Save → Submit**. This account requests items; it does not issue stock or approve its own request.
 
 **Pass:** Requisition submitted; no stock issue yet. Requester, issuer and approver must be distinct.
 
@@ -434,27 +578,147 @@ Open the same saved invoice after each sign-out/sign-in:
 
 **Prepared `procurementapprover / TDC_STORES_MANAGER`:** open the requisition → **Approve Inventory Requisition**.
 
-**Prepared `manager / TDC_STORES_OFFICER`:** same register → **Issue Items** → quantity 2, movement reason **DEPARTMENT_CONSUMPTION**, designated receiver **Jane Employee**. Post once.
+**Prepared `manager / TDC_STORES_OFFICER`:** same register → **Issue Items** → **Default issue location: LOC-001 - Main** → **Fill remaining quantities** (or enter **2** for a partial issue) → confirm the PVC line's quantity/location, movement reason **Department consumption**, and **Receiver: Jane Employee (requester)** → **Issue 2 Items** once. Confirm a Store Issue Voucher appears.
 
-**Recipient `employee`:** open **Issue vouchers → Acknowledge receipt** and confirm the actual simulated delivery.
+An **active storage location is required for every stock line at issue or receipt**, not when making the request. The default fills missing/unavailable locations; existing active selections stay unchanged and each line can be changed separately. **Fill remaining quantities** only fills the form; **Issue** posts stock. Keep the automatic receiver unless another person will collect (**Change receiver**). Leave **Advanced tracking options** closed for a normal issue.
+
+**Recipient `employee`:** **Inventory → My requisitions** → find the same requisition → **Issue vouchers → Acknowledge receipt**. Enter a short handover comment confirming the simulated delivery. The voucher action is also available after a partial issue.
 
 **Pass:** Posted SIV, 2-unit stock reduction and separate recipient acknowledgement. Historical source cost was **2 × 1,900 = 3,800**, not the draft planning price of 2,000. On a fresh run use actual retained valuation and compare with opening stock.
 
 ### B19. Return one unused PVC unit
 
-**Prepared `manager`:** original requisition/issue register → **Return Items** → 1 PVC against the actual SIV → reason → Save and Submit.
+**Prepared `manager`:** original requisition/issue register → **Return Items** → enter 1 PVC → select **Unused stock** → **Submit Return For Approval**. Details and notes are optional.
 
-**Prepared `procurementapprover`:** independently Approve the return, then **Post stock**.
+**Prepared `procurementapprover`:** open the same return → review the saved quantity and reason → **Approve** → **Approve return** (comments optional) → **Post**. This is a review screen; do not create or submit another return. The return creator cannot approve or post their own return. Rejection and reversal still require a reason.
 
-**Pass:** SRV Posted, original issue-cost reversal, quantity restored by 1 and linked issue/return history. For the historical case this was GHS 1,900; net issue is one PVC and stock is 19. Approval and stock posting are distinct actions; do not assume one did both.
+**Pass:** SRV **Posted** and 1 PVC restored at its original issue cost. Open the requisition → **Items**: **Requested 2 · Approved 2 · Issued 2 · Returned 1 · Net issued 1**. The requisition stays **Issued**. Returning stock does not reopen it for another issue; use a new requisition if more stock is needed. The original issue and return history remain available.
 
-### B20. Physical count — prepared scope only
+### B20. Physical count — step by step
 
-**Not ready for an unscripted fresh live creation.** The tested count-create UI selected unrelated warehouse items and did not expose the required category/location scope; the replacement two-item count was prepared through the supported application API. Therefore browser-only count creation is **not accepted**. For today's session, review the already posted **PC-20260906-0002** instead.
+**Use the correct copy:** [Rehearsal — port 3002](http://127.0.0.1:3002/inventory/physical-counts) for practice; [Main UAT — port 3000](http://localhost:3000/inventory/physical-counts) for the customer session. Stay in that copy when changing accounts and keep the same count number throughout.
 
-For a future authorized, correctly scoped new count: `manager` starts and records the two items with actual simulated counted quantities and clean count evidence → Complete Count; `procurementapprover` performs Stores approval → `financereviewer` Finance approval → separately authorized `employee / TDC_INTERNAL_AUDIT` Audit vouch → `financereviewer` **Finance post**.
+**Current rehearsal — complete:** **PC-20260911-0004** and **ADJ260001** are **Posted** (12 September). Separate Stores, Finance and Audit reviews were completed, then `financereviewer` posted. Verified: eight stock movements, reconciled stock/bin values, released freeze and one balanced GL journal — debits and credits each **GHS 850,444.23**. Use steps 13–14 to review the result; do not post again. Superseded rehearsal **PC-20260910-0001** and **PC-20260911-0002** remain **Cancelled**.
 
-**Pass for the tested zero-variance path:** Posted, freeze released, immutable action history, no unnecessary adjustment/journal and unchanged balance. Historical counted values were Barcode 20 / PVC 19. **Today's corresponding snapshot is Barcode 21 / PVC 19; read actual current quantities for any new count.** Nonzero variance, recount, transfer, disposal and broader reconciliation remain separate unpassed scenarios.
+**Main UAT preparation:** both databases are at **484 recorded migrations**, with existing stock, count and approval records preserved. Use **B23's deployment checkpoint** for the latest build/start status; database migration parity alone is not proof of running-version parity. Do not copy rehearsal count quantities into main UAT or treat the remaining ERP-wide approval rollout as complete.
+
+**Default bin setup:** **Administration → Inventory → Warehouses → Locations**. For a new bin, enter **Code**, **Name**, **Type: Bin**, enable **Use as default bin**, then **Add**. For an existing bin, select **Edit → Default bin → Save Changes**. Each warehouse has one active normal default bin. New warehouse-item assignments use it. Changing the default does not move stock already assigned elsewhere.
+
+**Choose the count scope.** **Warehouse-wide** includes the whole selected warehouse, with a separate row for each item/location. **Selected location** includes only stock assigned to that location. Unlocated stock uses the warehouse default bin, without changing warehouse totals. Draft items, Excel and variances use the same scope. Older count snapshots retain their original quantities; a safe default-bin resolution is recorded in Control history. An old warehouse-total row spanning multiple bins needs a new scoped count.
+
+#### B20.1. Prepare and check the draft
+
+1. **Use four separate users:** `manager` — counter; `procurementapprover` — Stores Manager; `financereviewer` — Finance; `employee` — Internal Audit. Their count responsibilities cover **Project Demo Warehouse (DEMO-PM), all locations**, including LOC-001 and the default bin. Finance/Audit setup is restored in both copies; the employee/MD role alone is not the Audit permission. Confirm **Administration → Workflow → Definitions → TDC Stock Adjustment Approval** remains **Published** with an independent Stores Manager approver. Re-login after setup; do not start a count while a later reviewer lacks access.
+2. **`manager`:** sign in → **Inventory → Transactions → Physical Counts → New Count**. Select **Warehouse**, then **Count scope: Warehouse-wide** or **Selected location → Location**. For this exercise, use **Project Demo Warehouse → Selected location → LOC-001 / Main → Full Count**, keep **Freeze inventory** checked, then **Create Count**. Open **Edit draft** and write down the count number. No evidence file is needed for a draft.
+3. **Items:** confirm that only the chosen scope is included. Remove unwanted rows using **Remove → Remove item**. To add a missing assigned item, click **Add item → Location → search/select Item → Add item**; a location-scoped count keeps its location fixed. Each item change saves immediately. For this exercise, retain **PVC Pipe 50mm** and **Barcode Device Kit** at **LOC-001 / Main**. The support reviewer retains opening balances separately from the blind counter. Items and scope are locked after Start; do not start an empty count.
+
+**Large item lists:** use **Search** and **Rows: 25 / 50 / 100** with the page arrows. Click **Full page** to expand Items, then **Restore** to return. **Save Counts** and the red **Submit for approval** button stay together in the bottom action bar in both views. Save all quantity changes before submitting. Hidden quantities show **xxx**. The count register shows newest counts first.
+
+**Cancel an unwanted draft:** in the register, click its red **Cancel draft count** icon → enter **Cancellation reason** → **Cancel count**. **Keep draft** closes the popup without cancelling. The cancelled record is retained; stock quantities are unchanged.
+
+#### B20.2. Start, record quantities and attach evidence
+
+4. **`manager`:** click **Close** to return to the register → **Start** beside that draft → **View** again. Expect **In Progress**. Starting activates the configured stock freeze; pause receipts, issues and returns in the affected scope until the count is posted or properly cancelled.
+5. **Choose direct entry or Excel.** Direct: **Items → Search → Counted Qty → Save Counts**; **Full page** is available. Attach supporting count evidence in **Details**, then go to step 8. Excel: **Items → Download count sheet**. Fill **Counted Qty**; enter **0** for none, leave blank only if not counted. Keep the other columns unchanged and save the `.xlsx` file. **Location** appears only when saved locations exist.
+6. **Details → Current count sheet → Upload → Choose File.** Select the completed Excel file, review the quantities → **Save count sheet**. This saves the quantities and marks that file **Current** together. Selecting a file alone does not save. Blank rows remain uncounted; no stock adjustment is posted.
+7. Confirm the uploaded filename marked **Current** and **Counted = Total Items**. To import another file, use **Replace** → select file → review → **Save count sheet**. Alternatively, correct quantities directly in **Items → Save Counts**; no replacement file is needed. Earlier files remain in **Supporting files and upload history**. In a blind count, saved inputs show **Saved**. **Attach supporting file** adds evidence only, not quantities.
+8. Click **Review variance** → **Items**. Expect **Under review**; compare **System, Counted and Variance**. Search for an item → edit **Counted Qty** → **Save Counts**. **No revised Excel upload is needed.** Earlier uploads remain as evidence/history. **Save Counts** and the red **Submit for approval** button stay together at the bottom in dialog and **Full page** views. When satisfied, **Submit for approval** → confirm. Expect **Stores Approval**; stock is unchanged.
+
+**Investigation:** an approver selects **Send for investigation**, enters the issue and clicks **Save decision**. Posting is blocked. The original counter opens the same count, records **Investigation findings → Resume review**, corrects the quantities/current sheet and submits again. All approval stages restart; prior history is preserved. An older **Awaiting review** count uses **Review variance** to enter this flow.
+
+#### B20.3. Review and post the same count
+
+**Administrator setup:** **Administration → Inventory → Physical Count Decisions**. Maintain decision labels and select each effect: **Approve adjustment** (advances approval; stock changes only at final Post) or **Start investigation** (blocks posting). Save changes. Keep at least one active choice for each effect; the default labels below may be renamed.
+
+After each account change: select the same organization → **Inventory → Transactions → Physical Counts → Refresh → View** on the recorded count number. Review **Details** evidence and the variance columns in **Items** before acting. A visible button does not grant approval permission.
+
+**Decision loading:** the choices are loaded for the saved count and its warehouse/location. Wait for **Loading decisions...** to finish. If **Could not load decisions** appears, select **Retry decisions**; if it still fails, resolve the displayed error before continuing. Do not change warehouse or substitute another reviewer to bypass access.
+
+**Before approval/posting:** the fresh-run example is zero variance. The completed rehearsal used its saved nonzero test quantities; do not copy those figures into a new UAT count. Review the actual quantities and values for the count being approved. Stock-adjustment validation uses the same location valuation source as the count; do not substitute the item-wide average cost. Do not post main UAT to imitate the rehearsal result.
+
+**See the costs:** an authorized reviewer opens **Items → Show costs**; use **Full page** if needed. **Count unit cost** is historical: rehearsal **PC-20260911-0004 → SKU-001** retains **GHS 1,918.85**. **Item-wide avg. cost** is current across owned locations; **Warehouse Items → Average cost** is warehouse-scoped. Compare current figures with the authoritative valuation balances for the same scope. **GHS 1,907.09** was the earlier stored item projection, not a fixed expected current cost. A later transfer, return or valuation correction must not rewrite the saved count cost. Blind counters do not see these costs.
+
+**If no approval process is active:** a new count uses **Complete count → Ready to Post → Post**, without the Stores/Finance/Audit approval steps below. Posting permission and stock/evidence/valuation checks still apply. The prepared UAT has an active workflow, so follow steps 9–12. Already-submitted approvals retain their original route; deactivation does not silently complete them.
+
+9. **`procurementapprover` — Stores Manager:** at **Stores Approval**, review the quantities, location and evidence → **Decision: Approve adjustment → Save decision**. Expect **Finance Approval**.
+10. **`financereviewer` — Finance Reviewer:** review the variance quantity/value → **Decision: Approve adjustment → Save decision**. Expect **Audit Attestation**.
+11. **`employee` — Internal Audit:** sign in separately and reopen the same count → review evidence, **Items** variances and **Control history** → **Decision: Approve adjustment → Save decision**. Expect **Ready to Post**. Do not use the counter, Stores reviewer or Finance reviewer for this stage.
+12. **`financereviewer`:** sign in separately and reopen the count at **Ready to Post** → check the approved results → **Post** once. The updated page shows Post only when the server confirms this user's posting access. Expect **Posted**. This final action posts any approved variance and releases the count freeze; the earlier approvals do not post stock.
+
+#### B20.4. Confirm the result
+
+13. **View → Details:** confirm **Counted = Total Items**. For the zero-variance exercise, **With Variance = 0**; for the current nonzero rehearsal, confirm the saved approved variances instead. **Control history**, newest first, must show separate Stores, Finance and Audit users, then final posting.
+14. **Inventory → Items & Catalogue → Warehouse Items:** select **Project Demo Warehouse** and compare balances with the opening snapshot plus the approved quantity changes. Check each affected bin and **Average cost** in **Reports → Inventory Reports → Balance Register**. Confirm freeze release and any adjustment/journal against the same count. Zero variance must not change stock/value or create an unnecessary adjustment/journal. **Details → Freeze: Yes** is the original setting; use **Posted** and the recorded freeze release as completion evidence.
+
+**If preparation is not ready:** demonstrate historical **PC-20260906-0002 → Details (Posted) → Items → Control history** without changing it. Its **Barcode 20 / PVC 19** values are historical, not today's balances; its old attachment was a plumbing-test placeholder. Use **PC-20260911-0004** for the verified current rehearsal result.
+
+### B21. Internal stock transfer
+
+**Actor:** `manager`, with transfer permission and active responsibility for the selected source and destination. **Page:** Inventory → [Transfers — rehearsal](http://127.0.0.1:3002/inventory/transfers) / [main UAT](http://localhost:3000/inventory/transfers). Use the same environment throughout. **Pass — TRF26091922, including automatic completion, 12 September 2026 at 14:42 UTC.**
+
+1. Note the item's available quantity in both bins. Click **New Transfer**. For the prepared inter-bin example, select **Project Demo Warehouse** as both source and destination; notes are optional. Select **Create Transfer** and record the draft number.
+2. Open **Items → Add Item**. Select **SKU-001 / PVC Pipe**, quantity **2**, source bin **LOC-001 / Main**, destination bin **DEFAULT**. Confirm those bins are active and the source has at least 2 available, then **Add Item**. The same bin cannot be both source and destination. Use **Full page** to maximize Items and **Restore** to return; current edits are retained.
+3. Use the blue **pencil (Edit)** in the register to reopen the draft; use the item row's pencil to correct its quantity, then save. With no active approval process, select **Finalize**; expect **Ready to ship**, without a fabricated approver. An active process instead requires its assigned approvals. Existing in-flight approvals retain their route.
+4. Select **Ship**, enter **2** in **Qty to Ship**, check **From Bin / To Bin**, then **Ship Items**. The compact grid shows Item, From Bin, To Bin, Remaining and Qty to Ship. Use **Columns** for Requested, Already Shipped or UOM; use **Full page / Restore** for more space. Shipping cost and comments are optional for this ordinary transfer. Expect **In Transit** and a source-bin reduction of 2. For a partial dispatch, enter 1 and later use **Dispatch More** for the remainder.
+5. Select **Receive**. Check the common bins above the grid; use **Columns → From Bin / To Bin** for line-level bins and **Full page / Restore** for more space. Enter **Qty to receive: 1** → **Receive Items**. Reopen Receive and record the remaining 1. Confirm the destination increases by 2 in total; do not receive the same quantity twice.
+6. Receive only the quantity available in good condition. Leave missing or damaged units unreceived; the transfer stays **In Transit** until the remaining good units arrive. On the final receipt, expect **Completed** automatically. There is no separate **Close transfer** action. For a cost-free inter-bin transfer, total owned quantity/value must remain unchanged.
+
+With no approval process, the same authorized operator can perform this ordinary transfer. Active approval routes retain their assigned approval, dispatch and receiving checks. Receiving fewer good units does not require a damage report, DMS upload or separate closing action.
+
+**Earlier manual-close result:** `manager` saved quantity **2 → 3 → 2**, finalized, dispatched 2 from LOC-001 to DEFAULT, received **1 + 1**, then closed. No approver, carrier reference or optional action comments were entered. Final PVC quantity stayed **300** and owned value **GHS 575,654.86**. The ledger shows **GHS 3,800 out → 1,900 in + 1,900 in**, no quantity in transit, and five control actions. The first receipt attempt failed and rolled back; the corrected retry completed. [Saved reconciliation evidence](../local-artifacts/inventory-final-transfer-closed-20260912-130840346.json). This pass covers the earlier **cost-free inter-bin flow only**, not automatic completion, inter-warehouse transfers, reversals, discrepancies or charges.
+
+**Automatic-completion result:** **TRF26091922**, PVC Pipe **2**, **DEFAULT → LOC-001**. The first receipt of **1** left it **In Transit**; the second **1** completed it automatically, without a Close action or human approval. Quantity remained **300** and stock value **GHS 575,654.86**. Verified three valuation movements, three physical stock movements and five history actions; the automatic-completion entry links to the final receipt. [Saved completion evidence](../local-artifacts/inventory-final-fresh-transfer-completion-verifier-20260912-144318012.json). This proves the ordinary, zero-charge inter-bin flow only, not the separate removed-draft-line guard correction.
+
+**Current UI:** the transfer dialog has fixed normal width/height, equal-width tabs and internal scrolling, with pencil editing and no transfer cost columns. **History** retains the audit trail. **V5 Items → Full page / Restore passed visibly at 15:12 UTC** on completed TRF26091922: 16px viewport margins when expanded, fixed normal width after Restore, stable width across tabs, seven columns without costing, and quantities **2 / 2 / 2** unchanged. Ship and Receive also have **Full page / Restore**, compact grids and Columns in V5. Their 13 focused tests passed, including retained quantities, notes and action buttons; those two dialogs were not separately checked live. Supplier-return grids remain scrollable without Full page.
+
+**Environment checkpoint:** main UAT and rehearsal are now at **schema 484**, including **20260912233000_InventoryTransferDraftLineCompletionGuard** and the disposal migration. Verified migration checks preserved existing business records; no transfer or supplier-return test stock transactions were made in main UAT. See **B23** for current build/start status. The **15-minute completion target was missed**. The transfer result passed, but this is not a claim that all inventory scenarios are bug-free.
+
+### B22. Supplier return from an accepted GRN
+
+**Actor:** `manager`, with stock-issue permission and active **Project Demo Warehouse** responsibility. **Page:** Inventory → [Supplier Returns — rehearsal](http://127.0.0.1:3002/inventory/supplier-returns) / [main UAT](http://localhost:3000/inventory/supplier-returns). **Pass — draft editing, direct completion and physical dispatch, 12 September 2026 at 15:10 UTC. Finance settlement is pending.**
+
+1. Click **New supplier return**. Select the accepted, stock-updated GRN linked to **REC260003** in rehearsal. In main UAT, select that database's own eligible receipt. Supplier, warehouse and source bins come from the accepted receipt; only stock actually accepted and posted is eligible.
+2. Select a **Return reason**, enter **1** against **PM-BARCODE-DEVICE / Barcode Device Kit**, leave other quantities blank/zero, then **Create draft**. Notes are optional. Confirm the exact source bin still has 1 available and the quantity is within the receipt's unreturned balance.
+3. Record the return number. Use the blue **pencil (Edit)** to correct quantities or the reason; zero removes a draft line. **Save**. The original GRN stays fixed; use a new draft for a different GRN. **View** shows each source location and the GRN cost estimate.
+4. With no active approval process, select **Complete**. Expect **Ready to dispatch**, with no human approval recorded. If a process is active, use **Submit** and the assigned independent reviewer completes **Approve** before dispatch; the final approver must not dispatch it.
+5. Select **Dispatch**. The carrier tracking reference is optional. Check the return and select **Dispatch stock** once. Expect **Shipped** and **Finance resolution pending**. The authorized requester may dispatch when approval is not required.
+6. Check **Stock Movement History**, **Warehouse Items** and the source bin. Quantity decreases by 1 once, with the return reference and exact bin. The movement uses current carrying value; the draft's GRN cost estimate remains historical. Reopening the shipped return must not offer another dispatch.
+
+**Chosen supplier outcome: credit against the original goods invoice.** The following Finance steps are being implemented; **not yet deployed or live-verified**. Do not treat the earlier physical-dispatch pass as a Finance pass.
+
+7. Sign in as an authorized AP officer. Open this shipped return with the **eye** icon → **Create credit draft**. Select the original posted goods invoice, enter the supplier's credit reference and date, then **Create draft**. The returned quantities, price and tax come from the original invoice; do not enter a second stock reversal.
+8. Click **Open credit**. Review the supplier, original invoice, returned lines and credit total. Use the **pencil** to correct the draft's credit reference/date, then **Save**. If approval is inactive, click **Continue**. If active, click **Submit for approval** and have the configured reviewer approve it.
+9. The authorized poster selects **Post**, checks the invoice and amount in the confirmation, then confirms **Post** once. This applies the commercial credit directly to the invoice. No cash payment or second physical stock movement is created.
+10. Return to **Supplier Returns**, refresh and expect **Credit applied**. Open the original invoice: its outstanding balance must decrease by this credit. Verify the dispatch/credit journals are balanced, the return's Finance status remains resolved after reload, and stock is unchanged by credit posting.
+
+**Setup gate:** Finance must configure Supplier Returns Clearing and Purchase Return Cost Variance before the integrated posting test. Existing uninvoiced or ambiguous returns remain visibly Finance-pending. Do not use the legacy Finance/AP returns screen to imitate completion. Record physical dispatch and Finance resolution separately.
+
+**Completed rehearsal:** **SRT-20260912131108-4cdc2070a96** is **Shipped — Finance resolution pending**. Draft editing passed: saved Barcode **2** plus PVC **1** (GRN estimate **GHS 3,300**), reopened, then removed PVC and reduced Barcode to **1** (**GHS 700**). **Complete** produced **Ready to dispatch**, with no human approver. **Dispatch** reduced Barcode item/warehouse/LOC-001 stock **430 → 429** and value **GHS 303,953.97 → 303,247.10**. Exactly one physical and one valuation movement recorded **1 unit / GHS 706.87**; the historical GRN cost remained **GHS 700**. Edit and Dispatch were no longer offered. PVC and the posted physical count were unchanged. [Saved dispatch evidence](../local-artifacts/inventory-final-supplier-dispatched-verifier-20260912-151007516.json). Review this shipped record; do not dispatch it again. No supplier debit/credit note or Finance settlement was created.
+
+**Display labels (V6):** View resolves **Source bin** to its code and name within the return's warehouse. The draft column is **GRN unit cost**, meaning the original receipt cost, not today's carrying cost. The production build and **23 focused UI tests passed**. Final live label confirmation is pending because the browser blocked automated navigation. No stock or costing calculation changed, and this cleanup adds no migration.
+
+### B23. Inventory stock disposal
+
+**Status: Implementation/testing in progress; live disposal not yet verified.** The browser currently reports **ERR_BLOCKED_BY_CLIENT**. No disposal reference or live pass is claimed. Both main UAT and rehearsal are now at **schema 484**. Fresh COPY_ONLY/CHECKSUM backups were verified; checks across **86 protected business tables** confirmed that stock, count and human-approval records were unchanged. Preserve the completed B21/B22 records.
+
+**Deployment checkpoint — 12 September, 17:06 UTC:** **120 API, 229 Core and 14 UI tests passed.** Both production frontends are built and running: rehearsal **3002**, main UAT **3000**. Both APIs passed live/readiness checks; four page routes and 61 assets per copy returned HTTP200. Build IDs, matching source hashes, CORS and anonymous disposal-API rejection (401) were verified. [Release evidence](../local-artifacts/disposal-release-verification.json). These checks do not replace the blocked live disposal walkthrough.
+
+**Page:** Inventory → [Disposals — rehearsal](http://127.0.0.1:3002/inventory/disposals) / [main UAT](http://localhost:3000/inventory/disposals). **Actor:** an authorized Stores user with disposal and stock-posting rights for the chosen warehouse/bin. Verify that account's access first. Finance mappings and the posting period must be ready.
+
+1. Click **New disposal**. In **Details**, select the warehouse, **Method** and **Reason**. Notes are optional. For the first controlled test, use **Write-off** and a small available quantity of an ordinary stock item. This screen does not dispose of fixed assets.
+2. In **Items**, search for the item and bin by code/name. The warehouse's default bin is suggested; confirm it is the bin holding the stock to be disposed of. Enter a positive quantity → **Add**. Enter lot/batch/serial details only for tracked items.
+3. Correct quantities directly in the compact grid; use the remove icon to take out a line. Use **Search item or bin**, **25 / 50 / 100 per page**, **Columns → Cost and value / Tracking**, and **Full page / Restore** as needed. Costs are hidden initially; newly added lines show **On save** until the server calculates the estimate.
+4. In **Supporting documents**, select a current published document by name if needed. Files are optional when no approval process is active; the active approval route requires supporting evidence. Any attached file still has to pass the shared document-security checks. Do not type document IDs.
+5. Click **Save draft** and record the generated reference. Reopen with the register's pencil icon; add/remove an item or change a quantity, then **Save draft** again. Draft saving must not change stock. The eye icon opens View. To test cancellation, use a separate draft's cancel icon and enter its reason; do not cancel the disposal being posted.
+6. View the saved draft. With no active approval process, select **Continue** → **Ready to post**; no reviewer or fabricated approval is required. With an active process, select **Submit for approval** and have its eligible independent actor **Approve**. Existing in-flight approval history must remain intact. There is no separate compulsory stock-disposal committee outside the configured route.
+7. Check **Details** before posting. **Auction / Sale** requires buyer, positive proceeds and a searchable proceeds account. **Donation** requires a recipient. **Write-off / Destruction** has no sale proceeds. The disposal reference defaults to the case reference.
+8. Select **Post** and confirm **Post** once. For a new ready disposal, preparation and final stock/Finance posting run in one transaction; a failure rolls them back together. Correct the displayed issue and retry the same disposal. An older, already-prepared disposal reuses its linked adjustment; it must not create another. Any configured approval still applies and must finish before stock posts.
+9. Expect **Completed** after successful posting. Review **Posted stock value**, the exact source-bin reduction, stock movement, valuation and Finance journal. New adjustments use the execution date, not the draft creation date; an existing prepared adjustment retains its saved date. The saved **Estimated stock value** is not a promise of the final carrying cost. Verify balanced postings and any sale/auction proceeds separately. **History** must show newest actions first, with no invented human approval in the direct path.
+10. Reopen the completed record and verify that Post is no longer available. Record the actual reference, before/after quantity and value, movement/journal references and screenshot/history evidence. A controlled retry must not duplicate stock or Finance posting.
+
+**Architecture boundary:** Sections **16.1**, **18.2** and **20.1** cover shared item/location/valuation/approval/ledger/audit controls and configurable routing for inventory disposals. **FR-FA-008's Board of Survey requirement belongs to the separate fixed-asset disposal process**; it is not an automatic three-person committee prerequisite for ordinary stock disposal. Stock, tenant, location, access, document security, accounting and duplicate-posting safeguards still apply.
+
+**Technical verification limit:** Multi-line FIFO disposal is not verified. Different lot/serial rows for the same item and bin can reuse an opening-layer estimate; where layer costs differ, posting can fail the protected valuation check. The transaction must roll back without stock or Finance posting. Do not mark this case passed or bypass the valuation guard.
 
 ## Part C — alternative procurement routes
 
@@ -462,7 +726,7 @@ All routes still require the approved source/budget controls and a PO for procur
 
 | Route | Planned sequence and accounts | Test data / preparation | Evidence status |
 | --- | --- | --- | --- |
-| **Petty Purchase** | `procurementofficer`: plan/PR and approved-source Petty quotation; `procurementapprover`: independent quotation approval; `procurementevaluator`: recommendation; `employee`: award. Officer creates PO; Procurement Approver approves; prepared Stores actors receive/inspect and issue GRN/MRN. | Local Goods band 0–1,000; tested 1 Barcode × GHS 750, Harbourline, DEMO-PM. One quote, evidence and independent approval; no public tender bidding window. | **Positive path passed through accepted receipt and issued GRN/MRN.** Petty-specific invoice/payment not executed. PDF/negative cases remain. |
+| **Petty Purchase** | `procurementofficer`: plan/PR and approved-source Petty quotation; `procurementapprover`: independent quotation approval; `procurementevaluator`: recommendation; `employee`: award. Officer creates PO; Procurement Approver approves; prepared Stores actors receive/inspect and issue GRN. | Local Goods band 0–1,000; tested 1 Barcode × GHS 750, Harbourline, DEMO-PM. One quote, evidence and independent approval; no public tender bidding window. | **Historical positive path passed through accepted receipt and issued GRN/MRN; MRN is now hidden from the receipt screen.** Petty-specific invoice/payment not executed. PDF/negative cases remain. |
 | **Standard RFQ** | Officer creates the policy-routed RFQ from approved PR; eligible suppliers submit quotations; assigned independent reviewers evaluate/recommend; configured independent award approver approves; PO → receipt → matching/Stores as applicable. | Local Goods band above 1,000 through 10,000; three quotations required. Only one eligible Goods supplier was available: prepare two more genuine test supplier accounts/contact channels. Exact RFQ screen/role sequence still needs rehearsal. | **Not executed end to end.** Do not treat three planning survey rows as three RFQ submissions. |
 | **QBS** | Officer selects Consultancy and **QBS before the compatible template**; qualified consultants submit; appointed committee evaluates technical quality; authorized negotiation/approval follows the configured QBS route, then PO/required contract and service certification before matching. | Prepare an eligible consultancy supplier; do not reclassify Harbourline Goods just to bypass eligibility. Local explicit Consultancy route up to 100,000. | **Not executed.** Do not use stock GRNs/Stores issues for pure consultancy services. |
 | **QCBS** | Officer selects Consultancy and **QCBS before the template**; technical evaluation and threshold decision precede controlled financial opening; apply published technical/financial weighting, rank, approve award and continue PO/contract/certification/matching. | Consultancy suppliers, compatible QCBS template, approved weights/threshold and technical/financial proposals. Do not reuse Standard Goods 90-point scoring as a QCBS result. | **Not executed.** Weights and formula must come from the configured method/template, not an invented default. |
@@ -506,10 +770,15 @@ For each fresh step, record the new reference, actual actor, timestamp, expected
 | Publication → bid → committee/opening | | | |
 | Evaluation → verification → award | | | |
 | PO/commitment → required contract activation | | | |
-| Accepted receipt → GRN/MRN | | | |
+| Accepted receipt → GRN | | | |
 | Receipt-linked invoice → 3-way match → approvals | | | |
 | Stock → Stores issue → acknowledgement → return | | | |
 | Count / final reconciliation | | | |
+| B21 Earlier transfer → partial receipt → manual close | TRF26090177 | manager | Pass — cost-free LOC-001 → DEFAULT, 2 received as 1 + 1; 12 Sep 2026 13:08 UTC |
+| B21 Current transfer → partial receipt → automatic completion | TRF26091922 | manager | Pass — 2 dispatched, received 1 + 1, automatic completion; 12 Sep 14:42 UTC |
+| B22 Supplier return → dispatch | SRT-20260912131108-4cdc2070a96 | manager | Pass — draft add/edit/remove, direct Complete, Barcode 1 dispatched; Finance pending; 12 Sep 15:10 UTC |
+| B22 Supplier-return Finance resolution | | | Pending — no automatic debit note / GL integration |
+| B23 Inventory stock disposal → posting | | | Live disposal walkthrough blocked by ERR_BLOCKED_BY_CLIENT; no transaction pass. Both databases484; API120/Core229/UI14 and both HTTP/runtime checks passed |
 | Petty / RFQ / QBS / QCBS / Emergency (separate results) | | | |
 
 **Completion decision:** the main positive chain and Petty receipt have recorded passes, but the alternative branches, browser-only scoped count creation, PDF presentation and remaining regression/negative observations prevent full UAT sign-off. No guarantee of zero bugs is made. This script was prepared for immediate use; exact-script fresh browser rehearsal remains pending.

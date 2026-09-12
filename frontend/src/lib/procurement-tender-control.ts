@@ -18,6 +18,12 @@ export const tenderControlStatusLabel: Record<Status, string> = {
   [Status.Accepted]: 'Bidder acceptance complete',
 };
 
+export function getTenderControlStatusLabel(control: Pick<ProcurementTenderControl, 'status' | 'approvalRequired'>) {
+  return control.approvalRequired === false && control.status === Status.Approved
+    ? 'Recommendation complete'
+    : tenderControlStatusLabel[control.status];
+}
+
 export function getTenderControlReadiness(control: ProcurementTenderControl) {
   const onTime = control.submissionReceipts.filter(
     (item) => item.disposition === Disposition.OnTimeAccepted

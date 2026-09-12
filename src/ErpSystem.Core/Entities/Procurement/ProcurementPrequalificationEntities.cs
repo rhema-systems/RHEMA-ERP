@@ -21,7 +21,8 @@ public sealed class ProcurementPrequalificationExercise : TenantEntity
     [Required, StringLength(50)] public string PolicySetCode { get; set; } = string.Empty;
     public int PolicySetVersion { get; set; }
     public Guid SourceConfigurationProfileId { get; set; }
-    public Guid WorkflowDefinitionId { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? WorkflowDefinitionId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
 
     [StringLength(300)] public string? AdvertisementReference { get; set; }
@@ -43,7 +44,7 @@ public sealed class ProcurementPrequalificationExercise : TenantEntity
     [Timestamp] public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ProcurementPolicySet PolicySet { get; set; } = null!;
-    public WorkflowDefinition WorkflowDefinition { get; set; } = null!;
+    public WorkflowDefinition? WorkflowDefinition { get; set; }
     public WorkflowInstance? WorkflowInstance { get; set; }
     public ICollection<ProcurementPrequalificationCriterion> Criteria { get; set; } = new List<ProcurementPrequalificationCriterion>();
     public ICollection<ProcurementPrequalificationApplication> Applications { get; set; } = new List<ProcurementPrequalificationApplication>();

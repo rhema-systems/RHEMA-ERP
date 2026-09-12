@@ -11,7 +11,7 @@ public sealed class InventoryDisposalCaseConfiguration : IEntityTypeConfiguratio
         builder.ToTable("InventoryDisposalCases", table =>
         {
             table.HasCheckConstraint("CK_InventoryDisposalCases_Amounts", "[TotalQuantity] > 0 AND [TotalValue] > 0 AND [ProceedsAmount] >= 0");
-            table.HasCheckConstraint("CK_InventoryDisposalCases_Status", "[Status] BETWEEN 1 AND 10");
+            table.HasCheckConstraint("CK_InventoryDisposalCases_Status", "[Status] BETWEEN 1 AND 11");
             table.HasCheckConstraint("CK_InventoryDisposalCases_Method", "[Method] BETWEEN 1 AND 5");
             table.HasTrigger("TR_InventoryDisposalCases_Guard");
         });

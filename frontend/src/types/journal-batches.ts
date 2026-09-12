@@ -6,7 +6,8 @@ export type JournalBatchApprovalStatus =
     | 'PartiallyApproved'
     | 'Approved'
     | 'Rejected'
-    | 'Cancelled';
+    | 'Cancelled'
+    | 'ReadyToPost';
 export type JournalBatchPostingStatus =
     | 'NotReady'
     | 'Ready'
@@ -17,7 +18,7 @@ export type JournalBatchReversalStatus =
     | 'NotReversed'
     | 'ReversalPending'
     | 'Reversed';
-export type JournalBatchItemReviewStatus = 'Pending' | 'Approved' | 'Rejected';
+export type JournalBatchItemReviewStatus = 'Pending' | 'Approved' | 'Rejected' | 'NotRequired';
 export type JournalBatchItemPostingStatus = 'NotEligible' | 'Ready' | 'Posting' | 'Posted' | 'Failed';
 
 export interface JournalBatchListItem {
@@ -30,6 +31,7 @@ export interface JournalBatchListItem {
     controlCurrencyCode: string;
     batchType: 'Standard' | 'Reversal';
     approvalStatus: JournalBatchApprovalStatus;
+    approvalRequired?: boolean;
     postingStatus: JournalBatchPostingStatus;
     reversalStatus: JournalBatchReversalStatus;
     isVoided: boolean;
@@ -109,6 +111,7 @@ export interface JournalBatchDetail extends JournalBatchListItem {
     notes?: string;
     submittedByUserId?: string;
     approvedByUserId?: string;
+    workflowInstanceId?: string;
     approvedAt?: string;
     reviewCompletedAt?: string;
     reversalOfJournalBatchId?: string;

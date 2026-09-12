@@ -342,6 +342,9 @@ public class StockAdjustment : TenantEntity
     [MaxLength(20)]
     public string Status { get; set; } = "Draft"; // Draft, Approved, Posted
 
+    // Server-owned submission snapshot. Existing records retain their approval obligations.
+    public bool ApprovalRequired { get; set; } = true;
+
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
 
@@ -505,6 +508,8 @@ public class WarehouseLocation : TenantEntity
 
     public Guid? ParentLocationId { get; set; }
 
+    /// <summary>The warehouse's normal fallback bin for newly assigned items.</summary>
+    public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsPickingLocation { get; set; } = true;
     public bool IsReceivingLocation { get; set; } = true;

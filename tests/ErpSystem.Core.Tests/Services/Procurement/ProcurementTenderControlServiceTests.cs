@@ -6,6 +6,8 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
+using Microsoft.Extensions.Logging.Abstractions;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -18,6 +20,75 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementTenderControlServiceTests
 {
+    [Fact]
+    public async Task NoActiveAwardWorkflowCompletesRecommendationWithoutFakeApprovalAndRecordsActualAwardActor()
+    {
+        await using var fixture = new Fixture();
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderAward"))
+            .ReturnsAsync(false);
+        var financial = await fixture.EvaluateAsync();
+        var maker = fixture.CurrentUserId;
+        var completed = await fixture.Service.SubmitApprovalAsync(fixture.Tender.Id,
+            new SubmitProcurementTenderApprovalRequest { RowVersion = financial.RowVersion, PpaApprovalReference = "PPA-DIRECT-001" }, "direct-complete");
+
+        completed.Status.Should().Be(ProcurementTenderControlStatus.Approved);
+        completed.ApprovalRequired.Should().BeFalse();
+        completed.WorkflowInstanceId.Should().BeNull();
+        completed.AuthorityApprovalReference.Should().BeNull();
+        completed.PpaApprovalReference.Should().Be("PPA-DIRECT-001");
+        var retained = await fixture.Context.ProcurementTenderControls.SingleAsync();
+        retained.ApprovedAtUtc.Should().BeNull();
+        retained.ApprovedById.Should().BeNull();
+        retained.ApprovalActorsJson.Should().Be("[]");
+        fixture.Workflow.Verify(service => service.StartApprovalWorkflowAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+
+        fixture.CurrentUserId = Guid.NewGuid();
+        var actualAwardActor = fixture.CurrentUserId;
+        await fixture.Service.RecordAwardAsync(fixture.Tender.Id,
+            new RecordProcurementTenderAwardRequest {
+                BidId = fixture.Bids[0].Id, AwardReference = "AWD-DIRECT", EvidenceReference = "DMS-DIRECT-AWARD", RowVersion = completed.RowVersion
+            }, "direct-award");
+        var award = await fixture.Context.TenderAwards.SingleAsync();
+        award.AwardedById.Should().Be(actualAwardActor);
+        award.CreatedById.Should().Be(maker);
+        retained.ApprovedById.Should().BeNull();
+        fixture.AwardReadiness.Verify(service => service.EnsureAwardReadyAsync(
+            ProcurementAwardReadinessSourceType.Tender, fixture.Tender.Id,
+            It.IsAny<EvaluateProcurementAwardReadinessRequest>(), "direct-award", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DirectRecommendationStillRequiresPpaEvidenceFromLockedRoute()
+    {
+        await using var fixture = new Fixture();
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderAward"))
+            .ReturnsAsync(false);
+        var financial = await fixture.EvaluateAsync();
+
+        await fixture.Service.Invoking(service => service.SubmitApprovalAsync(fixture.Tender.Id,
+            new SubmitProcurementTenderApprovalRequest { RowVersion = financial.RowVersion }, "direct-missing-ppa"))
+            .Should().ThrowAsync<ProcurementTenderControlValidationException>()
+            .Where(exception => exception.Code == "TENDER_PPA_APPROVAL_REQUIRED");
+    }
+
+    [Fact]
+    public async Task RetainedTenderAwardInstanceRemainsRequiredAfterDefinitionRetirement()
+    {
+        await using var fixture = new Fixture();
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderAward"))
+            .ReturnsAsync(false);
+        fixture.Workflow.Setup(service => service.HasActiveApprovalInstanceAsync("TenderAward", fixture.Tender.Id))
+            .ReturnsAsync(true);
+        var financial = await fixture.EvaluateAsync();
+        var submitted = await fixture.Service.SubmitApprovalAsync(fixture.Tender.Id,
+            new SubmitProcurementTenderApprovalRequest { RowVersion = financial.RowVersion }, "retained-submit");
+
+        submitted.ApprovalRequired.Should().BeTrue();
+        submitted.Status.Should().Be(ProcurementTenderControlStatus.PendingApproval);
+        submitted.WorkflowInstanceId.Should().Be(fixture.WorkflowInstanceId);
+    }
+
     [Fact]
     public async Task StandardFormalOpeningStillRequiresClosedWindowAndCurrentCommitteeQuorum()
     {
@@ -845,6 +916,8 @@ public sealed class ProcurementTenderControlServiceTests
             ControlEvents.Setup(service => service.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new ProcurementControlEventDto());
+            Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("TenderAward"))
+                .ReturnsAsync(true);
             Workflow.Setup(service => service.StartApprovalWorkflowAsync(
                     "TenderAward", Tender.Id, WorkflowDefinitionId))
                 .ReturnsAsync(new WorkflowExecutionResult
@@ -923,7 +996,8 @@ public sealed class ProcurementTenderControlServiceTests
                 _unitOfWork, _currentUser.Object, AccessControl.Object, SodGuard.Object,
                 ControlEvents.Object, SourcingCases.Object, Workflow.Object,
                 SupplierValidation.Object, TenderDocuments.Object, EvaluationCommittee.Object,
-                AwardReadiness.Object);
+                AwardReadiness.Object,
+                new WorkflowIntegrationService(Workflow.Object, NullLogger<WorkflowIntegrationService>.Instance));
         }
 
         public Guid CurrentTenantId { get; set; }

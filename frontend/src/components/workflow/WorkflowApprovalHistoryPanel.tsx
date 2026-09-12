@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { useToast } from '@/hooks/use-toast';
 import { workflowApiService } from '@/services/workflow-api.service';
+import { getWorkflowVisibility } from '@/components/workflow/workflowVisibility';
 import type {
   WorkflowApprovalChecklistResponseDto,
   WorkflowApprovalStatus,
@@ -32,6 +33,9 @@ export interface WorkflowApprovalHistoryPanelProps {
   status?: string;
   currentStepName?: string;
   workflowSummary?: WorkflowEntitySummaryDto;
+  workflowSummaryLoading?: boolean;
+  workflowSummaryError?: string;
+  loadWorkflowSummary?: boolean;
   canSubmit?: boolean;
   canApproveReject?: boolean;
   onSubmit?: () => Promise<void>;
@@ -333,6 +337,8 @@ export function WorkflowApprovalHistoryPanel({
   status,
   currentStepName,
   workflowSummary,
+  workflowSummaryLoading,
+  workflowSummaryError,
   canSubmit,
   canApproveReject,
   onSubmit,
@@ -352,6 +358,9 @@ export function WorkflowApprovalHistoryPanel({
 
   const effectiveSummary = workflowSummary ?? summary;
   const effectiveStatus = status || enumLabel(effectiveSummary?.status ?? audit?.status, instanceStatusLabels);
+  const visibility = getWorkflowVisibility({
+    summary: effectiveSummary, loading: loading || workflowSummaryLoading, error: error || workflowSummaryError,
+  });
 
   const loadWorkflow = React.useCallback(async () => {
     if (!entityType || !entityId) return;
@@ -363,7 +372,7 @@ export function WorkflowApprovalHistoryPanel({
         workflowApiService.getWorkflowEntityAudit(entityType, entityId),
         workflowSummary
           ? Promise.resolve(workflowSummary)
-          : workflowApiService.getWorkflowEntitySummary(entityType, entityId).catch(() => null),
+          : workflowApiService.getWorkflowEntitySummary(entityType, entityId),
       ]);
 
       setAudit(auditData);
@@ -440,7 +449,7 @@ export function WorkflowApprovalHistoryPanel({
     if (preview?.url) window.URL.revokeObjectURL(preview.url);
   }, [preview?.url]);
 
-  if (loading) {
+  if (loading || workflowSummaryLoading) {
     return (
       <div className="flex items-center justify-center py-10">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -448,18 +457,20 @@ export function WorkflowApprovalHistoryPanel({
     );
   }
 
-  if (error) {
+  if (error || workflowSummaryError) {
     return (
       <Card className="border-red-200 bg-red-50">
         <CardContent className="pt-6">
           <div className="flex items-center gap-2">
             <XCircle className="h-5 w-5 text-red-600" />
-            <p className="text-red-900">{error}</p>
+            <p className="text-red-900">{error || workflowSummaryError}</p>
           </div>
         </CardContent>
       </Card>
     );
   }
+
+  if (visibility.direct && !audit) return null;
 
   if (!audit && !effectiveSummary?.hasActiveInstance) {
     return (
@@ -580,7 +591,7 @@ export function WorkflowApprovalHistoryPanel({
       {audit && (
         <Card>
           <CardHeader>
-            <CardTitle>Workflow History</CardTitle>
+            <CardTitle>{visibility.direct ? 'History' : 'Workflow History'}</CardTitle>
             <CardDescription>
               Workflow: <span className="font-medium">{audit.workflowName}</span> • Status:{' '}
               <span className="font-medium">{enumLabel(audit.status, instanceStatusLabels)}</span>

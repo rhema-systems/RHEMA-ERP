@@ -143,7 +143,7 @@ public sealed class ProcurementReceiptInspectionService :
             decisionSodAllowed = current is not null &&
                                  await CanDecideIndependentlyAsync(
                                      current, cancellationToken);
-            workflowDecisionAllowed = current is not null &&
+            workflowDecisionAllowed = current is not null && current.ApprovalRequired &&
                                       current.Status ==
                                       ProcurementReceiptInspectionStatus.PendingApproval &&
                                       await _workflow.CanUserApproveAsync(
@@ -180,7 +180,7 @@ public sealed class ProcurementReceiptInspectionService :
             CanClose = !externalLinked && approveAllowed && receiptSodAllowed &&
                        current is not null &&
                        current.CreatedByUserId != _currentUser.UserId &&
-                       current.DecidedByUserId != _currentUser.UserId &&
+                       (current.DecidedByUserId ?? current.SubmittedByUserId) != _currentUser.UserId &&
                        current.Status == ProcurementReceiptInspectionStatus.ClosureReady &&
                        ProcurementReceiptInspectionRules.CanClose(
                            current.SupplierAcknowledgementStatus,
@@ -398,6 +398,7 @@ public sealed class ProcurementReceiptInspectionService :
                 AuthorityRuleId = governance.AuthorityRuleId,
                 AuthorityName = governance.AuthorityName,
                 WorkflowDefinitionId = receiptWorkflowDefinitionId,
+                ApprovalRequired = receiptWorkflowDefinitionId.HasValue,
                 CreatedByUserId = _currentUser.UserId,
                 CreatedByName = ActorName,
                 IdempotencyKey = $"inspection:{receipt.Id:N}:{sequence}",
@@ -464,6 +465,7 @@ public sealed class ProcurementReceiptInspectionService :
             correlation,
             cancellationToken);
         var actionFingerprint = SaveActionFingerprint(request);
+        var actionComment = RoutineInspectionActionComment(request.Comment, "Inspection quantities saved (no comment provided).");
         var replay = await TryReplayActionAsync(
             null, receiptId, ProcurementReceiptInspectionActionType.Saved,
             request.IdempotencyKey, actionFingerprint, cancellationToken);
@@ -506,7 +508,8 @@ public sealed class ProcurementReceiptInspectionService :
                 if (result.Rejected > 0 && string.IsNullOrWhiteSpace(candidate.RejectionReason))
                     throw Validation("RCV_REJECTION_REASON_REQUIRED",
                         "A documented rejection reason is required for every rejected quantity.");
-                if (result.Rejected > 0 && (!candidate.QuarantineLocationId.HasValue ||
+                if (PurchaseOrderLineRules.RequiresStock(line.PurchaseOrderReceiptItem.PurchaseOrderItem.LineType) &&
+                    result.Rejected > 0 && (!candidate.QuarantineLocationId.HasValue ||
                                             candidate.QuarantineLocationId == Guid.Empty))
                     throw Validation("RCV_QUARANTINE_LOCATION_REQUIRED",
                         "Rejected quantities require a controlled quarantine location.");
@@ -527,19 +530,19 @@ public sealed class ProcurementReceiptInspectionService :
                 await Lines.UpdateAsync(line);
             }
             Recalculate(inspection);
-            inspection.DecisionComment = request.Comment.Trim();
+            inspection.DecisionComment = Trim(request.Comment, 1000);
             inspection.CorrelationId = correlation;
             inspection.UpdatedAt = DateTime.UtcNow;
             inspection.UpdatedBy = ActorName;
             inspection.LastModifiedById = _currentUser.UserId;
             inspection.IntegrityHash = CaseHash(inspection);
             await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Saved,
-                request.Comment, "Inspection quantities saved", correlation,
+                actionComment, "Inspection quantities saved", correlation,
                 request.IdempotencyKey.Trim(), actionFingerprint, null, cancellationToken);
             await Cases.UpdateAsync(inspection);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordEventAsync(inspection, "Saved", ProcurementControlEventResult.ReviewRequired,
-                before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
+                before, Snapshot(inspection), actionComment, correlation, cancellationToken);
             saved = inspection;
         }, cancellationToken);
         return Map(saved!);
@@ -562,6 +565,7 @@ public sealed class ProcurementReceiptInspectionService :
             cancellationToken);
         var submitKey = $"submit:{inspection.Id:N}:{inspection.Sequence}";
         var actionFingerprint = SubmitActionFingerprint(request);
+        var actionComment = RoutineInspectionActionComment(request.Comment, "Inspection submitted (no comment provided).");
         var replay = await TryReplayActionAsync(
             caseId, null, ProcurementReceiptInspectionActionType.Submitted,
             submitKey, actionFingerprint, cancellationToken);
@@ -578,7 +582,8 @@ public sealed class ProcurementReceiptInspectionService :
                     "Every received quantity must be accepted or rejected before submission.");
             if (inspection.RejectedQuantity > 0 && inspection.Lines.Any(item =>
                     item.RejectedQuantity > 0 && (string.IsNullOrWhiteSpace(item.RejectionReason) ||
-                                                   !item.QuarantineLocationId.HasValue)))
+                                                   (PurchaseOrderLineRules.RequiresStock(item.PurchaseOrderReceiptItem.PurchaseOrderItem.LineType) &&
+                                                    !item.QuarantineLocationId.HasValue))))
                 throw Validation("RCV_REJECTION_CONTROL_INCOMPLETE",
                     "Every rejected line requires a reason and quarantine location.");
 
@@ -590,11 +595,16 @@ public sealed class ProcurementReceiptInspectionService :
             // workflow. Receipt inspection has its own workflow entity and must
             // never start a definition belonging to Purchase Requisition or any
             // other source document.
-            var receiptWorkflowDefinitionId = await ResolveReceiptWorkflowDefinitionIdAsync(
-                cancellationToken);
-            var workflowRebindRequired =
-                inspection.WorkflowDefinitionId != receiptWorkflowDefinitionId;
+            // An in-flight instance continues to govern even if its definition was retired.
+            var hasActiveInstance = await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, inspection.Id);
+            if (hasActiveInstance && !inspection.WorkflowDefinitionId.HasValue)
+                throw Conflict("RCV_INSPECTION_WORKFLOW_BINDING_MISSING", "The active approval instance has no retained definition. Reload and retry.");
+            var receiptWorkflowDefinitionId = hasActiveInstance
+                ? inspection.WorkflowDefinitionId
+                : await ResolveReceiptWorkflowDefinitionIdAsync(cancellationToken);
+            var approvalRequired = receiptWorkflowDefinitionId.HasValue;
             inspection.WorkflowDefinitionId = receiptWorkflowDefinitionId;
+            inspection.ApprovalRequired = approvalRequired;
             var configuredEvidenceRequirements = await LoadEvidenceRequirementKeysAsync(
                 inspection.ConfigurationProfileId, cancellationToken);
             EnsureConfiguredEvidenceRequirements(
@@ -609,12 +619,11 @@ public sealed class ProcurementReceiptInspectionService :
             inspection.Status = ProcurementReceiptInspectionStatus.PendingApproval;
             inspection.SubmittedByUserId = _currentUser.UserId;
             inspection.SubmittedAtUtc = DateTime.UtcNow;
-            inspection.DecisionComment = request.Comment.Trim();
+            inspection.DecisionComment = Trim(request.Comment, 1000);
             inspection.CorrelationId = correlation;
             inspection.IntegrityHash = CaseHash(inspection);
-            if (workflowRebindRequired)
-                await _store.SetWorkflowRebindContextAsync(
-                    inspection.Id, receiptWorkflowDefinitionId, cancellationToken);
+            await _store.SetWorkflowRebindContextAsync(
+                inspection.Id, receiptWorkflowDefinitionId, cancellationToken);
             try
             {
                 await Cases.UpdateAsync(inspection);
@@ -622,27 +631,39 @@ public sealed class ProcurementReceiptInspectionService :
             }
             finally
             {
-                if (workflowRebindRequired)
-                    await _store.ClearMutationContextAsync(cancellationToken);
+                await _store.ClearMutationContextAsync(cancellationToken);
             }
 
-            var workflow = await _workflow.SubmitAsync(
-                WorkflowEntityType, inspection.Id, inspection.WorkflowDefinitionId);
-            if (!workflow.ExecutionResult.Success)
-                throw Conflict("RCV_INSPECTION_WORKFLOW_START_FAILED",
-                    workflow.ExecutionResult.Message ?? "The configured receipt-inspection workflow could not be started.");
-
+            var workflow = inspection.WorkflowDefinitionId.HasValue
+                ? await _workflow.SubmitAsync(WorkflowEntityType, inspection.Id, inspection.WorkflowDefinitionId.Value)
+                : await _workflow.SubmitAsync(WorkflowEntityType, inspection.Id);
+            EnsureSubmissionWorkflowResult(inspection.ApprovalRequired, workflow);
             inspection.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
             await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Submitted,
-                request.Comment, "Submitted for independent approval", correlation,
+                actionComment, inspection.ApprovalRequired ? "Submitted for independent approval" : "Inspection submitted", correlation,
                 submitKey, actionFingerprint, null, cancellationToken);
             inspection.IntegrityHash = CaseHash(inspection);
-            await Cases.UpdateAsync(inspection);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await RecordEventAsync(inspection, "Submitted", ProcurementControlEventResult.ReviewRequired,
-                before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
+            await _store.SetMutationContextAsync(inspection.Id, cancellationToken);
+            try
+            {
+                await Cases.UpdateAsync(inspection);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                await _store.ClearMutationContextAsync(cancellationToken);
+            }
+            await RecordEventAsync(inspection, "Submitted", inspection.ApprovalRequired
+                    ? ProcurementControlEventResult.ReviewRequired : ProcurementControlEventResult.Allowed,
+                before, Snapshot(inspection), actionComment, correlation, cancellationToken);
+            if (!inspection.ApprovalRequired)
+                await CompleteAcceptedInspectionAsync(inspection, actionComment, correlation,
+                    $"complete:{inspection.Id:N}:{inspection.Sequence}", actionFingerprint,
+                    ProcurementReceiptInspectionActionType.Completed, Snapshot(inspection), cancellationToken);
         }, cancellationToken);
-        await PublishAsync("procurement.receipt-inspection.submitted", inspection, cancellationToken);
+        await PublishAsync(inspection.ApprovalRequired ? "procurement.receipt-inspection.submitted" :
+            inspection.QualityHold ? "procurement.receipt-inspection.quality-hold" :
+            "procurement.receipt-inspection.accepted", inspection, cancellationToken);
         return Map(inspection);
     }
 
@@ -656,6 +677,8 @@ public sealed class ProcurementReceiptInspectionService :
         var inspection = await LoadCaseAsync(caseId, cancellationToken);
         await EnsureCapabilityAsync(ApprovePermission, inspection.PurchaseOrderReceipt,
             correlation, cancellationToken);
+        if (!inspection.ApprovalRequired)
+            throw Conflict("RCV_INSPECTION_APPROVAL_NOT_REQUIRED", "This inspection does not require an approval decision.");
         if (!inspection.SubmittedByUserId.HasValue)
             throw Conflict("RCV_INSPECTION_SUBMITTER_MISSING", "The inspection submitter was not retained.");
         if (request.Approved)
@@ -745,90 +768,9 @@ public sealed class ProcurementReceiptInspectionService :
                 return;
             }
 
-            await _sourceControl.RevalidatePurchaseOrderReceiptAsync(
-                inspection.PurchaseOrderReceiptId, "ApproveReceiptInspection", correlation,
-                cancellationToken);
-            await _sourceEvidence.EnsureWaybillReadyAsync(
-                inspection.PurchaseOrderReceiptId, cancellationToken);
-            await RevalidateEvidenceAsync(inspection, cancellationToken);
-            await _store.SetMutationContextAsync(inspection.Id, cancellationToken);
-            try
-            {
-                await ApplyAcceptedQuantitiesAndStockAsync(inspection, cancellationToken);
-                var acceptedValue = inspection.Lines.Sum(item =>
-                    item.AcceptedQuantity * item.PurchaseOrderReceiptItem.PurchaseOrderItem.UnitPrice);
-                if (acceptedValue > 0m)
-                {
-                    await _budgetCommitments.UtilizePurchaseOrderAsync(
-                        inspection.PurchaseOrderReceipt.PurchaseOrderId,
-                        inspection.PurchaseOrderReceiptId,
-                        inspection.PurchaseOrderReceipt.ReceiptNumber,
-                        acceptedValue,
-                        correlation,
-                        cancellationToken);
-                }
-                var hasRejection = inspection.RejectedQuantity > 0;
-                inspection.Status = hasRejection
-                    ? ProcurementReceiptInspectionStatus.QualityHold
-                    : ProcurementReceiptInspectionStatus.Closed;
-                inspection.QualityHold = hasRejection;
-                inspection.QualityHoldReason = hasRejection
-                    ? "Rejected quantities remain quarantined until supplier acknowledgement and return/replacement closure."
-                    : null;
-                inspection.SupplierAcknowledgementStatus = hasRejection
-                    ? ProcurementReceiptSupplierAcknowledgementStatus.Pending
-                    : ProcurementReceiptSupplierAcknowledgementStatus.NotRequired;
-                inspection.ResolutionKind = ProcurementReceiptResolutionKind.None;
-                inspection.ResolutionStatus = hasRejection
-                    ? ProcurementReceiptResolutionStatus.Required
-                    : ProcurementReceiptResolutionStatus.NotRequired;
-                inspection.StockEligibleQuantity = inspection.AcceptedQuantity;
-                inspection.StockPostedQuantity = inspection.AcceptedQuantity;
-                inspection.StockPostedAtUtc = inspection.AcceptedQuantity > 0 ? DateTime.UtcNow : null;
-                inspection.ApEligibleQuantity = inspection.AcceptedQuantity;
-                inspection.ApBlockedQuantity = inspection.RejectedQuantity;
-                inspection.PurchaseOrderReceipt.Status = inspection.AcceptedQuantity == 0
-                    ? "Rejected"
-                    : hasRejection ? "Partially Accepted" : "Accepted";
-                inspection.PurchaseOrderReceipt.InspectionResult = inspection.AcceptedQuantity == 0
-                    ? "Failed"
-                    : hasRejection ? "Conditional" : "Passed";
-                inspection.PurchaseOrderReceipt.InspectionDate = DateTime.UtcNow;
-                inspection.PurchaseOrderReceipt.InspectedById = _currentUser.UserId;
-                inspection.PurchaseOrderReceipt.InspectionNotes = request.Comment.Trim();
-                if (hasRejection)
-                {
-                    inspection.RejectionNoteNumber =
-                        $"RN-{inspection.PurchaseOrderReceipt.ReceiptNumber}-{inspection.Sequence:00}";
-                    await AddActionAsync(inspection,
-                        ProcurementReceiptInspectionActionType.RejectionNoteIssued,
-                        "Formal rejection note issued for quarantined quantities.",
-                        inspection.RejectionNoteNumber, correlation,
-                        $"rejection-note:{inspection.Id:N}",
-                        ActionFingerprint("rejection-note", new
-                        {
-                            inspection.RejectionNoteNumber,
-                            inspection.RejectedQuantity,
-                            DecisionFingerprint = actionFingerprint
-                        }), null, cancellationToken);
-                }
-                await AddActionAsync(inspection, ProcurementReceiptInspectionActionType.Approved,
-                    request.Comment, hasRejection ? "Accepted with quality hold" : "Accepted and closed",
-                    correlation, decisionKey, actionFingerprint, null, cancellationToken);
-                inspection.IntegrityHash = CaseHash(inspection);
-                await Cases.UpdateAsync(inspection);
-                await _unitOfWork.Repository<PurchaseOrderReceipt>()
-                    .UpdateAsync(inspection.PurchaseOrderReceipt);
-                await UpdatePurchaseOrderStatusAsync(inspection.PurchaseOrderReceipt.PurchaseOrder,
-                    cancellationToken);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-            }
-            finally
-            {
-                await _store.ClearMutationContextAsync(cancellationToken);
-            }
-            await RecordEventAsync(inspection, "Approved", ProcurementControlEventResult.Allowed,
-                before, Snapshot(inspection), request.Comment, correlation, cancellationToken);
+            await CompleteAcceptedInspectionAsync(inspection, request.Comment, correlation,
+                decisionKey, actionFingerprint, ProcurementReceiptInspectionActionType.Approved,
+                before, cancellationToken);
             result = Map(inspection);
             publishTopic = inspection.QualityHold
                 ? "procurement.receipt-inspection.quality-hold"
@@ -837,6 +779,100 @@ public sealed class ProcurementReceiptInspectionService :
         if (publishTopic != null)
             await PublishAsync(publishTopic, inspection, cancellationToken);
         return result!;
+    }
+
+    // Both configured approval and direct submission use the same atomic stock/GL owner.
+    private async Task CompleteAcceptedInspectionAsync(
+        ProcurementReceiptInspectionCase inspection, string comment, string correlation,
+        string actionKey, string actionFingerprint,
+        ProcurementReceiptInspectionActionType completionAction, object before,
+        CancellationToken cancellationToken)
+    {
+        await _sourceControl.RevalidatePurchaseOrderReceiptAsync(
+            inspection.PurchaseOrderReceiptId,
+            inspection.ApprovalRequired ? "ApproveReceiptInspection" : "SubmitReceiptInspection", correlation,
+            cancellationToken);
+        await _sourceEvidence.EnsureWaybillReadyAsync(
+            inspection.PurchaseOrderReceiptId, cancellationToken);
+        await RevalidateEvidenceAsync(inspection, cancellationToken);
+        await _store.SetMutationContextAsync(inspection.Id, cancellationToken);
+        try
+        {
+            await ApplyAcceptedQuantitiesAndStockAsync(inspection, cancellationToken);
+            var acceptedValue = inspection.Lines.Sum(item =>
+                item.AcceptedQuantity * item.PurchaseOrderReceiptItem.PurchaseOrderItem.UnitPrice);
+            if (acceptedValue > 0m)
+            {
+                await _budgetCommitments.UtilizePurchaseOrderAsync(
+                    inspection.PurchaseOrderReceipt.PurchaseOrderId,
+                    inspection.PurchaseOrderReceiptId,
+                    inspection.PurchaseOrderReceipt.ReceiptNumber,
+                    acceptedValue,
+                    correlation,
+                    cancellationToken);
+            }
+            var hasRejection = inspection.RejectedQuantity > 0;
+            inspection.Status = hasRejection
+                ? ProcurementReceiptInspectionStatus.QualityHold
+                : ProcurementReceiptInspectionStatus.Closed;
+            inspection.QualityHold = hasRejection;
+            inspection.QualityHoldReason = hasRejection
+                ? "Rejected quantities remain quarantined until supplier acknowledgement and return/replacement closure."
+                : null;
+            inspection.SupplierAcknowledgementStatus = hasRejection
+                ? ProcurementReceiptSupplierAcknowledgementStatus.Pending
+                : ProcurementReceiptSupplierAcknowledgementStatus.NotRequired;
+            inspection.ResolutionKind = ProcurementReceiptResolutionKind.None;
+            inspection.ResolutionStatus = hasRejection
+                ? ProcurementReceiptResolutionStatus.Required
+                : ProcurementReceiptResolutionStatus.NotRequired;
+            inspection.StockEligibleQuantity = AcceptedStockQuantity(inspection);
+            inspection.StockPostedQuantity = inspection.StockEligibleQuantity;
+            inspection.StockPostedAtUtc = inspection.StockPostedQuantity > 0 ? DateTime.UtcNow : null;
+            inspection.ApEligibleQuantity = inspection.AcceptedQuantity;
+            inspection.ApBlockedQuantity = inspection.RejectedQuantity;
+            inspection.PurchaseOrderReceipt.Status = inspection.AcceptedQuantity == 0
+                ? "Rejected"
+                : hasRejection ? "Partially Accepted" : "Accepted";
+            inspection.PurchaseOrderReceipt.InspectionResult = inspection.AcceptedQuantity == 0
+                ? "Failed"
+                : hasRejection ? "Conditional" : "Passed";
+            inspection.PurchaseOrderReceipt.InspectionDate = DateTime.UtcNow;
+            inspection.PurchaseOrderReceipt.InspectedById = _currentUser.UserId;
+            inspection.PurchaseOrderReceipt.InspectionNotes = comment.Trim();
+            if (hasRejection)
+            {
+                inspection.RejectionNoteNumber =
+                    $"RN-{inspection.PurchaseOrderReceipt.ReceiptNumber}-{inspection.Sequence:00}";
+                await AddActionAsync(inspection,
+                    ProcurementReceiptInspectionActionType.RejectionNoteIssued,
+                    "Formal rejection note issued for quarantined quantities.",
+                    inspection.RejectionNoteNumber, correlation,
+                    $"rejection-note:{inspection.Id:N}",
+                    ActionFingerprint("rejection-note", new
+                    {
+                        inspection.RejectionNoteNumber,
+                        inspection.RejectedQuantity,
+                        DecisionFingerprint = actionFingerprint
+                    }), null, cancellationToken);
+            }
+            await AddActionAsync(inspection, completionAction,
+                comment, hasRejection ? "Accepted with quality hold" : "Accepted and closed",
+                correlation, actionKey, actionFingerprint, null, cancellationToken);
+            inspection.IntegrityHash = CaseHash(inspection);
+            await Cases.UpdateAsync(inspection);
+            await _unitOfWork.Repository<PurchaseOrderReceipt>()
+                .UpdateAsync(inspection.PurchaseOrderReceipt);
+            await UpdatePurchaseOrderStatusAsync(inspection.PurchaseOrderReceipt.PurchaseOrder,
+                cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            await _store.ClearMutationContextAsync(cancellationToken);
+        }
+        await RecordEventAsync(inspection, completionAction.ToString(), ProcurementControlEventResult.Allowed,
+            before, Snapshot(inspection), comment, correlation, cancellationToken);
     }
 
     public async Task<ProcurementReceiptInspectionDto> AcknowledgeAsync(
@@ -1037,7 +1073,7 @@ public sealed class ProcurementReceiptInspectionService :
                 inspection.SupplierAcknowledgementStatus, inspection.ResolutionStatus))
             throw Conflict("RCV_CLOSURE_NOT_READY",
                 "Supplier acknowledgement and evidenced return dispatch or accepted replacement are required before closure.");
-        if (inspection.DecidedByUserId == _currentUser.UserId ||
+        if ((inspection.DecidedByUserId ?? inspection.SubmittedByUserId) == _currentUser.UserId ||
             inspection.CreatedByUserId == _currentUser.UserId)
             throw new ProcurementReceiptInspectionAuthorizationException(
                 "Quality-hold closure requires an actor independent from inspection creation and approval.");
@@ -1052,7 +1088,7 @@ public sealed class ProcurementReceiptInspectionService :
                     inspection.SupplierAcknowledgementStatus, inspection.ResolutionStatus))
                 throw Conflict("RCV_CLOSURE_NOT_READY",
                     "Supplier acknowledgement and evidenced return dispatch or accepted replacement are required before closure.");
-            if (inspection.DecidedByUserId == _currentUser.UserId ||
+            if ((inspection.DecidedByUserId ?? inspection.SubmittedByUserId) == _currentUser.UserId ||
                 inspection.CreatedByUserId == _currentUser.UserId)
                 throw new ProcurementReceiptInspectionAuthorizationException(
                     "Quality-hold closure requires an actor independent from inspection creation and approval.");
@@ -1156,7 +1192,8 @@ public sealed class ProcurementReceiptInspectionService :
             poLine.ReceivedQuantity += line.AcceptedQuantity;
             poLine.UpdatedAt = DateTime.UtcNow;
             await _unitOfWork.Repository<PurchaseOrderItem>().UpdateAsync(poLine);
-            stockPostings.Add((receiptLine, poLine, line.AcceptedQuantity));
+            if (PurchaseOrderLineRules.RequiresStock(poLine.LineType))
+                stockPostings.Add((receiptLine, poLine, line.AcceptedQuantity));
         }
 
         // Inventory-source authorization reloads the receipt with AsNoTracking.
@@ -1171,7 +1208,7 @@ public sealed class ProcurementReceiptInspectionService :
         foreach (var posting in stockPostings)
             await PostStockAsync(inspection.PurchaseOrderReceipt, posting.ReceiptLine,
                 posting.PurchaseOrderLine, posting.Quantity, pendingInventoryLocations,
-                pendingWarehouseQuantities, cancellationToken);
+                pendingWarehouseQuantities, inspection.ApprovalRequired, cancellationToken);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         if (stockPostings.Count > 0)
@@ -1262,16 +1299,19 @@ public sealed class ProcurementReceiptInspectionService :
             pendingInventoryLocations,
         IDictionary<(Guid InventoryItemId, Guid WarehouseId), WarehouseQuantity>
             pendingWarehouseQuantities,
+        bool approvalRequired,
         CancellationToken cancellationToken)
     {
-        if (!poLine.InventoryItemId.HasValue || poLine.InventoryItemId == Guid.Empty) return;
+        if (!PurchaseOrderLineRules.RequiresStock(poLine.LineType)) return;
+        if (!poLine.InventoryItemId.HasValue || poLine.InventoryItemId == Guid.Empty)
+            throw Validation("RCV_STOCK_ITEM_REQUIRED", "Map or create the stock item before accepting stock into inventory.");
         if (!receiptLine.LocationId.HasValue || receiptLine.LocationId == Guid.Empty)
             throw Validation("RCV_STOCK_LOCATION_REQUIRED", "Accepted stock requires a governed receipt location.");
         var location = await _unitOfWork.Repository<WarehouseLocation>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
-                                  item.Id == receiptLine.LocationId.Value && !item.IsDeleted)
+                                  item.Id == receiptLine.LocationId.Value && !item.IsDeleted && item.IsActive)
             .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
-            ?? throw Validation("RCV_STOCK_LOCATION_INVALID", "The accepted-stock location was not found in the current tenant.");
+            ?? throw Validation("RCV_STOCK_LOCATION_INVALID", "Select an active storage location in the current organisation before accepting stock.");
         var conversion = 1m;
         if (receiptLine.ItemUnitOfMeasureId.HasValue)
         {
@@ -1294,7 +1334,8 @@ public sealed class ProcurementReceiptInspectionService :
             location.InventoryWarehouseId, receiptLine.LocationId, baseQuantity, baseCost,
             ReferenceType.PO, receipt.ReceiptNumber, receipt.Id,
             receiptLine.LotNumber, receiptLine.SerialNumber, receiptLine.ExpirationDate,
-            ProcurementPurchaseOrderSodRules.ApproveReceiptInspection);
+            approvalRequired ? ProcurementPurchaseOrderSodRules.ApproveReceiptInspection :
+                ProcurementPurchaseOrderSodRules.SubmitReceiptInspection);
 
         var valuationBalance = await _unitOfWork.Repository<InventoryBalance>()
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
@@ -1735,8 +1776,8 @@ public sealed class ProcurementReceiptInspectionService :
         CancellationToken cancellationToken)
     {
         // Detailed DEC configuration and authority bands are advisory for an
-        // ordinary receipt. The PO's independent approval and the Published
-        // receipt-inspection workflow remain the authoritative controls.
+        // ordinary receipt. PO source controls remain authoritative; the central
+        // workflow owner determines whether inspection approval is configured.
         var profile = await ResolveReceiptConfigurationProfileAsync(cancellationToken);
         var purchaseOrder = receipt.PurchaseOrder;
         var authority = await _compliance.EvaluateAuthorityRouteAsync(
@@ -1792,7 +1833,7 @@ public sealed class ProcurementReceiptInspectionService :
 
         var authorityRuleId = authorityStep?.RuleId ?? advisoryRule?.Id ?? Guid.Empty;
         var authorityName = authorityStep?.AuthorityName ?? advisoryRule?.AuthorityName ??
-                            "Published receipt-inspection workflow";
+                            "Receipt inspection controls";
         return new Governance(profile, policySetId, policyVersion,
             authorityRuleId, authorityName, Serialize(new
         {
@@ -1987,9 +2028,25 @@ public sealed class ProcurementReceiptInspectionService :
         return requirements;
     }
 
-    private async Task<Guid> ResolveReceiptWorkflowDefinitionIdAsync(
+    internal static void EnsureSubmissionWorkflowResult(bool approvalRequired, WorkflowIntegrationResult workflow)
+    {
+        if (!workflow.ExecutionResult.Success)
+            throw Conflict("RCV_INSPECTION_WORKFLOW_START_FAILED",
+                workflow.ExecutionResult.Message ?? "The configured receipt-inspection workflow could not be started.");
+        if (workflow.ApprovalRequired != approvalRequired ||
+            (workflow.ApprovalRequired && (!workflow.ExecutionResult.WorkflowInstanceId.HasValue ||
+                workflow.ExecutionResult.WorkflowInstanceId == Guid.Empty)) ||
+            (!workflow.ApprovalRequired && (workflow.ExecutionResult.WorkflowInstanceId.HasValue ||
+                workflow.Outcome != WorkflowOutcome.Approved ||
+                workflow.ExecutionResult.Status != WorkflowInstanceStatus.Completed)))
+            throw Conflict("RCV_INSPECTION_WORKFLOW_CHANGED",
+                "The approval setup changed during submission. Reload and retry.");
+    }
+
+    private async Task<Guid?> ResolveReceiptWorkflowDefinitionIdAsync(
         CancellationToken cancellationToken)
     {
+        if (!await _workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType)) return null;
         var definitionId = await _unitOfWork.Repository<WorkflowDefinition>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
@@ -2325,6 +2382,9 @@ public sealed class ProcurementReceiptInspectionService :
             Payload = payload
         }));
 
+    internal static string RoutineInspectionActionComment(string? comment, string automaticSummary) =>
+        Trim(comment, 1000) ?? automaticSummary;
+
     private async Task AddActionAsync(
         ProcurementReceiptInspectionCase inspection,
         ProcurementReceiptInspectionActionType action,
@@ -2509,13 +2569,17 @@ public sealed class ProcurementReceiptInspectionService :
         }
     }
 
+    private static decimal AcceptedStockQuantity(ProcurementReceiptInspectionCase inspection) =>
+        inspection.Lines.Where(line => PurchaseOrderLineRules.RequiresStock(
+            line.PurchaseOrderReceiptItem.PurchaseOrderItem.LineType)).Sum(line => line.AcceptedQuantity);
+
     private static void Recalculate(ProcurementReceiptInspectionCase inspection)
     {
         inspection.ReceivedQuantity = inspection.Lines.Sum(item => item.ReceivedQuantity);
         inspection.AcceptedQuantity = inspection.Lines.Sum(item => item.AcceptedQuantity);
         inspection.RejectedQuantity = inspection.Lines.Sum(item => item.RejectedQuantity);
         inspection.PendingQuantity = inspection.Lines.Sum(item => item.PendingQuantity);
-        inspection.StockEligibleQuantity = inspection.AcceptedQuantity;
+        inspection.StockEligibleQuantity = AcceptedStockQuantity(inspection);
         inspection.ApEligibleQuantity = inspection.PendingQuantity == 0 ? inspection.AcceptedQuantity : 0;
         inspection.ApBlockedQuantity = inspection.ReceivedQuantity - inspection.ApEligibleQuantity;
     }
@@ -2543,6 +2607,8 @@ public sealed class ProcurementReceiptInspectionService :
         StockPostedQuantity = item.StockPostedQuantity,
         ApEligibleQuantity = item.ApEligibleQuantity,
         ApBlockedQuantity = item.ApBlockedQuantity,
+        ApprovalRequired = item.ApprovalRequired,
+        WorkflowDefinitionId = item.WorkflowDefinitionId,
         WorkflowInstanceId = item.WorkflowInstanceId,
         RowVersion = Convert.ToBase64String(item.RowVersion),
         Lines = item.Lines.OrderBy(line => line.CreatedAt).Select(line =>
@@ -2551,6 +2617,7 @@ public sealed class ProcurementReceiptInspectionService :
                 Id = line.Id,
                 PurchaseOrderReceiptItemId = line.PurchaseOrderReceiptItemId,
                 PurchaseOrderItemId = line.PurchaseOrderReceiptItem.PurchaseOrderItemId,
+                LineType = line.PurchaseOrderReceiptItem.PurchaseOrderItem.LineType,
                 ItemCode = line.PurchaseOrderReceiptItem.PurchaseOrderItem.InventoryItem?.ItemCode ?? string.Empty,
                 ItemName = line.PurchaseOrderReceiptItem.PurchaseOrderItem.InventoryItem?.Name ??
                            line.PurchaseOrderReceiptItem.PurchaseOrderItem.ItemDescription ?? string.Empty,
@@ -2612,6 +2679,7 @@ public sealed class ProcurementReceiptInspectionService :
         item.StockPostedQuantity,
         item.ApEligibleQuantity,
         item.ApBlockedQuantity,
+        item.ApprovalRequired,
         item.WorkflowInstanceId,
         item.IntegrityHash
     };
@@ -2639,6 +2707,7 @@ public sealed class ProcurementReceiptInspectionService :
         item.PolicySetId,
         item.PolicyVersion,
         item.AuthorityRuleId,
+        item.ApprovalRequired,
         item.WorkflowDefinitionId,
         item.WorkflowInstanceId,
         item.SourceSnapshotHash

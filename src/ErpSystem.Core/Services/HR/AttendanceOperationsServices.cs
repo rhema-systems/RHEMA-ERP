@@ -329,7 +329,7 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
             }
 
             var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-            adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, entity.EmployeeId);
+            adapter.ApplySubmitOutcome(entity, workflowResult, entity.EmployeeId);
 
             await _repository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);

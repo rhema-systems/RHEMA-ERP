@@ -41,6 +41,26 @@ vi.mock('@/services/pricingService', () => ({ default: { getSupplierItemPrice: m
 afterEach(() => { localStorage.clear(); vi.clearAllMocks(); });
 
 describe('contract-first purchase order page', () => {
+  it.each([1, 2, 3] as const)('saves a descriptive line of type %s without inventory or warehouse mapping', async lineType => {
+    localStorage.setItem('user', JSON.stringify({ id: 'officer-1' }));
+    mocks.create.mockResolvedValue({ id: 'po-test' });
+    render(<Page />);
+    const source = (await screen.findByRole('option', { name: /Contract: CTR-TEST/ })).closest('select')!;
+    fireEvent.change(source, { target: { value: 'Contract:contract-1' } });
+    const row = await screen.findByRole('row', { name: /PVC Pipe 50mm/ });
+    fireEvent.keyDown(within(row).getByRole('button', { name: /Actions for/ }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit item' }));
+    const editing = (await screen.findByRole('textbox', { name: 'Approved source unit' })).closest('tr')!;
+    const typeSelect = within(editing).getByRole('option', { name: 'Service', exact: true }).closest('select')!;
+    fireEvent.change(typeSelect, { target: { value: String(lineType) } });
+    fireEvent.click(within(editing).getAllByRole('button')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Save as Draft' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+    expect(mocks.create.mock.calls[0][0].items[0]).toEqual(expect.objectContaining({
+      inventoryItemId: undefined, warehouseId: undefined, lineType,
+      itemDescription: 'PVC Pipe 50mm', orderedQuantity: 20, unitOfMeasure: 'EACH', unitPrice: 1900,
+    }));
+  }, 20000);
   it('loads approved lines, maps stock offering only EA, and saves the exact EACH terms', async () => {
     localStorage.setItem('user', JSON.stringify({ id: 'officer-1' }));
     mocks.create.mockResolvedValue({ id: 'po-test' });
@@ -49,14 +69,15 @@ describe('contract-first purchase order page', () => {
     fireEvent.change(source, { target: { value: 'Contract:contract-1' } });
     const initialRow = await screen.findByRole('row', { name: /PVC Pipe 50mm/ });
     expect(within(initialRow).getByText('EACH')).toBeInTheDocument();
-    fireEvent.click(within(initialRow).getAllByRole('button')[0]);
+    fireEvent.keyDown(within(initialRow).getByRole('button', { name: /Actions for/ }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Edit item' }));
     expect(await screen.findByRole('textbox', { name: 'Approved source unit' })).toHaveValue('EACH');
 
     const editingRow = screen.getByRole('textbox', { name: 'Approved source unit' }).closest('tr')!;
-    fireEvent.change(within(editingRow).getAllByRole('combobox')[0], { target: { value: 'pvc-stock' } });
-    await waitFor(() => expect(within(editingRow).getAllByRole('combobox')[0]).toHaveValue('pvc-stock'));
-    fireEvent.change(within(editingRow).getAllByRole('combobox')[1], { target: { value: 'store-1' } });
-    await waitFor(() => expect(within(editingRow).getAllByRole('combobox')[1]).toHaveValue('store-1'));
+    fireEvent.change(within(editingRow).getAllByRole('combobox')[1], { target: { value: 'pvc-stock' } });
+    await waitFor(() => expect(within(editingRow).getAllByRole('combobox')[1]).toHaveValue('pvc-stock'));
+    fireEvent.change(within(editingRow).getAllByRole('combobox')[2], { target: { value: 'store-1' } });
+    await waitFor(() => expect(within(editingRow).getAllByRole('combobox')[2]).toHaveValue('store-1'));
     expect(screen.getByRole('textbox', { name: 'Approved source unit' })).toHaveValue('EACH');
     expect(screen.getByPlaceholderText('Description')).toHaveValue('PVC Pipe 50mm');
     expect(mocks.price).not.toHaveBeenCalled();

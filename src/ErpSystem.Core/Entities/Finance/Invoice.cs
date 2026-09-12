@@ -61,6 +61,9 @@ namespace ErpSystem.Core.Entities.Finance
         public decimal BalanceAmount => TotalAmount - PaidAmount - CreditedAmount;
 
         public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
+        // Persist the submission decision; later workflow configuration changes do not rewrite it.
+        public bool ApprovalRequired { get; set; } = true;
+        public Guid? WorkflowInstanceId { get; set; }
 
         [MaxLength(500)]
         public string? Notes { get; set; }
@@ -219,6 +222,7 @@ namespace ErpSystem.Core.Entities.Finance
         Cancelled = 6,
         PendingApproval = 7,
         Approved = 8,
-        Rejected = 9
+        Rejected = 9,
+        ReadyToPost = 10
     }
 }

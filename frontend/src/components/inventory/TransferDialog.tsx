@@ -10,19 +10,20 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
-import { Plus, Trash2, Search, Package, AlertCircle, Barcode, Layers } from 'lucide-react';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
+import { Plus, Trash2, Search, Package, AlertCircle, Barcode, Layers, Pencil, Maximize2, Minimize2 } from 'lucide-react';
 import {
   inventoryManagementService,
   InventoryTransferDto, InventoryTransferDetailDto, InventoryTransferItemDto,
-  WarehouseDto, InventoryItemDto, AddTransferItemDto, UpdateTransferItemDto, WarehouseLocationDto,
-  InventoryTransferEvidenceRequest
+  WarehouseDto, AddTransferItemDto, UpdateTransferItemDto, WarehouseLocationDto,
+  InventoryTransferEvidenceRequest, WarehouseInventoryItemDto
 } from '@/services/inventoryManagementService';
 import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
 import { useToast } from '@/hooks/use-toast';
@@ -30,8 +31,11 @@ import { useAuth } from '@/hooks/use-auth';
 import {
   getInventoryTransferControlCapability,
   getInventoryTransferProblemMessage,
+  getInventoryTransferStatusLabel,
 } from '@/lib/inventory-transfer-controls';
 import { format } from 'date-fns';
+import { formatInventoryMoney } from '@/lib/inventory-currency';
+import { inventoryTrackingControlService, InventoryTrackingRequirements } from '@/services/inventoryTrackingControlService';
 import {
   InventoryTrackingExceptionSelect,
   useAvailableInventoryTrackingExceptions,
@@ -44,6 +48,7 @@ interface TransferDialogProps {
   mode: 'create' | 'edit' | 'view';
   initialTab?: 'details' | 'items' | 'approvals' | 'controls';
   warehouses: WarehouseDto[];
+  currencyCode?: string;
   onSuccess: () => void;
 }
 
@@ -78,15 +83,19 @@ const TransferStatuses = [
   { value: 'Cancelled', label: 'Cancelled', color: 'bg-red-100 text-red-800' }
 ];
 
-export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab = 'details', warehouses, onSuccess }: TransferDialogProps) {
+export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab = 'details', warehouses, onSuccess, currencyCode }: TransferDialogProps) {
   const { toast } = useToast();
   const { user, hasPermission } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('details');
+  const [itemsFullPage, setItemsFullPage] = useState(false);
   const [transferDetail, setTransferDetail] = useState<InventoryTransferDetailDto | null>(null);
-  const [warehouseInventoryItems, setWarehouseInventoryItems] = useState<InventoryItemDto[]>([]);
+  const [warehouseInventoryItems, setWarehouseInventoryItems] = useState<WarehouseInventoryItemDto[]>([]);
+  const [itemTrackingRequirements, setItemTrackingRequirements] = useState<InventoryTrackingRequirements | null>(null);
+  const [itemTrackingError, setItemTrackingError] = useState<string | null>(null);
+  const [itemTrackingAttempt, setItemTrackingAttempt] = useState(0);
   const [loadingItems, setLoadingItems] = useState(false);
   const [sourceLocations, setSourceLocations] = useState<WarehouseLocationDto[]>([]);
   const [destinationLocations, setDestinationLocations] = useState<WarehouseLocationDto[]>([]);
@@ -101,7 +110,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
   const [controlEvidence, setControlEvidence] = useState<InventoryTransferEvidenceRequest[]>([]);
   const [dmsRecords, setDmsRecords] = useState<CentralDocumentRecord[]>([]);
   const [showResolveConfirmation, setShowResolveConfirmation] = useState(false);
-  const [showCloseConfirmation, setShowCloseConfirmation] = useState(false);
   const controlKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const trackingExceptions = useAvailableInventoryTrackingExceptions(open && mode !== 'create' && Boolean(transfer?.id));
   
@@ -126,10 +134,23 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     notes: ''
   });
 
-  const isEditable = mode !== 'view' && (mode === 'create' || transferDetail?.status === 'Draft');
+  const isEditable = hasPermission('procurement.inventory.transfer') && mode !== 'view' && (mode === 'create' || transferDetail?.status === 'Draft');
+  const workflowPolicy = useWorkflowSummary({
+    entityType: 'InventoryTransfer', entityId: transfer?.id,
+    loadWorkflowSummary: open && mode !== 'create',
+  });
+  const workflowPolicyProps = {
+    entityType: 'InventoryTransfer', entityId: transfer?.id,
+    workflowSummary: workflowPolicy.summary, workflowSummaryLoading: workflowPolicy.loading,
+    workflowSummaryError: workflowPolicy.error, loadWorkflowSummary: false,
+  };
+  useEffect(() => {
+    if (!workflowPolicy.visibility.showTab && activeTab === 'approvals') setActiveTab('details');
+  }, [workflowPolicy.visibility.showTab, activeTab]);
 
   // Fetch transfer details when editing/viewing
   useEffect(() => {
+    setItemsFullPage(false);
     if (open && transfer?.id && mode !== 'create') {
       setActiveTab(initialTab);
       loadTransferDetails();
@@ -192,7 +213,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     try {
       setLoadingItems(true);
       // Load items from the source warehouse - endpoint returns items WITH stock
-      const items = await inventoryManagementService.getInventoryByWarehouse(warehouseId);
+      const items = await inventoryManagementService.getWarehouseInventoryItems(warehouseId);
       // Filter to only show items with available stock > 0
       const itemsWithStock = items.filter((item) => item.availableStock > 0);
       setWarehouseInventoryItems(itemsWithStock);
@@ -217,7 +238,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     setControlEvidence([]);
     setSelectedDiscrepancyIds([]);
     setShowResolveConfirmation(false);
-    setShowCloseConfirmation(false);
     controlKeyRef.current = null;
     setWarehouseInventoryItems([]);
     resetItemForm();
@@ -261,9 +281,9 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, approvalRequired?: boolean) => {
     const s = TransferStatuses.find(st => st.value === status);
-    return <Badge className={s?.color || 'bg-gray-100'}>{s?.label || status}</Badge>;
+    return <Badge className={s?.color || 'bg-gray-100'}>{getInventoryTransferStatusLabel(status, approvalRequired)}</Badge>;
   };
 
   const transferSubtotal = transferDetail?.items?.reduce((sum, item) => {
@@ -275,12 +295,27 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
   const transferAdditionalCost = transferDetail?.totalAdditionalCost ?? (transferShippingCost + transferMiscCost);
   const transferGrandTotal = transferSubtotal + transferAdditionalCost;
 
-  const selectedItem = warehouseInventoryItems.find(i => i.id === itemFormData.inventoryItemId);
+  const selectedItem = warehouseInventoryItems.find(i => i.inventoryItemId === itemFormData.inventoryItemId);
+  const selectedTracking = itemTrackingRequirements?.inventoryItemId === itemFormData.inventoryItemId
+    ? itemTrackingRequirements : null;
+
+  useEffect(() => {
+    let current = true;
+    setItemTrackingRequirements(null);
+    setItemTrackingError(null);
+    if (!open || !showAddItem || !itemFormData.inventoryItemId) return;
+    // The warehouse projection has no tracking flags. Use the central profile,
+    // which also includes inherited category requirements, for this selected item.
+    inventoryTrackingControlService.getRequirements(itemFormData.inventoryItemId)
+      .then(requirements => { if (current) setItemTrackingRequirements(requirements); })
+      .catch(error => { if (current) setItemTrackingError(getInventoryTransferProblemMessage(error, 'Unable to load item tracking requirements.')); });
+    return () => { current = false; };
+  }, [open, showAddItem, itemFormData.inventoryItemId, itemTrackingAttempt]);
 
   // Filter warehouse inventory items by search term
   const filteredInventoryItems = warehouseInventoryItems.filter(item =>
-    item.name.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
-    item.itemCode.toLowerCase().includes(itemSearchTerm.toLowerCase())
+    (item.itemName ?? '').toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
+    (item.itemCode ?? '').toLowerCase().includes(itemSearchTerm.toLowerCase())
   );
 
   const handleSaveTransfer = async () => {
@@ -308,7 +343,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
       console.error('Error saving transfer:', err);
       toast({
         title: 'Error',
-        description: 'Failed to save transfer',
+        description: getInventoryTransferProblemMessage(err, 'Failed to save transfer'),
         variant: 'destructive',
       });
     } finally {
@@ -356,7 +391,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
       console.error('Error adding item:', err);
       toast({
         title: 'Error',
-        description: err.response?.data || 'Failed to add item',
+        description: getInventoryTransferProblemMessage(err, 'Failed to add item'),
         variant: 'destructive',
       });
     } finally {
@@ -403,7 +438,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
       console.error('Error updating item:', err);
       toast({
         title: 'Error',
-        description: err.response?.data || 'Failed to update item',
+        description: getInventoryTransferProblemMessage(err, 'Failed to update item'),
         variant: 'destructive',
       });
     } finally {
@@ -425,7 +460,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
       console.error('Error removing item:', err);
       toast({
         title: 'Error',
-        description: err.response?.data || 'Failed to remove item',
+        description: getInventoryTransferProblemMessage(err, 'Failed to remove item'),
         variant: 'destructive',
       });
     } finally {
@@ -492,7 +527,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
         correlationId: `transfer-resolution:${transferDetail.id}:${idempotencyKey}`,
         comment: controlComment.trim(),
       });
-      toast({ title: 'Discrepancies resolved', description: 'The immutable resolution action and DMS evidence lineage were recorded.' });
+      toast({ title: 'Discrepancies resolved' });
       setControlComment('');
       setControlEvidence([]);
       controlKeyRef.current = null;
@@ -511,39 +546,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
     }
   };
 
-  const closeControlledTransfer = async (): Promise<boolean> => {
-    if (!transferDetail || !controlComment.trim()) {
-      toast({ title: 'Closure comment required', description: 'Enter the independent closure basis before closing this transfer.', variant: 'destructive' });
-      return false;
-    }
-    const idempotencyKey = controlKeyFor('close', { controlComment });
-    try {
-      setControlBusy(true);
-      await inventoryManagementService.closeTransfer(transferDetail.id, {
-        rowVersion: transferDetail.rowVersion,
-        idempotencyKey,
-        correlationId: `transfer-close:${transferDetail.id}:${idempotencyKey}`,
-        comment: controlComment.trim(),
-      });
-      toast({ title: 'Transfer closed', description: 'Independent closure and the immutable action register were completed.' });
-      setControlComment('');
-      controlKeyRef.current = null;
-      await loadTransferDetails();
-      onSuccess();
-      return true;
-    } catch (error: any) {
-      toast({
-        title: 'Closure blocked',
-        description: getInventoryTransferProblemMessage(error, 'The controlled closure failed.'),
-        variant: 'destructive',
-      });
-      return false;
-    } finally {
-      setControlBusy(false);
-    }
-  };
-
-  const showApprovalsTab = !!transferDetail && mode !== 'create';
+  const showApprovalsTab = !!transferDetail && transferDetail.approvalRequired !== false && mode !== 'create' && workflowPolicy.visibility.showTab;
   const showControlsTab = !!transferDetail && mode !== 'create';
   const hasTransferPermission = hasPermission('procurement.inventory.transfer');
   const resolveCapability = transferDetail
@@ -552,16 +555,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
         status: transferDetail.status,
         hasOpenDiscrepancy: transferDetail.hasOpenDiscrepancy,
         hasTransferPermission,
-        currentUserId: user?.id,
-        actions: transferDetail.actions,
-      })
-    : { allowed: false, reason: 'Transfer details are unavailable.' };
-  const closeCapability = transferDetail
-    ? getInventoryTransferControlCapability({
-        kind: 'close',
-        status: transferDetail.status,
-        hasOpenDiscrepancy: transferDetail.hasOpenDiscrepancy,
-        hasTransferPermission,
+        approvalRequired: transferDetail.approvalRequired,
         currentUserId: user?.id,
         actions: transferDetail.actions,
       })
@@ -570,13 +564,13 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`${mode === 'view' ? 'max-w-[90vw] lg:max-w-5xl' : 'max-w-[95vw] lg:max-w-7xl'} max-h-[90vh] overflow-y-auto`}>
+      <DialogContent className={`flex max-w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden ${itemsFullPage && activeTab === 'items' ? 'h-[calc(100dvh-32px)] w-[calc(100vw-32px)]' : 'h-[85vh] max-h-[900px] w-[800px]'}`}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {mode === 'create' ? 'Create Inventory Transfer' : `Transfer ${transferDetail?.transferNumber || ''}`}
-            {transferDetail && getStatusBadge(transferDetail.status)}
+            {transferDetail && getStatusBadge(transferDetail.status, transferDetail.approvalRequired)}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="sr-only">
             {mode === 'create' ? 'Create a new stock transfer (inter-warehouse or inter-bin)' :
              mode === 'edit' ? 'Edit transfer details and manage items' : 'View transfer details'}
           </DialogDescription>
@@ -585,18 +579,18 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
         {loading ? (
           <div className="py-8 text-center text-muted-foreground">Loading...</div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <Tabs value={activeTab} onValueChange={(tab) => { setActiveTab(tab); setItemsFullPage(false); }} className="flex min-h-0 min-w-0 flex-1 flex-col">
             <TabsList className={`grid w-full ${showApprovalsTab && showControlsTab ? 'grid-cols-4' : showApprovalsTab || showControlsTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <TabsTrigger value="details">Transfer Details</TabsTrigger>
               <TabsTrigger value="items" disabled={mode === 'create' && !transfer?.id}>
                 Items ({transferDetail?.items?.length || 0})
               </TabsTrigger>
               {showApprovalsTab && (
-                <WorkflowTabTrigger value="approvals" />
+                <WorkflowTabTrigger value="approvals" {...workflowPolicyProps} />
               )}
-              {showControlsTab && <TabsTrigger value="controls">Transfer Controls</TabsTrigger>}
+              {showControlsTab && <TabsTrigger value="controls">History</TabsTrigger>}
             </TabsList>
-
+            <div className="min-h-0 min-w-0 flex-1 overflow-auto pr-1">
             {/* Details Tab */}
             <TabsContent value="details" className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -625,11 +619,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                       {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  {formData.sourceWarehouseId && formData.destinationWarehouseId && formData.sourceWarehouseId === formData.destinationWarehouseId && (
-                    <p className="text-xs text-muted-foreground">
-                      Inter-bin transfer mode: bins are required on each line item.
-                    </p>
-                  )}
                 </div>
               </div>
 
@@ -662,19 +651,19 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                   onChange={(e) => setFormData({...formData, notes: e.target.value})}
                   disabled={!isEditable}
                   rows={3}
-                  placeholder="Add any notes or instructions for this transfer..."
+                  placeholder="Add a note"
                 />
               </div>
 
               {/* Transfer Summary */}
               {transferDetail && (
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4">
                   <Card>
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm">Quantity Summary</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
                           <span className="text-muted-foreground">Total Items:</span>
                           <span className="ml-2 font-medium">{transferDetail.items?.length || 0}</span>
@@ -685,80 +674,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                             {transferDetail.items?.reduce((sum, i) => sum + i.requestedQuantity, 0) || 0}
                           </span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">Total Value:</span>
-                          <span className="ml-2 font-medium">
-                            ${transferSubtotal.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Additional Cost & Allocation</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Shipping:</span>
-                        <span className="font-medium">${(transferDetail.shippingCost || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Miscellaneous:</span>
-                        <span className="font-medium">${(transferDetail.miscellaneousCost || 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Total Additional:</span>
-                        <span className="font-medium">${(transferDetail.totalAdditionalCost || 0).toFixed(2)}</span>
-                      </div>
-                      <Separator />
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Allocation Method:</span>
-                        <span className="font-medium">
-                          {(transferDetail.costAllocationMethod || 'SpreadToItemCost') === 'GLExpense'
-                            ? 'Post to GL expense'
-                            : 'Spread to item cost'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Spread Basis:</span>
-                        <span className="font-medium">{transferDetail.costApportionmentBasis || 'Value'}</span>
-                      </div>
-                      {(transferDetail.costAllocationMethod || 'SpreadToItemCost') === 'GLExpense' && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">GL Account:</span>
-                          <span className="font-medium">{transferDetail.expenseGLAccount || '-'}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Costs Allocated:</span>
-                        <span className="font-medium">{transferDetail.costsAllocated ? 'Yes' : 'No'}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="w-full xl:ml-auto xl:max-w-md">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Financial Summary</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Subtotal:</span>
-                        <span className="font-medium">${transferSubtotal.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Shipping:</span>
-                        <span className="font-medium">${transferShippingCost.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Miscellaneous:</span>
-                        <span className="font-medium">${transferMiscCost.toFixed(2)}</span>
-                      </div>
-                      <Separator />
-                      <div className="flex justify-between">
-                        <span className="font-semibold">Total Transfer Value:</span>
-                        <span className="font-semibold">${transferGrandTotal.toFixed(2)}</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -774,16 +689,16 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
             {showControlsTab && transferDetail && (
               <TabsContent value="controls" className="space-y-4">
                 <Card>
-                  <CardHeader><CardTitle className="text-base">Immutable transfer action register</CardTitle><CardDescription>Submission, approval, dispatch, receipt, discrepancy resolution and closure are retained with actor, correlation and sequence lineage.</CardDescription></CardHeader>
+                  <CardHeader><CardTitle className="text-base">History</CardTitle></CardHeader>
                   <CardContent>
-                    {transferDetail.actions.length === 0 ? <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No controlled actions recorded yet.</div> : (
+                    {transferDetail.actions.length === 0 ? <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No history yet.</div> : (
                       <div className="overflow-x-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>#</TableHead><TableHead>Action</TableHead><TableHead>Actor</TableHead><TableHead>UTC time</TableHead><TableHead>Comment</TableHead><TableHead>Correlation</TableHead></TableRow></TableHeader><TableBody>{transferDetail.actions.map((action) => <TableRow key={action.id}><TableCell>{action.sequence}</TableCell><TableCell><Badge variant="outline">{action.actionType}</Badge></TableCell><TableCell className="font-mono text-xs">{action.actorUserId}</TableCell><TableCell>{format(new Date(action.occurredAtUtc), 'MMM dd, yyyy HH:mm')}</TableCell><TableCell>{action.comment || '—'}</TableCell><TableCell className="max-w-52 truncate font-mono text-xs" title={action.correlationId}>{action.correlationId}</TableCell></TableRow>)}</TableBody></Table></div>
                     )}
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardHeader><CardTitle className="text-base">Receipt discrepancy register</CardTitle><CardDescription>Damage and shortage remain open until an independent actor records a governed resolution with protected central-DMS evidence.</CardDescription></CardHeader>
+                {transferDetail.discrepancies.length > 0 && <Card>
+                  <CardHeader><CardTitle className="text-base">Discrepancies</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     {transferDetail.discrepancies.length === 0 ? <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No transfer discrepancies.</div> : transferDetail.discrepancies.map((item) => (
                       <div key={item.id} className="flex items-start gap-3 rounded-md border p-3 text-sm">
@@ -805,20 +720,14 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                       <div className="rounded-md border border-amber-200 bg-amber-50/50 p-4 text-sm text-amber-900">{resolveCapability.reason}</div>
                     )}
 
-                    {transferDetail.status === 'Received' && !transferDetail.hasOpenDiscrepancy && closeCapability.allowed && (
-                      <div className="space-y-3 rounded-md border border-green-200 bg-green-50/50 p-4"><div><div className="font-medium">Independent transfer closure</div><p className="text-sm text-muted-foreground">Closure is available only after every dispatched quantity is accounted and every discrepancy is resolved.</p></div><Textarea value={controlComment} onChange={(event) => setControlComment(event.target.value)} placeholder="Required closure basis" /><Button disabled={controlBusy || !controlComment.trim()} onClick={() => setShowCloseConfirmation(true)}>Close transfer</Button></div>
-                    )}
-
-                    {transferDetail.status === 'Received' && !transferDetail.hasOpenDiscrepancy && !closeCapability.allowed && (
-                      <div className="rounded-md border border-amber-200 bg-amber-50/50 p-4 text-sm text-amber-900">{closeCapability.reason}</div>
-                    )}
                   </CardContent>
-                </Card>
+                </Card>}
               </TabsContent>
             )}
 
             {showApprovalsTab && transferDetail && (
               <WorkflowTabContent
+                {...workflowPolicyProps}
                 value="approvals"
                 entityType="InventoryTransfer"
                 entityId={transferDetail.id}
@@ -826,8 +735,8 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                 entityNumber={transferDetail.transferNumber}
                 status={transferDetail.status}
                 currentStepName={transferDetail.currentWorkflowStepName}
-                canSubmit={transferDetail.status === 'Draft'}
-                canApproveReject={transferDetail.status === 'Submitted'}
+                canSubmit={hasTransferPermission && transferDetail.status === 'Draft'}
+                canApproveReject={hasTransferPermission && transferDetail.status === 'Submitted'}
                 onSubmit={async () => {
                   await inventoryManagementService.submitTransferForApproval(transferDetail.id);
                 }}
@@ -839,16 +748,19 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                 }}
                 onAfterAction={async () => {
                   await loadTransferDetails();
+                  await workflowPolicy.refresh();
                 }}
               />
             )}
+            </div>
           </Tabs>
         )}
 
-        <DialogFooter className="flex justify-between">
+        <DialogFooter className="flex shrink-0 flex-wrap justify-between gap-2 border-t pt-3">
           <div className="flex gap-2">
-            {transferDetail && transferDetail.items?.length > 0 && (
+            {transferDetail && transferDetail.approvalRequired !== false && transferDetail.items?.length > 0 && (
               <WorkflowApprovalActions
+                {...workflowPolicyProps}
                 entityType="InventoryTransfer"
                 entityId={transferDetail.id}
                 entityLabel="Inventory Transfer"
@@ -856,19 +768,13 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                 status={transferDetail.status}
                 currentStepName={transferDetail.currentWorkflowStepName}
                 showStepBadge={transferDetail.status === 'Submitted' && !!transferDetail.currentWorkflowStepName}
-                loadWorkflowSummary={transferDetail.status === 'Submitted'}
-                canSubmit={transferDetail.status === 'Draft'}
-                canApproveReject={transferDetail.status === 'Submitted'}
+                canSubmit={hasTransferPermission && transferDetail.status === 'Draft'}
+                canApproveReject={hasTransferPermission && transferDetail.status === 'Submitted'}
                 onSubmit={async () => {
                   try {
                     await inventoryManagementService.submitTransferForApproval(transferDetail.id);
                   } catch (err: any) {
-                    const msg =
-                      err?.response?.data?.error ||
-                      err?.response?.data ||
-                      err?.message ||
-                      'Failed to submit transfer for approval';
-                    throw new Error(typeof msg === 'string' ? msg : 'Failed to submit transfer for approval');
+                    throw new Error(getInventoryTransferProblemMessage(err, 'Failed to submit transfer'));
                   }
                 }}
                 onApprove={async (comments) => {
@@ -898,6 +804,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                 onAfterAction={async () => {
                   await loadTransferDetails();
                   onSuccess();
+                  await workflowPolicy.refresh();
                 }}
                 onOpenWorkflows={() => router.push('/administration/workflow')}
                 size="sm"
@@ -921,24 +828,12 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
       open={showResolveConfirmation}
       onOpenChange={setShowResolveConfirmation}
       title="Resolve selected transfer discrepancies"
-      description={`Record ${selectedDiscrepancyIds.length} selected discrepancy resolution(s) as ${resolutionCodes[resolutionCode] || resolutionCode}. This action will retain the notes and linked DMS evidence in the transfer register.`}
+      description={`Resolve ${selectedDiscrepancyIds.length} selected discrepancy(s) as ${resolutionCodes[resolutionCode] || resolutionCode}?`}
       confirmText="Confirm resolution"
       cancelText="Review details"
       onConfirm={resolveDiscrepancies}
       isLoading={controlBusy}
       confirmDisabled={!resolveCapability.allowed || selectedDiscrepancyIds.length === 0 || !controlComment.trim() || controlEvidence.length === 0}
-      maxWidth="560px"
-    />
-    <ConfirmationDialog
-      open={showCloseConfirmation}
-      onOpenChange={setShowCloseConfirmation}
-      title="Close inventory transfer"
-      description="Confirm that every dispatched quantity is accounted for and every discrepancy is resolved. The transfer will be completed and retained in the action register."
-      confirmText="Close transfer"
-      cancelText="Review transfer"
-      onConfirm={closeControlledTransfer}
-      isLoading={controlBusy}
-      confirmDisabled={!closeCapability.allowed || !controlComment.trim()}
       maxWidth="560px"
     />
     </>
@@ -947,6 +842,12 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
   function renderItemsTab() {
     return (
       <>
+        <div className="flex justify-end">
+          <Button type="button" variant="outline" size="sm" aria-pressed={itemsFullPage} onClick={() => setItemsFullPage(value => !value)}>
+            {itemsFullPage ? <Minimize2 className="mr-2 h-4 w-4" /> : <Maximize2 className="mr-2 h-4 w-4" />}
+            {itemsFullPage ? 'Restore' : 'Full page'}
+          </Button>
+        </div>
         {/* Add Item Section */}
         {isEditable && (
           <Card>
@@ -994,13 +895,11 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                     </SelectTrigger>
                     <SelectContent className="max-h-60">
                       {filteredInventoryItems.slice(0, 50).map(item => (
-                        <SelectItem key={item.id} value={item.id}>
+                        <SelectItem key={item.inventoryItemId} value={item.inventoryItemId}>
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-xs">{item.itemCode}</span>
-                            <span>{item.name}</span>
+                            <span>{item.itemName}</span>
                             <span className="text-muted-foreground text-xs">({item.availableStock} avail)</span>
-                            {item.isSerialTracked && <Barcode className="h-3 w-3 text-blue-500" />}
-                            {item.isLotTracked && <Layers className="h-3 w-3 text-purple-500" />}
                           </div>
                         </SelectItem>
                       ))}
@@ -1017,15 +916,11 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                           <span className="text-muted-foreground">Available in Source:</span>
                           <span className="ml-2 font-medium">{selectedItem.availableStock} {selectedItem.unitOfMeasure}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">Unit Cost:</span>
-                          <span className="ml-2 font-medium">${selectedItem.currentCost.toFixed(2)}</span>
-                        </div>
                         <div className="flex items-center gap-1">
-                          {selectedItem.isSerialTracked && (
+                          {selectedTracking?.requiresSerial && (
                             <Badge variant="outline" className="text-xs"><Barcode className="h-3 w-3 mr-1" />Serial Tracked</Badge>
                           )}
-                          {selectedItem.isLotTracked && (
+                          {selectedTracking?.requiresLot && (
                             <Badge variant="outline" className="text-xs"><Layers className="h-3 w-3 mr-1" />Lot Tracked</Badge>
                           )}
                         </div>
@@ -1035,6 +930,12 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                 )}
 
                 {/* Quantity & Tracking Fields */}
+                {itemFormData.inventoryItemId && !selectedTracking && (
+                  <div className="text-sm text-muted-foreground" role={itemTrackingError ? 'alert' : 'status'}>
+                    {itemTrackingError || 'Loading tracking requirements…'}
+                    {itemTrackingError && <Button type="button" variant="link" size="sm" onClick={() => setItemTrackingAttempt(value => value + 1)}>Retry</Button>}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Requested Quantity *</Label>
@@ -1046,7 +947,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                       onChange={(e) => setItemFormData({...itemFormData, requestedQuantity: parseFloat(e.target.value) || 0})}
                     />
                   </div>
-                  {selectedItem?.isSerialTracked && (
+                  {selectedTracking?.requiresSerial && (
                     <div className="space-y-2">
                       <Label>Serial Number</Label>
                       <Input
@@ -1056,7 +957,7 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                       />
                     </div>
                   )}
-                  {selectedItem?.isLotTracked && (
+                  {selectedTracking?.requiresLot && (
                     <div className="space-y-2">
                       <Label>Lot Number</Label>
                       <Input
@@ -1066,13 +967,13 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                       />
                     </div>
                   )}
-                  {selectedItem?.isBatchTracked && (
+                  {selectedTracking?.requiresBatch && (
                     <div className="space-y-2"><Label>Batch Number</Label><Input value={itemFormData.batchNumber} onChange={(e) => setItemFormData({...itemFormData, batchNumber: e.target.value})} placeholder="Enter batch number" /></div>
                   )}
-                  {selectedItem?.isManufactureDateTracked && (
+                  {selectedTracking?.requiresManufactureDate && (
                     <div className="space-y-2"><Label>Manufacture Date</Label><Input type="date" value={itemFormData.manufactureDate} onChange={(e) => setItemFormData({...itemFormData, manufactureDate: e.target.value})} /></div>
                   )}
-                  {selectedItem?.isExpirationTracked && (
+                  {selectedTracking?.requiresExpiryDate && (
                     <div className="space-y-2"><Label>Expiry Date</Label><Input type="date" value={itemFormData.expiryDate} onChange={(e) => setItemFormData({...itemFormData, expiryDate: e.target.value})} /></div>
                   )}
                   <div className="space-y-2 col-span-2">
@@ -1121,9 +1022,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                         ))}
                       </SelectContent>
                     </Select>
-                    {formData.sourceWarehouseId && formData.destinationWarehouseId && formData.sourceWarehouseId === formData.destinationWarehouseId && (
-                      <p className="text-xs text-muted-foreground">Required for inter-bin transfers</p>
-                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -1145,9 +1043,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                         ))}
                       </SelectContent>
                     </Select>
-                    {formData.sourceWarehouseId && formData.destinationWarehouseId && formData.sourceWarehouseId === formData.destinationWarehouseId && (
-                      <p className="text-xs text-muted-foreground">Required for inter-bin transfers</p>
-                    )}
                   </div>
                 </div>
 
@@ -1183,16 +1078,12 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Transfer Items</CardTitle>
-            <CardDescription>
-              {transferDetail?.items?.length || 0} item(s) in this transfer
-            </CardDescription>
           </CardHeader>
           <CardContent>
             {(!transferDetail?.items || transferDetail.items.length === 0) ? (
               <div className="py-8 text-center text-muted-foreground">
                 <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
                 <p>No items added yet</p>
-                {isEditable && <p className="text-sm">Click "Add Item" to add inventory items to this transfer</p>}
               </div>
             ) : (
               <Table>
@@ -1205,8 +1096,6 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                     <TableHead className="text-right">Qty Shipped</TableHead>
                     <TableHead className="text-right">Qty Received</TableHead>
                     <TableHead>Tracking</TableHead>
-                    <TableHead className="text-right">Unit Cost</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
                     {isEditable && <TableHead></TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -1231,12 +1120,10 @@ export function TransferDialog({ open, onOpenChange, transfer, mode, initialTab 
                           {!item.serialNumber && !item.lotNumber && <span className="text-muted-foreground">-</span>}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">${item.unitCost?.toFixed(2) || '0.00'}</TableCell>
-                      <TableCell className="text-right">${item.totalCost?.toFixed(2) || '0.00'}</TableCell>
                       {isEditable && (
                         <TableCell>
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => startEditItem(item)}>Edit</Button>
+                            <Button variant="ghost" size="icon" aria-label="Edit" title="Edit" onClick={() => startEditItem(item)}><Pencil className="h-4 w-4 text-blue-500" /></Button>
                             <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleRemoveItem(item.id)}>
                               <Trash2 className="h-4 w-4" />
                             </Button>

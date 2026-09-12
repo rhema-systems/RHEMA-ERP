@@ -31,6 +31,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IDocumentNumberingService? _documentNumberingService;
         private readonly IFinanceBudgetControlService? _budgetControl;
         private readonly FinanceDimensionAdministrationService? _financeDimensions;
+        private readonly IWorkflowService? _approvalWorkflow;
         private const string AllActiveBooksCode = "ALL_ACTIVE_BOOKS";
 
         public JournalEntryService(
@@ -44,7 +45,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IFinanceAuditService? financeAuditService = null,
             IDocumentNumberingService? documentNumberingService = null,
             IFinanceBudgetControlService? budgetControl = null,
-            FinanceDimensionAdministrationService? financeDimensions = null)
+            FinanceDimensionAdministrationService? financeDimensions = null,
+            IWorkflowService? approvalWorkflow = null)
         {
             _context = context;
             _currentUserService = currentUserService;
@@ -57,6 +59,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _documentNumberingService = documentNumberingService;
             _budgetControl = budgetControl;
             _financeDimensions = financeDimensions;
+            _approvalWorkflow = approvalWorkflow;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -844,6 +847,10 @@ namespace ErpSystem.Api.Services.Finance.GL
         {
             if (requireApproved && !string.Equals(entry.PostingStatus, "Approved", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Manual journal entries must be approved before posting.");
+            if (requireApproved && string.Equals(entry.ApprovalStatus, "Not Required", StringComparison.OrdinalIgnoreCase) &&
+                (entry.RequiresApproval || entry.ApprovedByUserId.HasValue || entry.ApprovedDate.HasValue ||
+                 !string.IsNullOrWhiteSpace(entry.ApprovalWorkflowId)))
+                throw new InvalidOperationException("A directly completed journal cannot claim a workflow or human approval.");
 
             var transactions = entry.Transactions
                 .Where(t => !t.IsDeleted)
@@ -1655,8 +1662,27 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             var before = BuildJournalAuditSnapshot(entry);
 
-            if (approvalStatus == "Approved" && _budgetControl != null)
+            if (approvalStatus == "Not Required")
+            {
+                if (entry.PostingStatus != "Draft" || postingStatus != "Approved" || approvedByUserId.HasValue ||
+                    entry.ApprovedByUserId.HasValue || entry.ApprovedDate.HasValue ||
+                    !string.IsNullOrWhiteSpace(entry.ApprovalWorkflowId) || _approvalWorkflow is null ||
+                    await _approvalWorkflow.HasActiveApprovalInstanceAsync("JournalEntry", id) ||
+                    await _approvalWorkflow.HasActiveApprovalWorkflowAsync("JournalEntry"))
+                    throw new InvalidOperationException("The journal cannot complete directly while an approval process is required.");
+            }
+
+            if (approvalStatus is "Approved" or "Not Required" && _budgetControl != null)
                 await _budgetControl.ValidateManualJournalForPostingAsync(id, cancellationToken);
+
+            if (approvalStatus == "Not Required")
+            {
+                entry.RequiresApproval = false;
+                entry.RejectionReason = null;
+                entry.WithdrawalReason = null;
+                entry.WithdrawnByUserId = null;
+                entry.WithdrawnDate = null;
+            }
 
             entry.PostingStatus = postingStatus;
             entry.ApprovalStatus = approvalStatus;

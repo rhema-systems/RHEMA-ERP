@@ -108,6 +108,7 @@ export interface ProcurementAwardReadinessVerification {
 }
 
 export interface ProcurementAwardReadinessAuthority {
+  approvalRequired?: boolean;
   methodRuleId?: string;
   methodRuleCode?: string;
   authorityRouteId?: string;

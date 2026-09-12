@@ -31,7 +31,8 @@ public sealed class ProcurementExceptionalSourcingControl : TenantEntity
     public bool BoardApprovalRequired { get; set; }
     public bool ManagingDirectorApprovalRequired { get; set; }
     public bool PpaApprovalRequired { get; set; } = true;
-    public Guid WorkflowDefinitionId { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? WorkflowDefinitionId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
     [StringLength(300)] public string? BoardApprovalReference { get; set; }
     [StringLength(300)] public string? ManagingDirectorApprovalReference { get; set; }
@@ -84,7 +85,7 @@ public sealed class ProcurementExceptionalSourcingControl : TenantEntity
     public ProcurementPolicyMethodRule MethodRule { get; set; } = null!;
     public ProcurementPolicyExceptionRule ExceptionRule { get; set; } = null!;
     public ProcurementRequisitionAuthorityRoute? AuthorityRoute { get; set; }
-    public WorkflowDefinition WorkflowDefinition { get; set; } = null!;
+    public WorkflowDefinition? WorkflowDefinition { get; set; }
     public WorkflowInstance? WorkflowInstance { get; set; }
     public TenderNegotiation? Negotiation { get; set; }
 }

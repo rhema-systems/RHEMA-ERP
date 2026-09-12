@@ -231,6 +231,7 @@ export interface ProcurementRfqEvaluationLineDto {
 }
 
 export interface ProcurementRfqEvaluationDto {
+  approvalRequired?: boolean;
   id: string;
   status: RfqEvaluationStatus;
   awardMode: 'WinnerTakesAll' | 'SplitAward';

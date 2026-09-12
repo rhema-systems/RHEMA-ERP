@@ -257,7 +257,7 @@ public class InventoryTransfersController : ControllerBase
             if (!result)
                 return BadRequest("Failed to submit transfer for approval");
 
-            return Ok(new { message = "Transfer submitted for approval successfully" });
+            return Ok(new { message = "Transfer submission completed successfully" });
         }
         catch (ArgumentException ex)
         {

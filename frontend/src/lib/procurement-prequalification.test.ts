@@ -74,6 +74,15 @@ describe('procurement prequalification presentation', () => {
     expect(validatePrequalificationDraft(request())).toBeNull();
   });
 
+  it('omits workflow selection only after the server explicitly confirms no process', () => {
+    const direct = request();
+    direct.workflowDefinitionId = null;
+    expect(validatePrequalificationDraft(direct, false)).toBeNull();
+    expect(validatePrequalificationDraft(direct)).toContain('workflow');
+    direct.criteria[0].weight = 1;
+    expect(validatePrequalificationDraft(direct, false)).toContain('100');
+  });
+
   it('rejects criterion weights that do not total 100', () => {
     const invalid = request();
     invalid.criteria[1].weight = 50;

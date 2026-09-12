@@ -1054,14 +1054,6 @@ public class PurchaseRequisitionsController : ControllerBase
                 return UnprocessableEntity(problem);
             }
 
-            if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync("PurchaseRequisition"))
-            {
-                return UnprocessableEntity(Problem(
-                    "PR_WORKFLOW_NOT_CONFIGURED",
-                    "A published Purchase Requisition approval workflow must be configured before submission.",
-                    422));
-            }
-
             WorkflowIntegrationResult? workflowResult = null;
             await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
@@ -1070,8 +1062,11 @@ public class PurchaseRequisitionsController : ControllerBase
                 {
                     workflowResult = await _workflowIntegrationService.SubmitAsync(
                         "PurchaseRequisition", id);
+                    if (!workflowResult.ExecutionResult.Success)
+                        throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Purchase requisition submission failed.");
+                    requisition.ApprovalRequired = workflowResult.ApprovalRequired;
                     var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseRequisition");
-                    statusAdapter.ApplySubmitOutcome(requisition, workflowResult.Outcome, _currentUserProvider.UserId);
+                    statusAdapter.ApplySubmitOutcome(requisition, workflowResult, _currentUserProvider.UserId);
                     await _purchaseRequisitionRepository.UpdateRequisitionAsync(requisition);
                     await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
                 }
@@ -1114,12 +1109,13 @@ public class PurchaseRequisitionsController : ControllerBase
             return Ok(new
             {
                 success = true,
-                message = "Purchase requisition submitted for approval",
+                message = workflowResult.ApprovalRequired ? "Purchase requisition submitted for approval" : "Purchase requisition finalized; approval is not required",
                 data = new
                 {
                     id = requisition.Id,
                     status = requisition.Status,
                     workflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId,
+                    approvalRequired = workflowResult.ApprovalRequired,
                     workflowOutcome = workflowResult.Outcome.ToString(),
                     submissionControl = submissionReadiness,
                     budgetControl = budgetReadiness
@@ -1296,6 +1292,7 @@ public class PurchaseRequisitionsController : ControllerBase
                 RequestedByName = r.RequestedBy?.FirstName + " " + r.RequestedBy?.LastName,
                 RequiredDate = r.RequiredDate,
                 Status = r.Status,
+                ApprovalRequired = r.ApprovalRequired,
                 Priority = r.Priority,
                 Department = r.Department,
                 TotalAmount = r.TotalAmount,
@@ -1484,6 +1481,7 @@ public class PurchaseRequisitionsController : ControllerBase
         RequestedByName = requisition.RequestedBy?.FirstName + " " + requisition.RequestedBy?.LastName,
         RequiredDate = requisition.RequiredDate,
         Status = requisition.Status,
+        ApprovalRequired = requisition.ApprovalRequired,
         Priority = requisition.Priority,
         Department = requisition.Department,
         TotalAmount = requisition.TotalAmount,
@@ -1521,6 +1519,7 @@ public class PurchaseRequisitionsController : ControllerBase
             RequestedByName = requisition.RequestedBy?.FirstName + " " + requisition.RequestedBy?.LastName,
             RequiredDate = requisition.RequiredDate,
             Status = requisition.Status,
+            ApprovalRequired = requisition.ApprovalRequired,
             Priority = requisition.Priority,
             Department = requisition.Department,
             CostCenter = requisition.CostCenter,

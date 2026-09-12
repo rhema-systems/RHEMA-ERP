@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 import {
   AlertCircle,
   CheckCircle2,
@@ -111,52 +112,25 @@ export function PurchaseOrderSodControl({
     );
   }
 
-  const visibleChecks = scope === 'receipt'
+  const receiptOnly = scope === 'receipt' || readiness.approvalRequired === false;
+  const visibleChecks = receiptOnly
     ? readiness.checks.filter((check) => check.key === 'receipt')
     : readiness.checks;
   const allAllowed = visibleChecks.length > 0 &&
     visibleChecks.every((check) => check.allowed);
   return (
-    <Card
-      data-testid="purchase-order-sod-control"
-      className="border-slate-200 bg-white"
-    >
-      <CardHeader className="gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-slate-700" />
-              {scope === 'receipt'
-                ? 'Receiving responsibility'
-                : 'Approval and receiving responsibilities'}
-            </CardTitle>
-            <CardDescription className="mt-1">
-              {scope === 'receipt'
+    <ProcurementControlAccordion
+        title={receiptOnly ? 'Receiving responsibility' : 'Approval and receiving responsibilities'}
+        data-testid="purchase-order-sod-control"
+        status={<Badge variant="outline">{allAllowed ? 'Available to you' : 'Independent user required'}</Badge>}
+        notice={!allAllowed && 'An independent authorised user is required for one or more actions. Expand for responsibilities.'}
+        actions={<Button type="button" variant="ghost" size="sm" aria-label="Refresh PO role-separation readiness" onClick={() => void load()}><RefreshCw className="h-4 w-4" /></Button>}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
+              {receiptOnly
                 ? 'Receipt must be recorded by an authorised user other than the purchase-order creator.'
                 : 'This purchase order must be approved and received by authorised users other than its creator.'}
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge
-              className={
-                allAllowed
-                  ? 'bg-emerald-100 text-emerald-900'
-                  : 'bg-slate-100 text-slate-800'
-              }
-            >
-              {allAllowed ? 'Available to you' : 'Independent user required'}
-            </Badge>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Refresh PO role-separation readiness"
-              onClick={() => void load()}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
+            </p>
       <CardContent
         className={scope === 'receipt' ? 'grid gap-3' : 'grid gap-3 md:grid-cols-2'}
       >
@@ -198,6 +172,6 @@ export function PurchaseOrderSodControl({
           );
         })}
       </CardContent>
-    </Card>
+    </ProcurementControlAccordion>
   );
 }

@@ -473,20 +473,14 @@ public class TenderService : ITenderService
 
         await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
         var workflowResult = await _workflowIntegrationService.SubmitAsync("Tender", id);
-        if (!workflowResult.ApprovalRequired)
-        {
-            throw new ProcurementTenderWorkflowValidationException(
-                "TENDER_WORKFLOW_NOT_CONFIGURED",
-                "A published Tender approval workflow with an independent approver must be configured before submission.");
-        }
-
         if (!workflowResult.ExecutionResult.Success)
         {
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
         }
 
         var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("Tender");
-        statusAdapter.ApplySubmitOutcome(tender, workflowResult.Outcome, userId);
+        tender.ApprovalRequired = workflowResult.ApprovalRequired;
+        statusAdapter.ApplySubmitOutcome(tender, workflowResult, userId);
         tender.UpdatedAt = DateTime.UtcNow;
 
         await _tenderRepository.UpdateAsync(tender);
@@ -1675,6 +1669,7 @@ public class TenderService : ITenderService
     {
         return new TenderDto
         {
+            ApprovalRequired = tender.ApprovalRequired,
             Id = tender.Id,
             TenderNumber = tender.TenderNumber,
             Title = tender.Title,
@@ -1699,6 +1694,7 @@ public class TenderService : ITenderService
     {
         return new TenderDetailDto
         {
+            ApprovalRequired = tender.ApprovalRequired,
             Id = tender.Id,
             TenderNumber = tender.TenderNumber,
             Title = tender.Title,

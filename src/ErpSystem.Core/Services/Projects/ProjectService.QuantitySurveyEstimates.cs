@@ -311,7 +311,7 @@ public partial class ProjectService
         var before = SerializeEstimate(entity);
         var result = await _workflowIntegrationService.SubmitAsync(QuantitySurveyWorkflowBindingRegistry.Estimate, entity.Id, policy.EstimateWorkflowDefinitionId);
         if (!result.ExecutionResult.Success) throw new InvalidOperationException(result.ExecutionResult.Message ?? "The configured estimate workflow could not be started.");
-        _workflowStatusAdapterRegistry.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Estimate).ApplySubmitOutcome(entity, result.Outcome, userId);
+        _workflowStatusAdapterRegistry.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Estimate).ApplySubmitOutcome(entity, result, userId);
         // Persist an auto-approved workflow as PendingApproval first. FinalizeEstimateApprovalAsync
         // retires the previous approved version under the same serializable family lock before it
         // promotes this version, avoiding the filtered unique-index race. A completed workflow can

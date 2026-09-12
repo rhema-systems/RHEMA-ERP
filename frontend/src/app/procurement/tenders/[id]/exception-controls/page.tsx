@@ -40,6 +40,7 @@ import { procurementExceptionalSourcingControlService as service } from '@/servi
 import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
 import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import { useAuth } from '@/hooks/use-auth';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import {
   ProcurementExceptionalSourcingControlStatus as Status,
   type PrepareExceptionalSourcingRequest,
@@ -53,6 +54,7 @@ const formatDate = (value?: string) =>
 
 export default function ExceptionalSourcingControlsPage() {
   const { id: tenderId } = useParams<{ id: string }>();
+  const workflow = useWorkflowSummary({ entityType: 'TenderException', entityId: tenderId });
   const { hasPermission } = useAuth();
   const [control, setControl] =
     useState<ProcurementExceptionalSourcingControl | null>(null);
@@ -187,7 +189,7 @@ export default function ExceptionalSourcingControlsPage() {
       setActionError('');
       await action();
       toast.success(success);
-      await load();
+      await Promise.all([load(), workflow.refresh()]);
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Exceptional-sourcing action failed';
@@ -269,6 +271,9 @@ export default function ExceptionalSourcingControlsPage() {
       className="space-y-6 p-6"
       data-testid="exceptional-sourcing-control-page"
     >
+      {workflow.error && <div role="alert" className="flex items-center gap-3 rounded border p-3 text-sm text-destructive">
+        {workflow.error}<Button variant="outline" size="sm" onClick={() => void workflow.refresh()}>Retry workflow setup</Button>
+      </div>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Button variant="ghost" asChild className="mb-2 px-0">
@@ -295,7 +300,7 @@ export default function ExceptionalSourcingControlsPage() {
                 control.status === Status.Rejected ? 'destructive' : 'secondary'
               }
             >
-              {exceptionalSourcingStatusLabel[control.status]}
+              {control.approvalRequired === false && control.status === Status.Approved ? 'Sourcing complete' : exceptionalSourcingStatusLabel[control.status]}
             </Badge>
           )}
           {!control && <Badge variant="outline">Preparation required</Badge>}
@@ -611,22 +616,35 @@ export default function ExceptionalSourcingControlsPage() {
           </div>
 
           {actions.canSubmitApproval && (
-            <ActionCard title="Submit exact sourcing-approval workflow">
+            <ActionCard title={workflow.visibility.direct ? 'Complete sourcing' : 'Submit sourcing workflow'}>
               <p className="text-sm text-muted-foreground">
-                This locks the preparation and starts the authority route
-                selected by the current policy.
+                {workflow.visibility.direct
+                  ? 'Record the required authority evidence, then complete the sourcing preparation.'
+                  : 'Send the prepared sourcing record through the configured approval process.'}
               </p>
+              {workflow.visibility.direct && <div className="grid gap-3 md:grid-cols-3">
+                {control.boardApprovalRequired && <Field label="Board approval reference"><Input aria-label="Board approval reference" value={boardReference} onChange={(event) => setBoardReference(event.target.value)} /></Field>}
+                {control.managingDirectorApprovalRequired && <Field label="Managing Director reference"><Input aria-label="Managing Director reference" value={mdReference} onChange={(event) => setMdReference(event.target.value)} /></Field>}
+                {control.ppaApprovalRequired && <Field label="PPA approval reference"><Input aria-label="PPA approval reference" value={ppaReference} onChange={(event) => setPpaReference(event.target.value)} /></Field>}
+              </div>}
               <Button
                 onClick={() =>
                   void run(
                     'submit',
-                    () => service.submitApproval(tenderId, control.rowVersion),
-                    'Approval workflow submitted'
+                    () => service.submitApproval(tenderId, control.rowVersion, workflow.visibility.direct ? {
+                      boardApprovalReference: boardReference || undefined,
+                      managingDirectorApprovalReference: mdReference || undefined,
+                      ppaApprovalReference: ppaReference || undefined,
+                    } : undefined),
+                    workflow.visibility.direct ? 'Sourcing completed' : 'Approval workflow submitted'
                   )
                 }
-                disabled={busy !== null}
+                disabled={busy !== null || !workflow.visibility.known || (workflow.visibility.direct &&
+                  ((control.boardApprovalRequired && !boardReference.trim()) ||
+                   (control.managingDirectorApprovalRequired && !mdReference.trim()) ||
+                   (control.ppaApprovalRequired && !ppaReference.trim())))}
               >
-                Submit approval
+                {workflow.visibility.direct ? 'Complete sourcing' : 'Submit for approval'}
               </Button>
             </ActionCard>
           )}
@@ -634,7 +652,7 @@ export default function ExceptionalSourcingControlsPage() {
           {actions.canDecideApproval && !hasPermission('procurement.tender.approve') && (
             <p className="rounded-md border p-3 text-sm text-muted-foreground">Awaiting the configured independent approver. Your account cannot approve this purchase.</p>
           )}
-          {actions.canDecideApproval && hasPermission('procurement.tender.approve') && (
+          {actions.canDecideApproval && workflow.visibility.showApprovalControls && hasPermission('procurement.tender.approve') && (
             <ActionCard title="Record authority decision">
               <div className="grid gap-3 md:grid-cols-3">
                 {control.boardApprovalRequired && (

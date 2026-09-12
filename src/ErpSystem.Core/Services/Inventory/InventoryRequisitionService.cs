@@ -5,6 +5,7 @@ using System.Text.Json;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
@@ -106,44 +107,45 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var requisitions = await _requisitionRepository.GetByDateRangeAsync(
             fromDate ?? DateTime.UtcNow.AddMonths(-3),
             toDate ?? DateTime.UtcNow);
-        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
+        return await MapReadScopeAsync(requisitions);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByProjectAsync(Guid projectId)
     {
         var requisitions = await _requisitionRepository.GetByProjectAsync(projectId);
-        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
+        return await MapReadScopeAsync(requisitions);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByWarehouseAsync(Guid warehouseId)
     {
         var requisitions = await _requisitionRepository.GetByWarehouseAsync(warehouseId);
-        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
+        return await MapReadScopeAsync(requisitions);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetByDepartmentAsync(Guid departmentId)
     {
         var requisitions = await _requisitionRepository.GetByDepartmentAsync(departmentId);
-        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
+        return await MapReadScopeAsync(requisitions);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetPendingApprovalAsync()
     {
         var requisitions = await _requisitionRepository.GetPendingApprovalAsync();
-        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
+        return await MapReadScopeAsync(requisitions);
     }
 
     public async Task<IEnumerable<InventoryRequisitionDto>> GetPendingIssueAsync()
     {
         var requisitions = await _requisitionRepository.GetPendingIssueAsync();
-        return (await ApplyReadScopeAsync(requisitions)).Select(MapToDto);
+        return (await MapReadScopeAsync(requisitions)).Where(dto => dto.Status is
+            RequisitionStatus.Approved or RequisitionStatus.InProgress or RequisitionStatus.PartiallyIssued);
     }
 
     public async Task<InventoryRequisitionDetailDto?> GetByIdAsync(Guid id)
     {
         var requisition = await _requisitionRepository.GetWithItemsAsync(id);
         return requisition != null && await CanReadRequisitionAsync(requisition)
-            ? MapToDetailDto(requisition)
+            ? await MapDetailWithLocationsAsync(requisition)
             : null;
     }
 
@@ -153,8 +155,25 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         if (requisition == null) return null;
         var fullRequisition = await _requisitionRepository.GetWithItemsAsync(requisition.Id);
         return fullRequisition != null && await CanReadRequisitionAsync(fullRequisition)
-            ? MapToDetailDto(fullRequisition)
+            ? await MapDetailWithLocationsAsync(fullRequisition)
             : null;
+    }
+
+    private async Task<Department> ResolveDepartmentAsync(Guid departmentId)
+    {
+        var department = await _unitOfWork.Repository<Department>().GetByIdAsync(departmentId);
+        if (department == null || department.TenantId != _currentUserProvider.TenantId || !department.IsActive)
+            throw new ArgumentException("Select an active department belonging to your organisation.");
+        return department;
+    }
+
+    private static string? ResolveDepartmentCostCenter(Department department, bool hasProject)
+    {
+        // Same department cost-object rule as plan-linked procurement requisitions.
+        var value = NormalizeOptional(department.AccountCode, 100) ?? NormalizeOptional(department.Code, 100);
+        if (value == null && !hasProject)
+            throw new ArgumentException($"Department {department.Name} needs an accounting or department code configured before creating a stores requisition.");
+        return value;
     }
 
     public async Task<InventoryRequisitionDetailDto> CreateAsync(CreateInventoryRequisitionDto dto)
@@ -162,13 +181,15 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var warehouse = await _warehouseRepository.GetByIdAsync(dto.WarehouseId)
             ?? throw new ArgumentException($"Warehouse {dto.WarehouseId} not found");
         var project = await NormalizeProjectReferenceAsync(dto.ProjectId, dto.ProjectCode);
+        var department = await ResolveDepartmentAsync(dto.DepartmentId);
+        var costCenter = ResolveDepartmentCostCenter(department, project != null);
 
         var requisition = new InventoryRequisition
         {
             RequisitionNumber = await _requisitionRepository.GenerateRequisitionNumberAsync(),
             DepartmentId = dto.DepartmentId,
-            DepartmentName = dto.DepartmentName,
-            CostCenter = dto.CostCenter,
+            DepartmentName = department.Name,
+            CostCenter = costCenter,
             WarehouseId = dto.WarehouseId,
             LocationId = dto.LocationId,
             ProjectId = project?.Id,
@@ -242,9 +263,6 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         if (requisition.Status != RequisitionStatus.Draft)
             throw new InvalidOperationException("Only requisitions in Draft status can be updated");
 
-        if (dto.DepartmentId.HasValue) requisition.DepartmentId = dto.DepartmentId.Value;
-        if (dto.DepartmentName != null) requisition.DepartmentName = dto.DepartmentName;
-        if (dto.CostCenter != null) requisition.CostCenter = dto.CostCenter;
         if (dto.WarehouseId.HasValue) requisition.WarehouseId = dto.WarehouseId.Value;
         if (dto.LocationId.HasValue) requisition.LocationId = dto.LocationId;
         if (dto.RequiredDate.HasValue) requisition.RequiredDate = dto.RequiredDate;
@@ -256,6 +274,17 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             var project = await NormalizeProjectReferenceAsync(dto.ProjectId, dto.ProjectCode);
             requisition.ProjectId = project?.Id;
             requisition.ProjectCode = project?.ProjectCode;
+        }
+
+        // Keep the stored cost object on unrelated edits. Re-derive when the
+        // department changes or a legacy draft has no cost centre recorded.
+        if ((dto.DepartmentId.HasValue && dto.DepartmentId != requisition.DepartmentId) ||
+            string.IsNullOrWhiteSpace(requisition.CostCenter))
+        {
+            var department = await ResolveDepartmentAsync(dto.DepartmentId ?? requisition.DepartmentId);
+            requisition.CostCenter = ResolveDepartmentCostCenter(department, requisition.ProjectId.HasValue);
+            requisition.DepartmentId = department.Id;
+            requisition.DepartmentName = department.Name;
         }
 
         if (dto.WarehouseId.HasValue || dto.LocationId.HasValue)
@@ -310,7 +339,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         }
 
         var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
-        statusAdapter.ApplySubmitOutcome(requisition, workflowResult.Outcome, userId);
+        statusAdapter.ApplySubmitOutcome(requisition, workflowResult, userId);
         requisition.UpdatedAt = DateTime.UtcNow;
         await _requisitionRepository.UpdateAsync(requisition);
         await _unitOfWork.SaveChangesAsync();
@@ -534,6 +563,11 @@ public class InventoryRequisitionService : IInventoryRequisitionService
 
         EnsureRowVersion(requisition.RowVersion, dto.RowVersion, "requisition");
 
+        var postedReturns = await LoadReturnsAsync(new[] { requisition });
+        if (InventoryRequisitionFulfilment.Status(requisition, postedReturns) == RequisitionStatus.Issued)
+            throw new InventoryIssueControlException("INV_ISSUE_ALREADY_FULFILLED",
+                "All approved quantities have already been issued. Returned stock does not reopen this requisition; create a new request if more stock is needed.");
+
         if (requisition.Status != RequisitionStatus.Approved &&
             requisition.Status != RequisitionStatus.InProgress &&
             requisition.Status != RequisitionStatus.PartiallyIssued)
@@ -555,6 +589,18 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         if (!requisition.ProjectId.HasValue && string.IsNullOrWhiteSpace(requisition.CostCenter))
             throw new InventoryIssueControlException("INV_ISSUE_COST_OBJECT_REQUIRED",
                 "The approved requisition must reference a project or cost centre before stock can be issued.");
+
+        // Validate every bin before creating the voucher or changing any stock. Replaying
+        // an already successful request above remains safe, including historical issues.
+        var issueLocations = new HashSet<Guid>();
+        foreach (var issueItem in dto.Items)
+        {
+            var locationId = RequireIssueLocationId(issueItem.LocationId);
+            if (issueLocations.Contains(locationId)) continue;
+            var location = await _warehouseLocationRepository.GetByIdAsync(locationId);
+            ValidateIssueLocation(location, _currentUserProvider.TenantId, requisition.WarehouseId);
+            issueLocations.Add(locationId);
+        }
 
         var warehouse = await _warehouseRepository.GetByIdAsync(requisition.WarehouseId)
             ?? throw new InventoryIssueNotFoundException("The source warehouse was not found in the current tenant.");
@@ -619,26 +665,14 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             if (issueItem.IssuedQuantity <= 0)
                 throw new InventoryIssueControlException("INV_ISSUE_QUANTITY_INVALID", "Issued quantity must be greater than zero.");
 
-            var remainingToIssue = requisitionItem.ApprovedQuantity - requisitionItem.IssuedQuantity;
+            var remainingToIssue = InventoryRequisitionFulfilment.Remaining(requisitionItem, postedReturns);
             if (issueItem.IssuedQuantity > remainingToIssue)
                 throw new InventoryIssueControlException("INV_ISSUE_APPROVED_QUANTITY_EXCEEDED",
                     $"Cannot issue more than the remaining approved quantity for {requisitionItem.ItemCode}.");
 
-            var effectiveLocationId = issueItem.LocationId ?? requisition.LocationId;
+            Guid? effectiveLocationId = RequireIssueLocationId(issueItem.LocationId);
             var effectiveWarehouseId = requisition.WarehouseId;
             var isConsignmentWarehouse = warehouse.IsConsignmentWarehouse;
-
-            if (effectiveLocationId.HasValue && effectiveLocationId.Value != Guid.Empty)
-            {
-                var location = await _warehouseLocationRepository.GetByIdAsync(effectiveLocationId.Value);
-                if (location == null || location.TenantId != _currentUserProvider.TenantId || location.IsDeleted)
-                    throw new InventoryIssueNotFoundException("The issue location was not found in the current tenant.");
-                effectiveWarehouseId = location.InventoryWarehouseId;
-            }
-
-            if (effectiveWarehouseId != requisition.WarehouseId)
-                throw new InventoryIssueControlException("INV_ISSUE_LOCATION_WAREHOUSE_MISMATCH",
-                    "Every issue location must belong to the approved requisition warehouse.");
 
             var accessDecision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
             {
@@ -735,7 +769,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             requisitionItem.IssuedQuantity += issueItem.IssuedQuantity;
             requisitionItem.TrackingSequence = trackingSequence;
             requisitionItem.LineValue += issueValue;
-            if (issueItem.LocationId.HasValue) requisitionItem.LocationId = issueItem.LocationId;
+            requisitionItem.LocationId = effectiveLocationId;
             requisitionItem.LotNumber = lotNumber;
             requisitionItem.BatchNumber = batchNumber;
             requisitionItem.SerialNumber = serialNumber;
@@ -850,8 +884,10 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         }
 
         // Update requisition status
-        var allIssued = requisition.Items.All(i => i.IssuedQuantity >= i.ApprovedQuantity);
-        var anyIssued = requisition.Items.Any(i => i.IssuedQuantity > 0);
+        var allIssued = requisition.Items.Where(i => !i.IsDeleted)
+            .All(i => InventoryRequisitionFulfilment.Remaining(i, postedReturns) == 0);
+        var anyIssued = requisition.Items.Where(i => !i.IsDeleted)
+            .Any(i => InventoryRequisitionFulfilment.GrossIssued(i, postedReturns) > 0);
 
         if (allIssued)
         {
@@ -1729,7 +1765,19 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         await _requisitionRepository.UpdateAsync(requisition);
     }
 
-    private static InventoryRequisitionDto MapToDto(InventoryRequisition requisition)
+    private Task<IReadOnlyDictionary<Guid, decimal>> LoadReturnsAsync(IEnumerable<InventoryRequisition> requisitions) =>
+        InventoryRequisitionFulfilment.LoadReturnsAsync(_unitOfWork, _currentUserProvider.TenantId,
+            requisitions.Where(r => r.Status is not (RequisitionStatus.Draft or RequisitionStatus.Submitted))
+                .Select(r => r.Id));
+
+    private async Task<IReadOnlyList<InventoryRequisitionDto>> MapReadScopeAsync(IEnumerable<InventoryRequisition> requisitions)
+    {
+        var allowed = (await ApplyReadScopeAsync(requisitions)).ToArray();
+        var returns = await LoadReturnsAsync(allowed);
+        return allowed.Select(requisition => MapToDto(requisition, returns)).ToArray();
+    }
+
+    private static InventoryRequisitionDto MapToDto(InventoryRequisition requisition, IReadOnlyDictionary<Guid, decimal> returns)
     {
         var items = requisition.Items.Where(item => !item.IsDeleted).ToList();
         return new InventoryRequisitionDto
@@ -1746,7 +1794,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             LocationName = requisition.Location?.LocationCode,
             ProjectId = requisition.ProjectId,
             ProjectCode = requisition.ProjectCode,
-            Status = requisition.Status,
+            Status = InventoryRequisitionFulfilment.Status(requisition, returns),
             RequisitionType = requisition.RequisitionType,
             Priority = requisition.Priority,
             RequestDate = requisition.RequestDate,
@@ -1772,7 +1820,47 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         };
     }
 
-    private static InventoryRequisitionDetailDto MapToDetailDto(InventoryRequisition requisition)
+    internal static Guid RequireIssueLocationId(Guid? locationId)
+    {
+        if (!locationId.HasValue || locationId == Guid.Empty)
+            throw new InventoryIssueControlException("INV_ISSUE_LOCATION_REQUIRED",
+                "Select an active storage location for every line being issued.");
+        return locationId.Value;
+    }
+
+    internal static void ValidateIssueLocation(WarehouseLocation? location, Guid tenantId, Guid warehouseId)
+    {
+        if (location == null || location.TenantId != tenantId || location.IsDeleted)
+            throw new InventoryIssueNotFoundException("The issue location was not found in the current tenant.");
+        if (!location.IsActive)
+            throw new InventoryIssueControlException("INV_ISSUE_LOCATION_INACTIVE",
+                "The selected issue location is inactive. Select an active storage location.");
+        if (location.InventoryWarehouseId != warehouseId)
+            throw new InventoryIssueControlException("INV_ISSUE_LOCATION_WAREHOUSE_MISMATCH",
+                "Every issue location must belong to the approved requisition warehouse.");
+    }
+
+    private async Task<InventoryRequisitionDetailDto> MapDetailWithLocationsAsync(InventoryRequisition requisition)
+    {
+        var dto = MapToDetailDto(requisition, await LoadReturnsAsync(new[] { requisition }));
+        // The item location can be chosen by Stores after the request was approved.
+        // Resolve its saved ID directly; do not rely on a loaded navigation or the
+        // optional location on the request header. Keep inactive historical labels.
+        var ids = dto.Items.Select(item => item.LocationId).Append(dto.LocationId)
+            .Where(id => id.HasValue && id != Guid.Empty).Select(id => id!.Value).Distinct().ToList();
+        if (ids.Count == 0) return dto; // Requesters can legitimately leave every location unspecified.
+        var locations = await _unitOfWork.Repository<WarehouseLocation>()
+            .GetQueryable(location => location.TenantId == _currentUserProvider.TenantId && ids.Contains(location.Id))
+            .AsNoTracking().Select(location => new { location.Id, location.LocationCode, location.Name }).ToListAsync();
+        var labels = locations.ToDictionary(location => location.Id, location =>
+            string.IsNullOrWhiteSpace(location.Name) ? location.LocationCode : $"{location.LocationCode} - {location.Name}");
+        dto.LocationName = dto.LocationId.HasValue ? labels.GetValueOrDefault(dto.LocationId.Value) : null;
+        foreach (var item in dto.Items)
+            item.LocationName = item.LocationId.HasValue ? labels.GetValueOrDefault(item.LocationId.Value) : null;
+        return dto;
+    }
+
+    private static InventoryRequisitionDetailDto MapToDetailDto(InventoryRequisition requisition, IReadOnlyDictionary<Guid, decimal> returns)
     {
         var items = requisition.Items.Where(item => !item.IsDeleted).ToList();
         var dto = new InventoryRequisitionDetailDto
@@ -1787,7 +1875,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             WarehouseName = requisition.Warehouse?.Name ?? string.Empty,
             ProjectId = requisition.ProjectId,
             ProjectCode = requisition.ProjectCode,
-            Status = requisition.Status,
+            Status = InventoryRequisitionFulfilment.Status(requisition, returns),
             RequisitionType = requisition.RequisitionType,
             Priority = requisition.Priority,
             RequestDate = requisition.RequestDate,
@@ -1828,6 +1916,9 @@ public class InventoryRequisitionService : IInventoryRequisitionService
                 RequestedQuantity = i.RequestedQuantity,
                 ApprovedQuantity = i.ApprovedQuantity,
                 IssuedQuantity = i.IssuedQuantity,
+                GrossIssuedQuantity = InventoryRequisitionFulfilment.GrossIssued(i, returns),
+                ReturnedQuantity = InventoryRequisitionFulfilment.Returned(i, returns),
+                RemainingToIssueQuantity = InventoryRequisitionFulfilment.Remaining(i, returns),
                 UnitOfMeasure = i.UnitOfMeasure ?? string.Empty,
                 UnitCost = i.UnitCost,
                 TotalCost = i.RequestedQuantity * i.UnitCost,

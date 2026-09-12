@@ -525,6 +525,8 @@ export interface WarehouseItemDto {
   reorderLevel: number;
   maxStock: number;
   averageCost: number;
+  /** Stored item-wide average; averageCost above is the warehouse assignment's value. */
+  itemAverageCost?: number | null;
   lastMovementDate?: string;
   lastStockTakeDate?: string;
   notes?: string;
@@ -562,6 +564,7 @@ export interface WarehouseLocationDto {
   parentLocationId?: string;
   parentLocationName?: string;
   isActive: boolean;
+  isDefault?: boolean;
   isPickingLocation: boolean;
   isReceivingLocation: boolean;
   isConsignmentBin?: boolean;
@@ -592,6 +595,10 @@ export interface LandedCostDto {
 }
 
 export interface LandedCostItemDto {
+  invoiceDate?: string | null;
+  invoiceId?: string | null;
+  invoiceNumber?: string | null;
+  purchaseOrderItemId?: string;
   id: string;
   costType: string | number;
   description: string;
@@ -616,10 +623,32 @@ export interface LandedCostAllocationDto {
 }
 
 export interface LandedCostDetailDto extends LandedCostDto {
+  purchaseOrderId?: string | null;
+  receiptId: string;
+  editToken: string;
   approvedByName?: string;
   approvedDate?: string;
   costItems: LandedCostItemDto[];
   allocations: LandedCostAllocationDto[];
+}
+
+export interface SaveReceiptLandedCostDto {
+  requestId?: string;
+  goodsReceiptNoteId: string;
+  currency: string;
+  notes?: string;
+  editToken?: string;
+  costItems: Array<{
+    purchaseOrderItemId?: string;
+    costType: number;
+    description: string;
+    amount: number;
+    currency: string;
+    exchangeRate: number;
+    allocationMethod: string;
+    supplierId?: string;
+    referenceNumber?: string;
+  }>;
 }
 
 export interface CreateWarehouseLocationDto {
@@ -629,6 +658,7 @@ export interface CreateWarehouseLocationDto {
   description?: string;
   locationType: string;
   parentLocationId?: string;
+  isDefault?: boolean;
   isPickingLocation: boolean;
   isReceivingLocation: boolean;
   isConsignmentBin?: boolean;
@@ -729,6 +759,7 @@ export interface InventoryTransferDto {
   destinationWarehouseId: string;
   destinationWarehouseName?: string;
   status: string;
+  approvalRequired?: boolean;
   currentWorkflowStepName?: string;
   requestedDate: string;
   expectedDeliveryDate?: string;
@@ -928,6 +959,7 @@ export interface ResolveInventoryTransferDiscrepancyRequest extends InventoryTra
 
 // Physical Count
 export interface PhysicalCountDto {
+  approvalRequired?: boolean;
   id: string;
   countNumber: string;
   warehouseId: string;
@@ -935,6 +967,7 @@ export interface PhysicalCountDto {
   countType: string;
   status: string;
   countDate: string;
+  createdAt?: string;
   startedDate?: string;
   completedDate?: string;
   locationId?: string;
@@ -961,6 +994,9 @@ export interface PhysicalCountDto {
 }
 
 export interface PhysicalCountDetailDto extends PhysicalCountDto {
+  canReview?: boolean;
+  canDecide?: boolean;
+  canPost?: boolean;
   approvedByName?: string;
   approvedDate?: string;
   storesApprovedById?: string;
@@ -976,6 +1012,8 @@ export interface PhysicalCountDetailDto extends PhysicalCountDto {
 }
 
 export interface PhysicalCountEvidenceDto {
+  isCurrentCountSheet?: boolean;
+  isImportedCountSheet?: boolean;
   centralDocumentRecordId: string;
   centralDocumentVersionId: string;
   fileUploadRecordId: string;
@@ -1002,6 +1040,9 @@ export interface PhysicalCountItemDto {
   varianceQuantity: number;
   varianceValue: number;
   variancePercent: number;
+  /** Saved count valuation, not the live item-wide reference value. Hidden during blind counting. */
+  countUnitCost?: number | null;
+  itemAverageCost?: number | null;
   unitOfMeasure: string;
   lotNumber?: string;
   serialNumber?: string;
@@ -1063,6 +1104,8 @@ export interface PhysicalCountMutationRequest {
 }
 
 export interface PhysicalCountDecisionRequest extends PhysicalCountMutationRequest {
+  decisionCode: string;
+  decisionRevision: string;
   approved: boolean;
   reason?: string;
 }
@@ -1072,6 +1115,17 @@ export interface RecordPhysicalCountRecountRequest extends PhysicalCountMutation
   itemRowVersion: string;
   recountedQuantity: number;
   investigationNotes: string;
+}
+
+export interface PhysicalCountDecisionOption {
+  code: string;
+  label: string;
+  effect: 'ApproveAdjustment' | 'Investigate';
+  isActive: boolean;
+}
+export interface PhysicalCountDecisionSetup {
+  revision: string;
+  decisions: PhysicalCountDecisionOption[];
 }
 
 export interface PhysicalCountActionDto {
@@ -1254,6 +1308,7 @@ export interface UpdateItemSupplierDto {
 
 // Stock Movement
 export interface StockMovementDto {
+  currencyCode?: string | null;
   id: string;
   movementNumber: string;
   inventoryItemId: string;
@@ -1797,6 +1852,24 @@ class InventoryManagementService {
 
   // ========== LANDED COSTS ==========
 
+  async getLandedCostsBySource(source: 'po' | 'invoice', id: string): Promise<LandedCostDetailDto[]> {
+    const response = await axios.get(`${API_URL}/inventory/landed-costs/by-${source}/${id}`, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async linkLandedCostInvoice(id: string, itemId: string, invoiceId: string): Promise<LandedCostDetailDto> {
+    const response = await axios.put(`${API_URL}/inventory/landed-costs/${id}/items/${itemId}/invoice`, { invoiceId }, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
+  async saveReceiptLandedCost(data: SaveReceiptLandedCostDto, draftId?: string): Promise<LandedCostDto> {
+    const url = `${API_URL}/inventory/landed-costs${draftId ? `/${draftId}/draft` : ''}`;
+    const response = draftId
+      ? await axios.put(url, data, { headers: this.getAuthHeaders() })
+      : await axios.post(url, data, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
   async getLandedCostsByGrn(grnId: string, ensure: boolean = false): Promise<LandedCostDto[]> {
     const response = await axios.get(`${API_URL}/inventory/landed-costs/by-grn/${grnId}`, {
       params: { ensure },
@@ -2101,6 +2174,19 @@ class InventoryManagementService {
     return response.data;
   }
 
+  async importPhysicalCountSheet(countId: string, file: File, rowVersion: string,
+    lineVersions: { id: string; rowVersion: string }[], idempotencyKey: string): Promise<{ savedItems: number; blankItems: number }> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('rowVersion', rowVersion);
+    form.append('lineVersions', JSON.stringify(lineVersions));
+    form.append('idempotencyKey', idempotencyKey);
+    const response = await axios.post(`${API_URL}/inventory/physical-counts/${countId}/count-sheet`, form, {
+      headers: this.getMultipartAuthHeaders()
+    });
+    return response.data;
+  }
+
   async createPhysicalCount(data: CreatePhysicalCountDto): Promise<PhysicalCountDto> {
     const response = await axios.post(`${API_URL}/inventory/physical-counts`, data, {
       headers: this.getAuthHeaders()
@@ -2148,6 +2234,25 @@ class InventoryManagementService {
 
   async recordPhysicalCountRecount(id: string, request: RecordPhysicalCountRecountRequest): Promise<void> {
     await axios.post(`${API_URL}/inventory/physical-counts/${id}/recount`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async reviewPhysicalCount(id: string, request: PhysicalCountMutationRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/physical-counts/${id}/review`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async submitReviewedPhysicalCount(id: string, request: PhysicalCountMutationRequest): Promise<void> {
+    await axios.post(`${API_URL}/inventory/physical-counts/${id}/submit`, request, { headers: this.getAuthHeaders() });
+  }
+
+  async getPhysicalCountDecisions(manage = false, countId?: string): Promise<PhysicalCountDecisionSetup> {
+    if (!manage && !countId?.trim()) throw new Error('Open a saved physical count to load its decisions.');
+    return (await axios.get(`${API_URL}/inventory/physical-counts/${manage ? 'decision-setup' : 'decision-options'}`, {
+      headers: this.getAuthHeaders(), ...(manage ? {} : { params: { countId } }),
+    })).data;
+  }
+
+  async savePhysicalCountDecisions(setup: PhysicalCountDecisionSetup): Promise<PhysicalCountDecisionSetup> {
+    return (await axios.put(`${API_URL}/inventory/physical-counts/decision-setup`, setup, { headers: this.getAuthHeaders() })).data;
   }
 
   async decidePhysicalCountStores(id: string, request: PhysicalCountDecisionRequest): Promise<void> {

@@ -15,11 +15,13 @@ import {
 } from '@/services/inventoryManagementService';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
+import { formatInventoryMoney } from '@/lib/inventory-currency';
 
 interface MovementDetailDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   movement: StockMovementDto | null;
+  currencyCode: string | null;
 }
 
 // Movement type definitions for display
@@ -35,7 +37,7 @@ const getMovementTypeInfo = (type: string) => {
   return { color: 'bg-blue-100 text-blue-800', icon: ArrowUpDown, isInbound: null };
 };
 
-export function MovementDetailDialog({ open, onOpenChange, movement }: MovementDetailDialogProps) {
+export function MovementDetailDialog({ open, onOpenChange, movement, currencyCode }: MovementDetailDialogProps) {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('header');
   const [transferDetail, setTransferDetail] = useState<InventoryTransferDetailDto | null>(null);
@@ -94,6 +96,7 @@ export function MovementDetailDialog({ open, onOpenChange, movement }: MovementD
 
   const typeInfo = getMovementTypeInfo(movement.movementType);
   const IconComponent = typeInfo.icon;
+  const money = (value: number) => currencyCode ? formatInventoryMoney(value, currencyCode) : '—';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -212,11 +215,11 @@ export function MovementDetailDialog({ open, onOpenChange, movement }: MovementD
                 </div>
                 <div>
                   <p className="text-muted-foreground">Unit Cost</p>
-                  <p className="font-medium">${movement.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                  <p className="font-medium">{money(movement.unitCost)}</p>
                 </div>
                 <div className="col-span-2">
                   <p className="text-muted-foreground">Total Cost</p>
-                  <p className="font-medium text-lg">${movement.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                  <p className="font-medium text-lg">{money(movement.totalCost)}</p>
                 </div>
               </CardContent>
             </Card>

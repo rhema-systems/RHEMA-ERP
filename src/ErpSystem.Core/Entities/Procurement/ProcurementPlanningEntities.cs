@@ -82,6 +82,7 @@ public class ProcurementPlan : TenantEntity
     public DateTime? ReviewedDate { get; set; }
     public string? ReviewComments { get; set; }
 
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public string? ApprovalComments { get; set; }
@@ -346,6 +347,7 @@ public class ProcurementBudget : TenantEntity
     public DateTime? EffectiveDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
 
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
 
@@ -420,6 +422,7 @@ public class ProcurementBudgetRevision : TenantEntity
     [MaxLength(2000)]
     public string? Reason { get; set; }
 
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
 

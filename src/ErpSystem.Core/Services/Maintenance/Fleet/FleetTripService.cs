@@ -367,7 +367,7 @@ public class FleetTripService : IFleetTripService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(trip, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(trip, workflowResult, userId);
 
         trip.UpdatedAt = DateTime.UtcNow;
         trip.LastModifiedById = userId;

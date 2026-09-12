@@ -31,7 +31,7 @@ namespace ErpSystem.Api.Services.Finance.AP
     /// <summary>
     /// Manages vendor invoice lifecycle: creation, matching, approval, and voiding.
     /// </summary>
-    public class VendorInvoiceService : IVendorInvoiceService
+    public partial class VendorInvoiceService : IVendorInvoiceService
     {
         private const string VendorInvoiceBudgetSource = "VendorInvoice";
         private readonly IUnitOfWork _unitOfWork;
@@ -40,6 +40,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService _inventoryValuationService;
         private readonly IDocumentNumberingService _documentNumberingService;
         private readonly IWorkflowService _workflowService;
+        private readonly IWorkflowIntegrationService _workflowIntegration;
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly ITaxCalculationEngine? _taxEngine;
@@ -49,6 +50,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IProcurementAcceptedSupplyService? _acceptedSupply;
         private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
+        private readonly ErpSystem.Core.Interfaces.Inventory.ILandedCostService? _landedCosts;
 
         public VendorInvoiceService(
             IUnitOfWork unitOfWork,
@@ -65,7 +67,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             IProcurementControlEventService? procurementControlEvents = null,
             IProcurementAcceptedSupplyService? acceptedSupply = null,
             IFinanceBudgetCommitmentService? budgetCommitments = null,
-            IFinanceSourceDimensionService? sourceDimensions = null)
+            IFinanceSourceDimensionService? sourceDimensions = null,
+            ErpSystem.Core.Interfaces.Inventory.ILandedCostService? landedCosts = null,
+            IWorkflowIntegrationService? workflowIntegration = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -73,6 +77,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             _logger = logger;
             _documentNumberingService = documentNumberingService;
             _workflowService = workflowService;
+            _workflowIntegration = workflowIntegration ?? new ErpSystem.Core.Services.Workflow.WorkflowIntegrationService(
+                workflowService,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ErpSystem.Core.Services.Workflow.WorkflowIntegrationService>.Instance);
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
             _taxEngine = taxEngine;
@@ -82,6 +89,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _acceptedSupply = acceptedSupply;
             _budgetCommitments = budgetCommitments;
             _sourceDimensions = sourceDimensions;
+            _landedCosts = landedCosts;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -395,6 +403,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         : Guid.NewGuid(),
                     TenantId = TenantId,
                     VendorInvoiceId = invoice.Id,
+                    LandedCostItemId = lineDto.LandedCostItemId,
                     LineItemType = lineDto.LineItemType,
                     GLAccountId = lineDto.GLAccountId,
                     BudgetEntryId = lineDto.BudgetEntryId,
@@ -445,7 +454,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 if (_sourceDimensions is null)
                     throw new InvalidOperationException("Finance source dimensions are not configured for the manual AP invoice route.");
-                await _unitOfWork.ExecuteInTransactionAsync(async token =>
+                await InInvoiceTransactionAsync(async token =>
                 {
                     await _unitOfWork.Repository<VendorInvoice>().AddAsync(invoice);
                     await _unitOfWork.SaveChangesAsync(token);
@@ -503,6 +512,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (invoice.Status != VendorInvoiceStatus.Draft && invoice.Status != VendorInvoiceStatus.Rejected)
                 throw new InvalidOperationException("Only draft or rejected invoices can be updated.");
+
+            ValidateLandedCostInvoiceUpdate(invoice, dto);
 
             var previousBudgetKey = BuildVendorInvoiceBudgetMutationKey(invoice);
             var previouslyBudgetRelevant = invoice.LineItems.Any(line =>
@@ -718,6 +729,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be deleted.");
 
+            if (await DeleteLandedCostInvoiceDraftAsync(invoice, cancellationToken)) return;
+
             await _unitOfWork.Repository<VendorInvoice>().DeleteAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -810,6 +823,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.Draft)
                 throw new InvalidOperationException("Only draft invoices can be submitted for approval.");
 
+            EnsureLandedCostTaxReviewed(invoice);
+
             if (invoice.IsOpeningBalance)
                 await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
 
@@ -819,6 +834,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 await RevalidateWorksAcceptedSupplyAsync(invoice, cancellationToken);
 
             invoice = await LoadInvoiceForPostingAsync(invoice.Id, cancellationToken);
+            EnsureLandedCostTaxReviewed(invoice);
             var budgetRequest = await BuildVendorInvoiceBudgetRequestAsync(
                 invoice, "Submit", useSourceDimensions: producer is not null, cancellationToken);
             if (producer is not null)
@@ -847,11 +863,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
 
-            await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
+            // This aggregate was loaded tracked. Updating the whole graph also
+            // marks immutable submitted line items and supplier records modified.
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("VendorInvoice", id);
-            if (!workflowResult.Success)
+            var submission = await _workflowIntegration.SubmitAsync("VendorInvoice", id);
+            var workflowResult = submission.ExecutionResult;
+            var invalidDirectCompletion = !submission.ApprovalRequired &&
+                (submission.Outcome != WorkflowOutcome.Approved || workflowResult.WorkflowInstanceId.HasValue ||
+                 invoice.ApprovedById.HasValue || invoice.ApprovedDate.HasValue);
+            if (!workflowResult.Success || invalidDirectCompletion)
             {
                 await ReleaseVendorInvoiceBudgetAsync(
                     invoice.Id,
@@ -873,11 +894,25 @@ namespace ErpSystem.Api.Services.Finance.AP
                 invoice.SubmittedDate = null;
                 invoice.UpdatedAt = DateTime.UtcNow;
                 invoice.UpdatedBy = UserName;
-                await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                throw new InvalidOperationException(workflowResult.Message ?? "Unable to start vendor invoice approval workflow.");
+                throw new InvalidOperationException(invalidDirectCompletion
+                    ? "The invoice cannot complete directly with an approval instance or recorded human approval."
+                    : workflowResult.Message ?? "Unable to start vendor invoice approval workflow.");
             }
+
+            invoice.ApprovalRequired = submission.ApprovalRequired;
+            if (!submission.ApprovalRequired)
+            {
+                // Approved is the existing payable-ready business status, not a
+                // human approval. Keep its separate approval state explicit.
+                invoice.Status = VendorInvoiceStatus.Approved;
+                invoice.ApprovalStatus = "NotRequired";
+                invoice.ApprovedById = null;
+                invoice.ApprovedDate = null;
+                invoice.ApprovalComments = null;
+            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             await RecordApInvoiceAuditAsync(
                 FinanceAuditEvents.ApInvoiceSubmitted,
@@ -886,13 +921,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                 {
                     invoice.Status,
                     invoice.ApprovalStatus,
+                    invoice.ApprovalRequired,
                     invoice.SubmittedById,
                     invoice.SubmittedDate
                 },
-                comment: "Submitted for approval.",
+                comment: submission.ApprovalRequired ? "Submitted for approval." : "Completed; approval is not required.",
                 cancellationToken: cancellationToken);
 
-            _logger.LogInformation("Vendor invoice {InvoiceNumber} submitted for approval", invoice.InvoiceNumber);
+            // The ordinary final approval also posts normal AP invoices. Direct
+            // completion uses that same Finance owner, with all posting checks.
+            if (!submission.ApprovalRequired && !invoice.IsOpeningBalance)
+            {
+                if (producer is null) await PostAsync(invoice.Id, cancellationToken);
+                else await PostAsync(invoice.Id, producer, cancellationToken);
+            }
+            _logger.LogInformation("Vendor invoice {InvoiceNumber} submitted; approval required={ApprovalRequired}", invoice.InvoiceNumber, submission.ApprovalRequired);
             return producer is null
                 ? MapToDto(invoice)
                 : await GetByIdAsync(invoice.Id, producer, cancellationToken) ?? MapToDto(invoice);
@@ -928,6 +971,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoice.Status != VendorInvoiceStatus.PendingApproval)
                 throw new InvalidOperationException("Only pending invoices can be approved.");
 
+            EnsureLandedCostTaxReviewed(invoice);
+
             if (invoice.IsOpeningBalance)
                 await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
 
@@ -938,6 +983,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             invoice = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
+                .AsTracking()
                 .Include(i => i.LineItems)
                 .SingleAsync(cancellationToken);
 
@@ -985,7 +1031,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             // lifecycle. Invoice approval recognizes the AP obligation and must not
             // create a second stock receipt (or a phantom non-PO receipt).
 
-            await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             await RecordApInvoiceAuditAsync(
@@ -1087,7 +1132,6 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.JournalEntryId = postingResult.JournalEntryId;
                     invoice.UpdatedAt = DateTime.UtcNow;
                     invoice.UpdatedBy = UserName;
-                    await _unitOfWork.Repository<VendorInvoice>().UpdateAsync(invoice);
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
 
@@ -2441,6 +2485,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var activeLines = invoice.LineItems.Where(line => !line.IsDeleted).ToList();
             var hasBudgetSelections = activeLines.Any(line => line.BudgetEntryId.HasValue);
             var procurementOwned = invoice.PurchaseOrderId.HasValue
+                || IsLandedCostInvoice(invoice)
                 || await _unitOfWork.Repository<FinancePurchaseOrderReceipt>()
                     .GetQueryable(receipt => receipt.TenantId == TenantId && !receipt.IsDeleted
                         && receipt.VendorInvoiceId == invoice.Id)
@@ -2656,6 +2701,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             var tenantId = TenantId;
             var invoice = await _unitOfWork.Repository<VendorInvoice>()
                 .GetQueryable(i => i.TenantId == tenantId && i.Id == id && !i.IsDeleted)
+                .AsTracking()
                 .Include(i => i.LineItems)
                 .Include(i => i.Supplier)
                 .FirstOrDefaultAsync(cancellationToken);
@@ -2676,6 +2722,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             var lines = invoice.LineItems.Where(line => !line.IsDeleted)
                 .OrderBy(line => line.CreatedAt).ThenBy(line => line.Id).ToList();
             if (lines.Count == 0) return Array.Empty<FinanceSourceDocumentLineContext>();
+            if (IsLandedCostInvoice(invoice))
+            {
+                var accounts = await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken);
+                return lines.Select(line => new FinanceSourceDocumentLineContext(line.Id, accounts[line.Id])).ToArray();
+            }
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var accountCache = new Dictionary<Guid, Account>();
             Guid? commonAccountId = null;
@@ -2721,6 +2772,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             FinancePostingProducerContext? producer,
             CancellationToken cancellationToken)
         {
+            EnsureLandedCostTaxReviewed(invoice);
             var tenantId = TenantId;
             if (invoice.TenantId != tenantId)
                 throw new InvalidOperationException("Vendor invoice belongs to another tenant.");
@@ -2732,7 +2784,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("Only approved AP invoices can be posted.");
             }
 
-            if (!string.Equals(invoice.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+            if (invoice.ApprovalRequired
+                ? !string.Equals(invoice.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase)
+                : !string.Equals(invoice.ApprovalStatus, "NotRequired", StringComparison.OrdinalIgnoreCase) ||
+                    invoice.ApprovedById.HasValue || invoice.ApprovedDate.HasValue)
             {
                 throw new InvalidOperationException("AP invoice workflow approval is not complete.");
             }
@@ -2786,6 +2841,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.VendorInvoiceId == invoice.Id && !r.IsDeleted);
             var clearsFinanceGrv = linkedFinanceReceipt != null;
             var clearsProcurementGrv = IsProcurementGrvClearingInvoice(invoice);
+            var landedCostAccounts = IsLandedCostInvoice(invoice)
+                ? await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken)
+                : null;
             var clearsGrv = clearsFinanceGrv || clearsProcurementGrv;
             Guid? grvAccrualAccountId = null;
             if (clearsGrv)
@@ -2802,6 +2860,19 @@ namespace ErpSystem.Api.Services.Finance.AP
             foreach (var line in activeLines)
             {
                 var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
+                if (landedCostAccounts != null)
+                {
+                    var account = landedCostAccounts[line.Id];
+                    await ResolvePostingAccountAsync(account, "landed-cost accrual account", accountCache,
+                        allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+                    var clearingLine = BuildPostingLine(account,
+                        $"Clear landed-cost accrual - {invoice.InvoiceNumber} - {line.Description}",
+                        grossAmount, 0m, invoiceCurrency, functionalCurrency, exchangeRate,
+                        invoice.InvoiceDate, invoice.InvoiceNumber, lineNumber++, "AP-LANDED-COST-ACCRUAL");
+                    ApplySourceDimensions(clearingLine, line, sourceLineDimensions);
+                    postingLines.Add(clearingLine);
+                    continue;
+                }
                 if (grossAmount <= 0m)
                 {
                     continue;
@@ -4213,6 +4284,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 AcceptedSupplyValidatedAtUtc = invoice.AcceptedSupplyValidatedAtUtc,
                 Status = invoice.Status,
                 ApprovalStatus = invoice.ApprovalStatus,
+                ApprovalRequired = invoice.ApprovalRequired,
                 ExpenseAccountId = invoice.ExpenseAccountId,
                 ExpenseAccountName = invoice.ExpenseAccount?.AccountName,
                 ApAccountId = invoice.ApAccountId,
@@ -4226,6 +4298,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Id = li.Id,
                     VendorInvoiceId = li.VendorInvoiceId,
                     LineItemType = li.LineItemType,
+                    LandedCostItemId = li.LandedCostItemId,
                     GLAccountId = li.GLAccountId,
                     GLAccountName = li.GLAccount?.AccountName,
                     BudgetEntryId = li.BudgetEntryId,

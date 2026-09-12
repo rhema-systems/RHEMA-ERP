@@ -724,6 +724,7 @@ public class WarehouseLocationDto
     public string? Description { get; set; }
     public string LocationType { get; set; } = string.Empty;
     public Guid? ParentLocationId { get; set; }
+    public bool IsDefault { get; set; }
     public bool IsActive { get; set; }
     public bool IsPickingLocation { get; set; }
     public bool IsReceivingLocation { get; set; }
@@ -819,6 +820,7 @@ public class CreateWarehouseLocationDto
     public string LocationType { get; set; } = "Bin";
 
     public Guid? ParentLocationId { get; set; }
+    public bool IsDefault { get; set; }
 
     public bool IsPickingLocation { get; set; } = true;
     public bool IsReceivingLocation { get; set; } = true;
@@ -1082,6 +1084,7 @@ public class ReorderRequiredDto
 /// </summary>
 public class StockAdjustmentDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string AdjustmentNumber { get; set; } = string.Empty;
     public DateTime AdjustmentDate { get; set; }

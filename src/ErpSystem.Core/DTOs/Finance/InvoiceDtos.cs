@@ -21,6 +21,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal PaidAmount { get; set; }
         public decimal BalanceAmount { get; set; }
         public string Status { get; set; } = "Draft";
+        public bool ApprovalRequired { get; set; } = true;
+        public Guid? WorkflowInstanceId { get; set; }
         public string? Notes { get; set; }
         public string? Reference { get; set; }
         public bool IsOpeningBalance { get; set; }

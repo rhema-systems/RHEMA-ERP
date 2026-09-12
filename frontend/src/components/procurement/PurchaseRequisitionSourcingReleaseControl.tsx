@@ -1,21 +1,15 @@
 'use client';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 
 import {
   CheckCircle2,
   Clock,
   Loader2,
-  ShieldCheck,
   XCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { CardContent } from '@/components/ui/card';
 import type {
   PurchaseRequisitionSourcingReadinessDto,
   PurchaseRequisitionSourcingReleaseDto,
@@ -31,14 +25,6 @@ interface Props {
   loading: boolean;
 }
 
-const toneClass = {
-  neutral: 'border-slate-200 bg-slate-50',
-  ready: 'border-blue-200 bg-blue-50',
-  released: 'border-emerald-200 bg-emerald-50',
-  blocked: 'border-amber-200 bg-amber-50',
-  stale: 'border-red-200 bg-red-50',
-};
-
 export function PurchaseRequisitionSourcingReleaseControl({
   readiness,
   history,
@@ -47,33 +33,17 @@ export function PurchaseRequisitionSourcingReleaseControl({
   const presentation = getSourcingReleasePresentation(readiness, loading);
 
   return (
-    <Card
-      className={toneClass[presentation.tone]}
-      data-testid="sourcing-release-control"
-    >
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5" />
-              Sourcing release control
-            </CardTitle>
-            <CardDescription className="mt-1">
+    <ProcurementControlAccordion
+        title="Sourcing release control"
+        data-testid="sourcing-release-control"
+        summary={presentation.title}
+        status={<Badge variant="outline">{presentation.badge}</Badge>}
+        notice={['blocked', 'stale'].includes(presentation.tone) && (readiness?.message || 'Sourcing readiness needs attention. Expand for details.')}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
               Confirms the requisition is approved, complete, and still covered
               by an available approved budget before RFQ or tender entry.
-            </CardDescription>
-          </div>
-          <Badge
-            variant={
-              presentation.tone === 'blocked' || presentation.tone === 'stale'
-                ? 'destructive'
-                : 'outline'
-            }
-          >
-            {presentation.badge}
-          </Badge>
-        </div>
-      </CardHeader>
+            </p>
       <CardContent className="space-y-4">
         <div>
           <p className="font-medium">{presentation.title}</p>
@@ -212,6 +182,6 @@ export function PurchaseRequisitionSourcingReleaseControl({
         )}
       </CardContent>
 
-    </Card>
+    </ProcurementControlAccordion>
   );
 }

@@ -19,6 +19,7 @@ export interface SupplierReturnSourceLine {
   unitCost: number;
   unitOfMeasure?: string;
   storageLocationId?: string;
+  storageLocationName?: string;
 }
 
 export interface SupplierReturnSourceGrn {
@@ -33,6 +34,13 @@ export interface SupplierReturnSourceGrn {
 }
 
 export interface SupplierReturn {
+  supplierDebitNoteId?: string;
+  financeResolutionCompleted?: boolean;
+  approvalRequired?: boolean;
+  canSubmit?: boolean;
+  canApprove?: boolean;
+  canDispatch?: boolean;
+  canCancel?: boolean;
   id: string;
   returnNumber: string;
   returnDate: string;
@@ -60,6 +68,8 @@ export interface SupplierReturn {
 }
 
 export interface SupplierReturnLine {
+  locationId?: string;
+  locationName?: string;
   id: string;
   inventoryItemId: string;
   itemCode: string;
@@ -102,6 +112,9 @@ export const supplierReturnService = {
   },
   async create(request: CreateSupplierReturn): Promise<SupplierReturn> {
     return (await axios.post<SupplierReturn>(url, request, { headers: headers() })).data;
+  },
+  async update(id: string, request: CreateSupplierReturn): Promise<SupplierReturn> {
+    return (await axios.put<SupplierReturn>(`${url}/${id}`, request, { headers: headers() })).data;
   },
   async submit(id: string): Promise<void> { await axios.post(`${url}/${id}/submit`, {}, { headers: headers() }); },
   async approve(id: string): Promise<void> { await axios.post(`${url}/${id}/approve`, {}, { headers: headers() }); },

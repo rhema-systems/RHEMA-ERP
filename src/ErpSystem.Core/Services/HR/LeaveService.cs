@@ -458,7 +458,7 @@ public class LeaveService : ILeaveService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(request, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(request, workflowResult, userId);
 
         await _leaveRepository.UpdateAsync(request);
         await _unitOfWork.SaveChangesAsync();

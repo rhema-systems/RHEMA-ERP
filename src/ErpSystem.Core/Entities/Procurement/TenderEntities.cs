@@ -26,6 +26,7 @@ public class Tender : TenantEntity
     [Required]
     [MaxLength(50)]
     public string Status { get; set; } = "Draft"; // Draft, Published, Closed, Awarded, Cancelled
+    public bool ApprovalRequired { get; set; } = true;
 
     public DateTime? PublishDate { get; set; }
     public DateTime? SubmissionDeadline { get; set; }

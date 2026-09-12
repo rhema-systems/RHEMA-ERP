@@ -34,6 +34,69 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class ApInvoicePostingMigrationTests
 {
     [Fact]
+    public async Task NoWorkflowSubmit_ShouldPostThroughRealFinanceOwnerWithoutApproverOrRewritingInvoiceLines()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.ApprovalStatus = "Draft";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        });
+        // Mirrors the real SQL immutable-line boundary and catches accidental
+        // DbSet.Update(aggregate) graph writes during each lifecycle SaveChanges.
+        db.SavingChanges += (_, _) =>
+        {
+            db.ChangeTracker.DetectChanges();
+            db.ChangeTracker.Entries<VendorInvoiceLineItem>()
+                .Should().NotContain(entry => entry.State == EntityState.Modified);
+            db.ChangeTracker.Entries<Supplier>()
+                .Should().NotContain(entry => entry.State == EntityState.Modified);
+        };
+        var (service, _) = CreateService(db, tenantId);
+
+        var completed = await service.SubmitForApprovalAsync(fixture.Invoice.Id);
+
+        completed.ApprovalRequired.Should().BeFalse();
+        completed.JournalEntryId.Should().NotBeNull();
+        fixture.Invoice.ApprovalStatus.Should().Be("NotRequired");
+        fixture.Invoice.ApprovedById.Should().BeNull();
+        fixture.Invoice.ApprovedDate.Should().BeNull();
+        fixture.Invoice.SubmittedById.Should().NotBeNull();
+        var posted = await db.JournalEntries.Include(j => j.Transactions)
+            .SingleAsync(j => j.Id == completed.JournalEntryId);
+        posted.PostingStatus.Should().Be("Posted");
+        posted.Transactions.Sum(line => line.DebitAmount).Should().Be(100m);
+        posted.Transactions.Sum(line => line.CreditAmount).Should().Be(100m);
+        (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
+        await service.PostAsync(fixture.Invoice.Id);
+        (await db.FinancePostingEvents.CountAsync(e => e.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task NoWorkflowSubmit_ShouldStillRejectClosedPeriodWithoutCreatingFinancePosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.ApprovalStatus = "Draft";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+        }, periodIsOpen: false, periodIsClosed: true);
+        var (service, _) = CreateService(db, tenantId);
+
+        await ((Func<Task>)(() => service.SubmitForApprovalAsync(fixture.Invoice.Id)))
+            .Should().ThrowAsync<InvalidOperationException>();
+
+        fixture.Invoice.JournalEntryId.Should().BeNull();
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-APBudget")]
     [Trait("Category", "AccountsPayable")]
     public void BudgetEvidenceMigration_ShouldAddOnlyTheNullableApLineReferenceAndReverseCleanly()
@@ -204,6 +267,7 @@ public sealed class ApInvoicePostingMigrationTests
                 }
             });
         var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("VendorInvoice")).ReturnsAsync(true);
         workflow
             .Setup(service => service.StartApprovalWorkflowAsync("VendorInvoice", fixture.Invoice.Id))
             .ReturnsAsync(new WorkflowExecutionResult
@@ -248,6 +312,7 @@ public sealed class ApInvoicePostingMigrationTests
         });
         var budgetCommitments = new Mock<IFinanceBudgetCommitmentService>(MockBehavior.Strict);
         var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("VendorInvoice")).ReturnsAsync(true);
         workflow
             .Setup(service => service.StartApprovalWorkflowAsync("VendorInvoice", fixture.Invoice.Id))
             .ReturnsAsync(new WorkflowExecutionResult

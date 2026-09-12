@@ -229,7 +229,7 @@ namespace ErpSystem.Web.Services
                 if (_procurementAccessControlSeeder is not null)
                 {
                     _logger.LogInformation("Ensuring TDC access roles, permissions, committees, and Draft workflow templates are seeded...");
-                    await _procurementAccessControlSeeder.SeedAsync();
+                    await _procurementAccessControlSeeder.SeedAsync(preserveExistingWorkflows: true);
                 }
 
                 if (_civilEngineeringConfigurationProfileSeeder is not null)
@@ -410,20 +410,8 @@ namespace ErpSystem.Web.Services
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
 
-            // Program.cs invokes this lightweight path during every permitted VPS
-            // startup. Keep the UAT PO route here so Draft templates are repaired and
-            // published before operators can submit purchase orders.
-            if (_procurementAccessControlSeeder is not null &&
-                StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
-                    _environment.EnvironmentName,
-                    _allowDevelopmentDataSeedingOutsideDevelopment))
-            {
-                _logger.LogInformation(
-                    "Ensuring TDC Draft workflow templates and the UAT Purchase Order approval workflow are ready...");
-                await _procurementAccessControlSeeder.SeedAsync();
-                await _procurementAccessControlSeeder
-                    .EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync();
-            }
+            // Routine startup must not repair Draft user edits or publish a deliberately
+            // disabled UAT workflow. Explicit UAT provisioning owns template publication.
         }
 
         private async Task EnsureFinancePermissionAssignmentsAsync()
@@ -455,6 +443,9 @@ namespace ErpSystem.Web.Services
 
                 foreach (var tenant in tenants)
                 {
+                    if (await HasExistingWorkflowConfigurationAsync(tenant.Id, entityCode,
+                        "Procurement Receipt Inspection", definitionName))
+                        continue; // Retain live-instance assignments as well as the definition.
                     await EnsureSequentialWorkflowDefinitionSeededAsync(
                         tenant.Id,
                         entityCode,
@@ -587,6 +578,8 @@ namespace ErpSystem.Web.Services
 
         private async Task EnsureEstateSopWorkflowDefinitionSeededAsync(Guid tenantId, EstateSopWorkflowSeedSpec spec)
         {
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, spec.EntityCode, spec.EntityName, spec.DefinitionName))
+                return;
             var entityType = await EnsureWorkflowEntityTypeAsync(
                 tenantId,
                 spec.EntityCode,
@@ -1233,6 +1226,8 @@ namespace ErpSystem.Web.Services
         private async Task EnsureVendorPaymentControlWorkflowSeededAsync(Guid tenantId)
         {
             const string definitionName = "Vendor Payment Approval";
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, "VendorPayment", "Vendor Payment", definitionName))
+                return;
             await EnsureWorkflowDefinitionSeededAsync(
                 tenantId,
                 entityCode: "VendorPayment",
@@ -5211,6 +5206,8 @@ namespace ErpSystem.Web.Services
             string description,
             IReadOnlyCollection<string> approvalRoleNames)
         {
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, entityCode, entityName, definitionName))
+                return;
             var entityTypeCandidates = await _context.WorkflowEntityTypes
                 .Where(et => !et.IsDeleted && et.TenantId == tenantId)
                 .ToListAsync();
@@ -5408,6 +5405,8 @@ namespace ErpSystem.Web.Services
             string description,
             IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
         {
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, entityCode, entityName, definitionName))
+                return;
             var entityType = await EnsureWorkflowEntityTypeAsync(
                 tenantId,
                 entityCode,
@@ -5592,6 +5591,26 @@ namespace ErpSystem.Web.Services
             DeactivateLegacyWorkflowDefinitions(definitions, definitionId, definitionName, approvalStages, now);
 
             await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Startup creates missing baselines only. Existing definitions (including Draft,
+        /// inactive, retired and soft-deleted records) and disabled entity types are explicit
+        /// tenant configuration, not a request to publish a replacement on the next restart.
+        /// </summary>
+        private async Task<bool> HasExistingWorkflowConfigurationAsync(
+            Guid tenantId, string entityCode, string entityName, string definitionName)
+        {
+            var candidates = await _context.WorkflowEntityTypes.IgnoreQueryFilters().AsNoTracking()
+                .Where(item => item.TenantId == tenantId).ToListAsync();
+            var entityTypes = candidates.Where(item =>
+                WorkflowEntityTypeKeyMatches(item.Code, entityCode) || WorkflowEntityTypeKeyMatches(item.Name, entityCode) ||
+                WorkflowEntityTypeKeyMatches(item.Code, entityName) || WorkflowEntityTypeKeyMatches(item.Name, entityName)).ToList();
+            if (entityTypes.Any(item => item.IsDeleted || !item.IsActive)) return true;
+            var entityIds = entityTypes.Select(item => item.Id).ToList();
+            return await _context.WorkflowDefinitions.IgnoreQueryFilters().AsNoTracking().AnyAsync(item =>
+                item.TenantId == tenantId && (entityIds.Contains(item.EntityTypeId) ||
+                    item.Name == definitionName || item.Name.StartsWith(definitionName + " ")));
         }
 
         private async Task<WorkflowEntityType> EnsureWorkflowEntityTypeAsync(
@@ -5963,6 +5982,8 @@ namespace ErpSystem.Web.Services
                 var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
                 foreach (var tenant in tenants)
                 {
+                    if (await HasExistingWorkflowConfigurationAsync(tenant.Id, "EHC_TICKET", "EHC Ticket", "EHC Ticket"))
+                        continue;
                     var entityType = await _context.WorkflowEntityTypes
                         .FirstOrDefaultAsync(et => !et.IsDeleted && et.TenantId == tenant.Id && et.Code == "EHC_TICKET");
 

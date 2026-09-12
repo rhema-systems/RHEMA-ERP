@@ -8,13 +8,16 @@ const headers = () => ({
   'X-Correlation-ID': crypto.randomUUID(),
 });
 
-export type InventoryDisposalStatus = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+export type InventoryDisposalStatus = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 export type InventoryDisposalMethod = 1 | 2 | 3 | 4 | 5;
-export type InventoryDisposalActionType = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
+export type InventoryDisposalActionType = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
 export type DisposalEvidenceRequest = { centralDocumentVersionId: string; evidenceReference: string };
 export type InventoryDisposal = {
   id: string; disposalNumber: string; warehouseId: string; warehouseCode: string; warehouseName: string;
   status: InventoryDisposalStatus; method: InventoryDisposalMethod; reason: string; identificationDetails: string;
+  approvalRequired: boolean; canEdit: boolean; canSubmit: boolean; canApprove: boolean;
+  canStageExecution: boolean; canComplete: boolean; canCancel: boolean; currencyCode: string;
+  postedStockValue?: number;
   requestedById: string; requestedByName: string; requestedAtUtc: string; auditVerifiedById?: string;
   auditVerifiedAtUtc?: string; auditFindings?: string; committeeMeetingAtUtc?: string;
   committeeReference?: string; authorityRoute: string; workflowInstanceId?: string; approvedById?: string;
@@ -22,7 +25,7 @@ export type InventoryDisposal = {
   executionReference?: string; proceedsPostingEventId?: string; proceedsJournalEntryId?: string;
   completedAtUtc?: string; totalQuantity: number; totalValue: number; rowVersion: string;
   lines: Array<{ id: string; inventoryItemId: string; itemCode: string; itemName: string; locationId: string;
-    locationCode: string; quantity: number; unitCost: number; totalValue: number; lotNumber?: string;
+    locationCode: string; unitOfMeasure?: string; quantity: number; unitCost: number; totalValue: number; lotNumber?: string;
     batchNumber?: string; serialNumber?: string; conditionNotes?: string }>;
   evidence: Array<{ id: string; centralDocumentVersionId: string; fileUploadRecordId: string; stage: string;
     evidenceReference: string; documentReference: string; versionNumber: string }>;
@@ -47,13 +50,24 @@ export const inventoryDisposalService = {
   async create(request: { warehouseId: string; method: InventoryDisposalMethod; reason: string;
     identificationDetails: string; lines: Array<{ inventoryItemId: string; locationId: string; quantity: number;
       lotNumber?: string; batchNumber?: string; serialNumber?: string; conditionNotes?: string }>;
-    evidence: DisposalEvidenceRequest[] }) {
+    evidence: DisposalEvidenceRequest[]; idempotencyKey?: string }) {
     return (await axios.post<InventoryDisposal>(API_URL,
-      { ...request, idempotencyKey: `identify:${crypto.randomUUID()}` }, { headers: headers() })).data;
+      { ...request, idempotencyKey: request.idempotencyKey || `identify:${crypto.randomUUID()}` }, { headers: headers() })).data;
   },
   async verify(value: InventoryDisposal, verified: boolean, findings: string, evidence: DisposalEvidenceRequest[] = []) {
     return (await axios.post<InventoryDisposal>(`${API_URL}/${value.id}/audit-verification`,
       { ...mutation(value, 'audit', findings), verified, findings, evidence }, { headers: headers() })).data;
+  },
+  async update(value: InventoryDisposal, request: { method: InventoryDisposalMethod; reason: string;
+    identificationDetails: string; lines: Array<{ inventoryItemId: string; locationId: string; quantity: number;
+      lotNumber?: string; batchNumber?: string; serialNumber?: string; conditionNotes?: string }>;
+    evidence: DisposalEvidenceRequest[] }) {
+    return (await axios.put<InventoryDisposal>(`${API_URL}/${value.id}`,
+      { ...mutation(value, 'edit'), ...request }, { headers: headers() })).data;
+  },
+  async cancel(value: InventoryDisposal, reason: string) {
+    return (await axios.post<InventoryDisposal>(`${API_URL}/${value.id}/cancel`,
+      mutation(value, 'cancel', reason), { headers: headers() })).data;
   },
   async schedule(value: InventoryDisposal, meetingAtUtc: string, committeeReference: string, memberUserIds: string[], comment?: string) {
     return (await axios.post<InventoryDisposal>(`${API_URL}/${value.id}/committee/schedule`,
@@ -72,7 +86,7 @@ export const inventoryDisposalService = {
       { ...mutation(value, 'decision', comment), approved }, { headers: headers() })).data;
   },
   async stageExecution(value: InventoryDisposal, request: { proceedsAmount: number; proceedsAccountId?: string;
-    buyerOrRecipient?: string; executionReference: string; evidence: DisposalEvidenceRequest[]; comment?: string }) {
+    buyerOrRecipient?: string; executionReference: string; evidence: DisposalEvidenceRequest[]; comment?: string; postImmediately?: boolean }) {
     return (await axios.post<InventoryDisposal>(`${API_URL}/${value.id}/execution/stage`,
       { ...mutation(value, 'stage-execution', request.comment), ...request }, { headers: headers() })).data;
   },

@@ -17,6 +17,19 @@ public interface IWorkflowStatusAdapter
     /// </summary>
     void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId);
 
+    /// <summary>Applies a submitted result without attributing a human approval to direct completion.</summary>
+    void ApplySubmitOutcome(object entity, WorkflowIntegrationResult result, Guid? userId)
+    {
+        if (!result.ExecutionResult.Success)
+            throw new InvalidOperationException(result.ExecutionResult.Message ?? "Workflow submission failed.");
+        if (!result.ApprovalRequired && (result.Outcome != WorkflowOutcome.Approved ||
+            result.ExecutionResult.Status != WorkflowInstanceStatus.Completed || result.ExecutionResult.WorkflowInstanceId.HasValue))
+            throw new InvalidOperationException("Direct completion requires a successful result with no approval instance.");
+        ApplySubmitOutcome(entity, result.Outcome, userId);
+        if (!result.ApprovalRequired)
+            WorkflowStatusAdapterDefaults.ClearHumanApprovalMetadata(entity);
+    }
+
     /// <summary>
     /// Applies workflow outcome after approval processing
     /// </summary>
@@ -33,6 +46,12 @@ public interface IWorkflowStatusAdapter
 
 public static class WorkflowStatusAdapterDefaults
 {
+    public static void ClearHumanApprovalMetadata(object entity)
+    {
+        foreach (var name in new[] { "ApprovedById", "ApprovedByUserId", "ApprovedByName", "ApprovedAt", "ApprovedDate", "ApprovedAtUtc", "ApprovalDate" })
+            TrySetStatusProperty(entity, name, null);
+    }
+
     public static void ApplyDraftOutcome(object entity)
     {
         TrySetStatusProperty(entity, "Status", "Draft");

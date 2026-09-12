@@ -49,7 +49,7 @@ public partial class ProjectService
         }
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Boq);
-        adapter.ApplySubmitOutcome(version, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(version, workflowResult, userId);
         version.WorkflowInstanceId = workflowResult.ExecutionResult.WorkflowInstanceId;
         version.WorkflowDefinitionId = policy.BoqWorkflowDefinitionId;
         version.SubmittedById = userId;

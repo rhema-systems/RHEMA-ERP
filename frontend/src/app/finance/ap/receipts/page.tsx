@@ -86,7 +86,7 @@ function getReceiptStatus(receipt: FinancePurchaseOrderReceipt) {
         return { label: 'Partially Invoiced', className: 'bg-amber-600/15 text-amber-700 border-amber-200' };
     }
 
-    return { label: 'Approved', className: 'bg-emerald-600/15 text-emerald-700 border-emerald-200' };
+    return { label: receipt.approvalRequired === false ? 'Completed' : 'Approved', className: 'bg-emerald-600/15 text-emerald-700 border-emerald-200' };
 }
 
 export default function ReceiptsPage() {

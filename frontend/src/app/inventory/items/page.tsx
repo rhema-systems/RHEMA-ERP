@@ -29,6 +29,8 @@ import { useInventoryItemLabels } from '@/hooks/useFieldLabels';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { InventoryCostValue } from '@/components/inventory/InventoryCostValue';
+import { useInventoryCostCurrency } from '@/hooks/useInventoryCostCurrency';
 
 const ItemTypes = [
   { value: 1, label: 'Stock Item' },
@@ -75,6 +77,7 @@ const getFullImageUrl = (url: string | null | undefined): string | null => {
 };
 
 export default function InventoryItemsPage() {
+  const costCurrency = useInventoryCostCurrency();
   // Get configurable field labels
   const { getLabel } = useInventoryItemLabels();
   
@@ -1173,7 +1176,7 @@ export default function InventoryItemsPage() {
                             {item.isLotTracked && <Badge className="bg-indigo-100 text-indigo-800">Lot</Badge>}
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            Stock: {item.availableStock} / {item.currentStock} • Cost: ${item.standardCost.toFixed(2)} • {item.categoryName || 'No Category'}
+                            Stock: {item.availableStock} / {item.currentStock} • Standard cost: <InventoryCostValue value={item.standardCost} kind="standard" currencyCode={costCurrency} /> • Item-wide average cost: <InventoryCostValue value={item.averageCost} kind="item" currencyCode={costCurrency} /> • {item.categoryName || 'No Category'}
                           </p>
                         </div>
                       </div>
@@ -1591,6 +1594,11 @@ export default function InventoryItemsPage() {
               </div>
             </TabsContent>
             <TabsContent value="costs" className="flex-1 overflow-y-auto space-y-4 pt-4">
+              <div className="rounded-md border p-3">
+                <Label>Item-wide average cost (read-only)</Label>
+                <div className="mt-1 font-semibold"><InventoryCostValue value={selectedItem?.averageCost} kind="item" currencyCode={costCurrency} /></div>
+                <p className="mt-1 text-xs text-muted-foreground">Stored across warehouses. Count posting uses its saved valuation cost, not this reference value.</p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Standard Cost</Label><Input type="number" step="0.01" value={formData.standardCost} onChange={(e) => setFormData({...formData, standardCost: parseFloat(e.target.value) || 0})} /></div>
                 <div className="space-y-2"><Label>Current Cost</Label><Input type="number" step="0.01" value={formData.currentCost} onChange={(e) => setFormData({...formData, currentCost: parseFloat(e.target.value) || 0})} /></div>

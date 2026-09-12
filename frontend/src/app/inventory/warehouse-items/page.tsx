@@ -22,6 +22,8 @@ import {
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import axios from 'axios';
+import { InventoryCostValue } from '@/components/inventory/InventoryCostValue';
+import { useInventoryCostCurrency } from '@/hooks/useInventoryCostCurrency';
 
 type ProblemDetailsPayload = {
   detail?: string;
@@ -43,6 +45,7 @@ function getApiErrorMessage(error: unknown, fallback: string): string {
 }
 
 export default function WarehouseItemsPage() {
+  const costCurrency = useInventoryCostCurrency();
   const { toast } = useToast();
   const [warehouseItems, setWarehouseItems] = useState<WarehouseItemDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
@@ -330,13 +333,15 @@ export default function WarehouseItemsPage() {
                 <TableHead className="text-right">Available</TableHead>
                 <TableHead className="text-right">Allocated</TableHead>
                 <TableHead className="text-right">Reorder</TableHead>
+                <TableHead className="text-right">Warehouse avg. cost</TableHead>
+                <TableHead className="text-right">Item-wide avg. cost</TableHead>
                 <TableHead>Last Movement</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredItems.length === 0 ? (
-                <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">No warehouse items found</TableCell></TableRow>
+                <TableRow><TableCell colSpan={12} className="text-center py-8 text-muted-foreground">No warehouse items found</TableCell></TableRow>
               ) : (
                 filteredItems.map(item => (
                   <TableRow key={item.id}>
@@ -352,6 +357,8 @@ export default function WarehouseItemsPage() {
                         <Badge variant="destructive">{item.reorderLevel}</Badge>
                       ) : item.reorderLevel}
                     </TableCell>
+                    <TableCell className="text-right"><InventoryCostValue value={item.averageCost} kind="warehouse" currencyCode={costCurrency} /></TableCell>
+                    <TableCell className="text-right"><InventoryCostValue value={item.itemAverageCost} kind="item" currencyCode={costCurrency} /></TableCell>
                     <TableCell>{item.lastMovementDate ? format(new Date(item.lastMovementDate), 'MMM dd, yyyy') : '-'}</TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}><Edit className="h-4 w-4" /></Button>

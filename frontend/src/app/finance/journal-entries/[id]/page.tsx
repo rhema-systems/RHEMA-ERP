@@ -23,6 +23,7 @@ import {
     isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
 import { getJournalAuditActorLine } from '@/lib/finance/journal-entry-audit';
+import { getWorkflowVisibility } from '@/components/workflow/workflowVisibility';
 
 export default function JournalEntryDetailPage() {
     const router = useRouter();
@@ -229,8 +230,9 @@ export default function JournalEntryDetailPage() {
         if (!entry) return;
         try {
             setActionLoading('request-approval');
-            await financeDataService.requestJournalEntryApproval(entry.id);
-            toast({ title: 'Submitted', description: 'Journal entry submitted for approval.' });
+            const saved = await financeDataService.requestJournalEntryApproval(entry.id);
+            toast({ title: 'Submitted', description: saved.requiresApproval === false
+                ? 'Journal entry is ready to post. Approval is not required.' : 'Journal entry submitted for approval.' });
             await fetchEntry();
         } catch (err: any) {
             toast({ title: 'Error', description: err?.message || 'Failed to submit for approval', variant: 'destructive' });
@@ -415,8 +417,9 @@ export default function JournalEntryDetailPage() {
     const canApprovePermission = !isBatchOwned && hasPermission('Finance.JournalEntries.Approve');
     const canAttach = canEdit;
     const isCreator = !!entry.createdById && !!user?.id && entry.createdById === user.id;
+    const approvalVisibility = getWorkflowVisibility({ summary: workflowSummary });
     const hasActiveWorkflowAssignment = workflowSummary?.hasActiveInstance === true;
-    const canApproveWorkflow = !hasActiveWorkflowAssignment || workflowSummary?.canCurrentUserApprove === true;
+    const canApproveWorkflow = approvalVisibility.showApprovalControls && hasActiveWorkflowAssignment && workflowSummary?.canCurrentUserApprove === true;
     const canApproveNow = canApprovePermission && !isCreator && canApproveWorkflow;
     const canCancelAnyWorkflow = hasPermission('Finance.Workflow.Cancel');
     const canWithdrawApproval = !isBatchOwned
@@ -949,10 +952,10 @@ export default function JournalEntryDetailPage() {
                                         className="w-full"
                                         variant="outline"
                                         onClick={handleRequestApproval}
-                                        disabled={actionLoading === 'request-approval' || Boolean(budgetControlError) || budgetControl?.isAllowed === false}
+                                        disabled={!approvalVisibility.known || actionLoading === 'request-approval' || Boolean(budgetControlError) || budgetControl?.isAllowed === false}
                                     >
                                         {actionLoading === 'request-approval' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <SendHorizontal className="mr-2 h-4 w-4" />}
-                                        Submit for Approval
+                                        {approvalVisibility.direct ? 'Complete' : 'Submit for Approval'}
                                     </Button>
                                 )}
                                 {canDelete && (
@@ -966,7 +969,7 @@ export default function JournalEntryDetailPage() {
                     )}
 
                     {/* Pending Approval Actions: Approve, Reject, Withdraw */}
-                    {entry.postingStatus === 'Pending Approval' && (canApprovePermission || canWithdrawApproval) && (
+                    {entry.postingStatus === 'Pending Approval' && approvalVisibility.showApprovalControls && (canApprovePermission || canWithdrawApproval) && (
                         <Card className="border-amber-500/50">
                             <CardHeader>
                                 <CardTitle className="text-amber-600">Approval Required</CardTitle>

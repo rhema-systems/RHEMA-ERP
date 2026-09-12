@@ -13,6 +13,8 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IVendorPaymentService
 {
+    Task<VendorPaymentEvidenceDocumentDto> UploadEvidenceAsync(Guid id, VendorPaymentEvidenceUploadDto request, CancellationToken cancellationToken = default);
+    Task<ErpSystem.Core.Interfaces.DocumentManagement.CentralDocumentRepositoryContent?> OpenEvidenceAsync(Guid paymentId, Guid evidenceId, CancellationToken cancellationToken = default);
     // ── Single Payments ─────────────────────────────────────────────────
 
     /// <summary>

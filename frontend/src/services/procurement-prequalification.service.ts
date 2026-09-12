@@ -24,8 +24,9 @@ export const procurementPrequalificationService = {
     apiService.post<ProcurementPrequalificationExercise>(`${root}/${exerciseId}/close`, { rowVersion }),
   evaluate: (exerciseId: string, applicationId: string, request: unknown) =>
     apiService.post<ProcurementPrequalificationApplication>(`${root}/${exerciseId}/applications/${applicationId}/evaluate`, request),
-  submitDecision: (exerciseId: string, rowVersion: string) =>
-    apiService.post<ProcurementPrequalificationExercise>(`${root}/${exerciseId}/decision/submit`, { rowVersion }),
+  submitDecision: (exerciseId: string, rowVersion: string, decision?: {
+    decisionReference?: string; decisionEvidenceReference?: string; reason?: string;
+  }) => apiService.post<ProcurementPrequalificationExercise>(`${root}/${exerciseId}/decision/submit`, { ...decision, rowVersion }),
   decide: (exerciseId: string, request: unknown) =>
     apiService.post<ProcurementPrequalificationExercise>(`${root}/${exerciseId}/decision`, request),
   expire: (exerciseId: string, rowVersion: string) =>

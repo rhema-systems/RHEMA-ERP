@@ -484,8 +484,8 @@ public sealed class ProcurementPurchaseOrderSourceService :
         PurchaseOrder purchaseOrder, CancellationToken cancellationToken)
     {
         if (purchaseOrder.ProcurementCategory != ProcurementCategoryClass.Goods ||
-            !purchaseOrder.ApprovedAt.HasValue ||
-            !purchaseOrder.ApprovedById.HasValue || purchaseOrder.ApprovedById == Guid.Empty ||
+            (purchaseOrder.ApprovalRequired && (!purchaseOrder.ApprovedAt.HasValue ||
+            !purchaseOrder.ApprovedById.HasValue || purchaseOrder.ApprovedById == Guid.Empty)) ||
             purchaseOrder.Status is not ("Approved" or "Sent" or "Acknowledged" or "PartiallyReceived" or "Partially Received" or "Received"))
             return false;
 
@@ -1838,7 +1838,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         if (budget.TenantId != _currentUser.TenantId || budget.IsDeleted ||
             (!string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
              !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase)) ||
-            !budget.ApprovedById.HasValue || !budget.ApprovedDate.HasValue ||
+            (budget.ApprovalRequired && (!budget.ApprovedById.HasValue || !budget.ApprovedDate.HasValue)) ||
             (budget.EffectiveDate.HasValue && budget.EffectiveDate.Value > now) ||
             (budget.ExpiryDate.HasValue && budget.ExpiryDate.Value < now))
             throw Invalid(
@@ -2041,7 +2041,8 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 budget.ExpiryDate,
                 requiredExposure,
                 currencyCode ?? source.CurrencyCode,
-                DateTime.UtcNow));
+                DateTime.UtcNow,
+                budget.ApprovalRequired));
         if (!result.IsValid)
             throw Invalid(result.Code, result.Message);
     }

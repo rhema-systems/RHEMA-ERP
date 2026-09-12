@@ -192,7 +192,7 @@ public sealed class QuantitySurveyDesignRevisionImpactService(
         var result = await workflow.SubmitAsync(entity.WorkflowEntityTypeCode, entity.Id, entity.ApprovalWorkflowDefinitionId);
         if (!result.ExecutionResult.Success)
             throw Conflict(result.ExecutionResult.Message ?? "The configured design-impact workflow could not be started.");
-        workflowAdapters.GetAdapter(entity.WorkflowEntityTypeCode).ApplySubmitOutcome(entity, result.Outcome, UserId);
+        workflowAdapters.GetAdapter(entity.WorkflowEntityTypeCode).ApplySubmitOutcome(entity, result, UserId);
         entity.Status = QuantitySurveyDesignImpactStatuses.PendingApproval;
         entity.ApprovalStatus = "Pending"; entity.ApprovedById = null; entity.ApprovedAt = null;
         entity.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;

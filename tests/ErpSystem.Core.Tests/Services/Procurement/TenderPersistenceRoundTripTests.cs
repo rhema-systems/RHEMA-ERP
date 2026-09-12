@@ -8,6 +8,8 @@ using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Core.Services.Workflow;
+using System.Linq.Expressions;
+using Microsoft.EntityFrameworkCore.Query;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -185,7 +187,7 @@ public sealed class TenderPersistenceRoundTripTests
     }
 
     [Fact]
-    public async Task SubmitWithoutActiveWorkflowFailsClosedAndLeavesDraftUnchanged()
+    public async Task SubmitWithoutActiveWorkflowFinalizesPreparationButDoesNotPublishOrAward()
     {
         var fixture = new Fixture();
         var tender = fixture.SeedDraftTender();
@@ -200,14 +202,16 @@ public sealed class TenderPersistenceRoundTripTests
                 WorkflowOutcome.Approved,
                 approvalRequired: false));
 
-        var action = () => fixture.Service.SubmitTenderForApprovalAsync(tender.Id, fixture.UserId);
+        await fixture.Service.SubmitTenderForApprovalAsync(tender.Id, fixture.UserId);
 
-        var exception = await action.Should().ThrowAsync<ProcurementTenderWorkflowValidationException>();
-        exception.Which.Code.Should().Be("TENDER_WORKFLOW_NOT_CONFIGURED");
-        tender.Status.Should().Be("Draft");
-        fixture.Tenders.Verify(repository => repository.UpdateAsync(It.IsAny<Tender>()), Times.Never);
-        fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
-        fixture.StatusAdapters.Verify(registry => registry.GetAdapter(It.IsAny<string>()), Times.Never);
+        tender.Status.Should().Be("Approved");
+        tender.ApprovalRequired.Should().BeFalse();
+        tender.PublishDate.Should().BeNull();
+        tender.PublishedById.Should().BeNull();
+        tender.AwardDate.Should().BeNull();
+        tender.AwardedById.Should().BeNull();
+        fixture.Tenders.Verify(repository => repository.UpdateAsync(tender), Times.Once);
+        fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -228,6 +232,7 @@ public sealed class TenderPersistenceRoundTripTests
         await fixture.Service.SubmitTenderForApprovalAsync(tender.Id, fixture.UserId);
 
         tender.Status.Should().Be("Submitted");
+        tender.ApprovalRequired.Should().BeTrue();
         fixture.Tenders.Verify(repository => repository.UpdateAsync(tender), Times.Once);
         fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         fixture.StatusAdapters.Verify(registry => registry.GetAdapter("Tender"), Times.Once);
@@ -345,6 +350,40 @@ public sealed class TenderPersistenceRoundTripTests
             It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    private sealed class AsyncRows<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
+    {
+        public AsyncRows(IEnumerable<T> rows) : base(rows) { }
+        public AsyncRows(Expression expression) : base(expression) { }
+        IQueryProvider IQueryable.Provider => new AsyncProvider<T>(this);
+        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new AsyncRowsEnumerator<T>(((IEnumerable<T>)this).GetEnumerator());
+    }
+
+    private sealed class AsyncProvider<T>(IQueryProvider inner) : IAsyncQueryProvider
+    {
+        public IQueryable CreateQuery(Expression expression) => new AsyncRows<T>(expression);
+        public IQueryable<TElement> CreateQuery<TElement>(Expression expression) => new AsyncRows<TElement>(expression);
+        public object? Execute(Expression expression) => inner.Execute(expression);
+        public TResult Execute<TResult>(Expression expression) => inner.Execute<TResult>(expression);
+        public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var resultType = typeof(TResult).GetGenericArguments().Single();
+            var result = typeof(IQueryProvider).GetMethods()
+                .Single(method => method.Name == nameof(IQueryProvider.Execute) && method.IsGenericMethod)
+                .MakeGenericMethod(resultType).Invoke(inner, [expression]);
+            return (TResult)typeof(Task).GetMethod(nameof(Task.FromResult))!
+                .MakeGenericMethod(resultType).Invoke(null, [result])!;
+        }
+    }
+
+    private sealed class AsyncRowsEnumerator<T>(IEnumerator<T> inner) : IAsyncEnumerator<T>
+    {
+        public T Current => inner.Current;
+        public ValueTask<bool> MoveNextAsync() => ValueTask.FromResult(inner.MoveNext());
+        public ValueTask DisposeAsync() { inner.Dispose(); return ValueTask.CompletedTask; }
+    }
+
     private sealed class Fixture
     {
         private readonly Mock<ITenderRepository> _tenders = new();
@@ -413,7 +452,7 @@ public sealed class TenderPersistenceRoundTripTests
             sourcingCases.Setup(repository => repository.GetQueryable(
                     It.IsAny<System.Linq.Expressions.Expression<Func<ProcurementSourcingCase, bool>>>()))
                 .Returns((System.Linq.Expressions.Expression<Func<ProcurementSourcingCase, bool>> predicate) =>
-                    sourcingCaseRows.Where(predicate.Compile()).AsAsyncQueryable());
+                    new AsyncRows<ProcurementSourcingCase>(sourcingCaseRows.Where(predicate.Compile())));
 
             var unitOfWork = new Mock<IUnitOfWork>();
             UnitOfWork = unitOfWork;

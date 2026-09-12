@@ -12,6 +12,8 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Services.Workflow;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -26,19 +28,23 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         private readonly IWorkflowService _workflowService;
         private readonly IFinancePostingEngine _financePostingEngine;
         private readonly ILogger<AllocationService> _logger;
+        private readonly IWorkflowIntegrationService _workflowIntegration;
 
         public AllocationService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUserService,
             IWorkflowService workflowService,
             IFinancePostingEngine financePostingEngine,
-            ILogger<AllocationService> logger)
+            ILogger<AllocationService> logger,
+            IWorkflowIntegrationService? workflowIntegration = null)
         {
             _unitOfWork = unitOfWork;
             _currentUserService = currentUserService;
             _workflowService = workflowService;
             _financePostingEngine = financePostingEngine;
             _logger = logger;
+            _workflowIntegration = workflowIntegration ?? new WorkflowIntegrationService(workflowService,
+                NullLogger<WorkflowIntegrationService>.Instance);
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -287,6 +293,15 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
                 try
                 {
+                    // The old immediate-run endpoint must not circumvent a configured batch
+                    // approval, or duplicate a saved period batch using a different source key.
+                    if (await _workflowIntegration.HasActiveApprovalWorkflowAsync(AllocationRunBatchWorkflowEntityType) ||
+                        await _unitOfWork.Repository<AllocationRunBatch>().GetQueryable(batch =>
+                            batch.TenantId == TenantId && !batch.IsDeleted && batch.AllocationRuleId == dto.AllocationRuleId &&
+                            batch.FiscalPeriodId == dto.FiscalPeriodId && batch.Status != AllocationRunBatchStatus.Cancelled &&
+                            batch.Status != AllocationRunBatchStatus.Rejected).AnyAsync(cancellationToken))
+                        throw new InvalidOperationException("Use the allocation run batch to finalize and post this period; immediate execution cannot bypass its approval or duplicate its posting.");
+
                     var rule = await _unitOfWork.Repository<AllocationRule>()
                         .GetQueryable(r => r.Id == dto.AllocationRuleId && r.TenantId == TenantId && !r.IsDeleted)
                         .Include(r => r.SourceAccount)
@@ -538,51 +553,55 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             string? comment = null,
             CancellationToken cancellationToken = default)
         {
-            var batch = await LoadRunBatchAsync(id, cancellationToken)
-                ?? throw new ArgumentException($"Allocation run batch with ID '{id}' not found.");
-
-            if (batch.Status != AllocationRunBatchStatus.Draft)
-                throw new InvalidOperationException("Only draft allocation run batches can be submitted.");
-
-            EnsureRunBatchPeriodIsOpen(batch);
-
-            var now = DateTime.UtcNow;
-            batch.Status = AllocationRunBatchStatus.PendingApproval;
-            batch.SubmittedAt = now;
-            batch.SubmittedBy = UserId == Guid.Empty ? null : UserId;
-            batch.SubmittedByName = UserName;
-            batch.UpdatedAt = now;
-            batch.UpdatedBy = UserName;
-
-            await _unitOfWork.Repository<AllocationRunBatch>().UpdateAsync(batch);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            try
+            if (UserId == Guid.Empty)
+                throw new UnauthorizedAccessException("User not authenticated.");
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
-                var workflowResult = await _workflowService.StartApprovalWorkflowAsync(AllocationRunBatchWorkflowEntityType, id);
-                if (!workflowResult.Success)
-                    throw new InvalidOperationException(workflowResult.Message ?? "Failed to start allocation run approval workflow.");
-
-                batch.WorkflowInstanceId = workflowResult.WorkflowInstanceId ?? batch.WorkflowInstanceId;
-                batch.UpdatedAt = DateTime.UtcNow;
-                batch.UpdatedBy = UserName;
-                await _unitOfWork.Repository<AllocationRunBatch>().UpdateAsync(batch);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-            }
-            catch
-            {
-                batch.Status = AllocationRunBatchStatus.Draft;
-                batch.SubmittedAt = null;
-                batch.SubmittedBy = null;
-                batch.SubmittedByName = null;
-                batch.UpdatedAt = DateTime.UtcNow;
-                batch.UpdatedBy = UserName;
-                await _unitOfWork.Repository<AllocationRunBatch>().UpdateAsync(batch);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                throw;
-            }
-
-            return (await GetRunBatchByIdAsync(id, cancellationToken))!;
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    var batch = await LoadRunBatchAsync(id, cancellationToken)
+                        ?? throw new ArgumentException($"Allocation run batch with ID '{id}' not found.");
+                    if (batch.Status != AllocationRunBatchStatus.Draft)
+                        throw new InvalidOperationException("Only draft allocation run batches can be submitted.");
+                    EnsureRunBatchPeriodIsOpen(batch);
+                    if (!batch.Lines.Any(line => !line.IsDeleted) || batch.TotalAllocated <= 0m)
+                        throw new InvalidOperationException("A saved allocation calculation is required before submission.");
+                    var approvalRequired = await _workflowIntegration.HasActiveApprovalInstanceAsync(AllocationRunBatchWorkflowEntityType, id) ||
+                        await _workflowIntegration.HasActiveApprovalWorkflowAsync(AllocationRunBatchWorkflowEntityType);
+                    var now = DateTime.UtcNow;
+                    batch.SubmittedAt = now;
+                    batch.SubmittedBy = UserId;
+                    batch.SubmittedByName = UserName;
+                    batch.UpdatedAt = now;
+                    batch.UpdatedBy = UserName;
+                    if (approvalRequired)
+                    {
+                        batch.Status = AllocationRunBatchStatus.PendingApproval;
+                        await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+                    var result = await _workflowIntegration.SubmitAsync(AllocationRunBatchWorkflowEntityType, id);
+                    if (!result.ExecutionResult.Success || result.ApprovalRequired != approvalRequired ||
+                        (approvalRequired && !result.ExecutionResult.WorkflowInstanceId.HasValue) ||
+                        (!approvalRequired && (result.Outcome != WorkflowOutcome.Approved ||
+                            result.ExecutionResult.Status != WorkflowInstanceStatus.Completed || result.ExecutionResult.WorkflowInstanceId.HasValue ||
+                            batch.ApprovedBy.HasValue || batch.ApprovedAt.HasValue || !string.IsNullOrEmpty(batch.ApprovedByName))))
+                        throw new InvalidOperationException(result.ExecutionResult.Message ?? "Allocation approval configuration changed. Reload and retry.");
+                    batch.ApprovalRequired = result.ApprovalRequired;
+                    batch.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;
+                    batch.Status = result.ApprovalRequired
+                        ? result.Outcome == WorkflowOutcome.Approved ? AllocationRunBatchStatus.Approved : AllocationRunBatchStatus.PendingApproval
+                        : AllocationRunBatchStatus.ReadyToPost;
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return MapToRunBatchDto(batch);
+                }
+                catch
+                {
+                    await TryRollbackAsync(cancellationToken);
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         public async Task<AllocationRunBatchDto> ApproveRunBatchAsync(
@@ -593,7 +612,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             var batch = await LoadRunBatchAsync(id, cancellationToken)
                 ?? throw new ArgumentException($"Allocation run batch with ID '{id}' not found.");
 
-            if (batch.Status != AllocationRunBatchStatus.PendingApproval)
+            if (!batch.ApprovalRequired || batch.Status != AllocationRunBatchStatus.PendingApproval)
                 throw new InvalidOperationException("Only allocation run batches pending approval can be approved.");
 
             if (UserId == Guid.Empty)
@@ -640,7 +659,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             var batch = await LoadRunBatchAsync(id, cancellationToken)
                 ?? throw new ArgumentException($"Allocation run batch with ID '{id}' not found.");
 
-            if (batch.Status != AllocationRunBatchStatus.PendingApproval)
+            if (!batch.ApprovalRequired || batch.Status != AllocationRunBatchStatus.PendingApproval)
                 throw new InvalidOperationException("Only allocation run batches pending approval can be rejected.");
 
             if (UserId == Guid.Empty)
@@ -685,7 +704,10 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         return MapToRunBatchDto(batch);
                     }
 
-                    if (batch.Status != AllocationRunBatchStatus.Approved)
+                    var ready = batch.ApprovalRequired ? batch.Status == AllocationRunBatchStatus.Approved :
+                        batch.Status == AllocationRunBatchStatus.ReadyToPost && !batch.WorkflowInstanceId.HasValue &&
+                        !batch.ApprovedBy.HasValue && !batch.ApprovedAt.HasValue && string.IsNullOrEmpty(batch.ApprovedByName);
+                    if (!ready)
                         throw new InvalidOperationException("Only approved allocation run batches can be posted.");
 
                     EnsureRunBatchPeriodIsOpen(batch);
@@ -852,13 +874,14 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         line.AllocationPercent,
                         line.AllocatedAmount,
                         line.CostCenterCode))
-                    .ToList());
+                    .ToList(), batch.ApprovalRequired);
         }
 
         private async Task<AllocationRunBatch?> LoadRunBatchAsync(Guid id, CancellationToken cancellationToken)
         {
             return await _unitOfWork.Repository<AllocationRunBatch>()
                 .GetQueryable(b => b.Id == id && b.TenantId == TenantId && !b.IsDeleted)
+                .AsTracking()
                 .Include(b => b.AllocationRule)
                 .Include(b => b.FiscalPeriod)
                 .Include(b => b.SourceAccount)

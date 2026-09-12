@@ -290,31 +290,9 @@ namespace ErpSystem.Api.Controllers.Finance
                 return Forbid();
             try
             {
-                var invoice = await _dbContext.Invoices
-                    .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == _currentUserService.TenantId && !item.IsDeleted);
-                if (invoice == null)
-                    return NotFound();
-                if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.Rejected)
-                    return BadRequest(new { error = $"Only draft or rejected invoices can be submitted for approval. Current status: {invoice.Status}." });
-
-                var previousStatus = invoice.Status;
-                invoice.Status = InvoiceStatus.PendingApproval;
-                invoice.UpdatedAt = DateTime.UtcNow;
-                invoice.UpdatedBy = _currentUserService.UserName;
-                await _dbContext.SaveChangesAsync();
-
-                var workflowResult = await _workflowService.StartApprovalWorkflowAsync("Invoice", id);
-                if (!workflowResult.Success)
-                {
-                    invoice.Status = previousStatus;
-                    invoice.UpdatedAt = DateTime.UtcNow;
-                    invoice.UpdatedBy = _currentUserService.UserName;
-                    await _dbContext.SaveChangesAsync();
-                    return BadRequest(new { error = workflowResult.Message ?? "Unable to start the customer invoice approval workflow." });
-                }
-
-                return Ok(await _invoiceService.GetByIdAsync(id, DimensionProducer));
+                return Ok(await _invoiceService.SubmitAsync(id, DimensionProducer, HttpContext.RequestAborted));
             }
+            catch (KeyNotFoundException) { return NotFound(); }
             catch (Exception ex) { return BadRequest(new { error = ex.Message }); }
         }
 

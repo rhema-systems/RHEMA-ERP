@@ -24,11 +24,12 @@ interface AccountPickerProps {
     value?: string;
     placeholder: string;
     disabled?: boolean;
+    allowClear?: boolean;
     accounts: Account[];
     onChange: (value?: string) => void;
 }
 
-function AccountPicker({ id, value, placeholder, disabled, accounts, onChange }: AccountPickerProps) {
+function AccountPicker({ id, value, placeholder, disabled, allowClear = true, accounts, onChange }: AccountPickerProps) {
     const [open, setOpen] = useState(false);
     const selected = accounts.find(a => a.id === value);
 
@@ -56,7 +57,7 @@ function AccountPicker({ id, value, placeholder, disabled, accounts, onChange }:
                     <CommandList>
                         <CommandEmpty>No account found.</CommandEmpty>
                         <CommandGroup>
-                            <CommandItem
+                            {allowClear && <CommandItem
                                 value="none"
                                 onSelect={() => {
                                     onChange(undefined);
@@ -65,7 +66,7 @@ function AccountPicker({ id, value, placeholder, disabled, accounts, onChange }:
                             >
                                 <Check className={cn("mr-2 h-4 w-4", !value ? "opacity-100" : "opacity-0")} />
                                 None
-                            </CommandItem>
+                            </CommandItem>}
                             {accounts.map(account => (
                                 <CommandItem
                                     key={account.id}
@@ -105,6 +106,8 @@ export default function FinanceSettingsPage() {
         controlAccountArId: undefined,
         controlAccountApId: undefined,
         controlAccountInventoryId: undefined,
+        returnToVendorClearingAccountId: undefined,
+        purchaseReturnVarianceAccountId: undefined,
         controlAccountPayrollId: undefined,
         controlAccountTaxId: undefined,
         controlAccountGRVAccrualId: undefined,
@@ -162,6 +165,8 @@ export default function FinanceSettingsPage() {
                 controlAccountArId: data.controlAccountArId,
                 controlAccountApId: data.controlAccountApId,
                 controlAccountInventoryId: data.controlAccountInventoryId,
+                returnToVendorClearingAccountId: data.returnToVendorClearingAccountId,
+                purchaseReturnVarianceAccountId: data.purchaseReturnVarianceAccountId,
                 controlAccountPayrollId: data.controlAccountPayrollId,
                 controlAccountTaxId: data.controlAccountTaxId,
                 controlAccountGRVAccrualId: data.controlAccountGRVAccrualId,
@@ -786,6 +791,34 @@ export default function FinanceSettingsPage() {
                                 disabled={settings?.transactionsExist}
                                 accounts={accounts.filter(a => a.accountType === 'Asset')}
                                 onChange={(value) => setFormData({ ...formData, controlAccountInventoryId: value })}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="returnToVendorClearingAccount">Supplier Returns Clearing</Label>
+                            <AccountPicker
+                                id="returnToVendorClearingAccount"
+                                value={formData.returnToVendorClearingAccountId}
+                                placeholder="Search asset accounts..."
+                                disabled={saving}
+                                allowClear={false}
+                                accounts={accounts.filter(a => a.accountType === 'Asset' && a.status === 'Active' &&
+                                    a.allowDirectPosting && !a.isControlAccount && a.id !== formData.controlAccountInventoryId)}
+                                onChange={(value) => setFormData({ ...formData, returnToVendorClearingAccountId: value })}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="purchaseReturnVarianceAccount">Purchase Return Cost Variance</Label>
+                            <AccountPicker
+                                id="purchaseReturnVarianceAccount"
+                                value={formData.purchaseReturnVarianceAccountId}
+                                placeholder="Search expense accounts..."
+                                disabled={saving}
+                                allowClear={false}
+                                accounts={accounts.filter(a => a.accountType === 'Expense' && a.status === 'Active' &&
+                                    a.allowDirectPosting && !a.isControlAccount && a.id !== formData.controlAccountInventoryId)}
+                                onChange={(value) => setFormData({ ...formData, purchaseReturnVarianceAccountId: value })}
                             />
                         </div>
 

@@ -21,8 +21,8 @@ export const procurementTenderControlService = {
     apiService.put<ProcurementTenderControl>(`${root(tenderId)}/technical-evaluation`, request),
   financialEvaluation: (tenderId: string, request: unknown) =>
     apiService.put<ProcurementTenderControl>(`${root(tenderId)}/financial-evaluation`, request),
-  submitApproval: (tenderId: string, rowVersion: string) =>
-    apiService.post<ProcurementTenderControl>(`${root(tenderId)}/approval/submit`, { rowVersion }),
+  submitApproval: (tenderId: string, rowVersion: string, ppaApprovalReference?: string) =>
+    apiService.post<ProcurementTenderControl>(`${root(tenderId)}/approval/submit`, { rowVersion, ppaApprovalReference }),
   decideApproval: (tenderId: string, request: unknown) =>
     apiService.post<ProcurementTenderControl>(`${root(tenderId)}/approval/decision`, request),
   award: (tenderId: string, request: unknown) =>

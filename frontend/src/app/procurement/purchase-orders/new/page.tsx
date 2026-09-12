@@ -1,4 +1,6 @@
 'use client';
+import { PurchaseOrderLineActions, PurchaseOrderPlannedCosts } from '@/components/procurement/PurchaseOrderPlannedCosts';
+import { buildPlannedCostPayload, PlannedCostLine } from '@/lib/purchase-order-landed-costs';
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -60,6 +62,8 @@ import {
 } from '@/lib/procurement-currency';
 import { format } from 'date-fns';
 import { getPurchaseOrderItemMappingError } from '@/lib/purchase-order-item-mapping';
+import { PurchaseOrderLineTypeSelect } from '@/components/procurement/PurchaseOrderLineTypeSelect';
+import { purchaseOrderLineType, requiresPurchaseOrderStock, type PurchaseOrderLineType } from '@/lib/purchase-order-line-types';
 import {
   createApprovedPurchaseOrderItems,
   findApprovedPurchaseOrderLine,
@@ -77,39 +81,7 @@ interface POItemFormData extends CreatePurchaseOrderItemDto {
   warehouseName?: string;
 }
 
-interface POLandedCostPlanLineFormData {
-  tempId: string;
-  costType: number;
-  description: string;
-  amount: number;
-  currency: string;
-  exchangeRate: number;
-  allocationMethod: LandedCostAllocationMethod;
-  supplierId?: string;
-  referenceNumber?: string;
-}
-
-const LANDED_COST_TYPES: Array<{ value: number; label: string }> = [
-  { value: 1, label: 'Freight / Shipping' },
-  { value: 2, label: 'Customs Duty' },
-  { value: 3, label: 'Insurance' },
-  { value: 4, label: 'Handling' },
-  { value: 5, label: 'Brokerage' },
-  { value: 6, label: 'Storage / Warehousing' },
-  { value: 7, label: 'Other' },
-];
-
-const LANDED_COST_METHODS: Array<{ value: LandedCostAllocationMethod; label: string }> = [
-  { value: 'ByValue', label: 'By value' },
-  { value: 'ByQuantity', label: 'By qty' },
-  { value: 'ByWeight', label: 'By weight' },
-  { value: 'ByVolume', label: 'By volume' },
-  { value: 'Equal', label: 'Equal' },
-  { value: 'Manual', label: 'Manual (amounts later on GRN)' },
-];
-
-const getLandedCostTypeLabel = (costType: number) =>
-  LANDED_COST_TYPES.find(t => t.value === costType)?.label || 'Other';
+type POLandedCostPlanLineFormData = PlannedCostLine;
 
 function NewPurchaseOrderPageContent() {
   const router = useRouter();
@@ -153,6 +125,7 @@ function NewPurchaseOrderPageContent() {
   const [landedCostPlanCurrency, setLandedCostPlanCurrency] = useState('');
   const [landedCostPlanNotes, setLandedCostPlanNotes] = useState('');
   const [landedCostPlanItems, setLandedCostPlanItems] = useState<POLandedCostPlanLineFormData[]>([]);
+  const [costLineKey, setCostLineKey] = useState<string | null>(null);
   
   // Reference data
   const [inventoryItems, setInventoryItems] = useState<InventoryItemDto[]>([]);
@@ -474,10 +447,21 @@ function NewPurchaseOrderPageContent() {
     return warehouses.filter(w => allowedIds.has(w.id));
   }, [editingItem?.inventoryItemId, warehouses, warehouseItemsByInventoryItemId]);
 
+  const handleLineTypeChange = (lineType: PurchaseOrderLineType) => {
+    setEditingItem(prev => prev ? { ...prev, lineType, inventoryItemId: '', itemCode: '',
+      warehouseId: '', warehouseName: '', itemUnitOfMeasureId: undefined, priceListLineId: undefined } : null);
+    setAvailableUOMs([]);
+  };
+
   // Handle inventory item selection in inline editing
   const handleInlineInventoryItemSelect = async (itemId: string) => {
     if (!editingItem) return;
     
+    if (itemId === '__none__') {
+      setEditingItem(prev => prev ? { ...prev, inventoryItemId: '', itemCode: '', itemUnitOfMeasureId: undefined, priceListLineId: undefined } : null);
+      setAvailableUOMs([]);
+      return;
+    }
     const item = inventoryItems.find(i => i.id === itemId);
     if (!item) return;
     const approvedLine = findApprovedPurchaseOrderLine(selectedSource?.approvedLines || [], editingItem);
@@ -542,6 +526,7 @@ function NewPurchaseOrderPageContent() {
       setEditingItem(retainApprovedPurchaseOrderTerms({
         ...editingItem,
         inventoryItemId: item.id,
+        lineType: purchaseOrderLineType(item.itemType as PurchaseOrderLineType),
         itemCode: item.itemCode,
         itemName: item.name,
         itemDescription: item.description || item.name,
@@ -716,18 +701,8 @@ function NewPurchaseOrderPageContent() {
     if (!editingItem) return;
     
     // Validation
-    if (!editingItem.inventoryItemId && !procurementSettings?.allowNonInventoryItems) {
-      toast.error('Please select an inventory item');
-      return;
-    }
-    
     if (!editingItem.inventoryItemId && !editingItem.itemDescription) {
       toast.error('Please provide an item description');
-      return;
-    }
-    
-    if (!editingItem.warehouseId) {
-      toast.error('Please select a warehouse');
       return;
     }
     
@@ -776,70 +751,12 @@ function NewPurchaseOrderPageContent() {
 
   // Delete item
   const handleDeleteItem = (index: number) => {
-    if (confirm('Are you sure you want to remove this item?')) {
-      const updatedItems = items.filter((_, i) => i !== index);
-      setItems(updatedItems);
-      toast.success('Item removed');
-    }
+    const key = items[index].tempId;
+    setLandedCostPlanItems(prev => prev.filter(c => c.purchaseOrderLineKey !== key));
+    setItems(prev => prev.filter((_, i) => i !== index));
+    toast.success('Item removed from the form');
   };
 
-  const addLandedCostPlanLine = () => {
-    setLandedCostPlanItems(prev => ([
-      ...prev,
-      {
-        tempId: crypto.randomUUID(),
-        costType: 1,
-        description: getLandedCostTypeLabel(1),
-        amount: 0,
-        currency: landedCostPlanCurrency || documentCurrency,
-        exchangeRate: 1,
-        allocationMethod: 'ByValue',
-        supplierId: undefined,
-        referenceNumber: ''
-      }
-    ]));
-  };
-
-  const updateLandedCostPlanLine = (tempId: string, patch: Partial<POLandedCostPlanLineFormData>) => {
-    setLandedCostPlanItems(prev => prev.map(l => (l.tempId === tempId ? { ...l, ...patch } : l)));
-  };
-
-  const removeLandedCostPlanLine = (tempId: string) => {
-    setLandedCostPlanItems(prev => prev.filter(l => l.tempId !== tempId));
-  };
-
-  const upsertLandedCostPlanIfAny = async (purchaseOrderId: string) => {
-    if (landedCostPlanItems.length === 0) return;
-
-    const normalizedItems = landedCostPlanItems
-      .map(i => ({
-        ...i,
-        description: ((i.description || '').trim() || getLandedCostTypeLabel(i.costType)).trim(),
-        referenceNumber: (i.referenceNumber || '').trim(),
-        currency: (i.currency || landedCostPlanCurrency || documentCurrency).trim().toUpperCase(),
-        exchangeRate: Number.isFinite(i.exchangeRate) && i.exchangeRate > 0 ? i.exchangeRate : 1,
-        amount: Number.isFinite(i.amount) ? i.amount : 0
-      }));
-
-    const invalidLines = normalizedItems.filter(i => i.amount <= 0);
-    if (invalidLines.length > 0)
-      throw new Error('Please enter an Amount for every planned landed cost line (or delete the empty lines).');
-
-    await purchasingService.upsertPurchaseOrderLandedCostPlan(purchaseOrderId, {
-      currency: (landedCostPlanCurrency || '').trim().toUpperCase() || undefined,
-      notes: (landedCostPlanNotes || '').trim() || undefined,
-      items: normalizedItems.map(i => ({
-        costType: i.costType,
-        description: i.description,
-        amount: i.amount,
-        currency: i.currency,
-        exchangeRate: i.exchangeRate,
-        allocationMethod: i.allocationMethod,
-        supplierId: i.supplierId || undefined,
-        referenceNumber: i.referenceNumber || undefined
-      }))
-    });
-  };
 
   // Save as draft
   const handleSaveDraft = async () => {
@@ -904,15 +821,17 @@ function NewPurchaseOrderPageContent() {
         expenseGLAccount: costAllocationMethod === 'GLExpense' ? expenseGLAccount || undefined : undefined,
         discountAmount: discountAmount || undefined,
         requestedById,
+        plannedLandedCostPlan: buildPlannedCostPayload(landedCostPlanItems, items, landedCostPlanCurrency || documentCurrency, landedCostPlanNotes),
         items: items.map(item => ({
-          inventoryItemId: item.inventoryItemId,
+          inventoryItemId: item.inventoryItemId || undefined,
+          lineType: purchaseOrderLineType(item.lineType),
           supplierItemCode: item.supplierItemCode || undefined,
           itemDescription: item.itemDescription || undefined,
           orderedQuantity: item.orderedQuantity,
           unitOfMeasure: item.unitOfMeasure || 'EA',
           itemUnitOfMeasureId: item.itemUnitOfMeasureId || undefined,
           warehouseId:
-            orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined,
+            requiresPurchaseOrderStock(item.lineType) ? (orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined) : undefined,
           unitPrice: item.unitPrice,
           priceListLineId: item.priceListLineId || undefined,
           expectedDeliveryDate: item.expectedDeliveryDate || undefined,
@@ -921,19 +840,6 @@ function NewPurchaseOrderPageContent() {
       };
 
       const result = await purchasingService.createPurchaseOrder(createData);
-      let plannedLandedCostsSaved = true;
-      try {
-        await upsertLandedCostPlanIfAny(result.id);
-      } catch (e: any) {
-        console.error('Failed to save planned landed costs:', e);
-        plannedLandedCostsSaved = false;
-        toast.error(e?.message || 'Failed to save planned landed costs');
-      }
-
-      if (!plannedLandedCostsSaved) {
-        toast.error('Purchase order saved, but planned landed costs were not saved. Fix the errors and save again.');
-        return;
-      }
 
       toast.success('Purchase order saved as draft');
       router.push(`/procurement/purchase-orders/${result.id}`);
@@ -1008,15 +914,17 @@ function NewPurchaseOrderPageContent() {
         expenseGLAccount: costAllocationMethod === 'GLExpense' ? expenseGLAccount || undefined : undefined,
         discountAmount: discountAmount || undefined,
         requestedById,
+        plannedLandedCostPlan: buildPlannedCostPayload(landedCostPlanItems, items, landedCostPlanCurrency || documentCurrency, landedCostPlanNotes),
         items: items.map(item => ({
-          inventoryItemId: item.inventoryItemId,
+          inventoryItemId: item.inventoryItemId || undefined,
+          lineType: purchaseOrderLineType(item.lineType),
           supplierItemCode: item.supplierItemCode || undefined,
           itemDescription: item.itemDescription || undefined,
           orderedQuantity: item.orderedQuantity,
           unitOfMeasure: item.unitOfMeasure || 'EA',
           itemUnitOfMeasureId: item.itemUnitOfMeasureId || undefined,
           warehouseId:
-            orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined,
+            requiresPurchaseOrderStock(item.lineType) ? (orderType === 'Consignment' ? normalizedDeliveryWarehouseId : item.warehouseId || undefined) : undefined,
           unitPrice: item.unitPrice,
           priceListLineId: item.priceListLineId || undefined,
           expectedDeliveryDate: item.expectedDeliveryDate || undefined,
@@ -1025,21 +933,6 @@ function NewPurchaseOrderPageContent() {
       };
 
       const result = await purchasingService.createPurchaseOrder(createData);
-
-      let plannedLandedCostsSaved = true;
-      try {
-        await upsertLandedCostPlanIfAny(result.id);
-      } catch (e: any) {
-        console.error('Failed to save planned landed costs:', e);
-        plannedLandedCostsSaved = false;
-        toast.error(e?.message || 'Failed to save planned landed costs');
-      }
-
-      if (!plannedLandedCostsSaved) {
-        toast.error('Purchase order created as draft, but planned landed costs were not saved. Please fix and submit again.');
-        router.push(`/procurement/purchase-orders/${result.id}/edit`);
-        return;
-      }
       
       // Submit for approval
       await purchasingService.submitPurchaseOrder(result.id);
@@ -1465,7 +1358,7 @@ function NewPurchaseOrderPageContent() {
                 <Package className="h-5 w-5" />
                 Order Items
               </CardTitle>
-              <CardDescription>{getPurchaseOrderItemMappingError(items) || 'Add items to this purchase order'}</CardDescription>
+              <CardDescription>Catalogue selection is optional. Enter stock goods, non-stock goods or services; stock items must be mapped before receiving.</CardDescription>
             </div>
             <Button 
               onClick={handleAddNewRow} 
@@ -1515,6 +1408,7 @@ function NewPurchaseOrderPageContent() {
                           <>
                             <TableCell className="font-medium">{index + 1}</TableCell>
                             <TableCell>
+                              <PurchaseOrderLineTypeSelect value={editingItem?.lineType} onChange={handleLineTypeChange} />
                               <Select
                                 value={editingItem?.inventoryItemId || '__none__'}
                                 onValueChange={handleInlineInventoryItemSelect}
@@ -1523,6 +1417,7 @@ function NewPurchaseOrderPageContent() {
                                   <SelectValue placeholder="Select item" />
                                 </SelectTrigger>
                                 <SelectContent>
+                                  <SelectItem value="__none__">Ad hoc — no catalogue item</SelectItem>
                                   {filteredInventoryItemsForEditing.map(invItem => (
                                     <SelectItem key={invItem.id} value={invItem.id}>
                                       {invItem.itemCode} - {invItem.name}
@@ -1541,6 +1436,7 @@ function NewPurchaseOrderPageContent() {
                             </TableCell>
                             <TableCell>
                               <Select
+                                disabled={!requiresPurchaseOrderStock(editingItem?.lineType)}
                                 value={editingItem?.warehouseId || '__none__'}
                                 onValueChange={(value) => {
                                   if (value === '__none__') return;
@@ -1699,25 +1595,14 @@ function NewPurchaseOrderPageContent() {
                               {item.expectedDeliveryDate ? format(new Date(item.expectedDeliveryDate), 'MMM dd, yyyy') : '-'}
                             </TableCell>
                             <TableCell>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleEditRow(index)}
-                                  disabled={isAddingNewRow || editingRowIndex !== null}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-red-600 hover:text-red-700"
-                                  onClick={() => handleDeleteItem(index)}
-                                  disabled={isAddingNewRow || editingRowIndex !== null}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
+                              <PurchaseOrderLineActions
+                              name={item.itemName || item.itemDescription || `Line ${index + 1}`}
+                              disabled={isAddingNewRow || editingRowIndex !== null}
+                              costCount={landedCostPlanItems.filter(c => c.purchaseOrderLineKey === item.tempId).length}
+                              onEdit={() => handleEditRow(index)}
+                              onCosts={() => setCostLineKey(item.tempId)}
+                              onDelete={() => handleDeleteItem(index)}
+                            />
                             </TableCell>
                           </>
                         )}
@@ -1729,6 +1614,7 @@ function NewPurchaseOrderPageContent() {
                       <TableRow className="bg-blue-50">
                         <TableCell className="font-medium">{items.length + 1}</TableCell>
                         <TableCell>
+                          <PurchaseOrderLineTypeSelect value={editingItem.lineType} onChange={handleLineTypeChange} />
                           <Select
                             value={editingItem.inventoryItemId || '__none__'}
                             onValueChange={handleInlineInventoryItemSelect}
@@ -1737,7 +1623,8 @@ function NewPurchaseOrderPageContent() {
                               <SelectValue placeholder="Select item" />
                             </SelectTrigger>
                             <SelectContent>
-                              {filteredInventoryItemsForEditing.map(invItem => (
+                              <SelectItem value="__none__">Ad hoc — no catalogue item</SelectItem>
+                                  {filteredInventoryItemsForEditing.map(invItem => (
                                 <SelectItem key={invItem.id} value={invItem.id}>
                                   {invItem.itemCode} - {invItem.name}
                                 </SelectItem>
@@ -1755,6 +1642,7 @@ function NewPurchaseOrderPageContent() {
                         </TableCell>
                         <TableCell>
                           <Select
+                            disabled={!requiresPurchaseOrderStock(editingItem.lineType)}
                             value={editingItem.warehouseId || '__none__'}
                             onValueChange={(value) => {
                               if (value === '__none__') return;
@@ -2047,197 +1935,10 @@ function NewPurchaseOrderPageContent() {
                     </CardContent>
                   </Card>
 
-                  <Card className="w-full lg:col-span-2">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">Planned Landed Costs (carried to GRN)</CardTitle>
-                      <CardDescription className="text-xs">
-                        Optional. Capture freight/duty/insurance/handling etc now, then copy into the GRN landed cost voucher when receiving.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="flex flex-wrap items-end gap-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs">Plan Currency</Label>
-                          <Input
-                            value={landedCostPlanCurrency}
-                            onChange={(e) => setLandedCostPlanCurrency(e.target.value)}
-                            className="w-28 h-8 uppercase"
-                            placeholder={documentCurrency}
-                          />
-                        </div>
-                        <div className="flex-1 min-w-[240px] space-y-1">
-                          <Label className="text-xs">Notes</Label>
-                          <Input
-                            value={landedCostPlanNotes}
-                            onChange={(e) => setLandedCostPlanNotes(e.target.value)}
-                            className="h-8"
-                            placeholder="Optional notes"
-                          />
-                        </div>
-                        <Button type="button" variant="outline" className="h-8" onClick={addLandedCostPlanLine}>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Add line
-                        </Button>
-                      </div>
-
-                      <div className="rounded-md border">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="min-w-[180px]">Type</TableHead>
-                              <TableHead className="min-w-[220px]">Description</TableHead>
-                              <TableHead className="min-w-[220px]">Service Supplier</TableHead>
-                              <TableHead className="min-w-[150px]">Allocation</TableHead>
-                              <TableHead className="min-w-[140px] text-right">Amount</TableHead>
-                              <TableHead className="min-w-[90px]">Curr</TableHead>
-                              <TableHead className="min-w-[110px] text-right">Rate</TableHead>
-                              <TableHead className="min-w-[160px]">Ref</TableHead>
-                              <TableHead className="w-[60px]"></TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {landedCostPlanItems.length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={9} className="text-center py-6 text-sm text-muted-foreground">
-                                  No planned landed cost lines
-                                </TableCell>
-                              </TableRow>
-                            ) : (
-                              landedCostPlanItems.map((line) => (
-                                <TableRow key={line.tempId}>
-                                  <TableCell>
-                                    <Select
-                                      value={String(line.costType)}
-                                      onValueChange={(v) => {
-                                        const nextCostType = parseInt(v, 10);
-                                        const currentDescription = (line.description || '').trim();
-                                        const previousAutoDescription = getLandedCostTypeLabel(line.costType);
-
-                                        const shouldAutoUpdateDescription =
-                                          !currentDescription || currentDescription === previousAutoDescription;
-
-                                        updateLandedCostPlanLine(line.tempId, {
-                                          costType: nextCostType,
-                                          ...(shouldAutoUpdateDescription
-                                            ? { description: getLandedCostTypeLabel(nextCostType) }
-                                            : {})
-                                        });
-                                      }}
-                                    >
-                                      <SelectTrigger className="h-8">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {LANDED_COST_TYPES.map(t => (
-                                          <SelectItem key={t.value} value={String(t.value)}>{t.label}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Input
-                                      value={line.description}
-                                      onChange={(e) => updateLandedCostPlanLine(line.tempId, { description: e.target.value })}
-                                      className="h-8"
-                                      placeholder="e.g. Freight invoice estimate"
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <Select
-                                      value={line.supplierId || '__none__'}
-                                      onValueChange={(v) => updateLandedCostPlanLine(line.tempId, { supplierId: v === '__none__' ? undefined : v })}
-                                    >
-                                      <SelectTrigger className="h-8">
-                                        <SelectValue placeholder="Select supplier" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="__none__">None</SelectItem>
-                                        {suppliers.map(s => (
-                                          <SelectItem key={s.id} value={s.id}>{s.partnerName}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Select
-                                      value={line.allocationMethod}
-                                      onValueChange={(v: LandedCostAllocationMethod) => updateLandedCostPlanLine(line.tempId, { allocationMethod: v })}
-                                    >
-                                      <SelectTrigger className="h-8">
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {LANDED_COST_METHODS.map(m => (
-                                          <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <Input
-                                      type="number"
-                                      min="0.01"
-                                      step="0.01"
-                                      value={line.amount}
-                                      onChange={(e) => updateLandedCostPlanLine(line.tempId, { amount: parseFloat(e.target.value) || 0 })}
-                                      className="h-8 text-right"
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <Input
-                                      value={line.currency}
-                                      onChange={(e) => updateLandedCostPlanLine(line.tempId, { currency: e.target.value })}
-                                      className="h-8 uppercase"
-                                      placeholder={landedCostPlanCurrency}
-                                    />
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="0.0001"
-                                      value={line.exchangeRate}
-                                      onChange={(e) => updateLandedCostPlanLine(line.tempId, { exchangeRate: parseFloat(e.target.value) || 1 })}
-                                      className="h-8 text-right"
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <Input
-                                      value={line.referenceNumber || ''}
-                                      onChange={(e) => updateLandedCostPlanLine(line.tempId, { referenceNumber: e.target.value })}
-                                      className="h-8"
-                                      placeholder="Invoice/Ref"
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant="ghost"
-                                      className="text-red-600 hover:text-red-700"
-                                      onClick={() => removeLandedCostPlanLine(line.tempId)}
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Planned landed cost total ({(landedCostPlanCurrency || documentCurrency).toUpperCase()}):</span>
-                        <span className="font-medium">
-                          {formatProcurementMoney(
-                            landedCostPlanItems.reduce((sum, i) => sum + ((i.amount || 0) * (i.exchangeRate || 1)), 0),
-                            landedCostPlanCurrency || documentCurrency
-                          )}
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <PurchaseOrderPlannedCosts costs={landedCostPlanItems} onChange={setLandedCostPlanItems}
+                  currency={landedCostPlanCurrency || documentCurrency} onCurrencyChange={setLandedCostPlanCurrency}
+                  notes={landedCostPlanNotes} onNotesChange={setLandedCostPlanNotes} suppliers={suppliers}
+                  lines={items} selectedLineKey={costLineKey} onCloseLine={() => setCostLineKey(null)} />
                 </div>
               )}
             </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -121,13 +122,15 @@ export default function ProcurementBudgetDetailPage() {
 
     try {
       setRevisionSubmitting(true);
-      await procurementBudgetService.createRevision(id, {
+      const revision = await procurementBudgetService.createRevision(id, {
         revisionType: newAmount > budget.allocatedAmount ? 'Increase' : 'Decrease',
         newAmount,
         reason: revisionReason.trim(),
       });
       setRevisionDialogOpen(false);
-      toast.success('Budget revision submitted for independent approval');
+      toast.success(revision.approvalRequired === false
+        ? 'Budget revision applied'
+        : 'Budget revision submitted for independent approval');
       await loadBudget();
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create budget revision');
@@ -267,7 +270,7 @@ export default function ProcurementBudgetDetailPage() {
 
       {/* Tabs */}
       <Tabs defaultValue="details" className="w-full">
-        <TabsList><TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="allocations">Allocations</TabsTrigger><TabsTrigger value="revisions">Revisions</TabsTrigger><WorkflowTabTrigger /></TabsList>
+        <TabsList><TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="allocations">Allocations</TabsTrigger><TabsTrigger value="revisions">Revisions</TabsTrigger><WorkflowTabTrigger {...workflow.tabProps} /></TabsList>
         
         <TabsContent value="details" className="space-y-4">
           <Card>
@@ -276,14 +279,22 @@ export default function ProcurementBudgetDetailPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div><span className="text-sm text-muted-foreground">Department</span><p className="font-medium">{budget.departmentName || 'N/A'}</p></div>
                 <div><span className="text-sm text-muted-foreground">Fiscal Year</span><p className="font-medium">{budget.fiscalYear}</p></div>
-                <div><span className="text-sm text-muted-foreground">Control Level</span><p className="font-medium">{budget.controlLevel}</p></div>
-                <div><span className="text-sm text-muted-foreground">Warning Threshold</span><p className="font-medium">{budget.warningThresholdPercent}%</p></div>
-                <div><span className="text-sm text-muted-foreground">Effective Date</span><p className="font-medium">{budget.effectiveDate ? format(new Date(budget.effectiveDate), 'dd MMM yyyy') : 'N/A'}</p></div>
-                <div><span className="text-sm text-muted-foreground">Expiry Date</span><p className="font-medium">{budget.expiryDate ? format(new Date(budget.expiryDate), 'dd MMM yyyy') : 'N/A'}</p></div>
               </div>
               {budget.notes && <div className="mt-4"><span className="text-sm text-muted-foreground">Notes</span><p className="mt-1">{budget.notes}</p></div>}
             </CardContent>
           </Card>
+          <ProcurementControlAccordion
+            title="Budget policy controls"
+            summary={`${budget.controlLevel} control · Warning at ${budget.warningThresholdPercent}% utilization`}
+            status={getStatusBadge(budget.status)}
+          >
+            <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
+              <div><span className="text-muted-foreground">Control Level</span><p className="font-medium">{budget.controlLevel}</p></div>
+              <div><span className="text-muted-foreground">Warning Threshold</span><p className="font-medium">{budget.warningThresholdPercent}%</p></div>
+              <div><span className="text-muted-foreground">Effective Date</span><p className="font-medium">{budget.effectiveDate ? format(new Date(budget.effectiveDate), 'dd MMM yyyy') : 'N/A'}</p></div>
+              <div><span className="text-muted-foreground">Expiry Date</span><p className="font-medium">{budget.expiryDate ? format(new Date(budget.expiryDate), 'dd MMM yyyy') : 'N/A'}</p></div>
+            </div>
+          </ProcurementControlAccordion>
         </TabsContent>
         
         <TabsContent value="allocations">
@@ -406,7 +417,7 @@ export default function ProcurementBudgetDetailPage() {
           <DialogHeader>
             <DialogTitle>Revise Approved Budget</DialogTitle>
             <DialogDescription>
-              The current approved value remains effective until this revision completes the configured workflow.
+              If an approval process is active, the current value remains effective until approval. Otherwise, saving applies the revision.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -446,7 +457,7 @@ export default function ProcurementBudgetDetailPage() {
             <Button variant="outline" onClick={() => setRevisionDialogOpen(false)} disabled={revisionSubmitting}>Cancel</Button>
             <Button onClick={handleCreateRevision} disabled={revisionSubmitting}>
               {revisionSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Submit Revision
+              Save Revision
             </Button>
           </DialogFooter>
         </DialogContent>

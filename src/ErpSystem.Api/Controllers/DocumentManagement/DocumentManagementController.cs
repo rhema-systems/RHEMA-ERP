@@ -7,13 +7,16 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Models;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Api.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
@@ -44,6 +47,9 @@ public sealed class DocumentManagementController : ControllerBase
     private readonly INotificationService _notificationService;
     private readonly IProcedureCaseService _procedureCaseService;
     private readonly ILogger<DocumentManagementController> _logger;
+    private readonly IVendorPaymentService? _vendorPayments;
+    private readonly IAuthorizationService? _authorization;
+    private readonly Dictionary<Guid, HashSet<Guid>> _paymentEvidenceRecordIds = new();
 
     public DocumentManagementController(
         ICentralDocumentManagementService documentManagement,
@@ -55,7 +61,9 @@ public sealed class DocumentManagementController : ControllerBase
         ICentralDocumentPdfSigningService pdfSigningService,
         INotificationService notificationService,
         IProcedureCaseService procedureCaseService,
-        ILogger<DocumentManagementController> logger)
+        ILogger<DocumentManagementController> logger,
+        IVendorPaymentService? vendorPayments = null,
+        IAuthorizationService? authorization = null)
     {
         _documentManagement = documentManagement;
         _db = db;
@@ -67,6 +75,8 @@ public sealed class DocumentManagementController : ControllerBase
         _notificationService = notificationService;
         _procedureCaseService = procedureCaseService;
         _logger = logger;
+        _vendorPayments = vendorPayments;
+        _authorization = authorization;
     }
 
     [HttpGet("workspaces")]
@@ -490,6 +500,11 @@ public sealed class DocumentManagementController : ControllerBase
         if (record is null)
         {
             return NotFound(new { success = false, message = "Generated DMS document was not found." });
+        }
+
+        if (await IsPaymentOwnedRecordAsync(tenantId, record, cancellationToken))
+        {
+            return Forbid();
         }
 
         var normalizedAction = NormalizeMetadataField(action);
@@ -1562,6 +1577,10 @@ public sealed class DocumentManagementController : ControllerBase
             ?? "Unreferenced case", 140);
         var generatedSourceReference = $"{sourceRecord} / {template.TemplateCode}";
         var sourceModule = TrimOrDefault(request.SourceModule, template.Module);
+        if (string.Equals(template.DocumentType, nameof(VendorPayment), StringComparison.OrdinalIgnoreCase))
+        {
+            return Forbid(); // Payment-owned attachments are created through the payment owner only.
+        }
         if (!CanUseSourceModuleForDms(sourceModule))
         {
             return Forbid();
@@ -1588,6 +1607,11 @@ public sealed class DocumentManagementController : ControllerBase
                 && item.MetadataTemplateCode == template.MetadataTemplateCode
                 && item.SourceRecordReference == generatedSourceReference,
                 cancellationToken);
+
+        if (record is not null && await IsPaymentOwnedRecordAsync(tenantId, record, cancellationToken))
+        {
+            return Forbid();
+        }
 
         if (record is not null
             && !CanUseSourceModuleForDms(record.SourceModule)
@@ -1965,6 +1989,10 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpPost("records")]
     public async Task<IActionResult> CreateRecord([FromBody] UpsertDocumentRecordRequest request, CancellationToken cancellationToken)
     {
+        if (string.Equals(request.SourceEntityType?.Trim(), nameof(VendorPayment), StringComparison.OrdinalIgnoreCase))
+        {
+            return Forbid();
+        }
         if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.SourceModule))
         {
             return BadRequest(new { success = false, message = "Title and source module are required." });
@@ -2032,6 +2060,10 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpPut("records/{id:guid}")]
     public async Task<IActionResult> UpdateRecord(Guid id, [FromBody] UpsertDocumentRecordRequest request, CancellationToken cancellationToken)
     {
+        if (string.Equals(request.SourceEntityType?.Trim(), nameof(VendorPayment), StringComparison.OrdinalIgnoreCase))
+        {
+            return Forbid();
+        }
         var tenantId = GetTenantId();
         var record = await _db.CentralDocumentRecords
             .FirstOrDefaultAsync(item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
@@ -2822,6 +2854,12 @@ public sealed class DocumentManagementController : ControllerBase
             return BadRequest(new { success = false, message = "Download format must be pdf or word." });
         }
 
+        var paymentContent = await OpenPaymentOwnedVersionAsync(record, version, tenantId, normalizedFormat, false, cancellationToken);
+        if (paymentContent is not null)
+        {
+            return paymentContent;
+        }
+
         if (normalizedFormat == "pdf")
         {
             var pdfFile = await OpenPdfVersionFileAsync(record, version, tenantId, cancellationToken);
@@ -2898,6 +2936,12 @@ public sealed class DocumentManagementController : ControllerBase
             return BadRequest(new { success = false, message = "This DMS record does not have a viewable current version." });
         }
 
+        var paymentContent = await OpenPaymentOwnedVersionAsync(record, version, tenantId, "pdf", true, cancellationToken);
+        if (paymentContent is not null)
+        {
+            return paymentContent;
+        }
+
         var pdfFile = await OpenPdfVersionFileAsync(record, version, tenantId, cancellationToken);
         if (!pdfFile.Success || pdfFile.Stream is null)
         {
@@ -2936,6 +2980,12 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
+        var paymentContent = await OpenPaymentOwnedVersionAsync(record, version, tenantId, "pdf", true, cancellationToken);
+        if (paymentContent is not null)
+        {
+            return paymentContent;
+        }
+
         var pdfFile = await OpenPdfVersionFileAsync(record, version, tenantId, cancellationToken);
         if (!pdfFile.Success || pdfFile.Stream is null)
         {
@@ -2949,6 +2999,10 @@ public sealed class DocumentManagementController : ControllerBase
     [HttpPost("source-handoffs/register")]
     public async Task<IActionResult> RegisterSourceHandoff([FromBody] SourceDocumentHandoffRequest request, CancellationToken cancellationToken)
     {
+        if (string.Equals(request.SourceEntityType?.Trim(), nameof(VendorPayment), StringComparison.OrdinalIgnoreCase))
+        {
+            return Forbid();
+        }
         if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.SourceModule))
         {
             return BadRequest(new { success = false, message = "Title and source module are required." });
@@ -5551,6 +5605,12 @@ public sealed class DocumentManagementController : ControllerBase
         Func<CentralDocumentAccessRule, bool> actionPredicate,
         CancellationToken cancellationToken)
     {
+        // The source payment owns immutable attachments. DMS administrators may not replace,
+        // relabel, republish or delete their current file through a generic document action.
+        if (await IsPaymentOwnedRecordAsync(tenantId, record, cancellationToken))
+        {
+            return false;
+        }
         if (IsDmsAccessAdministrator())
         {
             return true;
@@ -5587,6 +5647,10 @@ public sealed class DocumentManagementController : ControllerBase
         CentralDocumentRecord record,
         CancellationToken cancellationToken)
     {
+        if (await IsPaymentOwnedRecordAsync(tenantId, record, cancellationToken))
+        {
+            return await CanViewPaymentRecordAsync(tenantId, record, cancellationToken);
+        }
         if (CanUseSourceModuleForDms(record.SourceModule))
         {
             return true;
@@ -5608,6 +5672,130 @@ public sealed class DocumentManagementController : ControllerBase
                 record,
                 rule => rule.CanView,
                 cancellationToken);
+    }
+
+    private async Task<bool> IsPaymentOwnedRecordAsync(
+        Guid tenantId, CentralDocumentRecord record, CancellationToken cancellationToken)
+    {
+        if (string.Equals(record.SourceEntityType?.Trim(), nameof(VendorPayment), StringComparison.OrdinalIgnoreCase)
+            || string.Equals(record.AccessProfile, "Finance AP payment restricted", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        // Register/dashboard reads can contain thousands of unrelated documents. Fetch the
+        // source-link identity set once per tenant/request, not once for each displayed row.
+        if (!_paymentEvidenceRecordIds.TryGetValue(tenantId, out var paymentRecordIds))
+        {
+            paymentRecordIds = (await _db.Set<VendorPaymentEvidenceLink>().AsNoTracking()
+                .Where(link => link.TenantId == tenantId).Select(link => link.CentralDocumentRecordId)
+                .Distinct().ToListAsync(cancellationToken)).ToHashSet();
+            _paymentEvidenceRecordIds[tenantId] = paymentRecordIds;
+        }
+        return paymentRecordIds.Contains(record.Id);
+    }
+
+    private async Task<bool> CanViewPaymentRecordAsync(
+        Guid tenantId, CentralDocumentRecord record, CancellationToken cancellationToken)
+    {
+        if (record.TenantId != tenantId || record.IsDeleted || _vendorPayments is null || _authorization is null
+            || !string.Equals(record.SourceEntityType?.Trim(), nameof(VendorPayment), StringComparison.OrdinalIgnoreCase)
+            || record.SourceRecordId is not Guid paymentId || paymentId == Guid.Empty)
+        {
+            return false;
+        }
+
+        // Profile/source roles are not Finance permissions and do not grant bank-account scope.
+        if (!(await _authorization.AuthorizeAsync(User, FinancePermissions.ViewFinance)).Succeeded)
+        {
+            return false;
+        }
+        if (await _db.Set<VendorPaymentEvidenceLink>().AsNoTracking().AnyAsync(link =>
+            link.TenantId == tenantId && link.CentralDocumentRecordId == record.Id && link.VendorPaymentId != paymentId,
+            cancellationToken))
+        {
+            return false;
+        }
+        try
+        {
+            // The established payment read owner filters the exact current-tenant source through
+            // GetPermittedBankAccountIdsAsync(Read), including restricted/null-bank fail-closed behavior.
+            var payment = await _vendorPayments.GetByIdAsync(paymentId, cancellationToken);
+            return payment?.Id == paymentId;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private async Task<IActionResult?> OpenPaymentOwnedVersionAsync(
+        CentralDocumentRecord record, CentralDocumentVersion version, Guid tenantId,
+        string format, bool inline, CancellationToken cancellationToken)
+    {
+        if (!await IsPaymentOwnedRecordAsync(tenantId, record, cancellationToken))
+        {
+            return null; // Preserve the existing file/rendition pipeline for other document sources.
+        }
+        if (_vendorPayments is null || record.TenantId != tenantId || version.TenantId != tenantId
+            || record.SourceRecordId is not Guid paymentId || version.DocumentRecordId != record.Id)
+        {
+            return Forbid();
+        }
+        var evidence = await _db.Set<VendorPaymentEvidenceLink>().AsNoTracking().SingleOrDefaultAsync(link =>
+            link.TenantId == tenantId && !link.IsDeleted && link.VendorPaymentId == paymentId
+            && link.CentralDocumentRecordId == record.Id && link.CentralDocumentVersionId == version.Id
+            && link.FileUploadRecordId == version.FileUploadRecordId, cancellationToken);
+        if (evidence is null)
+        {
+            return NotFound(new { success = false, message = "The exact payment attachment version was not found." });
+        }
+
+        try
+        {
+            // The payment owner rechecks bank scope, clean/current source metadata and the actual
+            // file's SHA-256. Never fall back to a DMS path or an unverified cached rendition.
+            var content = await _vendorPayments.OpenEvidenceAsync(paymentId, evidence.Id, cancellationToken);
+            if (content is null)
+            {
+                return NotFound(new { success = false, message = "The payment attachment was not found." });
+            }
+            var supported = format == "pdf"
+                ? IsPdfFile(content.ContentType, content.FileName)
+                : IsWordFile(content.ContentType, content.FileName);
+            if (!supported)
+            {
+                await content.DisposeAsync();
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Payment attachments are available only in their original format. Download the original file from the payment."
+                });
+            }
+
+            var fileName = SafeFileName(FileNameFromPath(content.FileName) ?? "payment-attachment");
+            var contentType = format == "pdf" ? "application/pdf" : content.ContentType;
+            if (inline)
+            {
+                Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
+                return File(content.Content, contentType);
+            }
+            // FileStreamResult owns stream disposal after the response has been sent.
+            return File(content.Content, contentType, fileName);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Title = "Payment attachment unavailable",
+                Detail = "The payment attachment is unavailable or failed its integrity checks.",
+                Extensions = { ["code"] = "AP_PAYMENT_EVIDENCE_UNAVAILABLE" }
+            });
+        }
     }
 
     private async Task<bool> CanViewLinkedPropertyAgreementReviewRecordAsync(
@@ -5819,6 +6007,10 @@ public sealed class DocumentManagementController : ControllerBase
         GeneratedDocumentTemplateDefinition template,
         CancellationToken cancellationToken)
     {
+        if (await IsPaymentOwnedRecordAsync(tenantId, record, cancellationToken))
+        {
+            return false;
+        }
         if (IsDmsAccessAdministrator())
         {
             return true;

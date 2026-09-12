@@ -105,13 +105,13 @@ public class SimpleWorkflowService : IWorkflowService
     {
         if (string.IsNullOrWhiteSpace(entityType))
         {
-            return false;
+            throw new ArgumentException("Entity type is required.", nameof(entityType));
         }
 
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
         {
-            return false;
+            throw new UnauthorizedAccessException("An authenticated tenant is required to resolve approval configuration.");
         }
 
         var entityTypeRecord = await _entityTypeRepository.GetByNameAsync(entityType, tenantId);
@@ -121,15 +121,35 @@ public class SimpleWorkflowService : IWorkflowService
             entityTypeRecord = activeTypes.FirstOrDefault(candidate => IsEntityType(candidate, entityType));
         }
 
-        if (entityTypeRecord == null)
+        if (entityTypeRecord == null || !entityTypeRecord.IsActive || entityTypeRecord.IsDeleted || entityTypeRecord.TenantId != tenantId)
         {
             return false;
         }
 
         var definitions = await _definitionRepository.GetActiveByEntityTypeAsync(entityTypeRecord.Id);
         return definitions.Any(definition => definition.IsActive &&
+            definition.TenantId == tenantId && definition.EntityTypeId == entityTypeRecord.Id &&
             definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
             !definition.IsDeleted);
+    }
+
+    public async Task<bool> HasActiveApprovalInstanceAsync(string entityType, Guid entityId)
+    {
+        if (string.IsNullOrWhiteSpace(entityType)) throw new ArgumentException("Entity type is required.", nameof(entityType));
+        if (entityId == Guid.Empty) throw new ArgumentException("Entity id is required.", nameof(entityId));
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty) throw new UnauthorizedAccessException("An authenticated tenant is required to resolve approval configuration.");
+        var entityTypeRecord = await _entityTypeRepository.GetByNameAsync(entityType, tenantId);
+        if (entityTypeRecord == null)
+        {
+            entityTypeRecord = (await _entityTypeRepository.GetActiveEntityTypesAsync(tenantId))
+                .FirstOrDefault(candidate => IsEntityType(candidate, entityType));
+        }
+        if (entityTypeRecord == null) return false;
+        var instances = await _instanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString());
+        return instances.Any(instance => instance.TenantId == tenantId && !instance.IsDeleted &&
+            instance.Status is WorkflowInstanceStatus.Created or WorkflowInstanceStatus.InProgress or
+                WorkflowInstanceStatus.Waiting or WorkflowInstanceStatus.Suspended);
     }
 
     public Task<WorkflowExecutionResult> StartApprovalWorkflowAsync(
@@ -147,15 +167,12 @@ public class SimpleWorkflowService : IWorkflowService
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
 
         var entityTypeRecord = await ResolveEntityTypeAsync(entityType, tenantId);
-        var definition = workflowDefinitionId.HasValue
-            ? await ResolveSelectedDefinitionAsync(entityTypeRecord, tenantId, workflowDefinitionId.Value)
-            : await ResolveActiveDefinitionAsync(entityTypeRecord, tenantId);
-
         // Idempotency/consistency: prevent multiple active workflow instances for the same entity.
         // If an instance is already running, return it instead of starting a duplicate.
         var existingInstances = await _instanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString());
         var activeCandidates = existingInstances
-            .Where(i => i.Status is WorkflowInstanceStatus.Created or WorkflowInstanceStatus.InProgress or WorkflowInstanceStatus.Waiting or WorkflowInstanceStatus.Suspended)
+            .Where(i => i.TenantId == tenantId && !i.IsDeleted &&
+                i.Status is WorkflowInstanceStatus.Created or WorkflowInstanceStatus.InProgress or WorkflowInstanceStatus.Waiting or WorkflowInstanceStatus.Suspended)
             .OrderByDescending(i => i.UpdatedAt ?? i.CreatedAt)
             .ToList();
 
@@ -174,9 +191,27 @@ public class SimpleWorkflowService : IWorkflowService
 
         existingActiveInstance ??= activeCandidates.FirstOrDefault();
 
+        // Deactivating a definition affects new submissions, not an existing
+        // approval's retained route. Resolve that route before looking for a
+        // currently active definition, while still rejecting an explicit rebind.
+        WorkflowDefinition definition;
         if (existingActiveInstance != null)
         {
-            if (existingActiveInstance.WorkflowDefinitionId != definition.Id)
+            definition = await _definitionRepository.GetWithDetailsAsync(existingActiveInstance.WorkflowDefinitionId)
+                ?? throw new InvalidOperationException("The existing approval's retained workflow definition was not found.");
+            if (definition.TenantId != tenantId || definition.EntityTypeId != entityTypeRecord.Id || definition.IsDeleted)
+                throw new InvalidOperationException("The existing approval's workflow definition is not valid for this record.");
+        }
+        else
+        {
+            definition = workflowDefinitionId.HasValue
+                ? await ResolveSelectedDefinitionAsync(entityTypeRecord, tenantId, workflowDefinitionId.Value)
+                : await ResolveActiveDefinitionAsync(entityTypeRecord, tenantId);
+        }
+
+        if (existingActiveInstance != null)
+        {
+            if (workflowDefinitionId.HasValue && existingActiveInstance.WorkflowDefinitionId != workflowDefinitionId.Value)
             {
                 return new WorkflowExecutionResult
                 {
@@ -761,8 +796,11 @@ public class SimpleWorkflowService : IWorkflowService
 
     private async Task<WorkflowDefinition> ResolveActiveDefinitionAsync(WorkflowEntityType entityTypeRecord, Guid tenantId)
     {
+        if (!entityTypeRecord.IsActive || entityTypeRecord.IsDeleted || entityTypeRecord.TenantId != tenantId)
+            throw new InvalidOperationException("The workflow entity type is not active for this tenant.");
         var definitions = await _definitionRepository.GetActiveByEntityTypeAsync(entityTypeRecord.Id);
         var definition = definitions
+            .Where(d => d.TenantId == tenantId && d.EntityTypeId == entityTypeRecord.Id)
             .Where(WorkflowDefinitionLifecyclePolicy.IsRuntimeEligible)
             .OrderByDescending(d => d.Version)
             .ThenByDescending(d => d.UpdatedAt ?? d.CreatedAt)
@@ -781,6 +819,8 @@ public class SimpleWorkflowService : IWorkflowService
         Guid tenantId,
         Guid workflowDefinitionId)
     {
+        if (!entityTypeRecord.IsActive || entityTypeRecord.IsDeleted || entityTypeRecord.TenantId != tenantId)
+            throw new InvalidOperationException("The workflow entity type is not active for this tenant.");
         var definition = await _definitionRepository.GetWithDetailsAsync(workflowDefinitionId);
         if (definition is null || definition.TenantId != tenantId || definition.EntityTypeId != entityTypeRecord.Id)
             throw new InvalidOperationException(
@@ -1281,6 +1321,27 @@ public class SimpleWorkflowService : IWorkflowService
             context["costApportionmentBasis"] = transfer.CostApportionmentBasis;
             context["requestedById"] = transfer.RequestedById;
             context["approvedById"] = transfer.ApprovedById;
+        }
+
+        if (IsEntityType(entityTypeRecord, "PurchaseReturn", "Purchase Return", "INVENTORY_SUPPLIER_RETURN"))
+        {
+            // Physical inventory returns are not the quarantined Finance SupplierReturn entity.
+            if (tenantId == Guid.Empty || entityTypeRecord.TenantId != tenantId)
+                throw new InvalidOperationException("Inventory supplier return workflow is outside the current tenant.");
+            var purchaseReturn = await _unitOfWork.Repository<ErpSystem.Core.Entities.Inventory.PurchaseReturn>()
+                .FirstOrDefaultAsync(value => value.Id == entityId &&
+                    value.TenantId == tenantId && !value.IsDeleted)
+                ?? throw new InvalidOperationException("Inventory supplier return not found");
+            context["returnNumber"] = purchaseReturn.ReturnNumber;
+            context["status"] = purchaseReturn.Status;
+            context["warehouseId"] = purchaseReturn.WarehouseId;
+            context["supplierId"] = purchaseReturn.SupplierId;
+            context["goodsReceiptNoteId"] = purchaseReturn.GoodsReceiptNoteId;
+            context["purchaseOrderId"] = purchaseReturn.PurchaseOrderId;
+            context["requestedById"] = purchaseReturn.RequestedById;
+            context["approvedById"] = purchaseReturn.ApprovedById;
+            context["totalQuantity"] = purchaseReturn.TotalQuantity;
+            context["totalValue"] = purchaseReturn.TotalValue;
         }
 
         if (IsEntityType(entityTypeRecord, "INVENTORY_REQUISITION", "InventoryRequisition", "Inventory Requisition", "Requisition"))

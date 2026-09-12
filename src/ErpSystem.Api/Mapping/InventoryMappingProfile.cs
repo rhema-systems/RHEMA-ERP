@@ -10,6 +10,7 @@ public class InventoryMappingProfile : Profile
     {
         // InventoryItem mappings
         CreateMap<InventoryItem, InventoryItemDto>()
+            .ForMember(dest => dest.AverageCost, opt => opt.MapFrom(src => src.AverageCost))
             .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.Status == ErpSystem.Core.Enums.ItemStatus.Active))
             .ForMember(dest => dest.UnitOfMeasureScheduleId, opt => opt.MapFrom(src => src.UnitOfMeasureScheduleId))
@@ -20,6 +21,7 @@ public class InventoryMappingProfile : Profile
             .ForMember(dest => dest.RowVersion, opt => opt.MapFrom(src => Convert.ToBase64String(src.RowVersion)));
 
         CreateMap<InventoryItem, InventoryItemDetailDto>()
+            .ForMember(dest => dest.AverageCost, opt => opt.MapFrom(src => src.AverageCost))
             .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.Status == ErpSystem.Core.Enums.ItemStatus.Active))
             .ForMember(dest => dest.UnitOfMeasureScheduleId, opt => opt.MapFrom(src => src.UnitOfMeasureScheduleId))

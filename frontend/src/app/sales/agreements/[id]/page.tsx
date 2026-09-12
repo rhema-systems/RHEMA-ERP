@@ -317,10 +317,12 @@ export default function SalesAgreementDetailPage() {
         </div>
       </div>
 
-      <WorkflowApprovalHistoryPanel
-        {...workflow.actionProps}
-        showActions={false}
-      />
+      {workflow.visibility.showTab && (
+        <WorkflowApprovalHistoryPanel
+          {...workflow.actionProps}
+          showActions={false}
+        />
+      )}
 
       {/* Milestones */}
       {agreement.milestones.length > 0 && (

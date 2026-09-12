@@ -263,7 +263,15 @@ public sealed class ProcurementPurchaseOrderSodService :
                 purchaseOrder.CreatedById,
                 participants.FrameworkCreatorUserId);
 
-        var approval = await EvaluateCheckAsync(
+        var approval = !purchaseOrder.ApprovalRequired
+            ? new ProcurementPurchaseOrderSodCheckDto
+            {
+                Key = "approval", Label = "PO approval", Action = "Approve",
+                ControlCode = ProcurementPurchaseOrderSodRules.ApprovalControl,
+                Allowed = false, Code = "PO_APPROVAL_NOT_REQUIRED",
+                Message = "This purchase order was finalized without an approval process."
+            }
+            : await EvaluateCheckAsync(
             "approval",
             "Independent PO approval",
             "Approve",
@@ -292,8 +300,9 @@ public sealed class ProcurementPurchaseOrderSodService :
             correlationId,
             cancellationToken);
         var checks = new[] { approval, receipt };
-        var canApprove = approval.Allowed;
+        var canApprove = purchaseOrder.ApprovalRequired && approval.Allowed;
         var canReceive = receipt.Allowed;
+        var ready = (!purchaseOrder.ApprovalRequired || canApprove) && canReceive;
         return new ProcurementPurchaseOrderSodReadinessDto
         {
             PurchaseOrderId = purchaseOrder.Id,
@@ -301,12 +310,15 @@ public sealed class ProcurementPurchaseOrderSodService :
             Status = purchaseOrder.Status,
             CurrentActorUserId = _currentUser.UserId,
             CanApprove = canApprove,
+            ApprovalRequired = purchaseOrder.ApprovalRequired,
             CanReceive = canReceive,
-            Code = canApprove && canReceive
+            Code = ready
                 ? "PO_SOD_READY"
                 : "PO_SOD_RESTRICTED",
-            Message = canApprove && canReceive
-                ? "The current actor is independent for both PO approval and primary goods-receipt confirmation."
+            Message = ready
+                ? purchaseOrder.ApprovalRequired
+                    ? "The current actor is independent for both PO approval and primary goods-receipt confirmation."
+                    : "Approval is not required. The current actor is independent for goods receipt."
                 : "One or more PO segregation-of-duties actions are prohibited for the current actor.",
             EvaluatedAtUtc = DateTime.UtcNow,
             DecisionKeys = DecisionKeys,

@@ -124,6 +124,16 @@ UPDATE PurchaseOrders SET Status='Submitted' WHERE ProcurementSourceType=0;
     'PASS: RFQ mapped stock still uses retained RFQ source-line identity'
     Assert-Blocked 'RFQ excess quantity still rejected' "UPDATE PurchaseOrderItems SET OrderedQuantity=3,LineTotal=150 WHERE SourceRfqItemId IS NOT NULL" 51227
     Assert-Blocked 'RFQ supplier ownership still checked' "UPDATE PurchaseOrders SET BusinessPartnerId=NEWID() WHERE ProcurementSourceType=0" 51222
+    # New classifications remain subject to the same approved-source commercial caps.
+    Invoke-TestSql 'ALTER TABLE PurchaseOrderItems ADD LineType int NOT NULL DEFAULT 1;'
+    Invoke-TestSql 'ALTER TABLE PurchaseOrderItems ADD CONSTRAINT CK_PurchaseOrderItems_LineType CHECK (LineType IN (1,2,3,4));'
+    if ([int](Read-TestScalar 'SELECT COUNT(*) FROM PurchaseOrderItems WHERE LineType<>1') -ne 0) { throw 'Historic classification was changed' }
+    foreach ($taskLineType in @(1,2,3)) {
+        Invoke-TestSql "UPDATE PurchaseOrderItems SET InventoryItemId=NULL, LineType=$taskLineType WHERE SourceRfqItemId IS NULL; UPDATE PurchaseOrders SET Status='Draft' WHERE ProcurementSourceType=2;"
+        Assert-Blocked "Unmapped line type $taskLineType still enforces approved quantity" 'UPDATE PurchaseOrderItems SET OrderedQuantity=OrderedQuantity+1,LineTotal=(OrderedQuantity+1)*UnitPrice WHERE SourceRfqItemId IS NULL' 51228
+        "PASS: Descriptive PO type $taskLineType persists without an inventory ID"
+    }
+    Assert-Blocked 'Unknown line classification rejected' 'UPDATE PurchaseOrderItems SET LineType=99' 547
     # A drifted key is rejected instead of silently removing unknown logic.
     $taskStored=[string](Read-TestScalar "SELECT OBJECT_DEFINITION(OBJECT_ID('dbo.TR_PurchaseOrderItems_ApprovedCommercialCapacity'))")
     $taskStored=$taskStored.Replace("ISNULL(item.ItemDescription,'')","ISNULL(item.ItemDescription,'unexpected')")

@@ -8,6 +8,7 @@ namespace ErpSystem.Core.Entities.Procurement;
 [Table("ProcurementTenderControls")]
 public sealed class ProcurementTenderControl : TenantEntity
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid TenderId { get; set; }
     public Guid SourcingCaseId { get; set; }
     public Guid MethodRuleId { get; set; }

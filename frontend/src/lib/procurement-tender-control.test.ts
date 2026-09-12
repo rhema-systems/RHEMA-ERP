@@ -3,6 +3,7 @@ import {
   buildFinancialScores,
   buildTechnicalScores,
   getTenderControlReadiness,
+  getTenderControlStatusLabel,
   tenderControlStatusLabel,
 } from './procurement-tender-control';
 import {
@@ -34,6 +35,13 @@ const control = (status: Status): ProcurementTenderControl => ({
 });
 
 describe('NCT/ICT tender control helpers', () => {
+  it('labels a directly completed recommendation without claiming authority approval', () => {
+    expect(getTenderControlStatusLabel({ status: Status.Approved, approvalRequired: false })).toBe('Recommendation complete');
+  });
+  it('preserves the authority label when the source required approval or is a legacy record', () => {
+    expect(getTenderControlStatusLabel({ status: Status.Approved, approvalRequired: true })).toBe('Authority approval complete');
+    expect(getTenderControlStatusLabel({ status: Status.Approved })).toBe('Authority approval complete');
+  });
   it('keeps advertised submissions sealed and separates late receipts', () => {
     vi.setSystemTime(new Date('2026-07-21T00:00:00Z'));
     expect(getTenderControlReadiness(control(Status.Advertised))).toMatchObject({

@@ -248,6 +248,7 @@ namespace ErpSystem.Api.Extensions
             // Procurement repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderItemRepository>();
+            services.AddScoped<ErpSystem.Core.Services.Procurement.PurchaseOrderLandedCostPlanService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanItemRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierRepository, ErpSystem.Data.Repositories.Procurement.SupplierRepository>();
@@ -762,6 +763,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryTransferService, ErpSystem.Core.Services.Inventory.InventoryTransferService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IItemSupplierService, ErpSystem.Core.Services.Inventory.ItemSupplierService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IPhysicalCountService, ErpSystem.Core.Services.Inventory.PhysicalCountService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IWarehouseDefaultLocationService, ErpSystem.Core.Services.Inventory.WarehouseDefaultLocationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryIssueFinanceAssetService, ErpSystem.Api.Services.Finance.InventoryIssueFinanceAssetPostingService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryReturnControlService, ErpSystem.Core.Services.Inventory.InventoryReturnControlService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryRequisitionService, ErpSystem.Core.Services.Inventory.InventoryRequisitionService>();
@@ -885,6 +887,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorInvoiceMatchExceptionService, ErpSystem.Api.Services.Finance.AP.VendorInvoiceMatchExceptionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IVendorPaymentService, ErpSystem.Api.Services.Finance.AP.VendorPaymentService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.ISupplierDebitNoteService, ErpSystem.Api.Services.Finance.AP.SupplierDebitNoteService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff>(provider =>
+                (ErpSystem.Core.Interfaces.Finance.IInventorySupplierReturnFinanceHandoff)provider.GetRequiredService<ErpSystem.Core.Interfaces.Finance.ISupplierDebitNoteService>());
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IApSupplierIdentityService, ErpSystem.Api.Services.Finance.AP.ApSupplierIdentityService>();
             // FIN-INT-012/013 is a Finance-owned, fail-closed consumer only. Procurement/Inventory
             // supplies approved immutable envelopes, never Finance account ids, and remains the

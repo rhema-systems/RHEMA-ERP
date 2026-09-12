@@ -929,7 +929,7 @@ export default function PayrollPage() {
         <TabsList className="flex h-auto flex-wrap justify-start">
           <TabsTrigger value="runs">Run Desk</TabsTrigger>
           <TabsTrigger value="reports">Payslips & Journals</TabsTrigger>
-          <WorkflowTabTrigger value="workflow" />
+          <WorkflowTabTrigger value="workflow" entityType="PayrollRun" entityId={selectedRun?.id} workflowSummary={selectedWorkflowSummary} />
         </TabsList>
 
         <TabsContent value="runs">

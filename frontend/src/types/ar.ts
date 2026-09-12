@@ -82,7 +82,9 @@ export interface Invoice {
     totalAmount: number;
     paidAmount: number;
     balanceAmount: number;
-    status: 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Sent' | 'Posted' | 'PartiallyPaid' | 'Paid' | 'Void' | 'Cancelled' | 'Overdue';
+    status: 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'ReadyToPost' | 'Sent' | 'Posted' | 'PartiallyPaid' | 'Paid' | 'Void' | 'Cancelled' | 'Overdue';
+    approvalRequired?: boolean;
+    workflowInstanceId?: string | null;
     currencyCode: string;
     exchangeRate: number;
     exchangeRateId?: string;

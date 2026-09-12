@@ -250,7 +250,8 @@ export default function SalesAllocationDetailPage() {
   }
 
   const isActive = ACTIVE_STATUSES.has(allocation.status);
-  const canMarkAllocated = ['Reserved', 'Approved'].includes(allocation.status);
+  // Reserved allocations use Submit, which centrally chooses direct completion or approval.
+  const canMarkAllocated = allocation.status === 'Approved' && workflow.visibility.known && !workflow.visibility.active;
   const canRelease = isActive && !['Sold', 'Leased'].includes(allocation.status);
   const canCancel = isActive && !['Sold', 'Leased'].includes(allocation.status);
   const canTransfer = isActive && allocation.status !== 'PendingApproval';
@@ -454,10 +455,12 @@ export default function SalesAllocationDetailPage() {
         </Card>
       </div>
 
-      <WorkflowApprovalHistoryPanel
-        {...workflow.actionProps}
-        showActions={false}
-      />
+      {workflow.visibility.showTab && (
+        <WorkflowApprovalHistoryPanel
+          {...workflow.actionProps}
+          showActions={false}
+        />
+      )}
 
       <Dialog open={transferDialogOpen} onOpenChange={setTransferDialogOpen}>
         <DialogContent>

@@ -36,7 +36,8 @@ public sealed class ProcurementReceiptInspectionCaseConfiguration :
         builder.HasOne(item => item.ReplacementInspectionCase).WithMany()
             .HasForeignKey(item => item.ReplacementInspectionCaseId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.WorkflowDefinition).WithMany()
-            .HasForeignKey(item => item.WorkflowDefinitionId).OnDelete(DeleteBehavior.Restrict);
+            .HasForeignKey(item => item.WorkflowDefinitionId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+        builder.Property(item => item.ApprovalRequired).HasDefaultValue(true).ValueGeneratedNever();
         builder.HasOne(item => item.WorkflowInstance).WithMany()
             .HasForeignKey(item => item.WorkflowInstanceId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -94,7 +95,7 @@ public sealed class ProcurementReceiptInspectionActionConfiguration :
         builder.HasIndex(item => new { item.TenantId, item.InspectionCaseId, item.Sequence }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Sequence", "[Sequence] >= 1");
-        builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Type", "[ActionType] BETWEEN 0 AND 14");
+        builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Type", "[ActionType] BETWEEN 0 AND 15");
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_Hash", "LEN([IntegrityHash]) = 64");
         builder.HasCheckConstraint("CK_ProcurementReceiptInspectionActions_RequestFingerprint",
             "[RequestFingerprint] IS NULL OR LEN([RequestFingerprint]) = 64");

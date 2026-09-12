@@ -521,10 +521,12 @@ export default function SalesOrderDetailPage() {
         </CardContent>
       </Card>
 
-      <WorkflowApprovalHistoryPanel
-        {...workflow.actionProps}
-        showActions={false}
-      />
+      {workflow.visibility.showTab && (
+        <WorkflowApprovalHistoryPanel
+          {...workflow.actionProps}
+          showActions={false}
+        />
+      )}
 
       {/* Status History */}
       {order.statusHistory && order.statusHistory.length > 0 && (

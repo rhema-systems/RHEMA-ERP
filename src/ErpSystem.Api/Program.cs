@@ -679,7 +679,7 @@ var migrationTimeout = TimeSpan.FromSeconds(Math.Max(
 var failFastOnDatabaseInitializationError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDatabaseInitializationError",
     true);
-var seedDevelopmentData = app.Configuration.GetValue("StartupInitialization:SeedDevelopmentData", true);
+var seedDevelopmentData = app.Configuration.GetValue("StartupInitialization:SeedDevelopmentData", false);
 var allowDevelopmentDataSeedingOutsideDevelopment = app.Configuration.GetValue(
     StartupInitializationPolicy.AllowDevelopmentDataSeedingOutsideDevelopmentKey,
     false);
@@ -687,7 +687,7 @@ var developmentDataSeedingPermitted =
     StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
         app.Environment.EnvironmentName,
         allowDevelopmentDataSeedingOutsideDevelopment);
-var seedWorkflowDefinitions = app.Configuration.GetValue("StartupInitialization:SeedWorkflowDefinitions", true);
+var seedWorkflowDefinitions = app.Configuration.GetValue("StartupInitialization:SeedWorkflowDefinitions", false);
 var failFastOnDevelopmentSeedError = app.Configuration.GetValue(
     "StartupInitialization:FailFastOnDevelopmentSeedError",
     false);

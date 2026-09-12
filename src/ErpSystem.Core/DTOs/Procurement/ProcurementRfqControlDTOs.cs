@@ -147,6 +147,7 @@ public sealed class DecideProcurementRfqEvaluationRequest
 
 public sealed class ProcurementRfqEvaluationDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public ProcurementRfqEvaluationStatus Status { get; set; }
     public string AwardMode { get; set; } = string.Empty;

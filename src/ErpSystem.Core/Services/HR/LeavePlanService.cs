@@ -177,7 +177,7 @@ public class LeavePlanService : ILeavePlanService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
+        adapter.ApplySubmitOutcome(entity, workflowResult, GetCurrentUserId());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -324,7 +324,7 @@ public class LeavePlanService : ILeavePlanService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
+        adapter.ApplySubmitOutcome(entity, workflowResult, GetCurrentUserId());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();

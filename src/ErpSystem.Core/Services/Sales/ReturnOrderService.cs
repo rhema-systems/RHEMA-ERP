@@ -453,7 +453,7 @@ public class ReturnOrderService : IReturnOrderService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start credit note workflow");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(CreditNoteWorkflowEntityType);
-        adapter.ApplySubmitOutcome(cn, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(cn, workflowResult, userId);
 
         await _creditNoteRepo.UpdateAsync(cn);
         await _unitOfWork.SaveChangesAsync();
@@ -1455,7 +1455,7 @@ public class ReturnOrderService : IReturnOrderService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start refund workflow");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(RefundWorkflowEntityType);
-        adapter.ApplySubmitOutcome(refund, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(refund, workflowResult, userId);
 
         await _refundRepo.UpdateAsync(refund);
         await _unitOfWork.SaveChangesAsync();

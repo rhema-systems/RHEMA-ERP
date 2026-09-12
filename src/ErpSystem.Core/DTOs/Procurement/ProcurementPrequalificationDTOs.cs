@@ -9,6 +9,7 @@ public class ProcurementPrequalificationSummaryDto
     public string Reference { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public ProcurementPrequalificationStatus Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public DateTime OpensAtUtc { get; set; }
     public DateTime ClosesAtUtc { get; set; }
     public int ApplicationCount { get; set; }
@@ -25,7 +26,7 @@ public sealed class ProcurementPrequalificationExerciseDto : ProcurementPrequali
     public string PolicySetCode { get; set; } = string.Empty;
     public int PolicySetVersion { get; set; }
     public Guid SourceConfigurationProfileId { get; set; }
-    public Guid WorkflowDefinitionId { get; set; }
+    public Guid? WorkflowDefinitionId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
     public string? AdvertisementReference { get; set; }
     public string? AdvertisementEvidenceReference { get; set; }
@@ -129,6 +130,7 @@ public sealed class ProcurementPrequalificationMilestoneDto
 
 public sealed class ProcurementPrequalificationReadinessDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public List<ProcurementPrequalificationCategoryDto> Categories { get; set; } = new();
     public List<ProcurementPrequalificationPolicyDto> Policies { get; set; } = new();
     public List<ProcurementPrequalificationWorkflowDto> Workflows { get; set; } = new();
@@ -180,7 +182,7 @@ public sealed class CreateProcurementPrequalificationExerciseRequest
     [Range(1, 60)] public int ValidityMonths { get; set; } = 12;
     [Range(1, 100)] public decimal PassingScore { get; set; } = 70;
     public Guid PolicySetId { get; set; }
-    public Guid WorkflowDefinitionId { get; set; }
+    public Guid? WorkflowDefinitionId { get; set; }
     [MinLength(1)] public List<CreateProcurementPrequalificationCriterionRequest> Criteria { get; set; } = new();
 }
 
@@ -241,6 +243,9 @@ public sealed class ProcurementPrequalificationCriterionScoreRequest
 
 public sealed class SubmitProcurementPrequalificationDecisionRequest
 {
+    [StringLength(300)] public string? DecisionReference { get; set; }
+    [StringLength(500)] public string? DecisionEvidenceReference { get; set; }
+    [StringLength(1000)] public string? Reason { get; set; }
     [Required] public string RowVersion { get; set; } = string.Empty;
 }
 

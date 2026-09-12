@@ -21,6 +21,231 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class JournalBatchServiceTests
 {
     [Fact]
+    public async Task SubmitWithoutWorkflow_PreparesEntriesWithoutHumanApprovalOrPosting()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(false);
+        var journalService = CreateJournalService(db, tenant);
+        var service = CreateService(db, tenant, journalService.Object, workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+
+        var result = await service.SubmitAsync(batch.Id);
+
+        result.ApprovalRequired.Should().BeFalse();
+        result.ApprovalStatus.Should().Be(JournalBatchApprovalStatus.ReadyToPost);
+        result.PostingStatus.Should().Be(JournalBatchPostingStatus.Ready);
+        result.DisplayStatus.Should().Be("Ready to Post");
+        result.CanPostAny.Should().BeTrue();
+        result.CanReview.Should().BeFalse();
+        result.WorkflowInstanceId.Should().BeNull();
+        result.ApprovedByUserId.Should().BeNull();
+        result.ApprovedAt.Should().BeNull();
+        result.ReviewCompletedAt.Should().BeNull();
+        result.ApprovedEntryCount.Should().Be(0);
+        result.Items.Should().OnlyContain(x => x.ReviewStatus == JournalBatchItemReviewStatus.NotRequired &&
+            x.PostingStatus == JournalBatchItemPostingStatus.Ready && x.FinalReviewedByUserId == null && x.FinalReviewedAt == null && x.Reviews.Count == 0);
+        var savedJournals = await db.JournalEntries.AsNoTracking().ToListAsync();
+        savedJournals.Should().OnlyContain(x => x.PostingStatus == "Approved" && x.ApprovalStatus == "Not Required" &&
+            !x.RequiresApproval && x.ApprovedByUserId == null && x.ApprovedDate == null && x.ApprovalWorkflowId == null);
+        workflow.Verify(x => x.StartApprovalWorkflowAsync("JournalBatch", It.IsAny<Guid>()), Times.Never);
+        journalService.Verify(x => x.PostJournalEntryForBatchAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        (await db.JournalBatchItemReviews.CountAsync()).Should().Be(0);
+        (await db.JournalBatchPostingRuns.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DirectBatch_PostsSelectedEntriesThroughCanonicalOwnerAndRemainsIdempotent()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(false);
+        var journalService = CreateJournalService(db, tenant);
+        var service = CreateService(db, tenant, journalService.Object, workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+        batch = await service.SubmitAsync(batch.Id);
+        db.ChangeTracker.Clear();
+        // A later workflow configuration change cannot rewrite the saved submission mode.
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(true);
+        var request = new CreateJournalBatchPostingRunDto { JournalBatchItemIds = [batch.Items[0].Id], IdempotencyKey = "direct-run-1" };
+        var first = await service.PostAsync(batch.Id, request);
+        var duplicate = await service.PostAsync(batch.Id, request);
+        duplicate.Id.Should().Be(first.Id);
+        var partial = await service.GetByIdAsync(batch.Id);
+        partial!.PostingStatus.Should().Be(JournalBatchPostingStatus.PartiallyPosted);
+        partial.PostedDebitTotal.Should().Be(100m);
+        partial.CanPostAny.Should().BeTrue();
+        await service.PostAsync(batch.Id, new CreateJournalBatchPostingRunDto { JournalBatchItemIds = [batch.Items[1].Id], IdempotencyKey = "direct-run-2" });
+        var posted = await service.GetByIdAsync(batch.Id);
+        posted!.PostingStatus.Should().Be(JournalBatchPostingStatus.Posted);
+        posted.PostedDebitTotal.Should().Be(300m);
+        posted.CanPostAny.Should().BeFalse();
+        foreach (var journal in journals)
+            journalService.Verify(x => x.PostJournalEntryForBatchAsync(journal.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RetiredWorkflow_WithExistingInstance_StillUsesApproval()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(false);
+        workflow.Setup(x => x.HasActiveApprovalInstanceAsync("JournalBatch", It.IsAny<Guid>())).ReturnsAsync(true);
+        var service = CreateService(db, tenant, workflow: workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+        batch = await service.SubmitAsync(batch.Id);
+        batch.ApprovalRequired.Should().BeTrue();
+        batch.ApprovalStatus.Should().Be(JournalBatchApprovalStatus.PendingApproval);
+        batch.WorkflowInstanceId.Should().NotBeNull();
+        batch.CanPostAny.Should().BeFalse();
+        var post = () => service.PostAsync(batch.Id, new CreateJournalBatchPostingRunDto { JournalBatchItemIds = [batch.Items[0].Id], IdempotencyKey = "blocked" });
+        await post.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not ready*");
+        var resubmit = () => service.SubmitAsync(batch.Id);
+        await resubmit.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Theory]
+    [InlineData("metadata")]
+    [InlineData("changed-content")]
+    public async Task DirectPosting_DoesNotBypassRetainedApprovalOrContentGuards(string invalidState)
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(false);
+        var journalService = CreateJournalService(db, tenant);
+        var service = CreateService(db, tenant, journalService.Object, workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+        batch = await service.SubmitAsync(batch.Id);
+        var journal = await db.JournalEntries.FirstAsync(x => x.Id == journals[0].Id);
+        if (invalidState == "metadata") journal.ApprovedByUserId = Guid.NewGuid();
+        else journal.Description = "Changed after submission";
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var post = () => service.PostAsync(batch.Id, new CreateJournalBatchPostingRunDto { JournalBatchItemIds = [batch.Items[0].Id], IdempotencyKey = "invalid" });
+        await post.Should().ThrowAsync<InvalidOperationException>();
+        journalService.Verify(x => x.PostJournalEntryForBatchAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NoWorkflow_SubmissionStillValidatesControlTotalsBeforeReadiness()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(false);
+        var service = CreateService(db, tenant, workflow: workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+        await service.UpdateAsync(batch.Id, new UpdateJournalBatchDto { Description = batch.Description, ExpectedDebitTotal = 301m, RowVersion = batch.RowVersion });
+        var submit = () => service.SubmitAsync(batch.Id);
+        await submit.Should().ThrowAsync<InvalidOperationException>();
+        var unchanged = await service.GetByIdAsync(batch.Id);
+        unchanged!.ApprovalStatus.Should().Be(JournalBatchApprovalStatus.Draft);
+        unchanged.ApprovalRequired.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CompletedWorkflowResponse_WithoutRetainedProofCannotReleaseBatch()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        workflow.Setup(x => x.StartApprovalWorkflowAsync("JournalBatch", It.IsAny<Guid>())).ReturnsAsync(new WorkflowExecutionResult
+            { Success = true, Status = WorkflowInstanceStatus.Completed, WorkflowInstanceId = Guid.NewGuid() });
+        var service = CreateService(db, tenant, workflow: workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+        var submit = () => service.SubmitAsync(batch.Id);
+        await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*retained completed workflow*");
+        (await db.JournalBatchPostingRuns.CountAsync()).Should().Be(0);
+    }
+
+    private static async Task<JournalBatchDetailDto> CreateDraftBatchAsync(JournalBatchService service, Guid periodId, IReadOnlyList<JournalEntry> journals)
+    {
+        var batch = await service.CreateAsync(new CreateJournalBatchDto { Description = "Optional approval test", FiscalPeriodId = periodId,
+            BookClassification = "IFRS", ControlCurrencyCode = "GHS", ExpectedDebitTotal = 300m, ExpectedJournalCount = 2 });
+        foreach (var journal in journals) batch = await service.AddExistingJournalAsync(batch.Id, journal.Id);
+        return batch;
+    }
+
+    [Fact]
+    public async Task ConfirmedCompletedWorkflow_PreparesWithoutFabricatingAReviewerOrPosting()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        var type = new ErpSystem.Core.Entities.Workflow.WorkflowEntityType { TenantId = tenant, Code = "JournalBatch", Name = "JournalBatch" };
+        db.WorkflowEntityTypes.Add(type);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        workflow.Setup(x => x.StartApprovalWorkflowAsync("JournalBatch", It.IsAny<Guid>())).Returns(async (string _, Guid batchId) =>
+        {
+            var instance = new ErpSystem.Core.Entities.Workflow.WorkflowInstance { TenantId = tenant, EntityId = batchId,
+                EntityTypeId = type.Id, EntityType = type, WorkflowDefinitionId = Guid.NewGuid(),
+                Status = WorkflowInstanceStatus.Completed, CompletedDate = DateTime.UtcNow, InitiatedById = Guid.NewGuid() };
+            db.WorkflowInstances.Add(instance);
+            await db.SaveChangesAsync();
+            return new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed, WorkflowInstanceId = instance.Id };
+        });
+        var journalService = CreateJournalService(db, tenant);
+        var service = CreateService(db, tenant, journalService.Object, workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+        batch = await service.SubmitAsync(batch.Id);
+        batch.ApprovalRequired.Should().BeTrue();
+        batch.ApprovalStatus.Should().Be(JournalBatchApprovalStatus.Approved);
+        batch.WorkflowInstanceId.Should().NotBeNull();
+        batch.ApprovedByUserId.Should().BeNull();
+        batch.Items.Should().OnlyContain(x => x.FinalReviewedByUserId == null && x.ReviewStatus == JournalBatchItemReviewStatus.Approved);
+        batch.CanPostAny.Should().BeTrue();
+        journalService.Verify(x => x.PostJournalEntryForBatchAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("unavailable")]
+    [InlineData("changed")]
+    public async Task ApprovalPolicyFailures_DoNotBecomeDirectReadiness(string failure)
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenant);
+        var journals = SeedJournals(db, tenant, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        if (failure == "unavailable")
+            workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ThrowsAsync(new InvalidOperationException("Policy unavailable"));
+        else workflow.SetupSequence(x => x.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(false).ReturnsAsync(true);
+        var service = CreateService(db, tenant, workflow: workflow.Object);
+        var batch = await CreateDraftBatchAsync(service, period.Id, journals);
+        var submit = () => service.SubmitAsync(batch.Id);
+        await submit.Should().ThrowAsync<InvalidOperationException>();
+        var saved = await service.GetByIdAsync(batch.Id);
+        saved!.ApprovalRequired.Should().BeTrue();
+        saved.ApprovalStatus.Should().Be(JournalBatchApprovalStatus.Draft);
+        saved.CanPostAny.Should().BeFalse();
+    }
+
+    [Fact]
     [Trait("Batch", "GeneralLedger")]
     [Trait("Category", "Controls")]
     public async Task ValidateAsync_ShouldEnforceIndependentBatchTotalAndJournalCount()
@@ -729,6 +954,7 @@ public sealed class JournalBatchServiceTests
     private static Mock<IWorkflowService> CreateWorkflow()
     {
         var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("JournalBatch")).ReturnsAsync(true);
         workflow.Setup(service => service.StartApprovalWorkflowAsync("JournalBatch", It.IsAny<Guid>()))
             .ReturnsAsync(new WorkflowExecutionResult
             {

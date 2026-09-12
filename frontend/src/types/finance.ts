@@ -348,7 +348,6 @@ export interface JournalEntry {
     isMultiCurrency?: boolean;
     primaryCurrency?: string;
     bookClassification?: string;
-    fiscalPeriodId?: string;
     isRevaluationEntry?: boolean;
     revaluationType?: string;
     reversalDate?: string;
@@ -799,6 +798,8 @@ export interface FinanceSettings {
     controlAccountArId?: string;
     controlAccountApId?: string;
     controlAccountInventoryId?: string;
+    returnToVendorClearingAccountId?: string;
+    purchaseReturnVarianceAccountId?: string;
     controlAccountPayrollId?: string;
     controlAccountTaxId?: string;
     controlAccountGRVAccrualId?: string;
@@ -844,6 +845,8 @@ export interface UpdateFinanceSettingsDto {
     controlAccountArId?: string;
     controlAccountApId?: string;
     controlAccountInventoryId?: string;
+    returnToVendorClearingAccountId?: string;
+    purchaseReturnVarianceAccountId?: string;
     controlAccountPayrollId?: string;
     controlAccountTaxId?: string;
     controlAccountGRVAccrualId?: string;

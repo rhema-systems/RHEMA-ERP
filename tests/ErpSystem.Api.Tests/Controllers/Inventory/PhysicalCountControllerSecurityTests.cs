@@ -19,6 +19,8 @@ public sealed class PhysicalCountControllerSecurityTests
 
     [Theory]
     [InlineData(nameof(PhysicalCountsController.RecordRecount), "{id}/recount")]
+    [InlineData(nameof(PhysicalCountsController.Review), "{id:guid}/review")]
+    [InlineData(nameof(PhysicalCountsController.SubmitReviewed), "{id:guid}/submit")]
     [InlineData(nameof(PhysicalCountsController.DecideStores), "{id}/stores-decision")]
     [InlineData(nameof(PhysicalCountsController.DecideFinance), "{id}/finance-decision")]
     [InlineData(nameof(PhysicalCountsController.AttestAudit), "{id}/audit-attestation")]

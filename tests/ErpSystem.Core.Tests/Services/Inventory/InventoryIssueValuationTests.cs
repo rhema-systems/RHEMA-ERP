@@ -22,6 +22,61 @@ public sealed class InventoryIssueValuationTests : IDisposable
     private readonly InventoryItem _item = new() { ItemCode = "ISSUE-PVC", Name = "Issue PVC", StandardCost = 2000m };
 
     [Theory]
+    [InlineData(ValuationMethod.FIFO, 41800)]
+    [InlineData(ValuationMethod.WeightedAverage, 41800)]
+    [InlineData(ValuationMethod.StandardCost, 44000)]
+    public async Task Receipt_reconciles_available_quantity_and_records_closing_balances_once(
+        ValuationMethod method, decimal closingValue)
+    {
+        var service = await Setup(method);
+        var opening = await _db.Set<InventoryBalance>().SingleAsync();
+        opening.QuantityAllocated = 3;
+        opening.QuantityAvailable = 0; // Existing legacy cache must not survive the new receipt.
+        await _db.SaveChangesAsync();
+
+        var variance = await service.ProcessReceiptAsync(_item.Id, _warehouse, _location,
+            2, 1900, ReferenceType.PO, "REC-TEST", Guid.NewGuid());
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        var closing = await _db.Set<InventoryBalance>().SingleAsync();
+        closing.QuantityOnHand.Should().Be(22);
+        closing.QuantityAllocated.Should().Be(3);
+        closing.QuantityAvailable.Should().Be(19);
+        closing.TotalValue.Should().Be(closingValue);
+        var movement = await _db.Set<InventoryMovement>().SingleAsync();
+        movement.RunningBalance.Should().Be(22);
+        movement.RunningValue.Should().Be(closingValue);
+        movement.TotalValue.Should().Be(method == ValuationMethod.StandardCost ? 4000 : 3800);
+        movement.VarianceAmount.Should().Be(variance);
+    }
+
+    [Theory]
+    [InlineData(ValuationMethod.FIFO)]
+    [InlineData(ValuationMethod.WeightedAverage)]
+    [InlineData(ValuationMethod.StandardCost)]
+    public async Task Consecutive_receipts_share_one_balance_without_double_counting_history(ValuationMethod method)
+    {
+        var service = await Setup(method);
+        await service.ProcessReceiptAsync(_item.Id, _warehouse, _location, 2, 1900,
+            ReferenceType.PO, "REC-FIRST", Guid.NewGuid());
+        await _db.SaveChangesAsync();
+        await service.ProcessReceiptAsync(_item.Id, _warehouse, _location, 1, 1900,
+            ReferenceType.PO, "REC-SECOND", Guid.NewGuid());
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        var balance = await _db.Set<InventoryBalance>().SingleAsync();
+        balance.QuantityOnHand.Should().Be(23);
+        balance.QuantityAvailable.Should().Be(23);
+        var first = await _db.Set<InventoryMovement>().SingleAsync(value => value.ReferenceNumber == "REC-FIRST");
+        var second = await _db.Set<InventoryMovement>().SingleAsync(value => value.ReferenceNumber == "REC-SECOND");
+        first.RunningBalance.Should().Be(22);
+        second.RunningBalance.Should().Be(23);
+        second.RunningValue.Should().Be(balance.TotalValue);
+    }
+
+    [Theory]
     [InlineData(ValuationMethod.FIFO, 3800, 34200)]
     [InlineData(ValuationMethod.WeightedAverage, 3800, 34200)]
     [InlineData(ValuationMethod.StandardCost, 4000, 36000)]

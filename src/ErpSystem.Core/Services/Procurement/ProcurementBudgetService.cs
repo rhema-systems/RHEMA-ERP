@@ -210,8 +210,9 @@ public class ProcurementBudgetService : IProcurementBudgetService
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the procurement budget workflow.");
 
+        budget.ApprovalRequired = workflowResult.ApprovalRequired;
         _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType)
-            .ApplySubmitOutcome(budget, workflowResult.Outcome, currentUserId);
+            .ApplySubmitOutcome(budget, workflowResult, currentUserId);
         budget.UpdatedAt = DateTime.UtcNow;
         await _budgetRepository.UpdateAsync(budget);
         await _unitOfWork.SaveChangesAsync();
@@ -365,13 +366,6 @@ public class ProcurementBudgetService : IProcurementBudgetService
                 throw new InvalidOperationException(
                     $"Revision {pendingRevision.RevisionNumber} is still pending. Complete or reject it before creating another revision.");
 
-            // An amendment to an approved financial envelope must not inherit
-            // the shared optional-workflow direct-approval path.
-            if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(RevisionWorkflowEntityType))
-                throw new InvalidOperationException(
-                    "Budget revisions require a published approval workflow with an independent approver. " +
-                    "Configure the Procurement Budget Revision workflow before submitting a revision. The approved budget has not changed.");
-
             var revision = new ProcurementBudgetRevision
             {
                 ProcurementBudgetId = budgetId,
@@ -399,16 +393,17 @@ public class ProcurementBudgetService : IProcurementBudgetService
                 throw new InvalidOperationException(
                     workflowResult.ExecutionResult.Message ?? "Failed to start the procurement budget revision workflow.");
 
-            // Recheck the outcome: configuration can change after the preflight,
-            // and a published route without a pending approval is not sufficient.
-            // Throw inside the transaction so the revision and workflow roll back.
-            if (!workflowResult.ApprovalRequired || workflowResult.Outcome != WorkflowOutcome.Pending)
+            // An enabled approval route must still produce an independent pending review.
+            if (workflowResult.ApprovalRequired && workflowResult.Outcome != WorkflowOutcome.Pending)
                 throw new InvalidOperationException(
                     "Budget revisions must wait for independent approval. The configured workflow did not create a pending review. " +
                     "Correct the Procurement Budget Revision workflow and retry. The approved budget has not changed.");
 
+            revision.ApprovalRequired = workflowResult.ApprovalRequired;
             _workflowStatusAdapterRegistry.GetAdapter(RevisionWorkflowEntityType)
-                .ApplySubmitOutcome(revision, workflowResult.Outcome, currentUserId);
+                .ApplySubmitOutcome(revision, workflowResult, currentUserId);
+            if (!workflowResult.ApprovalRequired)
+                await ApplyApprovedRevisionAsync(budget, revision);
             revision.UpdatedAt = DateTime.UtcNow;
             revision.UpdatedBy = _currentUserProvider.Username;
             revision.LastModifiedById = currentUserId;
@@ -807,6 +802,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
     {
         return new ProcurementBudgetDto
         {
+            ApprovalRequired = budget.ApprovalRequired,
             Id = budget.Id,
             BudgetCode = budget.BudgetCode,
             Title = budget.Title,
@@ -837,6 +833,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
     {
         var dto = new ProcurementBudgetDetailDto
         {
+            ApprovalRequired = budget.ApprovalRequired,
             Id = budget.Id,
             BudgetCode = budget.BudgetCode,
             Title = budget.Title,
@@ -888,6 +885,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
     {
         return new ProcurementBudgetRevisionDto
         {
+            ApprovalRequired = revision.ApprovalRequired,
             Id = revision.Id,
             ProcurementBudgetId = revision.ProcurementBudgetId,
             RevisionNumber = revision.RevisionNumber,

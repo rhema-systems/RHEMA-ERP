@@ -65,6 +65,19 @@ namespace ErpSystem.Api.Services.Finance.Settings
         {
             var tenantId = _currentUserService.GetRequiredFinanceTenantId();
 
+            // Validate both requested write-off mappings before mutating any settings. Omitted
+            // values preserve the existing mapping, as with the other partial updates.
+            if (dto.WriteOffExpenseAccountId.HasValue)
+                await ValidateWriteOffAccountAsync(tenantId, dto.WriteOffExpenseAccountId.Value,
+                    AccountType.Expense, "Write-off Expense Account");
+            if (dto.WriteOffRecoveryAccountId.HasValue)
+                await ValidateWriteOffAccountAsync(tenantId, dto.WriteOffRecoveryAccountId.Value,
+                    AccountType.Revenue, "Write-off Recovery Account");
+            if (dto.ReturnToVendorClearingAccountId.HasValue)
+                await ValidateReturnAccountAsync(tenantId, dto.ReturnToVendorClearingAccountId.Value, AccountType.Asset, "Return-to-vendor clearing account");
+            if (dto.PurchaseReturnVarianceAccountId.HasValue)
+                await ValidateReturnAccountAsync(tenantId, dto.PurchaseReturnVarianceAccountId.Value, AccountType.Expense, "Purchase-return cost variance account");
+
             var settings = await _context.FinanceSettings
                 .FirstOrDefaultAsync(s => s.TenantId == tenantId);
 
@@ -85,6 +98,11 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.UnrealizedFxLossAccountId,
                 settings.RealizedFxGainAccountId,
                 settings.RealizedFxLossAccountId
+            };
+            var beforeWriteOffMappings = new
+            {
+                settings.WriteOffExpenseAccountId,
+                settings.WriteOffRecoveryAccountId
             };
             var beforeFxPolicy = new
             {
@@ -246,12 +264,21 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.SupplierAdvanceAccountId.HasValue) settings.SupplierAdvanceAccountId = dto.SupplierAdvanceAccountId;
             if (dto.CustomerAdvanceAccountId.HasValue) settings.CustomerAdvanceAccountId = dto.CustomerAdvanceAccountId;
             if (dto.ControlAccountInventoryId.HasValue) settings.ControlAccountInventoryId = dto.ControlAccountInventoryId;
+            var rtvClearing = dto.ReturnToVendorClearingAccountId ?? settings.ReturnToVendorClearingAccountId;
+            var rtvVariance = dto.PurchaseReturnVarianceAccountId ?? settings.PurchaseReturnVarianceAccountId;
+            if (rtvClearing.HasValue && (rtvClearing == settings.ControlAccountInventoryId || rtvClearing == rtvVariance) ||
+                rtvVariance.HasValue && rtvVariance == settings.ControlAccountInventoryId)
+                throw new InvalidOperationException("Inventory, return clearing and purchase-return cost variance must use distinct GL accounts.");
+            if (dto.ReturnToVendorClearingAccountId.HasValue) settings.ReturnToVendorClearingAccountId = dto.ReturnToVendorClearingAccountId;
+            if (dto.PurchaseReturnVarianceAccountId.HasValue) settings.PurchaseReturnVarianceAccountId = dto.PurchaseReturnVarianceAccountId;
             if (dto.ControlAccountPayrollId.HasValue) settings.ControlAccountPayrollId = dto.ControlAccountPayrollId;
             if (dto.ControlAccountTaxId.HasValue) settings.ControlAccountTaxId = dto.ControlAccountTaxId;
             if (dto.ControlAccountGRVAccrualId.HasValue) settings.ControlAccountGRVAccrualId = dto.ControlAccountGRVAccrualId;
             if (dto.DiscountAllowedAccountId.HasValue) settings.DiscountAllowedAccountId = dto.DiscountAllowedAccountId;
             if (dto.DiscountReceivedAccountId.HasValue) settings.DiscountReceivedAccountId = dto.DiscountReceivedAccountId;
             if (dto.MigrationClearingAccountId.HasValue) settings.MigrationClearingAccountId = dto.MigrationClearingAccountId;
+            if (dto.WriteOffExpenseAccountId.HasValue) settings.WriteOffExpenseAccountId = dto.WriteOffExpenseAccountId;
+            if (dto.WriteOffRecoveryAccountId.HasValue) settings.WriteOffRecoveryAccountId = dto.WriteOffRecoveryAccountId;
             if (dto.OpeningBalanceAutoRoutingEnabled.HasValue) settings.OpeningBalanceAutoRoutingEnabled = dto.OpeningBalanceAutoRoutingEnabled.Value;
             if (dto.BankDepositPolicy.HasValue) settings.BankDepositPolicy = dto.BankDepositPolicy.Value;
             if (dto.RequireBankDepositPrimaryEvidence.HasValue)
@@ -374,6 +401,23 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             await _context.SaveChangesAsync();
 
+            var afterWriteOffMappings = new
+            {
+                settings.WriteOffExpenseAccountId,
+                settings.WriteOffRecoveryAccountId
+            };
+            if (!Equals(beforeWriteOffMappings, afterWriteOffMappings))
+            {
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.FinanceControlPolicyChanged,
+                    tenantId,
+                    settings,
+                    beforeValues: beforeWriteOffMappings,
+                    afterValues: afterWriteOffMappings,
+                    reason: "Write-off expense and recovery account mappings changed.",
+                    sourceModule: "Finance");
+            }
+
             var afterFxMappings = new
             {
                 settings.UnrealizedFxGainAccountId,
@@ -476,13 +520,32 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 || await _context.AccountTransactions.AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted);
         }
 
+        private async Task ValidateWriteOffAccountAsync(Guid tenantId, Guid accountId, AccountType accountType, string label)
+        {
+            var valid = accountId != Guid.Empty && await _context.Accounts.AsNoTracking().AnyAsync(account =>
+                account.Id == accountId && account.TenantId == tenantId && !account.IsDeleted &&
+                account.Status == AccountStatus.Active && account.AllowDirectPosting && !account.IsControlAccount &&
+                account.AccountType == accountType);
+            if (!valid)
+                throw new InvalidOperationException($"{label} must be an active {accountType} posting account belonging to the current tenant.");
+        }
+
+        private async Task ValidateReturnAccountAsync(Guid tenantId, Guid accountId, AccountType type, string label)
+        {
+            if (!await _context.Accounts.AsNoTracking().AnyAsync(account => account.Id == accountId &&
+                account.TenantId == tenantId && !account.IsDeleted && account.Status == AccountStatus.Active && account.AccountType == type &&
+                account.AllowDirectPosting && !account.IsControlAccount))
+                throw new InvalidOperationException($"{label} must be an active {type} posting account belonging to this tenant.");
+        }
+
         private async Task RecordFinanceSettingsAuditAsync(
             string eventType,
             Guid tenantId,
             FinanceSettings settings,
             object? beforeValues = null,
             object? afterValues = null,
-            string? reason = null)
+            string? reason = null,
+            string sourceModule = "FX")
         {
             if (_financeAuditService == null)
             {
@@ -493,7 +556,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
             {
                 EventType = eventType,
                 TenantId = tenantId,
-                SourceModule = "FX",
+                SourceModule = sourceModule,
                 SourceDocumentType = "FinanceSettings",
                 SourceDocumentId = settings.Id,
                 BeforeValues = beforeValues,
@@ -548,12 +611,16 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 SupplierAdvanceAccountId = settings.SupplierAdvanceAccountId,
                 CustomerAdvanceAccountId = settings.CustomerAdvanceAccountId,
                 ControlAccountInventoryId = settings.ControlAccountInventoryId,
+                ReturnToVendorClearingAccountId = settings.ReturnToVendorClearingAccountId,
+                PurchaseReturnVarianceAccountId = settings.PurchaseReturnVarianceAccountId,
                 ControlAccountPayrollId = settings.ControlAccountPayrollId,
                 ControlAccountTaxId = settings.ControlAccountTaxId,
                 ControlAccountGRVAccrualId = settings.ControlAccountGRVAccrualId,
                 DiscountAllowedAccountId = settings.DiscountAllowedAccountId,
                 DiscountReceivedAccountId = settings.DiscountReceivedAccountId,
                 MigrationClearingAccountId = settings.MigrationClearingAccountId,
+                WriteOffExpenseAccountId = settings.WriteOffExpenseAccountId,
+                WriteOffRecoveryAccountId = settings.WriteOffRecoveryAccountId,
                 OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled,
                 BankDepositPolicy = settings.BankDepositPolicy,
                 RequireBankDepositPrimaryEvidence = settings.RequireBankDepositPrimaryEvidence,

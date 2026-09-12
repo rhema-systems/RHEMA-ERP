@@ -463,21 +463,35 @@ Expected:
 
 ## UAT-INV-018: Damage, obsolescence, write-off and disposal
 
-1. Identify damaged or obsolete stock through a governed inspection, count or adjustment source.
-2. Open the configured adjustment/write-off/disposal process.
-3. Record item, quantity, condition, valuation, reason and DMS evidence.
-4. Submit and complete configured independent approval.
-5. Post/complete the disposal and any proceeds record.
-6. Review stock, valuation, asset, Finance and audit consequences.
-7. Retry completion.
+**Current result:** Implementation/testing in progress; live disposal not yet verified. Browser access is blocked by `ERR_BLOCKED_BY_CLIENT`. No example transaction or live pass is recorded. Both databases are now at **schema484**, following verified fresh COPY_ONLY/CHECKSUM backups; **86 protected business-table checks** confirmed unchanged stock, count and approval records. **120 API, 229 Core and 14 UI tests passed.** Both production frontends are built and running. At **17:06 UTC, 12 September**, both APIs passed live/readiness checks; four page routes and 61 assets per copy returned HTTP200. Build IDs/source parity, CORS and anonymous disposal-API rejection (401) were verified. [Release evidence](../local-artifacts/disposal-release-verification.json). These are HTTP/runtime checks, not a completed disposal walkthrough. B21/B22's earlier physical-flow passes remain separate evidence.
+
+**Page:** `Inventory → Disposals` (`/inventory/disposals`). Use ordinary **StockItem** records only; fixed assets use the separate Fixed Asset disposal owner. Verify the actor's disposal/stock-posting permission, warehouse/bin scope, available stock, open posting period and Finance mappings before testing.
+
+1. Record baseline item/warehouse/bin quantity, available quantity and carrying value. Click **New disposal**.
+2. In **Details**, select warehouse, method and reason; leave optional notes blank for the simple case.
+3. In **Items**, search an ordinary stock item and its exact bin. Confirm the suggested default warehouse bin is appropriate. Enter a small positive quantity and **Add**; enter tracking identity only when configured for the item.
+4. Test grid flexibility: search by item/bin, edit a quantity, add a second line and remove it, change page size **25 / 50 / 100**, toggle **Columns**, and use **Full page / Restore**. Hidden cost columns must not alter valuation. Save the draft, reopen by the pencil icon and confirm edits persist without any stock movement.
+5. Test **Supporting documents** by friendly document name. Without an active approval process, an empty selection must not block the normal path. With an active approval process, attach the required supporting evidence before submission. Any provided document must remain current and satisfy central security/access checks.
+6. Test the inactive path: **Continue → Ready to post**, with no workflow approval button or compulsory reviewer/committee stage. Verify the recorded no-approval decision and null human approver fields. A delegated generated stock adjustment must not introduce an unrelated second approval workflow.
+7. Separately test the active path: **Submit for approval → eligible independent actor Approve**. Confirm configured assignments, limits and maker/checker rules; unauthorized or conflicting approval fails. Deactivation must not erase an existing in-flight instance or its history.
+8. Prepare method-specific execution: Auction/Sale requires buyer, positive proceeds and a controlled proceeds account; Donation requires a recipient; Write-off/Destruction must not include sale proceeds.
+9. Click **Post**, review the confirmation and confirm **Post**. New ready disposals prepare the adjustment and complete stock/Finance posting in one serializable transaction. A posting error must roll back preparation, stock, Finance and completion together. Correct the cause and retry the same disposal. Older prepared records use the existing adjustment and completion path; do not recreate them. Configured approvals remain required before posting.
+10. Expect **Completed** after successful posting. Compare **Posted stock value** with the authoritative movement and balanced Finance journal, not just the saved **Estimated stock value**. New adjustments use the execution date; previously prepared adjustments retain their recorded date. Check exact bin, quantity, tracking, source reference, actor and newest-first History. Verify proceeds and their journal where applicable.
+11. Reopen and attempt a controlled replay: no duplicate outbound stock movement, valuation or Finance entry is allowed, and completed records must not offer another Post.
+12. On a separate unposted draft, click the cancel icon and supply a reason. Expect cancellation with retained history and no stock/Finance mutation. Confirm read-only or out-of-scope users cannot create, edit, cancel, approve or post.
 
 Expected:
 
 - **TDC required:** damage/obsolescence follows a governed adjustment or write-off route; it is not removed by direct edit.
-- **TDC required:** evidence, reason, approval, value impact and audit history are retained.
-- **TDC required:** maker/checker conflict or missing configured approval prevents posting without partial mutation.
-- **Implementation extension for stock disposal:** committee structure, proceeds-account selection and exact stages are configurable. Users select friendly controlled accounts; they do not type account IDs.
-- **TDC required for fixed assets (`FR-FA-008`):** fixed-asset disposal includes the Board of Survey and procurement-disposal controls; Section 18.2 still leaves the detailed roles, limits and routing for configuration.
+- **TDC required:** retain the reason, item/location/value impact, applicable supporting documents, configured approval decision and complete audit trail; retain no-approval decisions truthfully when the direct mode applies.
+- **Configured control:** an active approval route enforces its assignments, limits and segregation. The agreed direct mode must not fabricate approval or require a separate stock committee when no process is active. It does not waive non-approval stock, Finance, source, tenant, access or document-security controls.
+- **Implementation acceptance:** searchable controls, compact editable grid, pagination, optional columns, fixed normal dialog dimensions and Full page/Restore preserve state. Draft edits/cancellation change no stock. Costs shown before posting are estimates; final posted value comes from the authoritative valuation/posting owner.
+- **Implementation extension for stock disposal:** exact committee structure and stages are not fixed architecture requirements. Auction/Sale proceeds-account selection is required by the current execution owner; select controlled accounts by name/code, not internal IDs.
+- **TDC required for fixed assets (`FR-FA-008`):** the separate fixed-asset disposal process retains Board of Survey and procurement-disposal controls. Ordinary inventory stock disposal must not be used to bypass it.
+
+**Technical verification limit:** Multiple FIFO tracking rows sharing one item/bin can reuse the same opening-layer estimate. Differing layer costs can then fail the final valuation comparison. This case is not verified/passed; retain the guard and require a complete transaction rollback with no stock/Finance posting.
+
+Traceability: Section16.1 shared item/location/valuation/approval/ledger/audit; Section18.2 configurable thresholds/roles/routing; Section20.1 inventory disposals; `FR-FA-008` fixed-asset distinction. See [B23 customer walkthrough](TDC_CUSTOMER_PROCUREMENT_STORES_WALKTHROUGH.md#b23-inventory-stock-disposal).
 
 ## UAT-INV-019: Inventory valuation and General Ledger reconciliation
 

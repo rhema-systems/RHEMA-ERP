@@ -66,12 +66,17 @@ export default function PrequalificationPage() {
   }, [exercises.data, search]);
 
   const create = async () => {
+    if (!readiness.data || readiness.isError || readiness.isFetching) {
+      toast.error('Wait for the current sourcing setup to load before saving.');
+      return;
+    }
     const request = {
       ...form,
+      workflowDefinitionId: readiness.data.approvalRequired === false ? null : form.workflowDefinitionId,
       opensAtUtc: new Date(form.opensAtUtc).toISOString(),
       closesAtUtc: new Date(form.closesAtUtc).toISOString(),
     };
-    const error = validatePrequalificationDraft(request);
+    const error = validatePrequalificationDraft(request, readiness.data.approvalRequired !== false);
     if (error) { toast.error(error); return; }
     try {
       setSaving(true);
@@ -130,7 +135,7 @@ export default function PrequalificationPage() {
               <TableBody>{filtered.map((item) => <TableRow key={item.id}>
                 <TableCell className="font-medium">{item.reference}</TableCell>
                 <TableCell>{item.title}</TableCell>
-                <TableCell><Badge variant={item.status === 5 ? 'default' : item.status === 6 || item.status === 7 ? 'destructive' : 'secondary'}>{prequalificationStatusLabel[item.status]}</Badge></TableCell>
+                <TableCell><Badge variant={item.status === 5 ? 'default' : item.status === 6 || item.status === 7 ? 'destructive' : 'secondary'}>{item.approvalRequired === false && item.status === 5 ? 'Qualification complete' : prequalificationStatusLabel[item.status]}</Badge></TableCell>
                 <TableCell className="text-xs">{formatDate(item.opensAtUtc)}<br />to {formatDate(item.closesAtUtc)}</TableCell>
                 <TableCell>{item.applicationCount}</TableCell><TableCell>{item.qualifiedCount}</TableCell>
                 <TableCell className="text-right"><Button size="sm" variant="outline" asChild><Link href={`/procurement/prequalification/${item.id}`}>Open history</Link></Button></TableCell>
@@ -151,7 +156,7 @@ export default function PrequalificationPage() {
             <Field label="Qualified-list validity (months)"><Input type="number" min={1} max={60} value={form.validityMonths} onChange={(event) => setForm({ ...form, validityMonths: Number(event.target.value) })} /></Field>
             <Field label="Overall passing score"><Input type="number" min={1} max={100} value={form.passingScore} onChange={(event) => setForm({ ...form, passingScore: Number(event.target.value) })} /></Field>
             <div className="md:col-span-2"><Field label="Exact current procurement policy"><Select value={form.policySetId} onValueChange={(value) => setForm({ ...form, policySetId: value })}><SelectTrigger><SelectValue placeholder="Select effective policy" /></SelectTrigger><SelectContent>{readiness.data?.policies.map((item) => <SelectItem key={item.id} value={item.id}>{item.code} · {item.name} · v{item.version}</SelectItem>)}</SelectContent></Select></Field></div>
-            <div className="md:col-span-2"><Field label="Exact published sourcing workflow"><Select value={form.workflowDefinitionId} onValueChange={(value) => setForm({ ...form, workflowDefinitionId: value })}><SelectTrigger><SelectValue placeholder="Select workflow" /></SelectTrigger><SelectContent>{readiness.data?.workflows.map((item) => <SelectItem key={item.id} value={item.id}>{item.name} · v{item.version}</SelectItem>)}</SelectContent></Select></Field></div>
+            {readiness.data?.approvalRequired !== false && <div className="md:col-span-2"><Field label="Exact published sourcing workflow"><Select value={form.workflowDefinitionId ?? undefined} onValueChange={(value) => setForm({ ...form, workflowDefinitionId: value })}><SelectTrigger><SelectValue placeholder="Select workflow" /></SelectTrigger><SelectContent>{readiness.data?.workflows.map((item) => <SelectItem key={item.id} value={item.id}>{item.name} · v{item.version}</SelectItem>)}</SelectContent></Select></Field></div>}
             <div className="md:col-span-2 space-y-2"><Label>Advertised categories</Label><div className="grid gap-2 md:grid-cols-2">{readiness.data?.categories.map((item) => <label key={item.id} className="flex items-center gap-2 rounded border p-3 text-sm"><Checkbox checked={form.categoryIds.includes(item.id)} onCheckedChange={(checked) => setForm((current) => ({ ...current, categoryIds: checked ? [...current.categoryIds, item.id] : current.categoryIds.filter((id) => id !== item.id) }))} /><span>{item.code} · {item.name}</span></label>)}</div></div>
           </div>
           <div className="space-y-3">

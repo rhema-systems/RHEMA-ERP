@@ -365,6 +365,7 @@ public sealed class ProcurementReceiptSourceControlService :
                         .GetQueryable(item =>
                             item.TenantId == _currentUser.TenantId &&
                             item.InventoryItemId == inventoryItemId &&
+                            (item.LineType == ItemType.StockItem || item.LineType == ItemType.FixedAsset) &&
                             !item.IsDeleted)
                         on line.PurchaseOrderItemId equals
                         purchaseOrderItem.Id
@@ -419,14 +420,15 @@ public sealed class ProcurementReceiptSourceControlService :
                 "AuthorizeInventoryPosting",
                 correlation,
                 cancellationToken);
-            authorizedQuantity = await _unitOfWork
-                .Repository<GoodsReceiptNoteItem>()
-                .GetQueryable(item =>
-                    item.TenantId == _currentUser.TenantId &&
-                    item.GoodsReceiptNoteId ==
-                    goodsReceiptNote.Id &&
-                    item.InventoryItemId == inventoryItemId &&
-                    !item.IsDeleted)
+            authorizedQuantity = await (
+                from line in _unitOfWork.Repository<GoodsReceiptNoteItem>().GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && item.GoodsReceiptNoteId == goodsReceiptNote.Id &&
+                    item.InventoryItemId == inventoryItemId && !item.IsDeleted)
+                join poLine in _unitOfWork.Repository<PurchaseOrderItem>().GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                    (item.LineType == ItemType.StockItem || item.LineType == ItemType.FixedAsset))
+                    on line.PurchaseOrderItemId equals poLine.Id
+                select line)
                 .AsNoTracking()
                 .SumAsync(
                     item => item.AcceptedQuantity,

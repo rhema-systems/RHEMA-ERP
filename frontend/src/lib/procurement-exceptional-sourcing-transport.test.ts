@@ -20,6 +20,14 @@ describe('exceptional sourcing API enum contract', () => {
     expect(await service.submitApproval('source', 'current')).toMatchObject({ method: 5, status: 1, rowVersion: 'updated' });
     expect(api.post).toHaveBeenCalledWith('/procurement/tenders/source/exception-controls/approval/submit', { rowVersion: 'current' });
   });
+  it('retains direct completion mode and sends genuine statutory references', async () => {
+    api.post.mockResolvedValue({ method: 'SingleSource', status: 'Approved', approvalRequired: false, workflowInstanceId: null });
+    expect(await service.submitApproval('source', 'current', { boardApprovalReference: 'BOARD-1', ppaApprovalReference: 'PPA-1' }))
+      .toMatchObject({ method: 4, status: 2, approvalRequired: false, workflowInstanceId: null });
+    expect(api.post).toHaveBeenCalledWith('/procurement/tenders/source/exception-controls/approval/submit', {
+      rowVersion: 'current', boardApprovalReference: 'BOARD-1', ppaApprovalReference: 'PPA-1',
+    });
+  });
   it('fails closed for unknown methods and statuses', async () => {
     api.get.mockResolvedValue({ method: 'Unknown' });
     await expect(service.readiness('source')).rejects.toThrow('Unrecognized sourcing method');

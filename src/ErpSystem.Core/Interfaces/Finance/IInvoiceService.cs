@@ -50,6 +50,9 @@ public interface IInvoiceService
     /// </summary>
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>Submit a manual invoice to its active workflow, or make it ready for explicit posting.</summary>
+    Task<InvoiceDto> SubmitAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Changes invoice status from Draft to Sent.
     /// Updates customer's outstanding balance.

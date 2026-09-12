@@ -3699,7 +3699,7 @@ export default function JobCardsPage() {
                   <TabsTrigger value="qc" disabled={!selectedQCInspection}>
                     QC Inspection
                   </TabsTrigger>
-                  <WorkflowTabTrigger value="workflow" />
+                  <WorkflowTabTrigger value="workflow" entityType="JobCard" entityId={selectedCardDetails?.id} workflowSummary={selectedCardWorkflowSummary} hasHistoryContent />
                 </TabsList>
 
                 {/* Overview Tab */}

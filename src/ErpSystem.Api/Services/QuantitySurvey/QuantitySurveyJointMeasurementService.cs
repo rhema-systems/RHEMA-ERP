@@ -499,7 +499,7 @@ public sealed class QuantitySurveyJointMeasurementService(
             entity.ApprovalWorkflowDefinitionId);
         if (!result.ExecutionResult.Success)
             throw Conflict(result.ExecutionResult.Message ?? "The configured QS measurement workflow could not be started.");
-        workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Measurement).ApplySubmitOutcome(entity, result.Outcome, UserId);
+        workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Measurement).ApplySubmitOutcome(entity, result, UserId);
         if (result.Outcome == WorkflowOutcome.Approved)
         {
             entity.Status = QuantitySurveyJointMeasurementStatuses.PendingApproval;

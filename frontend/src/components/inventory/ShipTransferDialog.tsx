@@ -1,4 +1,5 @@
 'use client';
+import { formatInventoryMoney } from '@/lib/inventory-currency';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -9,8 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Send, FileText, Loader2, DollarSign, Calculator, Save } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Send, FileText, Loader2, DollarSign, Calculator, Save, Columns3, Maximize2, Minimize2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuLabel } from '@/components/ui/dropdown-menu';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -18,12 +20,14 @@ import {
   InventoryTransferDetailDto, InventoryTransferItemDto, ShipTransferItemDto, ShipTransferWithCostsDto
 } from '@/services/inventoryManagementService';
 import { useToast } from '@/hooks/use-toast';
+import { getInventoryTransferProblemMessage } from '@/lib/inventory-transfer-controls';
 
 interface ShipTransferDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   transferId: string | null;
   onSuccess: () => void;
+  currencyCode?: string;
 }
 
 interface ShipQuantity {
@@ -39,16 +43,18 @@ interface ShipQuantity {
   destinationLocationName?: string;
 }
 
-export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }: ShipTransferDialogProps) {
+export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, currencyCode }: ShipTransferDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [fullPage, setFullPage] = useState(false);
   const [transfer, setTransfer] = useState<InventoryTransferDetailDto | null>(null);
   const [trackingNumber, setTrackingNumber] = useState('');
   const [carrierName, setCarrierName] = useState('');
   const [dispatchComment, setDispatchComment] = useState('');
   const [shipQuantities, setShipQuantities] = useState<ShipQuantity[]>([]);
+  const [extraColumns, setExtraColumns] = useState({ requested: false, shipped: false, uom: false });
   const mutationKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   // Shipping costs state
@@ -61,6 +67,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
   const [expenseGLAccount, setExpenseGLAccount] = useState('');
 
   useEffect(() => {
+    setFullPage(false);
     if (open && transferId) {
       loadTransferDetails();
     } else {
@@ -196,7 +203,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
       console.error('Error shipping transfer:', err);
       toast({
         title: 'Error',
-        description: err.response?.data?.message || err.response?.data || 'Failed to ship transfer',
+        description: getInventoryTransferProblemMessage(err, 'Failed to ship transfer'),
         variant: 'destructive'
       });
     } finally {
@@ -217,7 +224,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
   };
 
   const handleSaveDraft = async () => {
-    if (!transferId) return;
+    if (!transferId || !transfer) return;
 
     // Validate costs if included
     if (includeCosts) {
@@ -259,7 +266,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
       console.error('Error saving shipping costs:', err);
       toast({
         title: 'Error',
-        description: err.response?.data?.message || err.response?.data || 'Failed to save shipping costs',
+        description: getInventoryTransferProblemMessage(err, 'Failed to save shipping costs'),
         variant: 'destructive'
       });
     } finally {
@@ -321,14 +328,20 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95vw] lg:max-w-7xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={`flex w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden ${fullPage ? 'h-[calc(100dvh-32px)] max-h-[calc(100dvh-32px)] max-w-[calc(100vw-32px)]' : 'max-h-[90vh] max-w-[1100px]'}`}>
         <DialogHeader>
+          <div className="flex items-center justify-between gap-3 pr-8">
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-5 w-5" />
             Ship Transfer {transfer?.transferNumber}
           </DialogTitle>
-          <DialogDescription>
-            Enter the quantities to ship for each item. You can ship partial quantities.
+          <Button type="button" variant="outline" size="sm" onClick={() => setFullPage(value => !value)} aria-pressed={fullPage}>
+            {fullPage ? <Minimize2 className="mr-2 h-4 w-4" /> : <Maximize2 className="mr-2 h-4 w-4" />}
+            {fullPage ? 'Restore' : 'Full page'}
+          </Button>
+          </div>
+          <DialogDescription className="sr-only">
+            Enter quantities to ship.
           </DialogDescription>
         </DialogHeader>
 
@@ -337,7 +350,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
             <Loader2 className="h-8 w-8 animate-spin" />
           </div>
         ) : transfer ? (
-          <div className="space-y-4">
+          <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden pr-1">
             {/* Transfer Info */}
             <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg">
               <div>
@@ -373,12 +386,12 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="dispatchComment">Dispatch control comment</Label>
+              <Label htmlFor="dispatchComment">Notes (Optional)</Label>
               <Textarea
                 id="dispatchComment"
                 value={dispatchComment}
                 onChange={(event) => setDispatchComment(event.target.value)}
-                placeholder="Optional operational context retained in the immutable transfer action register"
+                placeholder="Add a note"
                 rows={2}
               />
             </div>
@@ -400,13 +413,10 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
                     <Label htmlFor="includeCosts" className="text-sm">Include shipping costs</Label>
                   </div>
                 </div>
-                <CardDescription>
-                  Capture shipping and miscellaneous costs for this transfer
-                </CardDescription>
               </CardHeader>
 
               {includeCosts && (
-                <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <CardContent className="grid grid-cols-1 gap-4">
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
@@ -489,9 +499,6 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
                             <SelectItem value="Quantity">By Item Quantity</SelectItem>
                           </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">
-                          Costs will be proportionally allocated to item costs.
-                        </p>
                       </div>
                     )}
 
@@ -499,48 +506,50 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between items-center">
                           <span>Shipping Cost:</span>
-                          <span className="font-medium">${shippingCost.toFixed(2)}</span>
+                          <span className="font-medium">{formatInventoryMoney(shippingCost, currencyCode)}</span>
                         </div>
                         <div className="flex justify-between items-center">
                           <span>Miscellaneous Cost:</span>
-                          <span className="font-medium">${miscellaneousCost.toFixed(2)}</span>
+                          <span className="font-medium">{formatInventoryMoney(miscellaneousCost, currencyCode)}</span>
                         </div>
                         <Separator />
                         <div className="flex justify-between items-center">
                           <span>Total Additional Cost:</span>
-                          <span className="font-semibold">${totalAdditionalCost.toFixed(2)}</span>
+                          <span className="font-semibold">{formatInventoryMoney(totalAdditionalCost, currencyCode)}</span>
                         </div>
                       </div>
                     </div>
 
-                    {costAllocationMethod === 'SpreadToItemCost' && (
-                      <p className="text-xs text-muted-foreground">
-                        Landed Unit = Unit Cost + (Allocated Additional Cost / Qty to Ship). Allocation basis: {costApportionmentBasis}.
-                      </p>
-                    )}
                   </div>
                 </CardContent>
               )}
             </Card>
 
             {/* Items Table */}
-            <div className="border rounded-lg">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Items to ship</h3>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><Button type="button" variant="outline" size="sm"><Columns3 className="mr-2 h-4 w-4" />Columns</Button></DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Optional columns</DropdownMenuLabel>
+                  <DropdownMenuCheckboxItem checked={extraColumns.requested} onSelect={event => event.preventDefault()} onCheckedChange={checked => setExtraColumns(previous => ({ ...previous, requested: checked === true }))}>Requested</DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem checked={extraColumns.shipped} onSelect={event => event.preventDefault()} onCheckedChange={checked => setExtraColumns(previous => ({ ...previous, shipped: checked === true }))}>Already Shipped</DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem checked={extraColumns.uom} onSelect={event => event.preventDefault()} onCheckedChange={checked => setExtraColumns(previous => ({ ...previous, uom: checked === true }))}>UOM</DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <div className="min-w-0 max-w-full overflow-x-auto rounded-lg border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Item Code</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead>Item</TableHead>
                     <TableHead>From Bin</TableHead>
                     <TableHead>To Bin</TableHead>
-                    <TableHead>UoM</TableHead>
-                    <TableHead className="text-right">Requested</TableHead>
-                    <TableHead className="text-right">Already Shipped</TableHead>
+                    {extraColumns.uom && <TableHead>UOM</TableHead>}
+                    {extraColumns.requested && <TableHead className="text-right">Requested</TableHead>}
+                    {extraColumns.shipped && <TableHead className="text-right">Already Shipped</TableHead>}
                     <TableHead className="text-right">Remaining</TableHead>
                     <TableHead className="text-right w-32">Qty to Ship</TableHead>
-                    <TableHead className="text-right">Unit Cost</TableHead>
-                    <TableHead className="text-right">Ship Value</TableHead>
-                    <TableHead className="text-right">Alloc. Cost</TableHead>
-                    <TableHead className="text-right">Landed Unit</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -548,20 +557,20 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
                     const remaining = item.requestedQuantity - item.alreadyShipped;
                     return (
                       <TableRow key={item.itemId}>
-                        <TableCell className="font-mono text-sm">{item.itemCode}</TableCell>
-                        <TableCell>{item.itemName}</TableCell>
+                        <TableCell className="min-w-40 py-2"><div className="font-mono text-xs">{item.itemCode}</div><div className="text-sm text-muted-foreground">{item.itemName}</div></TableCell>
                         <TableCell className="text-sm">{item.sourceLocationName || <span className="text-muted-foreground">-</span>}</TableCell>
                         <TableCell className="text-sm">{item.destinationLocationName || <span className="text-muted-foreground">-</span>}</TableCell>
-                        <TableCell>{item.unitOfMeasure}</TableCell>
-                        <TableCell className="text-right">{item.requestedQuantity.toFixed(2)}</TableCell>
-                        <TableCell className="text-right">
+                        {extraColumns.uom && <TableCell>{item.unitOfMeasure}</TableCell>}
+                        {extraColumns.requested && <TableCell className="text-right">{item.requestedQuantity.toFixed(2)}</TableCell>}
+                        {extraColumns.shipped && <TableCell className="text-right">
                           {item.alreadyShipped > 0 ? (
                             <Badge variant="secondary">{item.alreadyShipped.toFixed(2)}</Badge>
                           ) : '-'}
-                        </TableCell>
+                        </TableCell>}
                         <TableCell className="text-right">{remaining.toFixed(2)}</TableCell>
                         <TableCell className="text-right">
                           <Input
+                            aria-label={`Qty to Ship ${item.itemCode || item.itemName || ''}`}
                             type="number"
                             min="0"
                             max={remaining}
@@ -572,20 +581,6 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
                             disabled={remaining <= 0}
                           />
                         </TableCell>
-                        <TableCell className="text-right">${(item.unitCost || 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-right">
-                          ${(allocationPreview[item.itemId]?.shipValue ?? ((item.toShip || 0) * (item.unitCost || 0))).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {includeCosts && costAllocationMethod === 'SpreadToItemCost'
-                            ? `$${(allocationPreview[item.itemId]?.allocated ?? 0).toFixed(2)}`
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {includeCosts && costAllocationMethod === 'SpreadToItemCost'
-                            ? `$${(allocationPreview[item.itemId]?.landedUnit ?? (item.unitCost || 0)).toFixed(4)}`
-                            : '-'}
-                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -594,7 +589,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
             </div>
 
             {/* Summary */}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">Quantity Summary</CardTitle>
@@ -608,38 +603,11 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
                   </div>
                 </CardContent>
               </Card>
-
-              <Card className="w-full lg:ml-auto lg:max-w-md">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Financial Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Shipment Subtotal:</span>
-                    <span className="font-medium">${shipmentSubtotal.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Additional Cost:</span>
-                    <span className="font-medium">${shipmentAdditionalCost.toFixed(2)}</span>
-                  </div>
-                  {includeCosts && costAllocationMethod === 'SpreadToItemCost' && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Allocated to Lines:</span>
-                      <span className="font-medium">${totalAllocatedPreview.toFixed(2)}</span>
-                    </div>
-                  )}
-                  <Separator />
-                  <div className="flex justify-between">
-                    <span className="font-semibold">Total Shipment Value:</span>
-                    <span className="font-semibold">${shipmentTotal.toFixed(2)}</span>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           </div>
         ) : null}
 
-        <DialogFooter className="flex justify-between sm:justify-between">
+        <DialogFooter className="flex shrink-0 flex-wrap gap-2 border-t pt-3 sm:justify-between">
           <div>
             {transfer && (
               <Button type="button" variant="outline" onClick={handlePrintShipmentNote}>
@@ -648,7 +616,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess }
               </Button>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>

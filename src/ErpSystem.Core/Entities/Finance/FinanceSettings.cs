@@ -11,6 +11,8 @@ namespace ErpSystem.Core.Entities.Finance
     /// </summary>
     public class FinanceSettings : BusinessEntity
     {
+        public Guid? ReturnToVendorClearingAccountId { get; set; }
+        public Guid? PurchaseReturnVarianceAccountId { get; set; }
         /// <summary>
         /// Tenant ID (one settings record per tenant)
         /// </summary>

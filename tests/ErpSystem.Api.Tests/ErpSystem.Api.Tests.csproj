@@ -29,6 +29,14 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\Workflow\OptionalApprovalConfigurationTests.cs" />
+    <Compile Include="Services\Workflow\PurchaseReturnWorkflowRegistrationTests.cs" />
+    <Compile Include="Services\Workflow\SalesAgreementOptionalApprovalTests.cs" />
+    <Compile Include="Controllers\Inventory\PhysicalCountSheetImportTests.cs" />
+    <Compile Include="Services\Finance\LandedCostSupplierInvoiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceSettingsWriteOffMappingTests.cs" />
+    <Compile Include="Services\Finance\InventorySupplierReturnCreditTests.cs" />
+    <Compile Include="Controllers\Inventory\StockMovementCurrencyTests.cs" />
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
     <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
     <Compile Include="Configuration\CandidatePortalOptionsTests.cs" />
@@ -43,11 +51,13 @@
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
+    <Compile Include="Controllers\DocumentManagement\PaymentDocumentScopeTests.cs" />
     <Compile Include="Controllers\WorkflowApprovalResponseTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Finance\FinancePurchasingOptionalApprovalTests.cs" />
     <!-- Supplier-return ownership is shared with Procurement/Inventory, but Finance must keep
          its legacy mutation endpoints fail-closed until FIN-INT-012/013 producer contracts exist. -->
     <Compile Include="Controllers\Finance\SupplierReturnsQuarantineTests.cs" />
@@ -100,6 +110,7 @@
     <Compile Include="Controllers\Procurement\ProcurementContractOperationsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementWorksCloseoutControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrdersSodControllerTests.cs" />
+    <Compile Include="Controllers\Procurement\PurchaseOrderUpdateRetryTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementReceiptDocumentsControllerTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementReceiptSourceEvidenceControllerTests.cs" />
     <Compile Include="Controllers\Procurement\PurchaseOrderReceiptIdempotencyTests.cs" />
@@ -117,6 +128,8 @@
     <Compile Include="Controllers\Inventory\InventoryDisposalsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryItemsProfileControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\WarehouseItemsControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Inventory\WarehouseInventoryCostTests.cs" />
+    <Compile Include="Controllers\Inventory\WarehouseDefaultLocationControllerTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryItemIdentifiersControllerAuthorizationTests.cs" />
     <Compile Include="Controllers\Inventory\StockAdjustmentsOpeningStockControllerTests.cs" />
     <Compile Include="Controllers\Procurement\SupplierValidationControllerTests.cs" />
@@ -134,6 +147,7 @@
     <Compile Include="Controllers\QuantitySurvey\**\*.cs" />
     <Compile Include="Controllers\DashboardControllerDateRangeTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
+    <Compile Include="Services\DatabaseSeedingWorkflowPreservationTests.cs" />
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
@@ -157,6 +171,7 @@
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceAccessScopeServiceTests.cs" />
     <Compile Include="Services\Finance\JournalEntryLifecycleBatch5Tests.cs" />
+    <Compile Include="Services\Finance\JournalEntryOptionalApprovalTests.cs" />
     <Compile Include="Services\Finance\JournalBatchServiceTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSqlServerReleaseGateTests.cs" />
     <Compile Include="Services\Finance\FinancePerformanceReadinessTests.cs" />
@@ -171,6 +186,10 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
+    <Compile Include="Services\Finance\VendorPaymentEvidenceOptionalApprovalTests.cs" />
+    <Compile Include="Services\Finance\VendorPaymentEvidenceUploadTests.cs" />
+    <Compile Include="Services\Finance\VendorPaymentDirectEvidenceMigrationTests.cs" />
     <!-- FIN-INT-012/013 is an inter-team callable promise. Keep its fail-closed ownership,
          canonical-integrity and producer retry-identity tests in the default Finance suite. -->
     <Compile Include="Services\Finance\SupplierReturnFinanceAdapterTests.cs" />
@@ -181,6 +200,7 @@
     <Compile Include="Services\Inventory\InventoryAnalyticsServiceTests.cs" />
     <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalServiceTests.cs" />
+    <Compile Include="Services\Inventory\InventoryDisposalOptionalApprovalMigrationTests.cs" />
     <Compile Include="Services\Inventory\E2E013InventoryDisposalLifecycleTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />
     <Compile Include="Services\Finance\VendorInvoiceMatchExceptionServiceTests.cs" />
@@ -256,6 +276,7 @@
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\ControlledOpeningBalancePostingTests.cs" />
     <Compile Include="Services\Finance\AllocationRunBatchServiceTests.cs" />
+    <Compile Include="Services\Finance\AllocationRunOptionalApprovalTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationServiceTests.cs" />
     <Compile Include="Services\Finance\FixedAssetServiceImportTests.cs" />
     <Compile Include="Services\TenantSettingsServiceTests.cs" />

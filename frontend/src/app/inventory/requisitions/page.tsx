@@ -24,6 +24,8 @@ import { RequisitionDialog } from '@/components/inventory/RequisitionDialog';
 import { IssueRequisitionDialog } from '@/components/inventory/IssueRequisitionDialog';
 import { ReturnRequisitionDialog } from '@/components/inventory/ReturnRequisitionDialog';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import { canIssueRequisition } from '@/lib/inventory-requisition-access';
 import { format } from 'date-fns';
 
 const RequisitionStatuses = [
@@ -50,6 +52,8 @@ const normalizeStatus = (status: number | string): number => {
 
 export default function InventoryRequisitionsPage() {
   const { toast } = useToast();
+  const { user, hasPermission } = useAuth();
+  const hasIssuePermission = hasPermission('procurement.inventory.issue');
   const router = useRouter();
   const [requisitions, setRequisitions] = useState<InventoryRequisitionDto[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
@@ -281,7 +285,8 @@ export default function InventoryRequisitionsPage() {
                 <tbody>
                   {filteredRequisitions.map((req) => {
                     const status = normalizeStatus(req.status);
-                    const canReturn = status === 5 || status === 6 || status === 7;
+                    const canReturn = hasIssuePermission && (status === 5 || status === 6 || status === 7);
+                    const canIssue = canIssueRequisition(req, user?.id, hasIssuePermission);
                     const summary = workflowSummariesById[req.id];
                     const stepName = summary?.currentStepName || req.currentWorkflowStepName;
                     const pending = formatPendingApprovers(summary?.pendingApprovers || []);
@@ -373,10 +378,10 @@ export default function InventoryRequisitionsPage() {
                                 className="flex"
                               />
                             )}
-                            {(status === 3 || status === 4 || status === 5) && (
+                            {canIssue && (
                               <Button variant="ghost" size="sm" className="text-purple-600" onClick={() => handleIssue(req.id)} title="Issue Items"><Package className="h-4 w-4" /></Button>
                             )}
-                            {(status === 6 || status === 7) && (
+                            {(status === 5 || status === 6 || status === 7) && (
                               <Button variant="ghost" size="sm" onClick={() => handleIssue(req.id)} title="Issue vouchers"><ClipboardList className="h-4 w-4" /></Button>
                             )}
                             {canReturn && (

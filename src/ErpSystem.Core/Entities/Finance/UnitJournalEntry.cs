@@ -25,7 +25,10 @@ public enum UnitJournalEntryStatus
     Posted = 4,
     
     /// <summary>Entry has been reversed.</summary>
-    Reversed = 5
+    Reversed = 5,
+
+    /// <summary>Validated submission; no active approval process was configured.</summary>
+    ReadyToPost = 6
 }
 
 /// <summary>
@@ -97,6 +100,8 @@ public class UnitJournalEntry : TenantEntity
     /// </summary>
     [Required]
     public UnitJournalEntryStatus Status { get; set; } = UnitJournalEntryStatus.Draft;
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? WorkflowInstanceId { get; set; }
 
     /// <summary>
     /// Reference to source document (e.g., "HR Report #123").

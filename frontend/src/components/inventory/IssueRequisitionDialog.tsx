@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Package, CheckCircle, Download, ClipboardCheck } from 'lucide-react';
 import {
   inventoryRequisitionService,
@@ -20,6 +21,9 @@ import {
 } from '@/services/inventoryRequisitionService';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
+import { canIssueRequisition } from '@/lib/inventory-requisition-access';
+import { inventoryManagementService, type WarehouseLocationDto } from '@/services/inventoryManagementService';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { format } from 'date-fns';
 import {
   InventoryTrackingExceptionSelect,
@@ -79,32 +83,40 @@ const normalizeStatus = (status: number | string | undefined): number => {
 
 export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSuccess }: IssueRequisitionDialogProps) {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const hasIssuePermission = hasPermission('procurement.inventory.issue');
   const [loading, setLoading] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [requisition, setRequisition] = useState<InventoryRequisitionDetailDto | null>(null);
   const [issueItems, setIssueItems] = useState<IssueItemState[]>([]);
+  const [issueLocations, setIssueLocations] = useState<WarehouseLocationDto[]>([]);
+  const [defaultIssueLocation, setDefaultIssueLocation] = useState('');
+  const [issueError, setIssueError] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [receivers, setReceivers] = useState<InventoryIssueReceiverDto[]>([]);
   const [receiverUserId, setReceiverUserId] = useState('');
+  const [changingReceiver, setChangingReceiver] = useState(false);
   const [movementReasonCode, setMovementReasonCode] = useState('');
   const [accountingOptions, setAccountingOptions] = useState<InventoryIssueAccountingOptionsDto | null>(null);
   const [vouchers, setVouchers] = useState<InventoryIssueVoucherDto[]>([]);
   const [acknowledgementComment, setAcknowledgementComment] = useState('');
   const [voucherActionId, setVoucherActionId] = useState<string | null>(null);
-  const canIssue = Boolean(requisition && [3, 4, 5].includes(normalizeStatus(requisition.status)));
+  const canIssue = canIssueRequisition(requisition, user?.id, hasIssuePermission);
   const trackingExceptions = useAvailableInventoryTrackingExceptions(open && canIssue);
 
   useEffect(() => {
     if (open && requisitionId) {
       loadRequisition();
     }
-  }, [open, requisitionId]);
+  }, [open, requisitionId, user?.id, hasIssuePermission]);
 
   const loadRequisition = async () => {
     if (!requisitionId) return;
     try {
       setLoading(true);
+      setIssueError(null);
+      setIssueLocations([]);
+      setDefaultIssueLocation('');
       const [detail, issueVouchers] = await Promise.all([
         inventoryRequisitionService.getById(requisitionId),
         inventoryRequisitionService.getIssueVouchers(requisitionId),
@@ -112,20 +124,28 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
       setRequisition(detail);
       setVouchers(issueVouchers);
       setReceivers([]);
+      setReceiverUserId('');
+      setChangingReceiver(false);
       setAccountingOptions(null);
       setMovementReasonCode('');
       // Viewing/acknowledging an issued voucher must not require issue-configuration access.
-      if ([3, 4, 5].includes(normalizeStatus(detail.status))) {
-        const [receiverOptions, governedOptions] = await Promise.all([
+      if (canIssueRequisition(detail, user?.id, hasIssuePermission)) {
+        const [receiverOptions, governedOptions, locations] = await Promise.all([
           inventoryRequisitionService.getIssueReceivers(),
           inventoryRequisitionService.getIssueAccountingOptions(requisitionId),
+          inventoryManagementService.getWarehouseLocations(detail.warehouseId),
         ]);
+        setIssueLocations(locations.filter(location => location.isActive &&
+          (location.warehouseId === detail.warehouseId ||
+            (location.isConsignmentBin && location.consignmentWarehouseId === detail.warehouseId))));
         setReceivers(receiverOptions);
+        const requesterIsEligible = receiverOptions.some(receiver => receiver.userId === detail.requestedById);
+        setReceiverUserId(requesterIsEligible ? detail.requestedById! : '');
+        setChangingReceiver(!requesterIsEligible);
         setAccountingOptions(governedOptions);
         setMovementReasonCode(governedOptions.applicableMovementReasonCodes.length === 1
           ? governedOptions.applicableMovementReasonCodes[0] : '');
       }
-      setReceiverUserId(detail.requestedById || '');
       // Initialize issue items from requisition items
       const items: IssueItemState[] = detail.items.map(item => ({
         itemId: item.id,
@@ -134,8 +154,9 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
         itemName: item.itemName,
         requestedQuantity: item.requestedQuantity,
         approvedQuantity: item.approvedQuantity || item.requestedQuantity,
-        previouslyIssued: item.issuedQuantity || 0,
-        remainingToIssue: (item.approvedQuantity || item.requestedQuantity) - (item.issuedQuantity || 0),
+        previouslyIssued: item.grossIssuedQuantity ?? (item.issuedQuantity || 0) + (item.returnedQuantity ?? 0),
+        remainingToIssue: item.remainingToIssueQuantity ?? Math.max(0,
+          item.approvedQuantity - (item.grossIssuedQuantity ?? (item.issuedQuantity || 0) + (item.returnedQuantity ?? 0))),
         issuingQuantity: 0,
         unitOfMeasure: item.unitOfMeasure,
         locationId: item.locationId || detail.locationId,
@@ -151,6 +172,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
       setNotes('');
     } catch (err) {
       console.error('Error loading requisition:', err);
+      setIssueError(getProcurementProblemMessage(err, 'Failed to load issue details.'));
       toast({ title: 'Error', description: 'Failed to load requisition', variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -168,14 +190,33 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
     }));
   };
 
-  const handleIssueAll = () => {
+  const handleDefaultIssueLocationChange = (value: string) => {
+    if (value === 'none') {
+      setDefaultIssueLocation('');
+      return;
+    }
+    const location = issueLocations.find(option => option.id === value);
+    if (!location) return;
+    setDefaultIssueLocation(value);
+    setIssueItems(items => items.map(item => item.remainingToIssue > 0 &&
+      !issueLocations.some(option => option.id === item.locationId) ? {
+      ...item,
+      locationId: location.id,
+      locationName: `${location.locationCode}${location.name ? ` - ${location.name}` : ''}`,
+      inventoryTrackingExceptionId: undefined,
+    } : item));
+    setIssueError(null);
+  };
+
+  const handleFillRemainingQuantities = () => {
     setIssueItems(items => items.map(item => ({
       ...item,
-      issuingQuantity: item.remainingToIssue
+      issuingQuantity: Math.max(0, item.remainingToIssue)
     })));
   };
 
   const handleIssue = async () => {
+    if (!canIssue) return;
     const itemsToIssue = issueItems.filter(item => item.issuingQuantity > 0);
     if (itemsToIssue.length === 0) {
       toast({ title: 'Validation Error', description: 'Please enter quantities to issue', variant: 'destructive' });
@@ -185,7 +226,12 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
       toast({ title: 'Movement reason required', description: 'Select a configured movement reason before issuing stock.', variant: 'destructive' });
       return;
     }
+    if (itemsToIssue.some(item => !issueLocations.some(location => location.id === item.locationId))) {
+      setIssueError('Select an active storage location for every line being issued. You can use Default issue location to fill the lines.');
+      return;
+    }
     try {
+      setIssueError(null);
       setIssuing(true);
       const dto: IssueRequisitionDto = {
         idempotencyKey: crypto.randomUUID(),
@@ -214,7 +260,8 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
       await loadRequisition();
     } catch (err: unknown) {
       console.error('Error issuing items:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to issue items';
+      const errorMessage = getProcurementProblemMessage(err, 'Failed to issue items');
+      setIssueError(errorMessage);
       toast({ title: 'Error', description: errorMessage, variant: 'destructive' });
     } finally {
       setIssuing(false);
@@ -300,7 +347,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
         {loading ? (
           <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>
         ) : requisition ? (
-          <div className="space-y-4">
+          <div className="min-w-0 max-w-full space-y-4">
             {/* Requisition Info */}
             <Card>
               <CardContent className="pt-4">
@@ -308,12 +355,13 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                   <div><span className="text-muted-foreground">Department:</span> <span className="font-medium">{requisition.departmentName}</span></div>
                   <div><span className="text-muted-foreground">Warehouse:</span> <span className="font-medium">{requisition.warehouseName}</span></div>
                   <div><span className="text-muted-foreground">Request Date:</span> <span className="font-medium">{requisition.requestDateFormatted || format(new Date(requisition.requestDate), 'dd/MM/yyyy')}</span></div>
-                  <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{requisition.locationName || 'Warehouse level'}</span></div>
+                  <div><span className="text-muted-foreground">Requested location:</span> <span className="font-medium">{requisition.locationName || 'Not specified'}</span></div>
                 </div>
               </CardContent>
             </Card>
 
             {canIssue && <>
+            {issueError && <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{issueError}</div>}
             <Card className="border-blue-200 bg-blue-50/40">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Controlled handover</CardTitle>
@@ -321,18 +369,37 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
               <CardContent className="space-y-3">
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1">
-                    <Label htmlFor="issue-receiver">Designated receiver</Label>
-                    <Select value={receiverUserId || 'none'} onValueChange={value => setReceiverUserId(value === 'none' ? '' : value)}>
-                      <SelectTrigger id="issue-receiver"><SelectValue placeholder="Select an active internal receiver" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Select an active internal receiver</SelectItem>
-                        {receivers.map(receiver => (
-                          <SelectItem key={receiver.userId} value={receiver.userId}>
-                            {receiver.displayName || receiver.username}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label htmlFor={changingReceiver ? 'issue-receiver' : undefined}>Receiver</Label>
+                    {changingReceiver ? (
+                      <>
+                        <Select disabled={issuing} value={receiverUserId || 'none'} onValueChange={value => {
+                          setReceiverUserId(value === 'none' ? '' : value);
+                          if (value !== 'none') setChangingReceiver(false);
+                        }}>
+                          <SelectTrigger id="issue-receiver"><SelectValue placeholder="Select an active internal receiver" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Select an active internal receiver</SelectItem>
+                            {receivers.map(receiver => (
+                              <SelectItem key={receiver.userId} value={receiver.userId}>
+                                {receiver.displayName || receiver.username}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!receiverUserId && <p className="text-xs text-muted-foreground">The requester is not available as an eligible receiver. Select the person collecting the items.</p>}
+                        {receiverUserId && <Button type="button" size="sm" variant="ghost" disabled={issuing} onClick={() => setChangingReceiver(false)}>Cancel change</Button>}
+                      </>
+                    ) : (
+                      <div className="flex min-h-10 flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-medium">
+                          {receivers.find(receiver => receiver.userId === receiverUserId)?.displayName ||
+                            receivers.find(receiver => receiver.userId === receiverUserId)?.username || requisition.requestedByName}
+                          {receiverUserId === requisition.requestedById && ' (requester)'}
+                        </span>
+                        <Button type="button" size="sm" variant="outline" disabled={issuing} onClick={() => setChangingReceiver(true)}>Change receiver</Button>
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">Change only if someone else will collect and acknowledge receipt.</p>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="movement-reason">Movement reason</Label>
@@ -356,10 +423,26 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
             </Card>
 
             {/* Items Table */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h4 className="font-medium">Items to Issue</h4>
-              {hasItemsToIssue && <Button variant="outline" size="sm" onClick={handleIssueAll}>Issue All Remaining</Button>}
             </div>
+            {hasItemsToIssue && <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="w-full space-y-1 sm:max-w-sm">
+                <Label htmlFor="default-issue-location">Default issue location</Label>
+                <Select value={defaultIssueLocation || 'none'} onValueChange={handleDefaultIssueLocationChange} disabled={issuing}>
+                  <SelectTrigger id="default-issue-location"><SelectValue placeholder="Select default location" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No default location</SelectItem>
+                    {issueLocations.map(location => <SelectItem key={location.id} value={location.id}>
+                      {location.locationCode}{location.name ? ` - ${location.name}` : ''}
+                    </SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Fills missing or unavailable locations. Existing active selections stay unchanged; you can change each line below.</p>
+                {issueLocations.length === 0 && <p className="text-sm text-destructive">No active storage locations are available in this warehouse. Ask Stores to configure a location before issuing.</p>}
+              </div>
+              <Button type="button" variant="outline" size="sm" disabled={issuing} onClick={handleFillRemainingQuantities}>Fill remaining quantities</Button>
+            </div>}
 
             <div className="overflow-x-auto">
             <Table className="min-w-[1040px]">
@@ -371,7 +454,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                   <TableHead className="text-center">Previously Issued</TableHead>
                   <TableHead className="text-center">Remaining</TableHead>
                   <TableHead className="text-center">Issue Qty</TableHead>
-                  <TableHead>Location</TableHead>
+                    <TableHead>Issue location</TableHead>
                   <TableHead>Tracking</TableHead>
                   <TableHead>UoM</TableHead>
                 </TableRow>
@@ -409,8 +492,61 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                         />
                       ) : '-'}
                     </TableCell>
-                    <TableCell>{item.locationName || requisition.locationName || 'Warehouse level'}</TableCell>
-                    <TableCell className="min-w-[360px]"><div className="grid grid-cols-3 gap-1"><Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} /><Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} /><Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} /><div className="col-span-3"><InventoryTrackingExceptionSelect value={item.inventoryTrackingExceptionId} onValueChange={inventoryTrackingExceptionId => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId } : value))} exceptions={trackingExceptions.exceptions} loading={trackingExceptions.loading} error={trackingExceptions.error} onRetry={trackingExceptions.refresh} context={{ inventoryItemId: item.inventoryItemId, warehouseId: requisition.warehouseId, locationId: item.locationId, referenceId: requisition.id, lotNumber: item.lotNumber, batchNumber: item.batchNumber, serialNumber: item.serialNumber }} /></div></div></TableCell>
+                    <TableCell className="min-w-[200px]">
+                      {item.remainingToIssue > 0 ? (
+                        <Select
+                          value={item.locationId || ''}
+                          disabled={issuing}
+                          onValueChange={value => {
+                            const location = issueLocations.find(option => option.id === value);
+                            if (!location) return;
+                            setIssueItems(values => values.map(line => line.itemId === item.itemId ? {
+                              ...line,
+                              locationId: location.id,
+                              locationName: `${location.locationCode}${location.name ? ` - ${location.name}` : ''}`,
+                              inventoryTrackingExceptionId: undefined,
+                            } : line));
+                            setIssueError(null);
+                          }}>
+                          <SelectTrigger aria-label={`Issue location for ${item.itemCode}`}><SelectValue placeholder="Select issue location" /></SelectTrigger>
+                          <SelectContent>
+                            {issueLocations.map(location => <SelectItem key={location.id} value={location.id}>
+                              {location.locationCode}{location.name ? ` - ${location.name}` : ''}
+                            </SelectItem>)}
+                            {item.locationId && !issueLocations.some(location => location.id === item.locationId) &&
+                              <SelectItem value={item.locationId} disabled>{item.locationName || 'Previously selected location (unavailable)'}</SelectItem>}
+                          </SelectContent>
+                        </Select>
+                      ) : item.locationName || 'Not recorded'}
+                    </TableCell>
+                    <TableCell className="min-w-[360px]">
+                      <div className="grid grid-cols-3 gap-1">
+                        <Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} />
+                        <Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} />
+                        <Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} />
+                        <Accordion type="single" collapsible defaultValue={item.inventoryTrackingExceptionId ? 'exception' : undefined} className="col-span-3">
+                          <AccordionItem value="exception" className="border-0">
+                            <AccordionTrigger disabled={issuing} className="gap-2 py-2 text-xs text-muted-foreground">
+                              <span>Advanced tracking options</span>
+                              {item.inventoryTrackingExceptionId && <Badge variant="outline" className="ml-auto text-xs">Exception selected</Badge>}
+                            </AccordionTrigger>
+                            <AccordionContent className="pb-0">
+                              <p className="mb-2 text-xs text-muted-foreground">Use only when an approved exception applies to this issue.</p>
+                              <InventoryTrackingExceptionSelect
+                                value={item.inventoryTrackingExceptionId}
+                                onValueChange={inventoryTrackingExceptionId => setIssueItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId } : value))}
+                                exceptions={trackingExceptions.exceptions}
+                                loading={trackingExceptions.loading}
+                                error={trackingExceptions.error}
+                                onRetry={trackingExceptions.refresh}
+                                disabled={issuing}
+                                context={{ inventoryItemId: item.inventoryItemId, warehouseId: requisition.warehouseId, locationId: item.locationId, referenceId: requisition.id, lotNumber: item.lotNumber, batchNumber: item.batchNumber, serialNumber: item.serialNumber }}
+                              />
+                            </AccordionContent>
+                          </AccordionItem>
+                        </Accordion>
+                      </div>
+                    </TableCell>
                     <TableCell>{item.unitOfMeasure}</TableCell>
                   </TableRow>
                 ))}

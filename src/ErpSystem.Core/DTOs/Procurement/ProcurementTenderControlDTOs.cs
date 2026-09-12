@@ -5,6 +5,7 @@ namespace ErpSystem.Core.DTOs.Procurement;
 
 public sealed class ProcurementTenderControlDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid TenderId { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string TenderTitle { get; set; } = string.Empty;
@@ -160,6 +161,7 @@ public sealed class ProcurementTenderFinancialScoreRequest
 
 public sealed class SubmitProcurementTenderApprovalRequest
 {
+    [StringLength(300)] public string? PpaApprovalReference { get; set; }
     [Required] public string RowVersion { get; set; } = string.Empty;
 }
 

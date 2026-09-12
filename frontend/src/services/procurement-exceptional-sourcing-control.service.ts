@@ -37,8 +37,9 @@ export const procurementExceptionalSourcingControlService = {
   get: async (tenderId: string) => normalizeControl(await apiService.get<WireControl>(root(tenderId))),
   prepare: (tenderId: string, request: PrepareExceptionalSourcingRequest) =>
     postControl(`${root(tenderId)}/prepare`, request),
-  submitApproval: (tenderId: string, rowVersion: string) =>
-    postControl(`${root(tenderId)}/approval/submit`, { rowVersion }),
+  submitApproval: (tenderId: string, rowVersion: string, authority?: {
+    boardApprovalReference?: string; managingDirectorApprovalReference?: string; ppaApprovalReference?: string;
+  }) => postControl(`${root(tenderId)}/approval/submit`, { ...authority, rowVersion }),
   decideApproval: (tenderId: string, request: unknown) =>
     postControl(`${root(tenderId)}/approval/decision`, request),
   negotiation: (tenderId: string, request: unknown) =>

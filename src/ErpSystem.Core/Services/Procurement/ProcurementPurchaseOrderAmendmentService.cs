@@ -1515,8 +1515,10 @@ public sealed class ProcurementPurchaseOrderAmendmentService :
         purchaseOrder.LastAmendedAt = now;
         purchaseOrder.LastAmendedById = _currentUser.UserId;
         purchaseOrder.Status = "Approved";
-        purchaseOrder.ApprovedById = _currentUser.UserId;
-        purchaseOrder.ApprovedAt = now;
+        // The amendment retains its own reviewer. Do not rewrite a direct PO's
+        // original no-approval decision as a human approval of the PO.
+        purchaseOrder.ApprovedById = purchaseOrder.ApprovalRequired ? _currentUser.UserId : null;
+        purchaseOrder.ApprovedAt = purchaseOrder.ApprovalRequired ? now : null;
         purchaseOrder.UpdatedAt = now;
         purchaseOrder.UpdatedBy = ActorName();
         purchaseOrder.LastModifiedById = _currentUser.UserId;

@@ -13,6 +13,7 @@ const getAuthHeaders = () => {
 
 // Types
 export interface StockAdjustmentDto {
+  approvalRequired?: boolean;
   id: string;
   adjustmentNumber: string;
   adjustmentDate: string;
@@ -141,6 +142,7 @@ export const StockAdjustmentStatusColors: Record<string, string> = {
   Draft: 'bg-gray-100 text-gray-800',
   PendingApproval: 'bg-amber-100 text-amber-800',
   Approved: 'bg-blue-100 text-blue-800',
+  ReadyToPost: 'bg-emerald-100 text-emerald-800',
   Rejected: 'bg-red-100 text-red-800',
   Posted: 'bg-green-100 text-green-800',
   Reversed: 'bg-purple-100 text-purple-800',

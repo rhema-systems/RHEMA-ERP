@@ -762,7 +762,7 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(entity, workflowResult, userId);
 
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();

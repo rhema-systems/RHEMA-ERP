@@ -148,7 +148,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (workflowResult.ExecutionResult.Success)
         {
             var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-            adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
+            adapter.ApplySubmitOutcome(entity, workflowResult, GetCurrentUserId());
             await _encashmentRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync();
         }

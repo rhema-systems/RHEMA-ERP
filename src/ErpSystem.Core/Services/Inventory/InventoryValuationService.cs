@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.Inventory;
+using System.Data.SqlTypes;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -13,7 +14,7 @@ namespace ErpSystem.Core.Services.Inventory;
 /// Comprehensive inventory valuation service supporting FIFO, WAC, and Standard Cost methods.
 /// Manages inventory movements, cost layers, and balance calculations.
 /// </summary>
-public class InventoryValuationService : IInventoryValuationService
+public partial class InventoryValuationService : IInventoryValuationService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<InventoryValuationService> _logger;
@@ -48,6 +49,7 @@ public class InventoryValuationService : IInventoryValuationService
     public void ResetProcessingAttempt()
     {
         _balanceCache.Clear();
+        _transferMovementCache.Clear();
         _movementNumberPrefix = null;
         _movementNumberNext = 0;
     }
@@ -291,12 +293,17 @@ public class InventoryValuationService : IInventoryValuationService
     /// <summary>
     /// Consumes inventory using FIFO method (oldest layers first)
     /// </summary>
-    public async Task<decimal> ConsumeFIFOLayersAsync(
+    public Task<decimal> ConsumeFIFOLayersAsync(
         Guid inventoryItemId,
         Guid warehouseId,
         Guid? locationId,
         decimal quantity,
-        List<InventoryMovement> movements)
+        List<InventoryMovement> movements) =>
+        ConsumeFIFOLayersCoreAsync(inventoryItemId, warehouseId, locationId, quantity, movements, Array.Empty<InventoryLayer>());
+
+    private async Task<decimal> ConsumeFIFOLayersCoreAsync(
+        Guid inventoryItemId, Guid warehouseId, Guid? locationId, decimal quantity,
+        List<InventoryMovement> movements, IReadOnlyCollection<InventoryLayer> pendingLayers)
     {
         if (quantity <= 0) throw new ArgumentOutOfRangeException(nameof(quantity));
         var query = _unitOfWork.Repository<InventoryLayer>()
@@ -314,6 +321,16 @@ public class InventoryValuationService : IInventoryValuationService
             .ThenBy(l => l.Id)
             .ToListAsync();
 
+        // Only the controlled adjustment owner supplies its newly adopted exact-bin
+        // layers. A database query alone cannot see Added entities before SaveChanges.
+        if (pendingLayers.Count > 0)
+            layers = layers.Concat(pendingLayers.Where(layer =>
+                    layer.TenantId == _currentUserProvider.TenantId && !layer.IsDeleted && layer.IsActive &&
+                    layer.InventoryItemId == inventoryItemId && layer.WarehouseId == warehouseId &&
+                    layer.LocationId == locationId && !layer.IsFullyConsumed && layer.RemainingQuantity > 0))
+                .DistinctBy(layer => layer.Id).OrderBy(layer => layer.LayerDate).ThenBy(layer => layer.CreatedAt)
+                .ThenBy(layer => new SqlGuid(layer.Id)).ToList();
+
         // Validate before touching tracked layers, including callers that own their transaction.
         if (layers.Sum(layer => layer.RemainingQuantity) < quantity)
             throw new InvalidOperationException("Insufficient inventory layers in the selected stock location.");
@@ -326,11 +343,16 @@ public class InventoryValuationService : IInventoryValuationService
             if (remainingQty <= 0) break;
 
             var qtyFromLayer = Math.Min(remainingQty, layer.RemainingQuantity);
-            var costFromLayer = qtyFromLayer * layer.UnitCost;
+            // A transferred FIFO layer may carry a cent remainder that cannot
+            // be represented by its rounded unit cost. Settle the last quantity
+            // at the retained layer value; never discard or invent that remainder.
+            var costFromLayer = qtyFromLayer == layer.RemainingQuantity
+                ? layer.RemainingValue
+                : Math.Min(layer.RemainingValue, decimal.Round(qtyFromLayer * layer.UnitCost, 2, MidpointRounding.AwayFromZero));
 
             // Update layer
             layer.RemainingQuantity -= qtyFromLayer;
-            layer.RemainingValue = layer.RemainingQuantity * layer.UnitCost;
+            layer.RemainingValue -= costFromLayer;
             layer.IsFullyConsumed = layer.RemainingQuantity == 0;
 
             // Track cost for this consumption
@@ -471,8 +493,12 @@ public class InventoryValuationService : IInventoryValuationService
             throw new InvalidOperationException($"Insufficient inventory. Available: {balance.QuantityOnHand}, Requested: {quantity}");
         }
 
-        var costPerUnit = balance.AverageUnitCost;
-        var totalCost = quantity * costPerUnit;
+        // The rounded average is a display/cache value, not the valuation source.
+        // Settle the retained value on the last quantity so issuing 3 units worth
+        // 10.00 cannot silently discard a cent because the cached average is 3.33.
+        var costPerUnit = balance.QuantityOnHand > 0 ? balance.TotalValue / balance.QuantityOnHand : 0;
+        var totalCost = quantity == balance.QuantityOnHand ? balance.TotalValue
+            : decimal.Round(quantity * costPerUnit, 2, MidpointRounding.AwayFromZero);
 
         balance.QuantityOnHand -= quantity;
         balance.TotalValue -= totalCost;
@@ -711,6 +737,12 @@ public class InventoryValuationService : IInventoryValuationService
         };
 
         await _unitOfWork.Repository<InventoryMovement>().AddAsync(movement);
+        if (referenceType == ReferenceType.Transfer && referenceId.HasValue)
+        {
+            if (!_transferMovementCache.TryGetValue(referenceId.Value, out var pending))
+                _transferMovementCache[referenceId.Value] = pending = new List<InventoryMovement>();
+            pending.Add(movement);
+        }
         return movement;
     }
 
@@ -802,6 +834,13 @@ public class InventoryValuationService : IInventoryValuationService
             referenceType, referenceNumber, referenceId,
             lotNumber, serialNumber, expirationDate);
         movement.VarianceAmount = variance;
+
+        // Receipt valuation has already changed the balance. Retain its closing
+        // totals rather than adding this receipt a second time in movement history.
+        var receiptBalance = await GetOrCreateBalanceAsync(inventoryItemId, warehouseId, locationId);
+        receiptBalance.QuantityAvailable = receiptBalance.QuantityOnHand - receiptBalance.QuantityAllocated;
+        movement.RunningBalance = receiptBalance.QuantityOnHand;
+        movement.RunningValue = receiptBalance.TotalValue;
 
         return variance;
     }
@@ -983,12 +1022,35 @@ public class InventoryValuationService : IInventoryValuationService
         string? lotNumber = null,
         string? serialNumber = null,
         DateTime? expirationDate = null,
-        Guid? reversalSourceId = null)
+        Guid? reversalSourceId = null,
+        DateTime? valuationTimestamp = null,
+        decimal? fifoOpeningFallbackCost = null,
+        Guid? reversalAdjustmentLineId = null)
     {
         if (quantityDelta == 0)
             throw new ArgumentOutOfRangeException(nameof(quantityDelta), "An adjustment quantity cannot be zero.");
         if (unitCost <= 0)
             throw new ArgumentOutOfRangeException(nameof(unitCost), "An adjustment requires a positive server-derived unit cost.");
+
+        decimal? retainedReversalValue = null;
+        if (reversalAdjustmentLineId.HasValue)
+        {
+            // A rounded four-decimal display price cannot reconstruct every cent of
+            // a consumed FIFO layer. Only the controlled reversal owner may restore
+            // the immutable original line value; no caller-supplied value is accepted.
+            if (quantityDelta <= 0 || reversalSourceId.HasValue)
+                throw new InvalidOperationException("An adjustment receipt reversal requires its exact original negative line.");
+            retainedReversalValue = await _unitOfWork.Repository<StockAdjustmentItem>()
+                .GetQueryable(line => line.TenantId == _currentUserProvider.TenantId &&
+                    line.Id == reversalAdjustmentLineId.Value && line.AdjustmentId == referenceId && !line.IsDeleted &&
+                    line.InventoryItemId == inventoryItemId && line.LocationId == locationId &&
+                    line.InventoryItem.ValuationMethod == ValuationMethod.FIFO &&
+                    line.AdjustmentQuantity == -quantityDelta && line.AdjustmentValue < 0 &&
+                    line.Adjustment.TenantId == _currentUserProvider.TenantId && !line.Adjustment.IsDeleted &&
+                    line.Adjustment.WarehouseId == warehouseId && line.Adjustment.Status == "Reversed")
+                .Select(line => (decimal?)-line.AdjustmentValue).SingleOrDefaultAsync()
+                ?? throw new InvalidOperationException("The reversal line does not match the retained adjustment quantity, location and value.");
+        }
 
         var item = await _unitOfWork.Repository<InventoryItem>()
             .GetQueryable(value => value.TenantId == _currentUserProvider.TenantId &&
@@ -1004,11 +1066,15 @@ public class InventoryValuationService : IInventoryValuationService
         var balance = await GetOrCreateBalanceAsync(inventoryItemId, warehouseId, locationId);
         // TDC-0603 deliberately did not manufacture legacy movement history. Adopt an
         // exact-bin opening value only while this authoritative scope is still pristine.
+        var fifoFallbackCost = fifoOpeningFallbackCost ?? (item.AverageCost > 0 ? item.AverageCost
+            : item.StandardCost > 0 ? item.StandardCost : item.LastPurchaseCost);
         if (!balance.LastMovementDate.HasValue && balance.QuantityOnHand == 0 && openingQuantity != 0)
         {
+            var openingUnitCost = item.ValuationMethod == ValuationMethod.FIFO && fifoFallbackCost > 0
+                ? fifoFallbackCost : unitCost;
             balance.QuantityOnHand = openingQuantity;
-            balance.TotalValue = openingQuantity * unitCost;
-            balance.AverageUnitCost = unitCost;
+            balance.TotalValue = openingQuantity * openingUnitCost;
+            balance.AverageUnitCost = openingUnitCost;
         }
 
         var quantity = Math.Abs(quantityDelta);
@@ -1026,13 +1092,16 @@ public class InventoryValuationService : IInventoryValuationService
                 : unitCost;
             if (movementUnitCost <= 0)
                 throw new InvalidOperationException($"A valid {item.ValuationMethod} cost is required for {item.ItemCode}.");
-            totalValue = quantity * movementUnitCost;
+            totalValue = retainedReversalValue ?? quantity * movementUnitCost;
+            if (retainedReversalValue.HasValue) movementUnitCost = totalValue / quantity;
             if (item.ValuationMethod == ValuationMethod.FIFO)
             {
                 var layer = await CreateFIFOLayerAsync(
                     inventoryItemId, warehouseId, locationId, quantity, movementUnitCost,
                     ReferenceType.Adjustment.ToString(), referenceNumber, referenceId,
                     lotNumber, expirationDate);
+                if (valuationTimestamp.HasValue) layer.LayerDate = valuationTimestamp.Value;
+                if (retainedReversalValue.HasValue) layer.RemainingValue = totalValue;
                 movementCostLayerId = layer.Id;
             }
             balance.QuantityOnHand += quantity;
@@ -1058,25 +1127,30 @@ public class InventoryValuationService : IInventoryValuationService
                     var activeLayerQuantity = await _unitOfWork.Repository<InventoryLayer>()
                         .GetQueryable(value => value.TenantId == _currentUserProvider.TenantId &&
                             value.InventoryItemId == inventoryItemId && value.WarehouseId == warehouseId &&
-                            value.LocationId == locationId && !value.IsFullyConsumed && value.RemainingQuantity > 0)
+                            value.LocationId == locationId && !value.IsDeleted && value.IsActive &&
+                            !value.IsFullyConsumed && value.RemainingQuantity > 0)
                         .SumAsync(value => (decimal?)value.RemainingQuantity) ?? 0;
                     // Legacy exact-bin stock can predate the valuation layer ledger. Adopt
                     // only the missing opening quantity and retain explicit source lineage.
                     var missingOpeningLayer = Math.Max(0, openingQuantity - activeLayerQuantity);
                     if (missingOpeningLayer > 0)
                     {
-                        await CreateFIFOLayerAsync(
-                            inventoryItemId, warehouseId, locationId, missingOpeningLayer, unitCost,
+                        var openingLayer = await CreateFIFOLayerAsync(
+                            inventoryItemId, warehouseId, locationId, missingOpeningLayer, fifoFallbackCost,
                             "LegacyExactBinAdoption", referenceNumber, referenceId, lotNumber, expirationDate);
+                        if (valuationTimestamp.HasValue) openingLayer.LayerDate = valuationTimestamp.Value;
+                        openingLayer.UnitCost = decimal.Round(openingLayer.UnitCost, 2, MidpointRounding.AwayFromZero);
+                        openingLayer.RemainingValue = decimal.Round(openingLayer.RemainingValue, 4, MidpointRounding.AwayFromZero);
                     }
                     var coveredQuantity = allowNegative
                         ? Math.Min(quantity, activeLayerQuantity + missingOpeningLayer)
                         : quantity;
                     totalValue = coveredQuantity > 0
-                        ? await ConsumeFIFOLayersAsync(
-                            inventoryItemId, warehouseId, locationId, coveredQuantity, new List<InventoryMovement>())
+                        ? await ConsumeFIFOLayersCoreAsync(
+                            inventoryItemId, warehouseId, locationId, coveredQuantity, new List<InventoryMovement>(),
+                            _unitOfWork.Repository<InventoryLayer>().GetAddedEntities())
                         : 0;
-                    totalValue += (quantity - coveredQuantity) * unitCost;
+                    totalValue += (quantity - coveredQuantity) * fifoFallbackCost;
                     movementUnitCost = totalValue / quantity;
                     break;
                 }
@@ -1112,6 +1186,7 @@ public class InventoryValuationService : IInventoryValuationService
         // This path mutates the balance before recording its immutable movement.
         movement.RunningBalance = balance.QuantityOnHand;
         movement.RunningValue = balance.TotalValue;
+        movement.TotalValue = totalValue;
         movement.CostLayerId = movementCostLayerId;
         return totalValue;
     }

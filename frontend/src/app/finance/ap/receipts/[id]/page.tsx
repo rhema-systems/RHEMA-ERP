@@ -22,6 +22,7 @@ import { Separator } from '@/components/ui/separator';
 import { financePurchaseOrderService, FinancePurchaseOrder, FinancePurchaseOrderReceipt } from '@/services/financePurchaseOrderService';
 import { formatCurrency } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 
 function formatDate(value?: string | null) {
     if (!value) return '-';
@@ -104,7 +105,7 @@ function getReceiptStatus(receipt: FinancePurchaseOrderReceipt) {
         return { label: 'Partially Invoiced', className: 'bg-amber-600/15 text-amber-700 border-amber-200' };
     }
 
-    return { label: 'Approved For Invoice', className: 'bg-emerald-600/15 text-emerald-700 border-emerald-200' };
+    return { label: receipt.approvalRequired === false ? 'Ready for invoice' : 'Approved For Invoice', className: 'bg-emerald-600/15 text-emerald-700 border-emerald-200' };
 }
 
 export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: string }> }) {
@@ -116,6 +117,7 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
     const [loading, setLoading] = useState(true);
     const [converting, setConverting] = useState(false);
     const [submittingApproval, setSubmittingApproval] = useState(false);
+    const workflow = useWorkflowSummary({ entityType: 'FinancePurchaseOrderReceipt', entityId: id });
 
     useEffect(() => {
         void loadReceipt();
@@ -142,7 +144,7 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
 
     const handleConvertToInvoice = async () => {
         if (!receipt || !isApprovedReceipt(receipt)) {
-            toast({ title: 'Approval required', description: 'Approve the GRV before converting it to a vendor invoice.', variant: 'destructive' });
+            toast({ title: 'Receipt not ready', description: 'Complete the GRV before converting it to a vendor invoice.', variant: 'destructive' });
             return;
         }
 
@@ -163,7 +165,9 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
         try {
             const data = await financePurchaseOrderService.submitReceiptForApproval(id);
             setReceipt(data);
-            toast({ title: 'Submitted', description: 'The GRV has been submitted for approval.' });
+            toast({ title: data.approvalRequired === false ? 'Receipt completed' : 'Submitted',
+                description: data.approvalRequired === false ? 'The receipt is posted and ready for invoicing.' : 'The GRV has been submitted for approval.' });
+            await workflow.refresh();
         } catch (error: any) {
             toast({ title: 'Error', description: error.message || 'Failed to submit GRV for approval', variant: 'destructive' });
         } finally {
@@ -228,6 +232,7 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    {workflow.error && <span role="alert" className="text-sm text-red-700">{workflow.error} <Button variant="link" onClick={() => void workflow.refresh()}>Retry</Button></span>}
                     <Button variant="outline" onClick={() => router.push(`/finance/ap/purchase-orders/${receipt.financePurchaseOrderId}`)}>
                         <ExternalLink className="mr-2 h-4 w-4" />
                         View PO
@@ -237,9 +242,9 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
                         Print
                     </Button>
                     {canSubmitForApproval && (
-                        <Button onClick={handleSubmitForApproval} disabled={submittingApproval}>
+                        <Button onClick={handleSubmitForApproval} disabled={submittingApproval || !workflow.visibility.known}>
                             {submittingApproval ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                            Submit For Approval
+                            {!workflow.visibility.known ? 'Checking approval status…' : workflow.visibility.direct ? 'Complete' : 'Submit For Approval'}
                         </Button>
                     )}
                     {canConvertToInvoice && (
@@ -514,7 +519,7 @@ export default function ReceiptDetailsPage({ params }: { params: Promise<{ id: s
             <div className="mt-16 grid grid-cols-3 gap-10 text-center text-sm">
                 <div className="border-t border-black pt-2">Received By</div>
                 <div className="border-t border-black pt-2">Inspected By</div>
-                <div className="border-t border-black pt-2">Approved By</div>
+                {receipt.approvalRequired !== false && <div className="border-t border-black pt-2">Approved By</div>}
             </div>
         </section>
         </>

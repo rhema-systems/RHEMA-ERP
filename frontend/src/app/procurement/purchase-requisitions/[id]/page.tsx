@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Card,
@@ -731,38 +732,20 @@ export default function PurchaseRequisitionDetailPage() {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <Card
-        className={
-          submissionPresentation.tone === 'ready'
-            ? 'border-emerald-200 bg-emerald-50/50'
-            : submissionPresentation.tone === 'blocked'
-              ? 'border-amber-200 bg-amber-50/50'
-              : ''
-        }
+      <ProcurementControlAccordion
+        title="Submission control"
+        summary={canEdit ? submissionPresentation.title : `Requisition is ${requisition.status}; draft-submission checks are reference only.`}
+        status={<Badge variant="outline">{canEdit ? submissionPresentation.basisLabel : requisition.status}</Badge>}
+        notice={canEdit && submissionPresentation.tone === 'blocked' && (submissionReadiness?.requiredActions[0] || submissionReadiness?.message || 'This control needs attention. Expand for details.')}
       >
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              {submissionPresentation.tone === 'ready' ? (
-                <CheckCircle className="h-5 w-5 text-emerald-700" />
-              ) : submissionPresentation.tone === 'blocked' ? (
-                <AlertCircle className="h-5 w-5 text-amber-700" />
-              ) : (
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              )}
-              Submission control
-            </CardTitle>
-            <CardDescription className="mt-1">
+        <p className="mb-4 text-sm text-muted-foreground">
               Required requisition details are checked before the configured
               approval workflow starts. APP exchange is shown for traceability
               and does not block submission.
-            </CardDescription>
-          </div>
-          <Badge variant="outline">{submissionPresentation.basisLabel}</Badge>
-        </CardHeader>
+            </p>
         <CardContent className="space-y-4">
           <div>
-            <p className="font-medium">{submissionPresentation.title}</p>
+            <p className="font-medium">{canEdit ? submissionPresentation.title : 'Draft submission check — not a current action at this stage'}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {submissionReadiness?.message ||
                 'The tenant-safe submission control is being evaluated.'}
@@ -858,38 +841,20 @@ export default function PurchaseRequisitionDetailPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </ProcurementControlAccordion>
 
-      <Card
-        className={
-          budgetPresentation.tone === 'ready'
-            ? 'border-emerald-200 bg-emerald-50/50'
-            : budgetPresentation.tone === 'blocked'
-              ? 'border-amber-200 bg-amber-50/50'
-              : ''
-        }
+      <ProcurementControlAccordion
+        title="Finance budget control"
+        summary={budgetPresentation.title}
+        status={<Badge variant="outline">{budgetPresentation.basisLabel}</Badge>}
+        notice={budgetPresentation.tone === 'blocked' && (budgetReadiness?.requiredActions[0] || budgetReadiness?.message || 'This control needs attention. Expand for details.')}
       >
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              {budgetPresentation.tone === 'ready' ? (
-                <CheckCircle className="h-5 w-5 text-emerald-700" />
-              ) : budgetPresentation.tone === 'blocked' ? (
-                <AlertCircle className="h-5 w-5 text-amber-700" />
-              ) : (
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              )}
-              Finance budget control
-            </CardTitle>
-            <CardDescription className="mt-1">
+        <p className="mb-4 text-sm text-muted-foreground">
               The approved budget and current availability are validated here;
               PR submission and approval do not reserve funds. The Finance
               commitment is created only at final PO approval or contract
               activation.
-            </CardDescription>
-          </div>
-          <Badge variant="outline">{budgetPresentation.basisLabel}</Badge>
-        </CardHeader>
+            </p>
         <CardContent className="space-y-4">
           <div>
             <p className="font-medium">{budgetPresentation.title}</p>
@@ -990,37 +955,19 @@ export default function PurchaseRequisitionDetailPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </ProcurementControlAccordion>
 
-      <Card
-        className={
-          authorityPresentation.tone === 'ready'
-            ? 'border-emerald-200 bg-emerald-50/50'
-            : authorityPresentation.tone === 'blocked'
-              ? 'border-amber-200 bg-amber-50/50'
-              : ''
-        }
+      <ProcurementControlAccordion
+        title="Policy authority guidance"
+        summary={authorityPresentation.title}
+        status={<Badge variant="outline">{authorityPresentation.basisLabel}</Badge>}
+        notice={authorityPresentation.tone === 'blocked' && (authorityReadiness?.requiredActions[0] || authorityReadiness?.message || 'This control needs attention. Expand for details.')}
       >
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              {authorityPresentation.tone === 'ready' ? (
-                <ShieldCheck className="h-5 w-5 text-emerald-700" />
-              ) : authorityPresentation.tone === 'blocked' ? (
-                <AlertCircle className="h-5 w-5 text-amber-700" />
-              ) : (
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              )}
-              Policy authority guidance
-            </CardTitle>
-            <CardDescription className="mt-1">
+        <p className="mb-4 text-sm text-muted-foreground">
               Optional policy routing metadata is shown for administrators. PR
               submission uses the published Purchase Requisition workflow and
               is not blocked by an executable-policy authority band.
-            </CardDescription>
-          </div>
-          <Badge variant="outline">{authorityPresentation.basisLabel}</Badge>
-        </CardHeader>
+            </p>
         <CardContent className="space-y-4">
           <div>
             <p className="font-medium">{authorityPresentation.title}</p>
@@ -1175,7 +1122,7 @@ export default function PurchaseRequisitionDetailPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </ProcurementControlAccordion>
 
       <PurchaseRequisitionSourcingReleaseControl
         readiness={sourcingReadiness}
@@ -1209,7 +1156,7 @@ export default function PurchaseRequisitionDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="linkage">Planning &amp; Governance</TabsTrigger>
-          <WorkflowTabTrigger value="approval" />
+          <WorkflowTabTrigger value="approval" {...workflow.tabProps} />
         </TabsList>
 
         {/* Overview Tab */}
@@ -1549,32 +1496,16 @@ export default function PurchaseRequisitionDetailPage() {
         </TabsContent>
 
         <TabsContent value="linkage" className="space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-start justify-between gap-4">
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <ShieldCheck className="h-5 w-5" /> Planning and Governance
-                  Linkage
-                </CardTitle>
-                <CardDescription>
+          <ProcurementControlAccordion
+        title="Planning and Governance Linkage"
+        summary={requisition.linkage.sourcePlanNumber || 'No plan linkage retained'}
+        actions={<Button type="button" variant="outline" size="sm" onClick={handleExport} disabled={exporting}>{exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}Export JSON</Button>}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
                   Drafts may remain incomplete while being prepared. Submission
                   requires an acknowledged APP plan-item linkage or a traceable
                   approved exception.
-                </CardDescription>
-              </div>
-              <Button
-                variant="outline"
-                onClick={handleExport}
-                disabled={exporting}
-              >
-                {exporting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="mr-2 h-4 w-4" />
-                )}
-                Export JSON
-              </Button>
-            </CardHeader>
+                </p>
             <CardContent>
               <div className="grid grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
                 <div>
@@ -1678,18 +1609,18 @@ export default function PurchaseRequisitionDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </ProcurementControlAccordion>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Immutable budget-control history</CardTitle>
-              <CardDescription>
+          <ProcurementControlAccordion
+        title="Immutable budget-control history"
+        summary="Retained decisions and audit evidence"
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
                 PR availability decisions and downstream reservation, reuse,
                 adjustment, or release events remain keyed to this requisition.
                 The formal ledger entry also appears on the approved PO or
                 activated contract.
-              </CardDescription>
-            </CardHeader>
+              </p>
             <CardContent>
               {budgetControlHistory.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
@@ -1736,16 +1667,16 @@ export default function PurchaseRequisitionDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </ProcurementControlAccordion>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Immutable linkage history</CardTitle>
-              <CardDescription>
+          <ProcurementControlAccordion
+        title="Immutable linkage history"
+        summary="Retained decisions and audit evidence"
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
                 Created, updated, and export events from the shared procurement
                 control-event ledger.
-              </CardDescription>
-            </CardHeader>
+              </p>
             <CardContent>
               {linkageHistory.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
@@ -1780,16 +1711,16 @@ export default function PurchaseRequisitionDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </ProcurementControlAccordion>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Immutable submission-control history</CardTitle>
-              <CardDescription>
+          <ProcurementControlAccordion
+        title="Immutable submission-control history"
+        summary="Retained decisions and audit evidence"
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
                 Every allowed or blocked submission attempt is retained in the
                 shared procurement control-event ledger.
-              </CardDescription>
-            </CardHeader>
+              </p>
             <CardContent>
               {submissionHistory.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
@@ -1834,17 +1765,17 @@ export default function PurchaseRequisitionDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </ProcurementControlAccordion>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Immutable authority-route history</CardTitle>
-              <CardDescription>
+          <ProcurementControlAccordion
+        title="Immutable authority-route history"
+        summary="Retained decisions and audit evidence"
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
                 Every submitted attempt retains its exact policy, authority
                 rules, workflow version, route stages, actor, correlation, and
                 integrity hash.
-              </CardDescription>
-            </CardHeader>
+              </p>
             <CardContent>
               {authorityHistory.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
@@ -1905,7 +1836,7 @@ export default function PurchaseRequisitionDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </ProcurementControlAccordion>
         </TabsContent>
 
         <WorkflowTabContent

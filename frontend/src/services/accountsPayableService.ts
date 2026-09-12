@@ -99,6 +99,7 @@ export interface PaymentBatchQuery {
 }
 
 export interface SupplierDebitNoteQuery {
+    inventoryPurchaseReturnId?: string;
     vendorId?: string;
     supplierId?: string;
     originalVendorInvoiceId?: string;
@@ -654,6 +655,12 @@ class AccountsPayableService {
 
     public async submitSupplierDebitNote(id: string): Promise<SupplierDebitNote> {
         return apiService.post<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}/submit`, {});
+    }
+
+    public async updateInventoryReturnCreditHeader(id: string, data: {
+        supplierCreditNoteReference: string; creditDate: string; reason?: string; rowVersion: string;
+    }): Promise<SupplierDebitNote> {
+        return apiService.put<SupplierDebitNote>(`${this.baseUrl}/supplier-debit-notes/${id}/inventory-return-header`, data);
     }
 
     public async decideSupplierDebitNote(

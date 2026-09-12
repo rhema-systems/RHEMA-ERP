@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Download, FileCheck2, Loader2, RefreshCw, ShieldCheck, Upload } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Download, FileCheck2, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -95,7 +95,7 @@ export function ReceiptSourceEvidenceControl({ receiptId }: { receiptId: string 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <CardTitle className="flex items-center gap-2"><FileCheck2 className="h-5 w-5" />Supplier delivery evidence</CardTitle>
-          <CardDescription>Waybill is mandatory before inspection acceptance. VAT invoice copies remain under Finance/AP ownership.</CardDescription>
+          <CardDescription>Attach the supplier's waybill before completing inspection.</CardDescription>
         </div>
         <Badge variant={overview.waybillReady ? 'default' : 'destructive'}>
           {overview.waybillReady ? 'Waybill ready' : 'Waybill required'}
@@ -103,12 +103,6 @@ export function ReceiptSourceEvidenceControl({ receiptId }: { receiptId: string 
       </div>
     </CardHeader>
     <CardContent className="space-y-4">
-      <Alert>
-        <ShieldCheck className="h-4 w-4" />
-        <AlertTitle>Finance/AP ownership preserved</AlertTitle>
-        <AlertDescription>{overview.financeOwnershipNotice}</AlertDescription>
-      </Alert>
-
       {overview.canUpload && <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-[190px_1fr_170px_minmax(220px,1fr)_auto] md:items-end">
         <div className="space-y-2">
           <Label>Evidence type</Label>
@@ -135,10 +129,14 @@ export function ReceiptSourceEvidenceControl({ receiptId }: { receiptId: string 
               <p>{evidence.referenceNumber} · {new Date(evidence.documentDate).toLocaleDateString()}</p>
               <p className="truncate text-muted-foreground">{evidence.originalFileName}</p>
               <Button variant="outline" size="sm" disabled={busy} onClick={() => void download(evidence.id, evidence.originalFileName)}><Download className="mr-2 h-4 w-4" />Download</Button>
-            </div> : <p className="text-sm text-muted-foreground">{value === 1 ? 'Inspection cannot be submitted or approved until attached.' : 'Attach when supplied; Finance/AP will perform authoritative invoice processing.'}</p>}
+            </div> : <p className="text-sm text-muted-foreground">{value === 1 ? 'Attach the waybill before submitting inspection.' : 'Optional supporting copy.'}</p>}
           </div>;
         })}
       </div>
+      <details className="rounded-lg border px-3 py-2 text-sm">
+        <summary className="cursor-pointer rounded font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">About invoice copies</summary>
+        <p className="mt-2 text-muted-foreground">{overview.financeOwnershipNotice}</p>
+      </details>
     </CardContent>
   </Card>;
 }

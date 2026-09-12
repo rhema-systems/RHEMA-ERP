@@ -16,6 +16,7 @@ public class PurchaseOrderLandedCostPlanDto
 
 public class PurchaseOrderLandedCostPlanItemDto
 {
+    public Guid? PurchaseOrderItemId { get; set; }
     public Guid Id { get; set; }
     public LandedCostType CostType { get; set; }
     public string Description { get; set; } = string.Empty;
@@ -44,6 +45,10 @@ public class UpsertPurchaseOrderLandedCostPlanDto
 
 public class UpsertPurchaseOrderLandedCostPlanItemDto
 {
+    public Guid? PurchaseOrderItemId { get; set; }
+    // Only accepted as part of a PO save; resolved to its persisted line ID.
+    [Range(0, int.MaxValue)]
+    public int? PurchaseOrderLineIndex { get; set; }
     [Required]
     public LandedCostType CostType { get; set; }
 
@@ -72,4 +77,3 @@ public class UpsertPurchaseOrderLandedCostPlanItemDto
     [MaxLength(1000)]
     public string? Notes { get; set; }
 }
-

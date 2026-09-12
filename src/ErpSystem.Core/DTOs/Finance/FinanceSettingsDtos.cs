@@ -5,6 +5,8 @@ namespace ErpSystem.Core.DTOs.Finance
 {
     public class FinanceSettingsDto
     {
+        public Guid? ReturnToVendorClearingAccountId { get; set; }
+        public Guid? PurchaseReturnVarianceAccountId { get; set; }
         public Guid Id { get; set; }
         public Guid TenantId { get; set; }
         public string CoaType { get; set; } = "Standard";
@@ -79,6 +81,8 @@ namespace ErpSystem.Core.DTOs.Finance
 
     public class UpdateFinanceSettingsDto
     {
+        public Guid? ReturnToVendorClearingAccountId { get; set; }
+        public Guid? PurchaseReturnVarianceAccountId { get; set; }
         public string? CoaType { get; set; }
         public string? BaseCurrency { get; set; }
         public string? AccountSeparator { get; set; }

@@ -18,7 +18,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class JournalEntryLifecycleBatch5Tests
+public sealed partial class JournalEntryLifecycleBatch5Tests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-5")]
@@ -412,7 +412,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
         Guid tenantId,
         Guid? currentUserId = null,
         Mock<INotificationService>? notification = null,
-        IFinanceBudgetControlService? budgetControl = null)
+        IFinanceBudgetControlService? budgetControl = null,
+        IWorkflowService? approvalWorkflow = null)
     {
         var currentUser = CreateCurrentUser(tenantId, currentUserId);
         var engine = new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
@@ -437,6 +438,14 @@ public sealed class JournalEntryLifecycleBatch5Tests
 
         notification ??= new Mock<INotificationService>();
         var books = new Mock<IAccountingBookService>();
+        if (budgetControl is null)
+        {
+            var unbudgetedJournal = new Mock<IFinanceBudgetControlService>();
+            unbudgetedJournal.Setup(control => control.ValidateManualJournalForPostingAsync(
+                    It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Array.Empty<Guid>());
+            budgetControl = unbudgetedJournal.Object;
+        }
 
         return new JournalEntryService(
             db,
@@ -446,7 +455,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
             notification.Object,
             books.Object,
             engine,
-            budgetControl: budgetControl);
+            budgetControl: budgetControl,
+            approvalWorkflow: approvalWorkflow);
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId, Guid? currentUserId = null)

@@ -24,6 +24,7 @@ const getAuthHeaders = () => {
 // ============================================================================
 
 export interface TenderDto {
+  approvalRequired?: boolean;
   id: string;
   tenderNumber: string;
   title: string;

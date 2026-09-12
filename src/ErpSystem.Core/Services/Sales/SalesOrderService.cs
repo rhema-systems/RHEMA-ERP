@@ -429,6 +429,7 @@ public class SalesOrderService : ISalesOrderService
         {
             var so = await _salesOrderRepo.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Sales Order {id} not found");
+            EnsureLifecycleTenant(so);
 
             if (so.OrderStatus != SalesOrderStatus.Draft)
                 throw new InvalidOperationException($"Cannot submit Sales Order in {so.OrderStatus} status");
@@ -437,18 +438,23 @@ public class SalesOrderService : ISalesOrderService
             if (userId == Guid.Empty)
                 throw new UnauthorizedAccessException("User is not authenticated");
 
+            // Both direct completion and an approval-backed submission retain the customer credit gate.
+            if (!await ValidateCreditLimitAsync(so.BusinessPartnerId, so.TotalAmount))
+                throw new InvalidOperationException("Order exceeds customer's available credit limit or the customer is on credit hold");
+
             var previousStatus = so.OrderStatus;
             var workflowResult = await _workflowIntegrationService.SubmitAsync(WorkflowEntityType, id);
             if (!workflowResult.ExecutionResult.Success)
                 throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
 
             var adapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
-            adapter.ApplySubmitOutcome(so, workflowResult.Outcome, userId);
+            adapter.ApplySubmitOutcome(so, workflowResult, userId);
 
             await _salesOrderRepo.UpdateAsync(so);
             if (previousStatus != so.OrderStatus)
             {
-                await RecordStatusChangeAsync(so.Id, previousStatus, so.OrderStatus, "Submitted for approval", so.TenantId);
+                await RecordStatusChangeAsync(so.Id, previousStatus, so.OrderStatus,
+                    workflowResult.ApprovalRequired ? "Submitted for approval" : "Confirmed — approval not required", so.TenantId);
             }
 
             await SyncLinkedProjectUnitsForSalesOrderAsync(so);
@@ -470,6 +476,7 @@ public class SalesOrderService : ISalesOrderService
         {
             var so = await _salesOrderRepo.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Sales Order {id} not found");
+            EnsureLifecycleTenant(so);
 
             if (so.OrderStatus != SalesOrderStatus.PendingApproval)
                 throw new InvalidOperationException($"Sales Order is not pending approval");
@@ -482,6 +489,9 @@ public class SalesOrderService : ISalesOrderService
             var canApprove = await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, id, userId);
             if (!canApprove)
                 throw new UnauthorizedAccessException("You are not assigned to approve the current workflow step");
+
+            if (dto.Approved && !await ValidateCreditLimitAsync(so.BusinessPartnerId, so.TotalAmount))
+                throw new InvalidOperationException("Order exceeds customer's available credit limit or the customer is on credit hold");
 
             var previousStatus = so.OrderStatus;
             var comments = dto.Approved
@@ -541,31 +551,14 @@ public class SalesOrderService : ISalesOrderService
         {
             var so = await _salesOrderRepo.GetByIdAsync(id, s => s.Lines, s => s.BusinessPartner)
                 ?? throw new InvalidOperationException($"Sales Order {id} not found");
+            EnsureLifecycleTenant(so);
 
-            // Allow confirming from PendingApproval if using direct confirm (no approval workflow)
-            if (so.OrderStatus != SalesOrderStatus.PendingApproval && so.OrderStatus != SalesOrderStatus.Draft)
-                throw new InvalidOperationException($"Cannot confirm Sales Order in {so.OrderStatus} status");
+            // Keep the legacy route, but never let it bypass a configured or in-flight approval.
+            // Central submission confirms directly only when approval is genuinely not required.
+            if (so.OrderStatus == SalesOrderStatus.Draft)
+                return await SubmitForApprovalAsync(id);
 
-            // Validate credit limit
-            if (!await ValidateCreditLimitAsync(so.BusinessPartnerId, so.TotalAmount))
-                throw new InvalidOperationException("Order exceeds customer's available credit limit");
-
-            var previousStatus = so.OrderStatus;
-            so.OrderStatus = SalesOrderStatus.Confirmed;
-            so.ApprovalStatus = "Approved";
-            so.ApprovedById = _currentUserProvider.UserId;
-            so.ApprovedDate = DateTime.UtcNow;
-
-            // TODO: Reserve stock for each line item via Inventory service
-            // This will be wired up when integrating with the Inventory module
-
-            await _salesOrderRepo.UpdateAsync(so);
-            await RecordStatusChangeAsync(so.Id, previousStatus, SalesOrderStatus.Confirmed, "Sales Order confirmed — stock reserved", so.TenantId);
-            await SyncLinkedProjectUnitsForSalesOrderAsync(so);
-            await _unitOfWork.SaveChangesAsync();
-
-            _logger.LogInformation("Sales Order {OrderNumber} confirmed", so.DocumentNumber);
-            return await GetSalesOrderByIdAsync(id) ?? throw new InvalidOperationException("Failed to retrieve");
+            throw new InvalidOperationException($"Cannot confirm Sales Order in {so.OrderStatus} status. Complete the existing approval process first.");
         }
         catch (Exception ex)
         {
@@ -768,15 +761,15 @@ public class SalesOrderService : ISalesOrderService
         try
         {
             var bp = await _bpRepo.GetByIdAsync(businessPartnerId);
-            if (bp == null) return false;
+            if (bp == null || bp.IsDeleted || bp.TenantId != _currentUserProvider.TenantId) return false;
+
+            // A hold still applies when no numeric credit limit has been configured.
+            if (bp.IsOnCreditHold)
+                return false;
 
             // If no credit limit is set, allow the order
             if (!bp.CreditLimit.HasValue || bp.CreditLimit.Value == 0)
                 return true;
-
-            // Check if customer is on credit hold
-            if (bp.IsOnCreditHold)
-                return false;
 
             var outstandingBalance = await GetCustomerOutstandingBalanceAsync(businessPartnerId);
             var availableCredit = bp.CreditLimit.Value - outstandingBalance;
@@ -807,6 +800,12 @@ public class SalesOrderService : ISalesOrderService
     #endregion
 
     #region Private Helpers
+
+    private void EnsureLifecycleTenant(SalesOrder order)
+    {
+        if (_currentUserProvider.TenantId == Guid.Empty || order.IsDeleted || order.TenantId != _currentUserProvider.TenantId)
+            throw new KeyNotFoundException("The selected sales order was not found in the current tenant.");
+    }
 
     private async Task SyncLinkedProjectUnitsForSalesOrderAsync(SalesOrder salesOrder)
     {

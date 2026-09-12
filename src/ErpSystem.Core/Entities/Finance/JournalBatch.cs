@@ -11,7 +11,8 @@ public enum JournalBatchApprovalStatus
     PartiallyApproved,
     Approved,
     Rejected,
-    Cancelled
+    Cancelled,
+    ReadyToPost
 }
 
 public enum JournalBatchPostingStatus
@@ -40,7 +41,8 @@ public enum JournalBatchItemReviewStatus
 {
     Pending,
     Approved,
-    Rejected
+    Rejected,
+    NotRequired
 }
 
 public enum JournalBatchItemPostingStatus
@@ -97,6 +99,7 @@ public sealed class JournalBatch : TenantEntity
 
     public JournalBatchType BatchType { get; set; } = JournalBatchType.Standard;
     public JournalBatchApprovalStatus ApprovalStatus { get; set; } = JournalBatchApprovalStatus.Draft;
+    public bool ApprovalRequired { get; set; } = true;
     public JournalBatchPostingStatus PostingStatus { get; set; } = JournalBatchPostingStatus.NotReady;
     public JournalBatchReversalStatus ReversalStatus { get; set; } = JournalBatchReversalStatus.NotReversed;
 

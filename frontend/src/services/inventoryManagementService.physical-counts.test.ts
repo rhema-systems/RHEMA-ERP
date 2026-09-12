@@ -14,6 +14,38 @@ beforeEach(() => {
 });
 
 describe('inventoryManagementService controlled physical counts', () => {
+  it('loads decision options against the saved count, without accepting caller warehouse or location scope', async () => {
+    await inventoryManagementService.getPhysicalCountDecisions(false, 'count-1');
+    expect(mockedAxios.get).toHaveBeenCalledWith(expect.stringMatching(/\/physical-counts\/decision-options$/), {
+      headers: { Authorization: 'Bearer tenant-token', 'Content-Type': 'application/json' }, params: { countId: 'count-1' },
+    });
+  });
+
+  it('refuses an unscoped decision-options request before sending HTTP', async () => {
+    await expect(inventoryManagementService.getPhysicalCountDecisions()).rejects.toThrow('Open a saved physical count');
+    expect(mockedAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('keeps administrative decision setup separate from count-scoped decision options', async () => {
+    await inventoryManagementService.getPhysicalCountDecisions(true);
+    expect(mockedAxios.get).toHaveBeenCalledWith(expect.stringMatching(/\/physical-counts\/decision-setup$/), {
+      headers: { Authorization: 'Bearer tenant-token', 'Content-Type': 'application/json' },
+    });
+  });
+
+  it('sends the actual count sheet and all concurrency versions as one multipart request', async () => {
+    const file = new File(['workbook'], 'counts.xlsx');
+    const lines = [{ id: 'line-1', rowVersion: 'BAUG' }];
+    await inventoryManagementService.importPhysicalCountSheet('count-1', file, 'AQID', lines, 'upload-key');
+    expect(mockedAxios.post).toHaveBeenCalledOnce();
+    const [url, body, options] = mockedAxios.post.mock.calls[0];
+    expect(url).toMatch(/\/physical-counts\/count-1\/count-sheet$/);
+    expect((body as FormData).get('file')).toBe(file);
+    expect((body as FormData).get('rowVersion')).toBe('AQID');
+    expect(JSON.parse((body as FormData).get('lineVersions') as string)).toEqual(lines);
+    expect((body as FormData).get('idempotencyKey')).toBe('upload-key');
+    expect(options?.headers).toEqual({ Authorization: 'Bearer tenant-token' });
+  });
   const control = { rowVersion: 'AQID', idempotencyKey: 'count-key', correlationId: 'count:1', comment: 'Controlled stage' };
 
   it('sends independent recount and the three explicit control stages', async () => {

@@ -295,8 +295,9 @@ public class ProcurementPlanService : IProcurementPlanService
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start procurement plan workflow");
 
+        plan.ApprovalRequired = workflowResult.ApprovalRequired;
         var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
-        statusAdapter.ApplySubmitOutcome(plan, workflowResult.Outcome, currentUserId);
+        statusAdapter.ApplySubmitOutcome(plan, workflowResult, currentUserId);
         plan.ReviewComments = dto.Comments;
         plan.UpdatedAt = DateTime.UtcNow;
 
@@ -392,8 +393,8 @@ public class ProcurementPlanService : IProcurementPlanService
         EnsureApprovedBudgetSelected(plan);
 
         plan.Status = "Approved";
-        plan.ApprovedById = currentUserId != Guid.Empty ? currentUserId : null;
-        plan.ApprovedDate = DateTime.UtcNow;
+        plan.ApprovedById = plan.ApprovalRequired && currentUserId != Guid.Empty ? currentUserId : null;
+        plan.ApprovedDate = plan.ApprovalRequired ? DateTime.UtcNow : null;
         plan.ApprovedBudget = dto.ApprovedBudget ?? plan.TotalEstimatedBudget;
         plan.ApprovalComments = dto.Comments;
 
@@ -1432,6 +1433,7 @@ public class ProcurementPlanService : IProcurementPlanService
     {
         return new ProcurementPlanDto
         {
+            ApprovalRequired = plan.ApprovalRequired,
             Id = plan.Id,
             PlanNumber = plan.PlanNumber,
             Title = plan.Title,
@@ -1466,6 +1468,7 @@ public class ProcurementPlanService : IProcurementPlanService
     {
         return new ProcurementPlanDetailDto
         {
+            ApprovalRequired = plan.ApprovalRequired,
             Id = plan.Id,
             PlanNumber = plan.PlanNumber,
             Title = plan.Title,
@@ -1580,6 +1583,7 @@ public class ProcurementPlanService : IProcurementPlanService
     {
         return new ProcurementBudgetDto
         {
+            ApprovalRequired = budget.ApprovalRequired,
             Id = budget.Id,
             BudgetCode = budget.BudgetCode,
             Title = budget.Title,

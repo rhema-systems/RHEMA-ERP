@@ -626,7 +626,7 @@ export default function TenderDetailPage() {
               Verification
             </TabsTrigger>
           )}
-          <WorkflowTabTrigger value="approvals" />
+          <WorkflowTabTrigger value="approvals" {...workflow.tabProps} />
         </TabsList>
 
         {/* Overview Tab */}

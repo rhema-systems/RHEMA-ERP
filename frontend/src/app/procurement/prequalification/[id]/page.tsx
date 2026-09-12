@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import {
   getPrequalificationActions,
   prequalificationApplicationStatusLabel,
@@ -35,6 +36,7 @@ const formatDate = (value?: string) => value ? new Date(value).toLocaleString() 
 
 export default function PrequalificationDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const workflow = useWorkflowSummary({ entityType: 'ProcurementSourcing', entityId: id });
   const { hasPermission } = useAuth();
   const canManage = hasPermission('procurement.sourcing.manage');
   const canEvaluate = hasPermission('procurement.tender.evaluate');
@@ -87,7 +89,7 @@ export default function PrequalificationDetailPage() {
       setBusy(key);
       await action();
       toast.success(success);
-      await load();
+      await Promise.all([load(), workflow.refresh()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Prequalification action failed');
     } finally {
@@ -149,9 +151,12 @@ export default function PrequalificationDetailPage() {
 
   return (
     <div className="space-y-6 p-6" data-testid="prequalification-detail-page">
+      {workflow.error && <div role="alert" className="flex items-center gap-3 rounded border p-3 text-sm text-destructive">
+        {workflow.error}<Button variant="outline" size="sm" onClick={() => void workflow.refresh()}>Retry workflow setup</Button>
+      </div>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><Button variant="ghost" asChild className="mb-2 px-0"><Link href="/procurement/prequalification"><ArrowLeft className="mr-2 h-4 w-4" />Prequalification</Link></Button><h1 className="text-2xl font-semibold">{exercise.reference} · {exercise.title}</h1><p className="text-sm text-muted-foreground">{exercise.description}</p></div>
-        <div className="flex items-center gap-2"><Badge variant={exercise.status === Status.Approved ? 'default' : exercise.status >= Status.Rejected ? 'destructive' : 'secondary'}>{prequalificationStatusLabel[exercise.status]}</Badge><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></div>
+        <div className="flex items-center gap-2"><Badge variant={exercise.status === Status.Approved ? 'default' : exercise.status >= Status.Rejected ? 'destructive' : 'secondary'}>{exercise.approvalRequired === false && exercise.status === Status.Approved ? 'Qualification complete' : prequalificationStatusLabel[exercise.status]}</Badge><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-4">
@@ -165,7 +170,7 @@ export default function PrequalificationDetailPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card><CardHeader><CardTitle>Locked categories and criteria</CardTitle></CardHeader><CardContent className="space-y-3"><div className="flex flex-wrap gap-2">{exercise.categories.map((item) => <Badge key={item.id} variant="outline">{item.code} · {item.name}</Badge>)}</div>{exercise.criteria.map((item) => <div key={item.id} className="rounded border p-3 text-sm"><div className="flex justify-between gap-2"><strong>{item.code} · {item.name}</strong><span>{item.weight}%</span></div><p className="text-xs text-muted-foreground">Minimum {item.minimumScore}% · {item.isMandatory ? 'Mandatory' : 'Optional'} · {item.requiresEvidence ? 'Verified evidence required' : 'No evidence requirement'}</p></div>)}</CardContent></Card>
-        <Card><CardHeader><CardTitle>Source policy, advertisement, and decision lineage</CardTitle></CardHeader><CardContent className="space-y-2 text-sm"><Line label="Source policy" value={`${exercise.policySetCode} · v${exercise.policySetVersion}`} /><Line label="Source configuration" value={exercise.sourceConfigurationProfileId} /><Line label="Advertisement" value={exercise.advertisementReference} /><Line label="Advertisement evidence" value={exercise.advertisementEvidenceReference} /><Line label="Workflow instance" value={exercise.workflowInstanceId} /><Line label="Decision" value={exercise.decisionReference} /><Line label="Decision evidence" value={exercise.decisionEvidenceReference} /><Line label="Decision reason" value={exercise.decisionReason} /><Line label="Qualified-list expiry" value={formatDate(exercise.expiresAtUtc)} /></CardContent></Card>
+        <Card><CardHeader><CardTitle>Source policy, advertisement, and decision lineage</CardTitle></CardHeader><CardContent className="space-y-2 text-sm"><Line label="Source policy" value={`${exercise.policySetCode} · v${exercise.policySetVersion}`} /><Line label="Source configuration" value={exercise.sourceConfigurationProfileId} /><Line label="Advertisement" value={exercise.advertisementReference} /><Line label="Advertisement evidence" value={exercise.advertisementEvidenceReference} />{exercise.workflowInstanceId && <Line label="Workflow instance" value={exercise.workflowInstanceId} />}<Line label="Decision" value={exercise.decisionReference} /><Line label="Decision evidence" value={exercise.decisionEvidenceReference} /><Line label="Decision reason" value={exercise.decisionReason} /><Line label="Qualified-list expiry" value={formatDate(exercise.expiresAtUtc)} /></CardContent></Card>
       </div>
 
       {actions.canAdvertise && canManage && <ActionCard title="Publish approved advertisement"><div className="grid gap-3 md:grid-cols-2"><Field label="Advertisement reference"><Input value={advertisementReference} onChange={(event) => setAdvertisementReference(event.target.value)} /></Field><Field label="Publication evidence"><Input value={advertisementEvidence} onChange={(event) => setAdvertisementEvidence(event.target.value)} /></Field></div><Button disabled={busy !== null} onClick={() => void run('advertise', () => service.advertise(exercise.id, { advertisementReference, advertisementEvidenceReference: advertisementEvidence, rowVersion: exercise.rowVersion }), 'Advertisement published')}>Publish advertisement</Button></ActionCard>}
@@ -177,11 +182,26 @@ export default function PrequalificationDetailPage() {
 
       <Card data-testid="prequalification-applications"><CardHeader><CardTitle>Application and evaluation history</CardTitle></CardHeader><CardContent>{exercise.applications.length === 0 ? <p className="text-sm text-muted-foreground">No applications submitted.</p> : <Table><TableHeader><TableRow><TableHead>Application</TableHead><TableHead>Supplier</TableHead><TableHead>Status</TableHead><TableHead>Score</TableHead><TableHead>Submitted</TableHead><TableHead /></TableRow></TableHeader><TableBody>{exercise.applications.map((item) => <TableRow key={item.id}><TableCell className="font-medium">{item.applicationNumber}</TableCell><TableCell>{item.supplierName}</TableCell><TableCell><Badge variant={item.passed === false ? 'destructive' : item.passed === true ? 'default' : 'secondary'}>{prequalificationApplicationStatusLabel[item.status]}</Badge></TableCell><TableCell>{item.totalScore == null ? '—' : `${item.totalScore}%`}</TableCell><TableCell>{formatDate(item.submittedAtUtc)}</TableCell><TableCell className="text-right">{actions.canEvaluate && canEvaluate && item.status === ApplicationStatus.Submitted && <Button size="sm" variant="outline" onClick={() => openEvaluation(item)}>Evaluate</Button>}</TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
 
-      {actions.canSubmitDecision && canManage && <ActionCard title="Submit exact approval workflow"><p className="text-sm text-muted-foreground">All applications have complete scorecards. Submit the locked recommendation to the selected Published Procurement Sourcing workflow.</p><Button disabled={busy !== null} onClick={() => void run('submit-decision', () => service.submitDecision(exercise.id, exercise.rowVersion), 'Decision workflow submitted')}>Submit decision</Button></ActionCard>}
+      {actions.canSubmitDecision && canManage && <ActionCard title={workflow.visibility.direct ? 'Complete qualification' : 'Submit qualification decision'}>
+        <p className="text-sm text-muted-foreground">{workflow.visibility.direct ? 'Review the completed scorecards and record the signed decision before creating the qualified list.' : 'Send the completed scorecards through the configured approval process.'}</p>
+        {workflow.visibility.direct && <>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="Decision reference"><Input aria-label="Decision reference" value={decisionReference} onChange={(event) => setDecisionReference(event.target.value)} /></Field>
+            <Field label="Signed decision evidence"><Input aria-label="Signed decision evidence" value={decisionEvidence} onChange={(event) => setDecisionEvidence(event.target.value)} /></Field>
+          </div>
+          <Field label="Decision reason"><Textarea aria-label="Decision reason" value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} /></Field>
+        </>}
+        <Button disabled={busy !== null || !workflow.visibility.known || (workflow.visibility.direct && (!decisionReference.trim() || !decisionEvidence.trim() || !decisionReason.trim()))}
+          onClick={() => void run('submit-decision', () => service.submitDecision(exercise.id, exercise.rowVersion, workflow.visibility.direct ? {
+            decisionReference, decisionEvidenceReference: decisionEvidence, reason: decisionReason,
+          } : undefined), workflow.visibility.direct ? 'Qualification completed' : 'Decision workflow submitted')}>
+          {workflow.visibility.direct ? 'Complete qualification' : 'Submit for approval'}
+        </Button>
+      </ActionCard>}
 
-      {actions.canDecide && canApprove && <ActionCard title="Record workflow decision"><div className="grid gap-3 md:grid-cols-2"><Field label="Decision reference"><Input value={decisionReference} onChange={(event) => setDecisionReference(event.target.value)} /></Field><Field label="Signed decision evidence"><Input value={decisionEvidence} onChange={(event) => setDecisionEvidence(event.target.value)} /></Field></div><Field label="Decision reason"><Textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} /></Field><div className="flex gap-2"><Button disabled={busy !== null} onClick={() => void run('approve', () => service.decide(exercise.id, { action: 'Approve', decisionReference, decisionEvidenceReference: decisionEvidence, reason: decisionReason, rowVersion: exercise.rowVersion }), 'Qualified list approved')}>Approve workflow step</Button><Button variant="destructive" disabled={busy !== null} onClick={() => void run('reject', () => service.decide(exercise.id, { action: 'Reject', decisionReference, decisionEvidenceReference: decisionEvidence, reason: decisionReason, rowVersion: exercise.rowVersion }), 'Rejection recorded')}>Reject</Button></div></ActionCard>}
+      {actions.canDecide && workflow.visibility.showApprovalControls && canApprove && <ActionCard title="Record workflow decision"><div className="grid gap-3 md:grid-cols-2"><Field label="Decision reference"><Input value={decisionReference} onChange={(event) => setDecisionReference(event.target.value)} /></Field><Field label="Signed decision evidence"><Input value={decisionEvidence} onChange={(event) => setDecisionEvidence(event.target.value)} /></Field></div><Field label="Decision reason"><Textarea value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} /></Field><div className="flex gap-2"><Button disabled={busy !== null} onClick={() => void run('approve', () => service.decide(exercise.id, { action: 'Approve', decisionReference, decisionEvidenceReference: decisionEvidence, reason: decisionReason, rowVersion: exercise.rowVersion }), 'Qualified list approved')}>Approve workflow step</Button><Button variant="destructive" disabled={busy !== null} onClick={() => void run('reject', () => service.decide(exercise.id, { action: 'Reject', decisionReference, decisionEvidenceReference: decisionEvidence, reason: decisionReason, rowVersion: exercise.rowVersion }), 'Rejection recorded')}>Reject</Button></div></ActionCard>}
 
-      <Card data-testid="qualified-list-history"><CardHeader><CardTitle>Reusable qualified-list history</CardTitle></CardHeader><CardContent>{exercise.qualifiedEntries.length === 0 ? <p className="text-sm text-muted-foreground">Qualified-list entries will appear only after the exact workflow completes approval.</p> : <Table><TableHeader><TableRow><TableHead>Supplier</TableHead><TableHead>Category</TableHead><TableHead>Status</TableHead><TableHead>Valid from</TableHead><TableHead>Expires</TableHead><TableHead>Approval</TableHead></TableRow></TableHeader><TableBody>{exercise.qualifiedEntries.map((item) => <TableRow key={item.id}><TableCell>{item.supplierName}</TableCell><TableCell>{item.categoryCode} · {item.categoryName}</TableCell><TableCell><Badge variant={item.status === 0 ? 'default' : 'secondary'}>{qualifiedEntryStatusLabel[item.status]}</Badge></TableCell><TableCell>{formatDate(item.validFromUtc)}</TableCell><TableCell>{formatDate(item.expiresAtUtc)}</TableCell><TableCell className="text-xs">{item.approvalReference}<br />{item.integrityHash.slice(0, 12)}…</TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
+      <Card data-testid="qualified-list-history"><CardHeader><CardTitle>Reusable qualified-list history</CardTitle></CardHeader><CardContent>{exercise.qualifiedEntries.length === 0 ? <p className="text-sm text-muted-foreground">Qualified-list entries appear after the qualification decision is completed.</p> : <Table><TableHeader><TableRow><TableHead>Supplier</TableHead><TableHead>Category</TableHead><TableHead>Status</TableHead><TableHead>Valid from</TableHead><TableHead>Expires</TableHead><TableHead>Decision</TableHead></TableRow></TableHeader><TableBody>{exercise.qualifiedEntries.map((item) => <TableRow key={item.id}><TableCell>{item.supplierName}</TableCell><TableCell>{item.categoryCode} · {item.categoryName}</TableCell><TableCell><Badge variant={item.status === 0 ? 'default' : 'secondary'}>{qualifiedEntryStatusLabel[item.status]}</Badge></TableCell><TableCell>{formatDate(item.validFromUtc)}</TableCell><TableCell>{formatDate(item.expiresAtUtc)}</TableCell><TableCell className="text-xs">{item.approvalReference}<br />{item.integrityHash.slice(0, 12)}…</TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
 
       {actions.canExpire && canManage && <ActionCard title="Apply due expiry"><p className="text-sm text-muted-foreground">Expire only entries whose approved validity has elapsed; later sourcing eligibility will fail closed immediately.</p><Button disabled={busy !== null} onClick={() => void run('expire', () => service.expire(exercise.id, exercise.rowVersion), 'Due qualified-list entries expired')}>Apply expiry</Button></ActionCard>}
       {actions.immutable && <Card><CardContent className="flex items-center gap-3 p-5 text-sm"><FileCheck2 className="h-5 w-5 text-emerald-600" />This terminal record is read-only. Criteria, evidence, scores, workflow outcome, entries, expiry, and hashes remain available for audit.</CardContent></Card>}

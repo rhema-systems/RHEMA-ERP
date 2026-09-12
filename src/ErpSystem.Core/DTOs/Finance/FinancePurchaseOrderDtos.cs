@@ -18,6 +18,7 @@ public class FinancePurchaseOrderDto
     public decimal? EarlyPaymentDiscountPercentage { get; set; }
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
     public int Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public string CurrencyCode { get; set; } = "GHS";
     public decimal ExchangeRate { get; set; }
     public decimal TotalAmount { get; set; }
@@ -114,6 +115,7 @@ public class FinancePurchaseOrderReceiptDto
     public DateTime ReceiptDate { get; set; }
     public string? Remarks { get; set; }
     public int Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public string StatusName { get; set; } = string.Empty;
     public Guid? WorkflowInstanceId { get; set; }
     public Guid? VendorInvoiceId { get; set; }

@@ -87,6 +87,7 @@ public sealed class ProcurementRfqOpeningEntry : TenantEntity
 [Table("ProcurementRfqEvaluations")]
 public sealed class ProcurementRfqEvaluation : TenantEntity
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid RfqId { get; set; }
     public Guid OpeningRegisterId { get; set; }
     public ProcurementRfqEvaluationStatus Status { get; set; } = ProcurementRfqEvaluationStatus.Draft;

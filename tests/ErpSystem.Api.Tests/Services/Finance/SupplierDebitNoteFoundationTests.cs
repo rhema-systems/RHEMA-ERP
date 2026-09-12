@@ -310,7 +310,7 @@ public sealed class SupplierDebitNoteFoundationTests
             root, "src", "ErpSystem.Api", "Controllers", "WorkflowController.cs"));
         workflowController.Should().Contain("SupplierDebitNote");
         workflowController.Should().Contain(
-            "route = $\"/api/ap/supplier-debit-notes/{supplierDebitNoteWorkflow.EntityId}/approval\"",
+            "route = $\"/api/ap/supplier-debit-notes/{workflowMetadata.EntityId}/approval\"",
             "the generic workflow endpoint must redirect to the concrete Finance-owned document approval route");
 
         var seeder = File.ReadAllText(Path.Combine(

@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -17,6 +18,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,6 +36,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private readonly IFinancePostingEngine? _financePostingEngine;
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
+        private readonly IWorkflowIntegrationService? _workflowIntegration;
 
         public InvoiceService(
             IUnitOfWork unitOfWork,
@@ -44,7 +47,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             IDocumentNumberingService documentNumberingService,
             IFinancePostingEngine? financePostingEngine = null,
             IFinanceAuditService? financeAuditService = null,
-            IFinanceSourceDimensionService? sourceDimensions = null)
+            IFinanceSourceDimensionService? sourceDimensions = null,
+            IWorkflowIntegrationService? workflowIntegration = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -55,6 +59,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             _financePostingEngine = financePostingEngine;
             _financeAuditService = financeAuditService;
             _sourceDimensions = sourceDimensions;
+            _workflowIntegration = workflowIntegration;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -638,16 +643,87 @@ namespace ErpSystem.Api.Services.Finance.AR
             _logger.LogInformation("Deleted invoice {InvoiceId}", id);
         }
 
+        public Task<InvoiceDto> SubmitAsync(Guid id, FinancePostingProducerContext producer, CancellationToken cancellationToken = default) =>
+            ExecuteInvoiceLifecycleAsync(id, () => SubmitCoreAsync(id, EnsureCustomerInvoiceRoute(producer), cancellationToken), cancellationToken);
+
+        private async Task<InvoiceDto> SubmitCoreAsync(Guid id, FinancePostingProducerContext? producer, CancellationToken cancellationToken)
+        {
+            var workflow = _workflowIntegration ?? throw new InvalidOperationException("Invoice workflow integration is not configured.");
+            var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
+            if (invoice.Status is not (InvoiceStatus.Draft or InvoiceStatus.Rejected) || invoice.JournalEntryId.HasValue)
+                throw new InvalidOperationException("Only unposted draft or rejected invoices can be submitted.");
+            await ResolveCustomerForPostingAsync(invoice, cancellationToken);
+            var lines = invoice.LineItems.Where(line => !line.IsDeleted).ToArray();
+            if (lines.Length == 0 || lines.Any(line => line.InvoiceId != invoice.Id || line.TenantId != TenantId || line.Quantity <= 0))
+                throw new InvalidOperationException("Invoice requires valid lines belonging to this invoice and tenant.");
+
+            var approvalRequired = await workflow.HasActiveApprovalInstanceAsync("Invoice", id) ||
+                await workflow.HasActiveApprovalWorkflowAsync("Invoice");
+            if (approvalRequired)
+            {
+                invoice.Status = InvoiceStatus.PendingApproval;
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            var result = await workflow.SubmitAsync("Invoice", id);
+            if (!result.ExecutionResult.Success)
+                throw new InvalidOperationException(result.ExecutionResult.Message ?? "Unable to submit invoice.");
+            if (result.ApprovalRequired != approvalRequired ||
+                (approvalRequired && (!result.ExecutionResult.WorkflowInstanceId.HasValue || result.ExecutionResult.WorkflowInstanceId == Guid.Empty)) ||
+                (approvalRequired && result.Outcome is not (WorkflowOutcome.Pending or WorkflowOutcome.Approved)) ||
+                (!approvalRequired && (result.ExecutionResult.WorkflowInstanceId.HasValue || result.Outcome != WorkflowOutcome.Approved ||
+                    result.ExecutionResult.Status != WorkflowInstanceStatus.Completed)))
+                throw new InvalidOperationException("Invoice approval configuration changed. Reload and retry.");
+            invoice.ApprovalRequired = result.ApprovalRequired;
+            invoice.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;
+            invoice.Status = !approvalRequired ? InvoiceStatus.ReadyToPost
+                : result.Outcome == WorkflowOutcome.Approved ? InvoiceStatus.Approved : InvoiceStatus.PendingApproval;
+            if (invoice.Status == InvoiceStatus.Approved)
+                await RequireCompletedInvoiceWorkflowAsync(invoice, cancellationToken);
+            invoice.UpdatedAt = DateTime.UtcNow;
+            invoice.UpdatedBy = UserName;
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return MapToDto(invoice);
+        }
+
+        // One lock/transaction contains stock issues, customer balance, source status and central GL posting.
+        // Existing caller-owned approval/producer transactions remain owned by that caller.
+        private async Task<InvoiceDto> ExecuteInvoiceLifecycleAsync(Guid id, Func<Task<InvoiceDto>> action, CancellationToken cancellationToken)
+        {
+            if (_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"AR:Invoice:{TenantId:N}:{id:N}", cancellationToken);
+                return await action();
+            }
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    await _unitOfWork.AcquireTransactionLockAsync($"AR:Invoice:{TenantId:N}:{id:N}", cancellationToken);
+                    var result = await action();
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction)
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                    _unitOfWork.ClearTrackedChanges();
+                    throw;
+                }
+            }, cancellationToken);
+        }
+
         public Task<InvoiceDto> SendInvoiceAsync(
             Guid id,
             CancellationToken cancellationToken = default) =>
-            SendInvoiceCoreAsync(id, null, cancellationToken);
+            ExecuteInvoiceLifecycleAsync(id, () => SendInvoiceCoreAsync(id, null, cancellationToken), cancellationToken);
 
         public Task<InvoiceDto> SendInvoiceAsync(
             Guid id,
             FinancePostingProducerContext producer,
             CancellationToken cancellationToken = default) =>
-            SendInvoiceCoreAsync(id, EnsureCustomerInvoiceRoute(producer), cancellationToken);
+            ExecuteInvoiceLifecycleAsync(id, () => SendInvoiceCoreAsync(id, EnsureCustomerInvoiceRoute(producer), cancellationToken), cancellationToken);
 
         private async Task<InvoiceDto> SendInvoiceCoreAsync(
             Guid id,
@@ -655,15 +731,33 @@ namespace ErpSystem.Api.Services.Finance.AR
             CancellationToken cancellationToken)
         {
             var invoice = await _unitOfWork.Repository<Invoice>()
-                .GetQueryable(i => i.TenantId == TenantId && i.Id == id)
+                .GetQueryable(i => i.TenantId == TenantId && i.Id == id && !i.IsDeleted)
                 .Include(i => i.LineItems)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (invoice == null)
                 throw new KeyNotFoundException($"Invoice with Id '{id}' not found.");
 
-            if (invoice.Status != InvoiceStatus.Draft && invoice.Status != InvoiceStatus.PendingApproval)
-                throw new InvalidOperationException("Only draft or fully approved pending invoices can be sent.");
+            if (invoice.Status == InvoiceStatus.Sent && invoice.JournalEntryId.HasValue)
+                return MapToDto(invoice); // Retried release must never issue stock or increase debt twice.
+            if (invoice.Status == InvoiceStatus.Draft)
+            {
+                // Trusted internal producers retain their release entry point, but cannot skip an active invoice process.
+                var workflow = _workflowIntegration ?? throw new InvalidOperationException("Invoice workflow integration is not configured.");
+                if (await workflow.HasActiveApprovalInstanceAsync("Invoice", id) || await workflow.HasActiveApprovalWorkflowAsync("Invoice"))
+                    throw new InvalidOperationException("Submit the invoice to its active approval process before release.");
+                await SubmitCoreAsync(id, producer, cancellationToken);
+            }
+            if (invoice.Status == InvoiceStatus.ReadyToPost)
+            {
+                if (invoice.ApprovalRequired || invoice.WorkflowInstanceId.HasValue)
+                    throw new InvalidOperationException("Invoice does not have a retained direct posting decision.");
+            }
+            else if (invoice.Status is InvoiceStatus.PendingApproval or InvoiceStatus.Approved)
+            {
+                await RequireCompletedInvoiceWorkflowAsync(invoice, cancellationToken);
+            }
+            else throw new InvalidOperationException("Only ready-to-post or fully approved invoices can be released.");
 
             if (producer is not null)
             {
@@ -679,7 +773,6 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
 
             var now = DateTime.UtcNow;
-            invoice.Status = InvoiceStatus.Draft;
             var previousStatus = invoice.Status;
             invoice.Status = InvoiceStatus.Sent;
             invoice.UpdatedAt = now;
@@ -783,16 +876,35 @@ namespace ErpSystem.Api.Services.Finance.AR
             }
         }
 
+        private async Task RequireCompletedInvoiceWorkflowAsync(Invoice invoice, CancellationToken cancellationToken)
+        {
+            var workflow = _workflowIntegration ?? throw new InvalidOperationException("Invoice workflow integration is not configured.");
+            if (!invoice.ApprovalRequired || await workflow.HasActiveApprovalInstanceAsync("Invoice", invoice.Id))
+                throw new InvalidOperationException("The invoice approval process is not complete.");
+            var candidates = await _unitOfWork.Repository<WorkflowInstance>()
+                .GetQueryable(instance => instance.TenantId == TenantId && instance.EntityId == invoice.Id && !instance.IsDeleted)
+                .Include(instance => instance.EntityType)
+                .OrderByDescending(instance => instance.CreatedDate).ToListAsync(cancellationToken);
+            static string Key(string? value) => new((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+            var retained = candidates.FirstOrDefault(instance => instance.EntityType != null &&
+                instance.EntityType.TenantId == TenantId && !instance.EntityType.IsDeleted &&
+                (Key(instance.EntityType.Code) is "INVOICE" or "CUSTOMERINVOICE" || Key(instance.EntityType.Name) is "INVOICE" or "CUSTOMERINVOICE") &&
+                (!invoice.WorkflowInstanceId.HasValue || instance.Id == invoice.WorkflowInstanceId));
+            if (retained == null || retained.Status != WorkflowInstanceStatus.Completed || !retained.CompletedDate.HasValue)
+                throw new InvalidOperationException("A completed approval workflow belonging to this invoice is required before release.");
+            invoice.WorkflowInstanceId = retained.Id;
+        }
+
         public Task<InvoiceDto> PostAsync(
             Guid id,
             CancellationToken cancellationToken = default) =>
-            PostCoreAsync(id, null, cancellationToken);
+            ExecuteInvoiceLifecycleAsync(id, () => PostCoreAsync(id, null, cancellationToken), cancellationToken);
 
         public Task<InvoiceDto> PostAsync(
             Guid id,
             FinancePostingProducerContext producer,
             CancellationToken cancellationToken = default) =>
-            PostCoreAsync(id, EnsureCustomerInvoiceRoute(producer), cancellationToken);
+            ExecuteInvoiceLifecycleAsync(id, () => PostCoreAsync(id, EnsureCustomerInvoiceRoute(producer), cancellationToken), cancellationToken);
 
         private async Task<InvoiceDto> PostCoreAsync(
             Guid id,
@@ -803,6 +915,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 throw new InvalidOperationException("Central finance posting engine is not configured for AR invoice posting.");
 
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
+            if (invoice.Status is InvoiceStatus.ReadyToPost or InvoiceStatus.Approved)
+                return await SendInvoiceCoreAsync(id, producer, cancellationToken);
             var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
 
             if (producer is not null)
@@ -2192,6 +2306,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 PaidAmount = invoice.PaidAmount,
                 BalanceAmount = invoice.BalanceAmount,
                 Status = invoice.Status.ToString(),
+                ApprovalRequired = invoice.ApprovalRequired,
+                WorkflowInstanceId = invoice.WorkflowInstanceId,
                 Notes = invoice.Notes,
                 Reference = invoice.Reference,
                 IsOpeningBalance = invoice.IsOpeningBalance,

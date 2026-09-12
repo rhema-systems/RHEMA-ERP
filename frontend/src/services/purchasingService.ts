@@ -648,6 +648,7 @@ export interface ProcurementPurchaseOrderSodCheckDto {
 }
 
 export interface ProcurementPurchaseOrderSodReadinessDto {
+  approvalRequired?: boolean;
   purchaseOrderId: string;
   orderNumber: string;
   status: string;
@@ -788,6 +789,7 @@ export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
 }
 
 export interface PurchaseOrderItemDto {
+  lineType?: import('@/lib/purchase-order-line-types').PurchaseOrderLineType;
   id: string;
   purchaseOrderId: string;
   inventoryItemId: string;
@@ -819,6 +821,7 @@ export type LandedCostAllocationMethod =
   'ByValue' | 'ByQuantity' | 'ByWeight' | 'ByVolume' | 'Equal' | 'Manual';
 
 export interface PurchaseOrderLandedCostPlanItemDto {
+  purchaseOrderItemId?: string;
   id: string;
   costType: number; // matches backend LandedCostType enum values
   description: string;
@@ -844,6 +847,8 @@ export interface PurchaseOrderLandedCostPlanDto {
 }
 
 export interface UpsertPurchaseOrderLandedCostPlanItemDto {
+  purchaseOrderItemId?: string;
+  purchaseOrderLineIndex?: number;
   costType: number;
   description: string;
   amount: number;
@@ -900,6 +905,7 @@ const normalizePurchaseOrderLandedCostPlanDto = (
 };
 
 export interface CreatePurchaseOrderDto {
+  plannedLandedCostPlan?: UpsertPurchaseOrderLandedCostPlanDto;
   sourceType: ProcurementPurchaseOrderSourceType;
   sourceId: string;
   supplierId: string; // Maps to BusinessPartnerId
@@ -926,7 +932,9 @@ export interface CreatePurchaseOrderDto {
 }
 
 export interface CreatePurchaseOrderItemDto {
-  inventoryItemId: string;
+  id?: string;
+  lineType?: import('@/lib/purchase-order-line-types').PurchaseOrderLineType;
+  inventoryItemId?: string;
   supplierItemCode?: string; // Maps to BusinessPartnerItemCode
   itemDescription?: string;
   orderedQuantity: number;
@@ -1047,6 +1055,7 @@ export interface ProcurementReceiptInspectionEvidenceRequest {
 }
 
 export interface ProcurementReceiptInspectionLineDto {
+  lineType?: import('@/lib/purchase-order-line-types').PurchaseOrderLineType;
   id: string;
   purchaseOrderReceiptItemId: string;
   purchaseOrderItemId: string;
@@ -1088,6 +1097,8 @@ export interface ProcurementReceiptInspectionActionDto {
 }
 
 export interface ProcurementReceiptInspectionDto {
+  approvalRequired?: boolean;
+  workflowDefinitionId?: string;
   id: string;
   purchaseOrderReceiptId: string;
   sequence: number;
@@ -1210,7 +1221,7 @@ export interface ProcurementReceiptDocumentOverviewDto {
 }
 
 export interface SaveProcurementReceiptInspectionRequest {
-  comment: string;
+  comment?: string;
   idempotencyKey: string;
   rowVersion?: string;
   lines: Array<{
@@ -2158,7 +2169,7 @@ export const purchasingService = {
   async submitReceiptInspection(
     caseId: string,
     request: {
-      comment: string;
+      comment?: string;
       rowVersion: string;
       evidence: ProcurementReceiptInspectionEvidenceRequest[];
     }

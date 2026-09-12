@@ -106,6 +106,7 @@ export interface NavItem {
   permissions?: string[];
   accessMode?: 'all' | 'any';
   navigationSurface?: 'operations' | 'settings';
+  fallback?: NavItem;
 }
 
 export function canAccessNavItem(
@@ -130,6 +131,24 @@ export function canAccessNavItem(
   return item.accessMode === 'any'
     ? checks.some(Boolean)
     : checks.every(Boolean);
+}
+
+export function filterNavigationByAccess(
+  items: NavItem[],
+  hasAnyRole: (roles: string[]) => boolean,
+  hasAnyPermission: (permissions: string[]) => boolean
+): NavItem[] {
+  return items.flatMap(item => {
+    if (!canAccessNavItem(item, hasAnyRole, hasAnyPermission)) {
+      return item.fallback
+        ? filterNavigationByAccess([item.fallback], hasAnyRole, hasAnyPermission)
+        : [];
+    }
+    const children = item.children
+      ? filterNavigationByAccess(item.children, hasAnyRole, hasAnyPermission)
+      : undefined;
+    return item.children && !children?.length ? [] : [{ ...item, children }];
+  });
 }
 
 const ADMINISTRATION_ROLES = [
@@ -1775,6 +1794,17 @@ export const navigationItems: NavItem[] = [
     href: '/inventory',
     icon: Package,
     roles: INVENTORY_ROLES,
+    // Employees already have server-authorized access to their own requests.
+    // Show that route without exposing warehouse operations or granting roles.
+    fallback: {
+      title: 'Inventory',
+      href: '/inventory',
+      icon: Package,
+      roles: ['Employee'],
+      children: [
+        { title: 'My requisitions', href: '/inventory/requisitions', icon: ClipboardList },
+      ],
+    },
     permissions: [
       'procurement.inventory.read',
       'procurement.inventory.master-data.manage',
@@ -3209,6 +3239,12 @@ export const navigationItems: NavItem[] = [
             icon: Landmark,
             permissions: ['procurement.inventory.master-data.manage'],
           },
+          {
+            title: 'Physical Count Decisions',
+            href: '/administration/inventory/count-decisions',
+            icon: Settings,
+            permissions: ['procurement.inventory.master-data.manage'],
+          },
         ],
       },
       {
@@ -4021,27 +4057,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       return items;
     }
 
-    return items.reduce<NavItem[]>((acc, item) => {
-      const hasAccess = canAccessNavItem(item, hasAnyRole, hasAnyPermission);
-
-      if (!hasAccess) {
-        return acc;
-      }
-
-      const children = item.children
-        ? filterNavItems(item.children)
-        : undefined;
-      if (item.children && (!children || children.length === 0)) {
-        return acc;
-      }
-
-      acc.push({
-        ...item,
-        children,
-      });
-
-      return acc;
-    }, []);
+    return filterNavigationByAccess(items, hasAnyRole, hasAnyPermission);
   };
 
   return (
