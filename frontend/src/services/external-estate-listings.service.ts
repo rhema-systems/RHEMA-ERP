@@ -121,6 +121,19 @@ class ExternalEstateListingsService {
     return response.data || [];
   }
 
+  async getPublicListings(query: {
+    location?: string;
+    listingType?: string;
+    search?: string;
+    take?: number;
+  }): Promise<ExternalEstateListing[]> {
+    const response = await apiService.get<ApiResponse<ExternalEstateListing[]>>(
+      '/estate/public/listings',
+      query
+    );
+    return response.data || [];
+  }
+
   async getListingImage(listing: ExternalEstateListing): Promise<Blob | null> {
     if (!listing.primaryImageUrl) return null;
     return rawApiService.downloadBlob(listing.primaryImageUrl);

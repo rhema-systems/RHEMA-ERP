@@ -1748,8 +1748,127 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .ToListAsync(cancellationToken);
 
         var listings = filtered
-            .Select(ToExternalListingDto)
-            .Concat(filteredDemarcations.Select(ToExternalListingDto))
+            .Select(item => ToExternalListingDto(item))
+            .Concat(filteredDemarcations.Select(item => ToExternalListingDto(item)))
+            .Take(limit)
+            .ToList();
+
+        return Ok(new { success = true, data = listings });
+    }
+
+    [AllowAnonymous]
+    [HttpGet("/api/estate/public/listings")]
+    public async Task<IActionResult> GetPublicListings(
+        [FromQuery] string? location = null,
+        [FromQuery] string? listingType = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int take = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = await ResolvePublicTenantIdAsync(cancellationToken);
+        if (tenantId == Guid.Empty)
+        {
+            return Ok(new { success = true, data = Array.Empty<object>() });
+        }
+
+        var normalizedLocation = Normalize(location);
+        var normalizedSearch = Normalize(search);
+        var normalizedListingType = NormalizeListingType(listingType);
+        var limit = Math.Clamp(take <= 0 ? 100 : take, 1, 200);
+
+        var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
+            .AsNoTracking()
+            .Include(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage)))
+            .Where(asset => asset.TenantId == tenantId
+                && (asset.AssetType == EstateManagedAssetType.Land
+                    || asset.AssetType == EstateManagedAssetType.Property
+                    || asset.AssetType == EstateManagedAssetType.Facility));
+
+        if (normalizedListingType != null)
+        {
+            query = query.Where(asset => asset.ExternalListingType == normalizedListingType
+                || asset.ExternalListingType == "SaleAndRent");
+        }
+
+        if (normalizedLocation != null)
+        {
+            query = query.Where(asset =>
+                (asset.Location != null && asset.Location.ToLower().Contains(normalizedLocation))
+                || (asset.Town != null && asset.Town.ToLower().Contains(normalizedLocation))
+                || (asset.District != null && asset.District.ToLower().Contains(normalizedLocation))
+                || (asset.Region != null && asset.Region.ToLower().Contains(normalizedLocation)));
+        }
+
+        if (normalizedSearch != null)
+        {
+            query = query.Where(asset =>
+                (asset.AssetCode != null && asset.AssetCode.ToLower().Contains(normalizedSearch))
+                || (asset.Name != null && asset.Name.ToLower().Contains(normalizedSearch))
+                || (asset.Description != null && asset.Description.ToLower().Contains(normalizedSearch))
+                || (asset.Location != null && asset.Location.ToLower().Contains(normalizedSearch))
+                || (asset.Town != null && asset.Town.ToLower().Contains(normalizedSearch))
+                || (asset.District != null && asset.District.ToLower().Contains(normalizedSearch))
+                || (asset.ProjectTitle != null && asset.ProjectTitle.ToLower().Contains(normalizedSearch))
+                || (asset.UnitType != null && asset.UnitType.ToLower().Contains(normalizedSearch)));
+        }
+
+        var filtered = await query
+            .OrderByDescending(asset => asset.ExternalPublishedAt ?? asset.UpdatedAt ?? asset.CreatedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        var demarcationQuery = _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Include(item => item.EstateManagedAsset)
+                .ThenInclude(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.IsPublishedToExternalPortal
+                && item.ExternalListingStatus == "Published"
+                && item.BoundaryVerified
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                && !item.EstateManagedAsset.ProjectId.HasValue
+                && !item.EstateManagedAsset.IsPublishedToExternalPortal);
+
+        if (normalizedListingType != null)
+        {
+            demarcationQuery = demarcationQuery.Where(item => item.ExternalListingType == normalizedListingType
+                || item.ExternalListingType == "SaleAndRent");
+        }
+
+        if (normalizedLocation != null)
+        {
+            demarcationQuery = demarcationQuery.Where(item =>
+                (item.EstateManagedAsset.Location != null && item.EstateManagedAsset.Location.ToLower().Contains(normalizedLocation))
+                || (item.EstateManagedAsset.Town != null && item.EstateManagedAsset.Town.ToLower().Contains(normalizedLocation))
+                || (item.EstateManagedAsset.District != null && item.EstateManagedAsset.District.ToLower().Contains(normalizedLocation))
+                || (item.EstateManagedAsset.Region != null && item.EstateManagedAsset.Region.ToLower().Contains(normalizedLocation)));
+        }
+
+        if (normalizedSearch != null)
+        {
+            demarcationQuery = demarcationQuery.Where(item =>
+                item.Description.ToLower().Contains(normalizedSearch)
+                || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
+                || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
+                || (item.EstateManagedAsset.Description != null && item.EstateManagedAsset.Description.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.Location != null && item.EstateManagedAsset.Location.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.Town != null && item.EstateManagedAsset.Town.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.District != null && item.EstateManagedAsset.District.ToLower().Contains(normalizedSearch))
+                || (item.EstateManagedAsset.ProjectTitle != null && item.EstateManagedAsset.ProjectTitle.ToLower().Contains(normalizedSearch)));
+        }
+
+        var filteredDemarcations = await demarcationQuery
+            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        var listings = filtered
+            .Select(item => ToExternalListingDto(item, usePublicImageRoute: true))
+            .Concat(filteredDemarcations.Select(item => ToExternalListingDto(item, usePublicImageRoute: true)))
             .Take(limit)
             .ToList();
 
@@ -1782,6 +1901,54 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var document = await _db.EstateManagedAssetDocuments
             .AsNoTracking()
             .Include(item => item.EstateManagedAsset)
+            .FirstOrDefaultAsync(item => item.Id == documentId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.IsListingImage
+                && (externallyAvailableAssetIds.Contains(item.EstateManagedAssetId)
+                    || demarcationListingAssetIds.Contains(item.EstateManagedAssetId)), cancellationToken);
+
+        if (document == null)
+        {
+            return NotFound(new { success = false, message = "Listing image was not found." });
+        }
+
+        var stream = await _fileStorageService.DownloadFileAsync(document.FilePath, document.Id);
+        return File(stream, document.ContentType ?? "application/octet-stream", document.FileName);
+    }
+
+    [AllowAnonymous]
+    [HttpGet("/api/estate/public/listings/{listingId:guid}/images/{documentId:guid}")]
+    public async Task<IActionResult> GetPublicListingImage(Guid listingId, Guid documentId, CancellationToken cancellationToken)
+    {
+        var tenantId = await ResolvePublicTenantIdAsync(cancellationToken);
+        if (tenantId == Guid.Empty)
+        {
+            return NotFound(new { success = false, message = "Listing image was not found." });
+        }
+
+        var externallyAvailableAssetIds = WhereExternallyAvailableListings(
+                _db.EstateManagedAssets.AsNoTracking())
+            .Where(item => item.TenantId == tenantId)
+            .Select(item => item.Id);
+        var demarcationListingAssetIds = _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Where(item => item.Id == listingId
+                && item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.IsPublishedToExternalPortal
+                && item.ExternalListingStatus == "Published"
+                && item.BoundaryVerified
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                && !item.EstateManagedAsset.ProjectId.HasValue
+                && !item.EstateManagedAsset.IsPublishedToExternalPortal)
+            .Select(item => item.EstateManagedAssetId);
+
+        var document = await _db.EstateManagedAssetDocuments
+            .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == documentId
                 && item.TenantId == tenantId
                 && !item.IsDeleted
@@ -2401,7 +2568,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
     }
 
-    private static object ToExternalListingDto(EstateManagedAsset asset)
+    private static object ToExternalListingDto(EstateManagedAsset asset, bool usePublicImageRoute = false)
     {
         var image = asset.Documents
             .Where(document => document.IsListingImage)
@@ -2439,12 +2606,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.ExternalListingNotes,
             asset.ExternalPublishedAt,
             PrimaryImageDocumentId = image?.Id,
-            PrimaryImageUrl = image is null ? null : $"/estate/external/listings/{asset.Id}/images/{image.Id}",
+            PrimaryImageUrl = image is null
+                ? null
+                : usePublicImageRoute
+                    ? $"/estate/public/listings/{asset.Id}/images/{image.Id}"
+                    : $"/estate/external/listings/{asset.Id}/images/{image.Id}",
             SourceLabel = "Source: Estate / Property Management -> External Portal"
         };
     }
 
-    private static object ToExternalListingDto(EstateLandDemarcation demarcation)
+    private static object ToExternalListingDto(EstateLandDemarcation demarcation, bool usePublicImageRoute = false)
     {
         var asset = demarcation.EstateManagedAsset;
         var image = asset.Documents
@@ -2486,7 +2657,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             demarcation.ExternalListingNotes,
             demarcation.ExternalPublishedAt,
             PrimaryImageDocumentId = image?.Id,
-            PrimaryImageUrl = image is null ? null : $"/estate/external/listings/{demarcation.Id}/images/{image.Id}",
+            PrimaryImageUrl = image is null
+                ? null
+                : usePublicImageRoute
+                    ? $"/estate/public/listings/{demarcation.Id}/images/{image.Id}"
+                    : $"/estate/external/listings/{demarcation.Id}/images/{image.Id}",
             SourceLabel = "Source: Estate Land Bank Demarcation -> External Portal"
         };
     }
@@ -3116,6 +3291,53 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     && asset.SourceType == EstateManagedAssetSourceType.ProjectUnit
                     && asset.IsPublishedFromProject
                     && asset.Status == EstateManagedAssetStatus.Available)));
+
+    private async Task<Guid> ResolvePublicTenantIdAsync(CancellationToken cancellationToken)
+    {
+        if (_currentUserService.TenantId is { } currentTenantId && currentTenantId != Guid.Empty)
+        {
+            return currentTenantId;
+        }
+
+        var host = HttpContext.Request.Host.Host;
+        if (!string.IsNullOrWhiteSpace(host))
+        {
+            var normalizedHost = host.Trim().ToLowerInvariant();
+            var hostTenantId = await _db.Tenants
+                .AsNoTracking()
+                .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+                .Where(tenant => tenant.Domain != null
+                    && tenant.Domain.Trim().ToLower() == normalizedHost)
+                .Select(tenant => tenant.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (hostTenantId != Guid.Empty)
+            {
+                return hostTenantId;
+            }
+        }
+
+        var defaultPublicTenantId = await _db.Tenants
+            .AsNoTracking()
+            .Where(tenant => !tenant.IsDeleted
+                && tenant.Status == TenantStatus.Active
+                && tenant.IsDefaultForPublicUsers)
+            .OrderBy(tenant => tenant.DefaultPriority)
+            .Select(tenant => tenant.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (defaultPublicTenantId != Guid.Empty)
+        {
+            return defaultPublicTenantId;
+        }
+
+        return await _db.Tenants
+            .AsNoTracking()
+            .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+            .OrderBy(tenant => tenant.DefaultPriority)
+            .Select(tenant => tenant.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
