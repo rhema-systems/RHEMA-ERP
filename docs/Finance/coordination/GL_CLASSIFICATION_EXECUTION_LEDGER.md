@@ -2188,3 +2188,12 @@ orphan and PASS target-history reconciliation; hash/identity-bound backup/VERIFY
 canonical content invariants for Accounts, AccountSegmentValues and C1-C8 authority/state; and sanitized SQL,
 machine identity and failure evidence with `.sql` included in package scans. A bounded Sol Medium correction is
 active in the same isolated D1 worktree. No database or configured connection was inspected.
+
+The bounded D1 correction completed as the clean three-commit series `e014f907`, `33b3d764`, and
+`6864103aa22fd952705602b3738fbf80e0948e9f`, directly atop the rejected candidate. It now locks execution to
+one exact reviewed commit/tree, rejects ordinary and relevant ignored dirt before SQL, binds all retained
+artifacts, independently reconciles repository/source/pending/orphan/target histories, validates ordered and
+identity-bound backup/VERIFYONLY/restore/DBCC proof, canonicalizes Accounts, AccountSegmentValues and C1-C8
+authority/state, and retains only sanitized SQL derivatives. Offline PowerShell parsing, the complete safety-
+refusal suite, final 456/C8 PASS/NO-GO package validation and all tamper/refusal cases passed. No database or
+configured connection was accessed; final Sol High re-review remains required over the ledger-only descendant.
