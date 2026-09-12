@@ -83,7 +83,7 @@ try {
     [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_COMMIT', $executedCommit, 'Process')
     [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_TREE', $executedTree, 'Process')
 
-    $dirtyProbe = Join-Path $repositoryRoot 'gl-final-clone-dirty-probe.tmp'
+    $dirtyProbe = Join-Path $repositoryRoot 'gl-final-clone-dirty-probe.ps1'
     try {
         'untracked safety probe' | Set-Content -Encoding ascii -LiteralPath $dirtyProbe
         $output = & pwsh -NoProfile -File $script -Mode RehearseFinalClone -EvidenceDirectory $emptyEvidence 2>&1 | Out-String
