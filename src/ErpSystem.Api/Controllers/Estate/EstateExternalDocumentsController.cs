@@ -1599,9 +1599,18 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         [FromQuery] string? listingType = null,
         [FromQuery] string? search = null,
         [FromQuery] Guid? businessPartnerId = null,
-        [FromQuery] int take = 100,
+        [FromQuery] int? page = null,
+        [FromQuery] int? pageSize = null,
+        [FromQuery] decimal? minPrice = null,
+        [FromQuery] decimal? maxPrice = null,
+        [FromQuery] int? take = null,
         CancellationToken cancellationToken = default)
     {
+        if (minPrice < 0 || maxPrice < 0 || (minPrice.HasValue && maxPrice.HasValue && minPrice > maxPrice))
+        {
+            return BadRequest(new { success = false, message = "Enter a valid price range." });
+        }
+
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
         {
@@ -1611,7 +1620,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedLocation = Normalize(location);
         var normalizedSearch = Normalize(search);
         var normalizedListingType = NormalizeListingType(listingType);
-        var limit = Math.Clamp(take <= 0 ? 100 : take, 1, 200);
+        var normalizedPage = Math.Max(1, page ?? 1);
+        var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking()
@@ -1692,11 +1702,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 || (asset.UnitType != null && asset.UnitType.ToLower().Contains(normalizedSearch)));
         }
 
+        query = ApplyPublicPriceFilter(query, normalizedListingType, minPrice, maxPrice);
+
         // Estate external portal: apply all listing/search filters before paging published inventory.
-        var filtered = await query
-            .OrderByDescending(asset => asset.ExternalPublishedAt ?? asset.UpdatedAt ?? asset.CreatedAt)
-            .Take(limit)
-            .ToListAsync(cancellationToken);
+        var filteredAssets = await query.ToListAsync(cancellationToken);
 
         var demarcationQuery = _db.EstateLandDemarcations
             .AsNoTracking()
@@ -1742,18 +1751,41 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 || (item.EstateManagedAsset.ProjectTitle != null && item.EstateManagedAsset.ProjectTitle.ToLower().Contains(normalizedSearch)));
         }
 
-        var filteredDemarcations = await demarcationQuery
-            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
-            .Take(limit)
-            .ToListAsync(cancellationToken);
+        demarcationQuery = ApplyPublicPriceFilter(demarcationQuery, normalizedListingType, minPrice, maxPrice);
 
-        var listings = filtered
-            .Select(item => ToExternalListingDto(item))
-            .Concat(filteredDemarcations.Select(item => ToExternalListingDto(item)))
-            .Take(limit)
+        var filteredDemarcations = await demarcationQuery.ToListAsync(cancellationToken);
+
+        var candidates = filteredAssets
+            .Select(item => (
+                Data: (object)ToExternalListingDto(item),
+                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt))
+            .Concat(filteredDemarcations.Select(item => (
+                Data: (object)ToExternalListingDto(item),
+                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)))
+            .OrderByDescending(item => item.PublishedAt)
             .ToList();
 
-        return Ok(new { success = true, data = listings });
+        var totalCount = candidates.Count;
+        var listings = candidates
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
+            .Select(item => item.Data)
+            .ToList();
+
+        return Ok(new
+        {
+            success = true,
+            data = listings,
+            pagination = new
+            {
+                page = normalizedPage,
+                pageSize = normalizedPageSize,
+                totalCount,
+                totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)normalizedPageSize)),
+                hasPreviousPage = normalizedPage > 1,
+                hasNextPage = normalizedPage * normalizedPageSize < totalCount
+            }
+        });
     }
 
     [AllowAnonymous]
@@ -1762,9 +1794,18 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         [FromQuery] string? location = null,
         [FromQuery] string? listingType = null,
         [FromQuery] string? search = null,
-        [FromQuery] int take = 100,
+        [FromQuery] int? page = null,
+        [FromQuery] int? pageSize = null,
+        [FromQuery] decimal? minPrice = null,
+        [FromQuery] decimal? maxPrice = null,
+        [FromQuery] int? take = null,
         CancellationToken cancellationToken = default)
     {
+        if (minPrice < 0 || maxPrice < 0 || (minPrice.HasValue && maxPrice.HasValue && minPrice > maxPrice))
+        {
+            return BadRequest(new { success = false, message = "Enter a valid price range." });
+        }
+
         var tenantId = await ResolvePublicTenantIdAsync(cancellationToken);
         if (tenantId == Guid.Empty)
         {
@@ -1774,7 +1815,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedLocation = Normalize(location);
         var normalizedSearch = Normalize(search);
         var normalizedListingType = NormalizeListingType(listingType);
-        var limit = Math.Clamp(take <= 0 ? 100 : take, 1, 200);
+        var normalizedPage = Math.Max(1, page ?? 1);
+        var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking()
@@ -1812,10 +1854,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 || (asset.UnitType != null && asset.UnitType.ToLower().Contains(normalizedSearch)));
         }
 
-        var filtered = await query
-            .OrderByDescending(asset => asset.ExternalPublishedAt ?? asset.UpdatedAt ?? asset.CreatedAt)
-            .Take(limit)
-            .ToListAsync(cancellationToken);
+        query = ApplyPublicPriceFilter(query, normalizedListingType, minPrice, maxPrice);
+
+        var filteredAssets = await query.ToListAsync(cancellationToken);
 
         var demarcationQuery = _db.EstateLandDemarcations
             .AsNoTracking()
@@ -1861,18 +1902,41 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 || (item.EstateManagedAsset.ProjectTitle != null && item.EstateManagedAsset.ProjectTitle.ToLower().Contains(normalizedSearch)));
         }
 
-        var filteredDemarcations = await demarcationQuery
-            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
-            .Take(limit)
-            .ToListAsync(cancellationToken);
+        demarcationQuery = ApplyPublicPriceFilter(demarcationQuery, normalizedListingType, minPrice, maxPrice);
 
-        var listings = filtered
-            .Select(item => ToExternalListingDto(item, usePublicImageRoute: true))
-            .Concat(filteredDemarcations.Select(item => ToExternalListingDto(item, usePublicImageRoute: true)))
-            .Take(limit)
+        var filteredDemarcations = await demarcationQuery.ToListAsync(cancellationToken);
+
+        var candidates = filteredAssets
+            .Select(item => (
+                Data: (object)ToExternalListingDto(item, usePublicImageRoute: true),
+                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt))
+            .Concat(filteredDemarcations.Select(item => (
+                Data: (object)ToExternalListingDto(item, usePublicImageRoute: true),
+                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)))
+            .OrderByDescending(item => item.PublishedAt)
             .ToList();
 
-        return Ok(new { success = true, data = listings });
+        var totalCount = candidates.Count;
+        var listings = candidates
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
+            .Select(item => item.Data)
+            .ToList();
+
+        return Ok(new
+        {
+            success = true,
+            data = listings,
+            pagination = new
+            {
+                page = normalizedPage,
+                pageSize = normalizedPageSize,
+                totalCount,
+                totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)normalizedPageSize)),
+                hasPreviousPage = normalizedPage > 1,
+                hasNextPage = normalizedPage * normalizedPageSize < totalCount
+            }
+        });
     }
 
     [HttpGet("/api/estate/external/listings/{listingId:guid}/images/{documentId:guid}")]
@@ -3221,6 +3285,118 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         => PortalCustomers(tenantId, userId)
             .Where(item => item.Id == businessPartnerId)
             .FirstOrDefaultAsync(cancellationToken);
+
+    private static IQueryable<EstateManagedAsset> ApplyPublicPriceFilter(
+        IQueryable<EstateManagedAsset> query,
+        string? listingType,
+        decimal? minPrice,
+        decimal? maxPrice)
+    {
+        if (!minPrice.HasValue && !maxPrice.HasValue)
+        {
+            return query;
+        }
+
+        if (listingType == "Rent")
+        {
+            return query.Where(asset =>
+                ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
+                    ?? asset.ExternalMonthlyRent
+                    ?? asset.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
+                        ?? asset.ExternalMonthlyRent
+                        ?? asset.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
+                        ?? asset.ExternalMonthlyRent
+                        ?? asset.ExternalListingPrice) <= maxPrice.Value));
+        }
+
+        if (listingType == "Sale")
+        {
+            return query.Where(asset =>
+                (asset.ExternalSalePrice ?? asset.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    (asset.ExternalSalePrice ?? asset.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    (asset.ExternalSalePrice ?? asset.ExternalListingPrice) <= maxPrice.Value));
+        }
+
+        return query.Where(asset =>
+            ((asset.ExternalSalePrice ?? asset.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    (asset.ExternalSalePrice ?? asset.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    (asset.ExternalSalePrice ?? asset.ExternalListingPrice) <= maxPrice.Value))
+            || (((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
+                    ?? asset.ExternalMonthlyRent
+                    ?? asset.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
+                        ?? asset.ExternalMonthlyRent
+                        ?? asset.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
+                        ?? asset.ExternalMonthlyRent
+                        ?? asset.ExternalListingPrice) <= maxPrice.Value)));
+    }
+
+    private static IQueryable<EstateLandDemarcation> ApplyPublicPriceFilter(
+        IQueryable<EstateLandDemarcation> query,
+        string? listingType,
+        decimal? minPrice,
+        decimal? maxPrice)
+    {
+        if (!minPrice.HasValue && !maxPrice.HasValue)
+        {
+            return query;
+        }
+
+        if (listingType == "Rent")
+        {
+            return query.Where(item =>
+                (item.EstateManagedAsset.GroundRentPayable
+                    ?? item.ExternalMonthlyRent
+                    ?? item.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    (item.EstateManagedAsset.GroundRentPayable
+                        ?? item.ExternalMonthlyRent
+                        ?? item.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    (item.EstateManagedAsset.GroundRentPayable
+                        ?? item.ExternalMonthlyRent
+                        ?? item.ExternalListingPrice) <= maxPrice.Value));
+        }
+
+        if (listingType == "Sale")
+        {
+            return query.Where(item =>
+                (item.ExternalSalePrice ?? item.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    (item.ExternalSalePrice ?? item.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    (item.ExternalSalePrice ?? item.ExternalListingPrice) <= maxPrice.Value));
+        }
+
+        return query.Where(item =>
+            ((item.ExternalSalePrice ?? item.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    (item.ExternalSalePrice ?? item.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    (item.ExternalSalePrice ?? item.ExternalListingPrice) <= maxPrice.Value))
+            || ((item.EstateManagedAsset.GroundRentPayable
+                    ?? item.ExternalMonthlyRent
+                    ?? item.ExternalListingPrice).HasValue
+                && (!minPrice.HasValue ||
+                    (item.EstateManagedAsset.GroundRentPayable
+                        ?? item.ExternalMonthlyRent
+                        ?? item.ExternalListingPrice) >= minPrice.Value)
+                && (!maxPrice.HasValue ||
+                    (item.EstateManagedAsset.GroundRentPayable
+                        ?? item.ExternalMonthlyRent
+                        ?? item.ExternalListingPrice) <= maxPrice.Value)));
+    }
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToLowerInvariant();

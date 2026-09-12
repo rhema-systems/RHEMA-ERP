@@ -97,6 +97,24 @@ interface ApiResponse<T> {
   success: boolean;
   data: T;
   message?: string;
+  pagination?: {
+    page: number;
+    pageSize: number;
+    totalCount: number;
+    totalPages: number;
+    hasPreviousPage: boolean;
+    hasNextPage: boolean;
+  };
+}
+
+export interface PublicEstateListingsPage {
+  items: ExternalEstateListing[];
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
 }
 
 class ExternalEstateListingsService {
@@ -121,6 +139,31 @@ class ExternalEstateListingsService {
     return response.data || [];
   }
 
+  async getListingsPage(query: {
+    location?: string;
+    listingType?: string;
+    search?: string;
+    businessPartnerId?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    page?: number;
+    pageSize?: number;
+  }): Promise<PublicEstateListingsPage> {
+    const response = await apiService.get<ApiResponse<ExternalEstateListing[]>>(
+      '/estate/external/listings',
+      query
+    );
+    return {
+      items: response.data || [],
+      page: response.pagination?.page ?? query.page ?? 1,
+      pageSize: response.pagination?.pageSize ?? query.pageSize ?? 10,
+      totalCount: response.pagination?.totalCount ?? response.data?.length ?? 0,
+      totalPages: response.pagination?.totalPages ?? 1,
+      hasPreviousPage: response.pagination?.hasPreviousPage ?? false,
+      hasNextPage: response.pagination?.hasNextPage ?? false,
+    };
+  }
+
   async getPublicListings(query: {
     location?: string;
     listingType?: string;
@@ -132,6 +175,30 @@ class ExternalEstateListingsService {
       query
     );
     return response.data || [];
+  }
+
+  async getPublicListingsPage(query: {
+    location?: string;
+    listingType?: string;
+    search?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    page?: number;
+    pageSize?: number;
+  }): Promise<PublicEstateListingsPage> {
+    const response = await apiService.get<ApiResponse<ExternalEstateListing[]>>(
+      '/estate/public/listings',
+      query
+    );
+    return {
+      items: response.data || [],
+      page: response.pagination?.page ?? query.page ?? 1,
+      pageSize: response.pagination?.pageSize ?? query.pageSize ?? 10,
+      totalCount: response.pagination?.totalCount ?? response.data?.length ?? 0,
+      totalPages: response.pagination?.totalPages ?? 1,
+      hasPreviousPage: response.pagination?.hasPreviousPage ?? false,
+      hasNextPage: response.pagination?.hasNextPage ?? false,
+    };
   }
 
   async getListingImage(listing: ExternalEstateListing): Promise<Blob | null> {
