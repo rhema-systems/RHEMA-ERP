@@ -125,6 +125,13 @@ function acquisitionReadyForLandBank(item: LandAcquisitionItem) {
   return item.stageOrder >= 15 && item.stageInputsComplete;
 }
 
+function acquisitionVisibleInLandBank(item: LandAcquisitionItem) {
+  return (
+    acquisitionReadyForLandBank(item) &&
+    item.status.toLowerCase() === 'approved'
+  );
+}
+
 function StatCard({
   title,
   value,
@@ -277,7 +284,11 @@ export default function EstateLandManagementPage() {
       ]);
       const acquisitionItems = acquisitionBoard.stages
         .flatMap((stage) => stage.items)
-        .filter((item) => acquisitionMatches(item, query));
+        .filter(
+          (item) =>
+            acquisitionVisibleInLandBank(item) &&
+            acquisitionMatches(item, query)
+        );
       setAssets(data);
       setAcquisitions(acquisitionItems);
       const nextKeys = [
@@ -642,7 +653,7 @@ export default function EstateLandManagementPage() {
                     title={
                       acquisitionReadyForLandBank(selected.acquisition)
                         ? undefined
-                        : 'Complete the acquisition workflow through Asset Creation before publishing this land to Estate Land Bank.'
+                        : 'Complete the acquisition workflow through Land Creation before publishing this land to Estate Land Bank.'
                     }
                   >
                     {markingReadyKey ===
@@ -765,7 +776,7 @@ export default function EstateLandManagementPage() {
                     value={formatArea(selected.asset.areaSquareMeters)}
                   />
                   <DetailRow
-                    label="Valuation"
+                    label="Capitalized value"
                     value={formatMoney(
                       selected.asset.valuationAmount,
                       selected.asset.currency
@@ -910,7 +921,7 @@ export default function EstateLandManagementPage() {
                         title={
                           acquisitionReadyForLandBank(selected.acquisition)
                             ? undefined
-                            : 'Complete the acquisition workflow through Asset Creation before publishing this land to Estate Land Bank.'
+                            : 'Complete the acquisition workflow through Land Creation before publishing this land to Estate Land Bank.'
                         }
                       >
                         {markingReadyKey ===

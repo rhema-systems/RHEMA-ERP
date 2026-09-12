@@ -35,8 +35,29 @@ const GRID_LINE_STYLE = {
 
 function numberValue(value: string | boolean | undefined): number | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
+
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  if (Number.isFinite(parsed)) return parsed;
+
+  const normalized = value.replace(/,/g, '').match(/[+-]?\d+(\.\d+)?/)?.[0];
+  if (!normalized) return null;
+
+  const parsedNormalized = Number(normalized);
+  return Number.isFinite(parsedNormalized) ? parsedNormalized : null;
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+
+  const parsed = Number(value);
+  if (Number.isFinite(parsed)) return parsed;
+
+  const normalized = value.replace(/,/g, '').match(/[+-]?\d+(\.\d+)?/)?.[0];
+  if (!normalized) return null;
+
+  const parsedNormalized = Number(normalized);
+  return Number.isFinite(parsedNormalized) ? parsedNormalized : null;
 }
 
 function parseBoundary(value: string | boolean | undefined): BeaconPoint[] {
@@ -44,31 +65,35 @@ function parseBoundary(value: string | boolean | undefined): BeaconPoint[] {
 
   try {
     const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
+    const points = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.beacons)
+        ? parsed.beacons
+        : [];
 
-    return parsed
-      .map((item, index): BeaconPoint | null => {
+    return points
+      .map((item: any, index: number): BeaconPoint | null => {
         if (Array.isArray(item) && item.length >= 2) {
-          const northing = Number(item[0]);
-          const easting = Number(item[1]);
-          return Number.isFinite(northing) && Number.isFinite(easting)
+          const northing = numberFromUnknown(item[0]);
+          const easting = numberFromUnknown(item[1]);
+          return northing != null && easting != null
             ? { beacon: `Beacon ${index + 1}`, northing, easting }
             : null;
         }
 
-        const northing = Number(item?.northing ?? item?.Northing ?? item?.northingFeet ?? item?.NorthingFeet);
-        const easting = Number(item?.easting ?? item?.Easting ?? item?.eastingFeet ?? item?.EastingFeet);
-        if (!Number.isFinite(northing) || !Number.isFinite(easting)) return null;
+        const northing = numberFromUnknown(item?.northing ?? item?.Northing ?? item?.northingFeet ?? item?.NorthingFeet ?? item?.northing_ft);
+        const easting = numberFromUnknown(item?.easting ?? item?.Easting ?? item?.eastingFeet ?? item?.EastingFeet ?? item?.easting_ft);
+        if (northing == null || easting == null) return null;
 
         return {
-          beacon: `${item?.beacon ?? item?.Beacon ?? item?.beaconIndex ?? item?.BeaconIndex ?? `Beacon ${index + 1}`}`,
+          beacon: `${item?.beacon ?? item?.Beacon ?? item?.beaconIndex ?? item?.BeaconIndex ?? item?.index ?? `Beacon ${index + 1}`}`,
           northing,
           easting,
           bearing: item?.bearing ?? item?.Bearing,
-          distance: item?.distance ?? item?.Distance,
+          distance: item?.distance ?? item?.Distance ?? item?.distance_ft,
         };
       })
-      .filter((item): item is BeaconPoint => Boolean(item));
+      .filter((item: BeaconPoint | null): item is BeaconPoint => Boolean(item));
   } catch {
     return [];
   }
@@ -106,6 +131,22 @@ function pointsFromOwnerBeacons(values: WorkspaceValues): BeaconPoint[] {
       };
     })
     .filter((item): item is BeaconPoint => Boolean(item));
+}
+
+function sameBoundary(left: BeaconPoint[], right: BeaconPoint[]) {
+  if (left.length !== right.length) return false;
+
+  return left.every((point, index) => {
+    const other = right[index];
+    return (
+      other &&
+      point.beacon === other.beacon &&
+      point.northing === other.northing &&
+      point.easting === other.easting &&
+      `${point.bearing ?? ''}` === `${other.bearing ?? ''}` &&
+      `${point.distance ?? ''}` === `${other.distance ?? ''}`
+    );
+  });
 }
 
 function toPlanPoint(point: BeaconPoint): PlanPoint {
@@ -232,6 +273,21 @@ export default function CadastralMapPanel({
       boundaryCoordinates: points.length ? JSON.stringify(points) : '',
     });
   };
+
+  React.useEffect(() => {
+    if (readOnly || !onChange) return;
+
+    const points = pointsFromBeacons(values);
+    if (points.length < 3) return;
+
+    const savedBoundary = parseBoundary(values.boundaryCoordinates);
+    if (sameBoundary(points, savedBoundary)) return;
+
+    onChange({
+      ...values,
+      boundaryCoordinates: JSON.stringify(points),
+    });
+  }, [onChange, readOnly, values]);
 
   const drawFromBeacons = () => {
     const points = pointsFromBeacons(values);

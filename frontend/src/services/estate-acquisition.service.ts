@@ -222,8 +222,8 @@ export const ACQUISITION_STAGES: LandAcquisitionStageDefinition[] = [
   stage(12, 'Stamp Duty Assessment', 'stamp-duty-assessment', '/LandParcel/StampDutyAssessment', 'Record valuation, assessed value, stamp duty amount, and assessment reference.', 'Submit Stamp Duty Assessment', 'Return Assessment', 'Finance Officer', 12, 'GET', 12),
   stage(13, 'Stamp Duty Approval', 'stamp-duty-approval', '/LandParcel/StampDutyApproval', 'Approve the stamp duty assessment before payment is processed.', 'Approve Stamp Duty Assessment', 'Reject Stamp Duty Assessment', 'Finance Manager', 8, 'GET', 13),
   stage(14, 'Stamp Duty Payment', 'stamp-duty-payment', '/LandParcel/StampDutyPaymentPage', 'Track the linked Accounts Payable request and continue after its payment is processed.', 'Confirm Accounts Payable Payment', 'Return Payment', 'Accounts Payable', 8, 'GET', 14),
-  stage(15, 'Registration', 'registration', '/LandParcel/RegistrationStage', 'Capture registry, registration number, volume, folio, instrument date, and archive details.', 'Submit Registration', 'Return Registration', 'Land Registry Officer', 24, 'GET', 15),
-  stage(16, 'Asset Creation', 'asset-creation', '/LandParcel/AssetCreation', 'Create the estate asset, assign asset code, GL account, capitalization value, and custodian.', 'Create Estate Asset', 'Return Asset Creation', 'Fixed Asset Officer', 12, 'GET', 16),
+  stage(15, 'Registration', 'registration', '/LandParcel/RegistrationStage', 'Capture publication, land title reference, registration number, volume, folio, instrument date, and archive details.', 'Submit Registration', 'Return Registration', 'Land Registry Officer', 24, 'GET', 15),
+  stage(16, 'Land Creation', 'asset-creation', '/LandParcel/AssetCreation', 'Create the estate land record, confirm total capitalized land cost, GL transfer target, and custodian.', 'Create Estate Land', 'Return Land Creation', 'Fixed Asset Officer', 12, 'GET', 16),
 ];
 
 const tf = (
@@ -335,10 +335,25 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       tf('beacon4Bearing', 'Beacon 4 Bearing', WorkflowFieldType.Text, false),
       tf('beacon4DistanceFeet', 'Beacon 4 Distance (ft)', WorkflowFieldType.Number, false),
       tf('boundaryCoordinates', 'Beacon Coordinate JSON', WorkflowFieldType.TextArea, false),
+      tf('surveyorSource', 'Surveyor Source', WorkflowFieldType.Select, true, ['Internal', 'External']),
+      tf('surveyorBusinessPartnerId', 'External Surveyor / Vendor', WorkflowFieldType.Text, false),
+      tf('surveyorFeeAmount', 'External Surveyor Fee', WorkflowFieldType.Number, false),
+      tf('surveyorFeeDueDate', 'Surveyor Fee Due Date', WorkflowFieldType.Date, false),
       tf('surveyorName', 'Surveyor Name'),
       tf('surveyDate', 'Survey Date', WorkflowFieldType.Date),
       tf('surveyPlanNumber', 'Survey Plan Number'),
       tf('mapSheetNumber', 'Map Sheet Number'),
+      tf('accountsPayableInvoiceNumber', 'AP Invoice', WorkflowFieldType.Text, false),
+      tf('accountsPayableInvoiceStatus', 'Invoice Status', WorkflowFieldType.Text, false),
+      tf('accountsPayablePaymentNumber', 'AP Payment', WorkflowFieldType.Text, false),
+      tf('accountsPayablePaymentStatus', 'Payment Status', WorkflowFieldType.Text, false),
+      tf('receiptNumber', 'Receipt Number', WorkflowFieldType.Text, false),
+      tf('paymentReference', 'Payment Reference', WorkflowFieldType.Text, false),
+      tf('paymentDate', 'Payment Date', WorkflowFieldType.Date, false),
+      tf('amountPaid', 'Amount Paid', WorkflowFieldType.Number, false),
+      tf('paymentMethod', 'Payment Method', WorkflowFieldType.Text, false),
+      tf('isPaid', 'Paid', WorkflowFieldType.Boolean, false),
+      tf('paymentNotes', 'Payment Notes', WorkflowFieldType.TextArea, false),
     ],
   },
   3: {
@@ -355,7 +370,7 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       { key: 'witness-oath', name: 'Witness Oath / Statutory Declaration', type: 'Declaration' },
     ],
     checklist: [
-      { name: 'Ownership type classified', description: 'Ownership type, tenure, acquisition method, and interest held are complete.' },
+      { name: 'Ownership type classified', description: 'Ownership type, tenure, and acquisition method are complete.' },
       { name: 'Witness details captured', description: 'Witness names, contacts, relationship, address, and oath details are recorded where applicable.' },
     ],
     fields: [
@@ -583,11 +598,16 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
       { key: 'registry-extract', name: 'Registry Extract', type: 'Registry' },
     ],
     checklist: [
+      { name: 'Publication completed', description: 'The Lands Commission publication date is recorded.' },
+      { name: 'Objection window checked', description: 'Any objection raised after publication has been reviewed and cleared before registration.' },
       { name: 'Registration details captured', description: 'Registry office, number, volume, folio, and date are recorded.' },
       { name: 'Registered instrument attached', description: 'Registered instrument and registry extract are attached.' },
     ],
     fields: [
       tf('registryOffice', 'Registry Office'),
+      tf('publicationDate', 'Publication Date', WorkflowFieldType.Date),
+      tf('landTitleReference', 'Land Title Reference'),
+      tf('landTitleCapturedDate', 'Land Title Captured Date', WorkflowFieldType.Date),
       tf('registrationNumber', 'Registration Number'),
       tf('volume', 'Volume'),
       tf('folio', 'Folio'),
@@ -596,22 +616,28 @@ export const STAGE_WORKFLOW_REQUIREMENTS: Record<number, StageWorkflowRequiremen
   },
   16: {
     documents: [
-      { key: 'asset-creation-memo', name: 'Asset Creation Memo', type: 'Memo' },
+      { key: 'asset-creation-memo', name: 'Land Creation Memo', type: 'Memo' },
       { key: 'capitalization-approval', name: 'GL / Capitalization Approval', type: 'Finance' },
       { key: 'project-handoff-pack', name: 'Project Handoff Pack', type: 'Handoff' },
     ],
     checklist: [
-      { name: 'Land asset record complete', description: 'Asset code, parcel identifier, owner, size, purpose, and zoning are recorded.' },
-      { name: 'Ready for project handoff', description: 'Capitalization details and project handoff pack are complete.' },
+      { name: 'Land record complete', description: 'Land code, parcel identifier, size, purpose, and zoning are recorded.' },
+      { name: 'Capitalized land cost confirmed', description: 'Owner consideration, surveyor cost, stamp duty, and other acquisition costs reconcile to the land value.' },
+      { name: 'Ready for project handoff', description: 'GL capitalization details and project handoff pack are complete.' },
     ],
     fields: [
-      tf('assetCode', 'Asset Code'),
+      tf('assetCode', 'Land Code'),
       tf('parcelIdentifier', 'Parcel Identifier'),
-      tf('assetLocation', 'Asset Location'),
       tf('size', 'Size', WorkflowFieldType.Number),
       tf('sizeUnit', 'Size Unit', WorkflowFieldType.Select, true, ['Acres', 'Hectares', 'sqm']),
       tf('purpose', 'Purpose'),
+      tf('ownerConsiderationCost', 'Owner / Vendor Consideration', WorkflowFieldType.Number),
+      tf('externalSurveyorCost', 'External Surveyor Cost', WorkflowFieldType.Number, false),
+      tf('stampDutyCost', 'Stamp Duty Cost', WorkflowFieldType.Number),
+      tf('otherAcquisitionCost', 'Other Acquisition Cost', WorkflowFieldType.Number, false),
+      tf('totalCapitalizedCost', 'Total Land Cost', WorkflowFieldType.Number),
       tf('capitalizationValue', 'Capitalization Value', WorkflowFieldType.Number),
+      tf('glAccount', 'Fixed Asset GL Account'),
       tf('custodian', 'Custodian'),
     ],
   },
@@ -758,6 +784,22 @@ export class EstateAcquisitionService {
   async ensureAccountsPayableRequest(acquisitionId: string): Promise<WorkspaceData> {
     const response = await apiService.post<MaybeApiResponse<WorkspaceData>>(
       `/estate/land-acquisitions/${acquisitionId}/accounts-payable-request`,
+      {}
+    );
+    const data = response.data ?? (response as unknown as WorkspaceData);
+    return {
+      acquisitionId: data.acquisitionId,
+      procedureId: data.procedureId,
+      values: data.values || {},
+      stageInputsComplete: data.stageInputsComplete === true,
+      missingInputs: data.missingInputs || [],
+      documentRequirements: data.documentRequirements || [],
+    };
+  }
+
+  async ensureOtherAcquisitionCostsPayableRequest(acquisitionId: string): Promise<WorkspaceData> {
+    const response = await apiService.post<MaybeApiResponse<WorkspaceData>>(
+      `/estate/land-acquisitions/${acquisitionId}/other-acquisition-costs/accounts-payable-request`,
       {}
     );
     const data = response.data ?? (response as unknown as WorkspaceData);

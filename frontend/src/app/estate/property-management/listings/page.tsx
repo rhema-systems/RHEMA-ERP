@@ -62,6 +62,9 @@ function formatLeaseTerm(months?: number) {
 function commercialSummary(asset: EstateManagedAsset) {
   const currency = asset.externalListingCurrency || asset.currency;
   if (asset.externalListingType === 'Rent') {
+    if (asset.assetType === EstateManagedAssetType.Land) {
+      return `${formatMoney(asset.groundRentPayable, currency)} annual ground rent · ${formatLeaseTerm(asset.externalLeaseTermMonths)}`;
+    }
     return `${formatMoney(asset.externalMonthlyRent, currency)} / month · ${formatLeaseTerm(asset.externalLeaseTermMonths)}`;
   }
   if (asset.externalListingType === 'SaleAndRent') {
@@ -111,11 +114,15 @@ export default function EstatePropertyListingsPage() {
     async (query?: string) => {
       setIsLoading(true);
       try {
-        const data = await estateLandManagementService.getManagedAssets({
-          search: query,
-          portalListingCandidates: true,
-          take: 300,
-        });
+        const [managedAssets, demarcations] = await Promise.all([
+          estateLandManagementService.getManagedAssets({
+            search: query,
+            portalListingCandidates: true,
+            take: 300,
+          }),
+          estateLandManagementService.getPortalListingDemarcations(query),
+        ]);
+        const data = [...managedAssets, ...demarcations];
         setAssets(data);
         const requestedAsset = requestedAssetId
           ? data.find((asset) => asset.id === requestedAssetId)
@@ -176,7 +183,9 @@ export default function EstatePropertyListingsPage() {
             : selected.assetType === EstateManagedAssetType.Land
               ? 'Sale'
               : 'Rent',
-      externalListingStatus: selected.externalListingStatus || 'Published',
+      externalListingStatus:
+        selected.externalListingStatus ||
+        (selected.listingScope === 'demarcation' ? 'Draft' : 'Published'),
       externalSalePrice:
         selected.externalSalePrice == null &&
         selected.externalListingType !== 'Rent'
@@ -187,7 +196,10 @@ export default function EstatePropertyListingsPage() {
             ? ''
             : String(selected.externalSalePrice),
       externalMonthlyRent:
-        selected.externalMonthlyRent == null &&
+        selected.assetType === EstateManagedAssetType.Land &&
+        selected.groundRentPayable != null
+          ? String(selected.groundRentPayable)
+          : selected.externalMonthlyRent == null &&
         selected.externalListingType === 'Rent'
           ? selected.externalListingPrice == null
             ? ''
@@ -203,12 +215,18 @@ export default function EstatePropertyListingsPage() {
       externalListingCurrency: selected.externalListingCurrency || 'GHS',
       externalListingNotes: selected.externalListingNotes || '',
     });
-    void loadDocuments(selected.id);
+    void loadDocuments(
+      selected.listingScope === 'demarcation'
+        ? selected.parentAssetId || selected.id
+        : selected.id
+    );
   }, [loadDocuments, requestedListingType, selected]);
 
   const listingImages = documents.filter((document) => document.isListingImage);
   const publishedCount = assets.filter(
-    (asset) => asset.isPublishedToExternalPortal
+    (asset) =>
+      asset.isPublishedToExternalPortal &&
+      asset.externalListingStatus === 'Published'
   ).length;
   const includesSale =
     form.externalListingType === 'Sale' ||
@@ -223,44 +241,84 @@ export default function EstatePropertyListingsPage() {
       selected.assetType === EstateManagedAssetType.Land &&
       !(selected.groundRentPayable != null && selected.groundRentPayable > 0)
   );
+  const minimumSalePrice =
+    selected?.listingScope === 'demarcation' &&
+    selected.targetSalePrice != null &&
+    selected.targetSalePrice > 0
+      ? selected.targetSalePrice
+      : null;
 
   const saveListing = async () => {
     if (!selected) return;
+    const salePriceValue =
+      includesSale && form.externalSalePrice
+        ? Number(form.externalSalePrice)
+        : null;
+    if (
+      minimumSalePrice != null &&
+      salePriceValue != null &&
+      salePriceValue < minimumSalePrice
+    ) {
+      toast.error(
+        `Sale price cannot be below the minimum sale price of ${formatMoney(
+          minimumSalePrice,
+          form.externalListingCurrency || selected.currency
+        )}.`
+      );
+      return;
+    }
+
     setIsSaving(true);
     try {
-      const updated = await estateLandManagementService.updateExternalListing(
-        selected.id,
-        {
-          isPublishedToExternalPortal: form.isPublishedToExternalPortal,
-          externalListingType: form.externalListingType,
-          externalListingStatus: form.externalListingStatus,
-          externalListingPrice: includesSale
-            ? form.externalSalePrice
-              ? Number(form.externalSalePrice)
-              : null
-            : form.externalMonthlyRent
+      const payload = {
+        isPublishedToExternalPortal: form.isPublishedToExternalPortal,
+        externalListingType: form.externalListingType,
+        externalListingStatus: form.externalListingStatus,
+        externalListingPrice: includesSale
+          ? form.externalSalePrice
+            ? Number(form.externalSalePrice)
+            : null
+          : form.externalMonthlyRent
+            ? Number(form.externalMonthlyRent)
+            : null,
+        externalSalePrice:
+          includesSale && form.externalSalePrice
+            ? Number(form.externalSalePrice)
+            : null,
+        externalMonthlyRent:
+          includesRent && selected.assetType === EstateManagedAssetType.Land
+            ? selected.groundRentPayable ?? null
+            : includesRent && form.externalMonthlyRent
               ? Number(form.externalMonthlyRent)
               : null,
-          externalSalePrice:
-            includesSale && form.externalSalePrice
-              ? Number(form.externalSalePrice)
-              : null,
-          externalMonthlyRent:
-            includesRent && form.externalMonthlyRent
-              ? Number(form.externalMonthlyRent)
-              : null,
-          externalLeaseTermMonths:
-            includesRent && form.externalLeaseDuration
-              ? Number(form.externalLeaseDuration) *
-                (form.externalLeaseDurationUnit === 'years' ? 12 : 1)
-              : null,
-          externalListingCurrency: form.externalListingCurrency,
-          externalListingNotes: form.externalListingNotes,
-        }
-      );
-      setAssets((current) =>
-        current.map((asset) => (asset.id === updated.id ? updated : asset))
-      );
+        externalLeaseTermMonths:
+          includesRent && form.externalLeaseDuration
+            ? Number(form.externalLeaseDuration) *
+              (form.externalLeaseDurationUnit === 'years' ? 12 : 1)
+            : null,
+        externalListingCurrency: form.externalListingCurrency,
+        externalListingNotes: form.externalListingNotes,
+      };
+
+      if (selected.listingScope === 'demarcation' && selected.parentAssetId) {
+        await estateLandManagementService.updateLandDemarcationDisposition(
+          selected.parentAssetId,
+          selected.id,
+          {
+            isReadyForProjectManagement: false,
+            ...payload,
+          }
+        );
+        await loadAssets(search);
+      } else {
+        const updated = await estateLandManagementService.updateExternalListing(
+          selected.id,
+          payload
+        );
+        setAssets((current) =>
+          current.map((asset) => (asset.id === updated.id ? updated : asset))
+        );
+      }
       toast.success('Portal listing updated.');
     } catch (error: any) {
       toast.error(error?.message || 'Unable to update portal listing.');
@@ -273,7 +331,7 @@ export default function EstatePropertyListingsPage() {
     if (!selected) return;
     setIsSaving(true);
     try {
-      await estateLandManagementService.updateExternalListing(selected.id, {
+      const payload = {
         isPublishedToExternalPortal: false,
         externalListingType: 'None',
         externalListingStatus: 'Draft',
@@ -283,8 +341,23 @@ export default function EstatePropertyListingsPage() {
         externalLeaseTermMonths: null,
         externalListingCurrency: form.externalListingCurrency,
         externalListingNotes: null,
-      });
-      toast.success('Asset removed from Portal Listings.');
+      };
+      if (selected.listingScope === 'demarcation' && selected.parentAssetId) {
+        await estateLandManagementService.updateLandDemarcationDisposition(
+          selected.parentAssetId,
+          selected.id,
+          {
+            isReadyForProjectManagement: false,
+            ...payload,
+          }
+        );
+      } else {
+        await estateLandManagementService.updateExternalListing(
+          selected.id,
+          payload
+        );
+      }
+      toast.success('Listing removed from Portal Listings.');
       setSelectedId(null);
       await loadAssets(search);
     } catch (error: any) {
@@ -301,8 +374,12 @@ export default function EstatePropertyListingsPage() {
 
     setIsUploading(true);
     try {
+      const documentAssetId =
+        selected.listingScope === 'demarcation'
+          ? selected.parentAssetId || selected.id
+          : selected.id;
       await estateLandManagementService.uploadDocument(
-        selected.id,
+        documentAssetId,
         file,
         'Listing Image',
         file.name,
@@ -311,7 +388,7 @@ export default function EstatePropertyListingsPage() {
           isPrimaryListingImage: listingImages.length === 0,
         }
       );
-      await loadDocuments(selected.id);
+      await loadDocuments(documentAssetId);
       toast.success('Listing image attached.');
     } catch (error: any) {
       toast.error(error?.message || 'Unable to upload listing image.');
@@ -323,11 +400,15 @@ export default function EstatePropertyListingsPage() {
   const setPrimaryImage = async (documentId: string) => {
     if (!selected) return;
     try {
+      const documentAssetId =
+        selected.listingScope === 'demarcation'
+          ? selected.parentAssetId || selected.id
+          : selected.id;
       await estateLandManagementService.setPrimaryListingImage(
-        selected.id,
+        documentAssetId,
         documentId
       );
-      await loadDocuments(selected.id);
+      await loadDocuments(documentAssetId);
       toast.success('Primary listing image updated.');
     } catch (error: any) {
       toast.error(error?.message || 'Unable to set primary listing image.');
@@ -418,10 +499,15 @@ export default function EstatePropertyListingsPage() {
                             {asset.assetCode}
                           </p>
                         </div>
-                        {asset.isPublishedToExternalPortal ? (
+                        {asset.isPublishedToExternalPortal &&
+                        asset.externalListingStatus === 'Published' ? (
                           <Badge variant="secondary">Published</Badge>
                         ) : (
-                          <Badge variant="outline">Draft</Badge>
+                          <Badge variant="outline">
+                            {asset.listingScope === 'demarcation'
+                              ? 'Pending publication'
+                              : 'Draft'}
+                          </Badge>
                         )}
                       </div>
                       <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
@@ -474,10 +560,12 @@ export default function EstatePropertyListingsPage() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Portal visibility</Label>
+                    <Label>Customer portal visibility</Label>
                     <Select
                       value={
-                        form.isPublishedToExternalPortal ? 'published' : 'draft'
+                        form.externalListingStatus === 'Published'
+                          ? 'published'
+                          : 'draft'
                       }
                       onValueChange={(value) =>
                         setForm((current) => ({
@@ -569,7 +657,7 @@ export default function EstatePropertyListingsPage() {
                         <Label>Sale price</Label>
                         <Input
                           type="number"
-                          min="0"
+                          min={minimumSalePrice ?? 0}
                           value={form.externalSalePrice}
                           onChange={(event) =>
                             setForm((current) => ({
@@ -577,25 +665,54 @@ export default function EstatePropertyListingsPage() {
                               externalSalePrice: event.target.value,
                             }))
                           }
-                          placeholder="Enter sale price"
+                          placeholder={
+                            minimumSalePrice != null
+                              ? `Minimum ${formatMoney(
+                                  minimumSalePrice,
+                                  form.externalListingCurrency ||
+                                    selected.currency
+                                )}`
+                              : 'Enter sale price'
+                          }
                         />
+                        {minimumSalePrice != null ? (
+                          <p className="text-xs text-muted-foreground">
+                            Minimum sale price:{' '}
+                            {formatMoney(
+                              minimumSalePrice,
+                              form.externalListingCurrency || selected.currency
+                            )}
+                            . You can publish higher, but not lower.
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                     {includesRent ? (
                       <>
                         <div className="space-y-2">
-                          <Label>Rent per month</Label>
+                          <Label>
+                            {selected.assetType === EstateManagedAssetType.Land
+                              ? 'Annual ground rent'
+                              : 'Rent per month'}
+                          </Label>
                           <Input
                             type="number"
                             min="0"
                             value={form.externalMonthlyRent}
+                            readOnly={
+                              selected.assetType === EstateManagedAssetType.Land
+                            }
                             onChange={(event) =>
                               setForm((current) => ({
                                 ...current,
                                 externalMonthlyRent: event.target.value,
                               }))
                             }
-                            placeholder="Enter monthly rent"
+                            placeholder={
+                              selected.assetType === EstateManagedAssetType.Land
+                                ? 'Complete ground-rent assessment first'
+                                : 'Enter monthly rent'
+                            }
                           />
                         </div>
                         <div className="space-y-2">
