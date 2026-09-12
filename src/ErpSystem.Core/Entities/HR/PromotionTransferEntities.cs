@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
@@ -895,4 +895,69 @@ public class EmployeeCareerPath : TenantEntity
  
     [MaxLength(2000)]
     public string? KeyProjects { get; set; }
+}
+
+// =============================================================================
+// REMINDER ENGINE (area 8 slice 5)
+// =============================================================================
+
+/// <summary>
+/// One execution of the staff-movement reminder sweep, scheduled or run by hand.
+/// </summary>
+public class StaffMovementReminderRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+
+    public virtual ICollection<StaffMovementReminderDispatchLog> DispatchLogs { get; set; }
+        = new List<StaffMovementReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a sweep.
+///
+/// The unique (TenantId, DedupeKey) index is the send-once guarantee: a key encodes the item, the
+/// reminder kind, the due date and the ladder rung (or escalation tier) reached, so each rung fires
+/// exactly once — and moving a due date re-arms the ladder, because it produces new keys.
+/// </summary>
+public class StaffMovementReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual StaffMovementReminderRun Run { get; set; } = null!;
+
+    /// <summary>Machine kind, e.g. "TemporaryReturnOverdue", "AwaitingImplementation".</summary>
+    [MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item, e.g. "Secondment return".</summary>
+    [MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept record. No FK — the target table varies by kind.</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>What the notification shows: the movement or appointment number.</summary>
+    [MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time; negative when overdue.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [MaxLength(200)]
+    public string DedupeKey { get; set; } = string.Empty;
 }

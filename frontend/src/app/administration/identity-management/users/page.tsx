@@ -27,6 +27,7 @@ import {
   FormMessage,
 } from '../../../../components/ui/form';
 import { Input } from '../../../../components/ui/input';
+import { Checkbox } from '../../../../components/ui/checkbox';
 import { Label } from '../../../../components/ui/label';
 import { Switch } from '../../../../components/ui/switch';
 import { Textarea } from '../../../../components/ui/textarea';
@@ -58,6 +59,8 @@ const userSchema = z.object({
 });
 
 type UserFormData = z.infer<typeof userSchema>;
+
+const normalizeRoleName = (value: string) => value.trim().toLocaleLowerCase();
 
 export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -599,36 +602,97 @@ export default function UsersPage() {
                 <FormField
                   control={form.control}
                   name="roles"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Roles *</FormLabel>
-                      <FormControl>
+                  render={({ field }) => {
+                    const selectedRoles = field.value ?? [];
+                    const roleOptions = [
+                      ...roles.map((role) => ({
+                        id: role.id,
+                        name: role.name,
+                        description: role.description,
+                      })),
+                      ...selectedRoles
+                        .filter((selectedRole) => !roles.some((role) =>
+                          normalizeRoleName(role.name) === normalizeRoleName(selectedRole)))
+                        .map((selectedRole) => ({
+                          id: `currently-assigned-${selectedRole}`,
+                          name: selectedRole,
+                          description: 'Currently assigned role',
+                        })),
+                    ];
+
+                    const isSelected = (roleName: string) => selectedRoles.some((selectedRole) =>
+                      normalizeRoleName(selectedRole) === normalizeRoleName(roleName));
+
+                    const setSelected = (roleName: string, checked: boolean) => {
+                      if (checked) {
+                        if (!isSelected(roleName)) {
+                          field.onChange([...selectedRoles, roleName]);
+                        }
+                        return;
+                      }
+
+                      field.onChange(selectedRoles.filter((selectedRole) =>
+                        normalizeRoleName(selectedRole) !== normalizeRoleName(roleName)));
+                    };
+
+                    return (
+                      <FormItem>
+                        <div className="flex items-center justify-between gap-3">
+                          <FormLabel>Roles *</FormLabel>
+                          <Badge variant="outline" className="font-normal">
+                            {selectedRoles.length} selected
+                          </Badge>
+                        </div>
                         <ClientOnly fallback={
-                          <div className="h-10 bg-muted/50 rounded-md border" />
+                          <div className="h-28 bg-muted/50 rounded-md border" />
                         }>
-                          <Select
-                            value={field.value[0] || ''}
-                            onValueChange={(value) => field.onChange([value])}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select a role" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {roles.map((role) => (
-                                <SelectItem key={role.id} value={role.name}>
-                                  {role.name} - {role.description}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <FormControl>
+                            <div
+                              ref={field.ref}
+                              role="group"
+                              aria-label="User roles"
+                              onBlur={field.onBlur}
+                              className="max-h-60 space-y-1 overflow-y-auto rounded-md border p-2"
+                            >
+                              {roleOptions.length === 0 ? (
+                                <p className="px-2 py-3 text-sm text-muted-foreground">
+                                  No roles are available. Create a role before assigning this user.
+                                </p>
+                              ) : roleOptions.map((role) => {
+                                const checkboxId = `user-role-${role.id}`;
+                                return (
+                                  <label
+                                    key={role.id}
+                                    htmlFor={checkboxId}
+                                    className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-muted/60"
+                                  >
+                                    <Checkbox
+                                      id={checkboxId}
+                                      checked={isSelected(role.name)}
+                                      onCheckedChange={(checked) => setSelected(role.name, checked === true)}
+                                      aria-label={`Assign ${role.name}`}
+                                    />
+                                    <span className="min-w-0">
+                                      <span className="block text-sm font-medium leading-none">{role.name}</span>
+                                      {role.description ? (
+                                        <span className="mt-1 block text-xs text-muted-foreground">
+                                          {role.description}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </FormControl>
                         </ClientOnly>
-                      </FormControl>
-                      <FormDescription>
-                        Select the primary role for this user
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                        <FormDescription>
+                          Select every role this user should retain. Clearing a role removes it when you save.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
                 />
 
 
@@ -721,9 +785,19 @@ export default function UsersPage() {
               <UserProfile
                 user={viewingUser}
                 onClose={() => setIsProfileDialogOpen(false)}
+                onResetPassword={async (userId, request) => {
+                  await adminApiService.resetUserPassword(userId, request);
+                  await queryClient.invalidateQueries({
+                    queryKey: ['admin-users'],
+                  });
+                  toast({
+                    title: 'Temporary password set',
+                    description:
+                      'The user must replace it at next sign-in before it expires.',
+                  });
+                }}
                 onEdit={(user) => {
-                  setEditingUser(user);
-                  setIsDialogOpen(true);
+                  handleEdit(user);
                   setIsProfileDialogOpen(false);
                 }}
               />

@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Recruitment;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -50,6 +51,12 @@ public class JobInterviewQuestionBankService : IJobInterviewQuestionBankService
         return tenantId;
     }
 
+    // ⚠ The question bank is recruitment setup data — the questions candidates will be asked and the
+    // weights their answers are scored against — and is HR-only. That gate lives on
+    // InterviewQuestionBankController rather than here: this service has exactly one controller and no
+    // per-record rule to express, unlike JobInterviewService where a panelist's access depends on which
+    // interview they sit on.
+
     // A question type owned by another tenant is reported as missing rather than forbidden, so the endpoints do
     // not confirm that the id exists elsewhere.
     private async Task<JobInterviewQuestionType> GetOwnedQuestionTypeAsync(Guid id)
@@ -74,11 +81,22 @@ public class JobInterviewQuestionBankService : IJobInterviewQuestionBankService
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// Every question type in the bank, active or not.
+    ///
+    /// <para>This backs the question-bank admin list and used to call <c>GetActiveTypesAsync</c>, so a
+    /// type someone had deactivated vanished from the only screen that could reactivate it — along with
+    /// its questions, which remained attached to it. The interview-scheduling picker wants active types
+    /// only and filters on <c>IsActive</c> for itself.</para>
+    /// </summary>
     public async Task<IEnumerable<JobInterviewQuestionTypeSummaryDto>> GetAllQuestionTypesAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _questionTypeRepository.GetActiveTypesAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToSummaryDto());
+        var entities = await _questionTypeRepository.FindAsync(t => !t.IsDeleted);
+        return entities
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.TypeName)
+            .Select(e => e.ToSummaryDto());
     }
 
     public async Task<JobInterviewQuestionTypeDto> CreateQuestionTypeAsync(CreateJobInterviewQuestionTypeDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -203,12 +221,14 @@ public class JobInterviewService : IJobInterviewService
     private readonly IJobInterviewQuestionRepository _questionPlanRepository;
     private readonly IJobInterviewSelectedQuestionRepository _selectedQuestionRepository;
     private readonly IJobInterviewQuestionDetailRepository _questionDetailRepository;
+    private readonly IJobInterviewQuestionTypeRepository _questionTypeRepository;
     private readonly IJobInterviewScoreSummaryRepository _scoreSummaryRepository;
     private readonly IJobInterviewScoreEntryRepository _scoreEntryRepository;
     private readonly IJobInterviewScoreDraftRepository _draftRepository;
     private readonly IInterviewQuestionPresetRepository _presetRepository;
     private readonly IApplicationPipelineService _pipelineService;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrentUserService _currentUser;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobInterviewService> _logger;
     private readonly IEmailService _email;
@@ -217,6 +237,7 @@ public class JobInterviewService : IJobInterviewService
     // and application/vacancy validation. Open-generic IGenericRepository<T> is DI-registered.
     private readonly IGenericRepository<JobApplication> _applicationRepository;
     private readonly IGenericRepository<Entities.HR.Employee> _employeeRepository;
+    private readonly IGenericRepository<Entities.HR.ExternalAssociate> _associateRepository;
     private readonly IGenericRepository<Entities.HR.StaffLeave.LeaveRequest> _leaveRepository;
     private readonly IGenericRepository<Entities.HR.StaffTravel.StaffTravelRequest> _travelRepository;
     private readonly string _portalUrl;
@@ -229,18 +250,21 @@ public class JobInterviewService : IJobInterviewService
         IJobInterviewQuestionRepository questionPlanRepository,
         IJobInterviewSelectedQuestionRepository selectedQuestionRepository,
         IJobInterviewQuestionDetailRepository questionDetailRepository,
+        IJobInterviewQuestionTypeRepository questionTypeRepository,
         IJobInterviewScoreSummaryRepository scoreSummaryRepository,
         IJobInterviewScoreEntryRepository scoreEntryRepository,
         IJobInterviewScoreDraftRepository draftRepository,
         IInterviewQuestionPresetRepository presetRepository,
         IApplicationPipelineService pipelineService,
         ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUser,
         IUnitOfWork unitOfWork,
         ILogger<JobInterviewService> logger,
         IEmailService email,
         ITemplatedEmailService templatedEmail,
         IGenericRepository<JobApplication> applicationRepository,
         IGenericRepository<Entities.HR.Employee> employeeRepository,
+        IGenericRepository<Entities.HR.ExternalAssociate> associateRepository,
         IGenericRepository<Entities.HR.StaffLeave.LeaveRequest> leaveRepository,
         IGenericRepository<Entities.HR.StaffTravel.StaffTravelRequest> travelRepository,
         IConfiguration configuration)
@@ -252,18 +276,21 @@ public class JobInterviewService : IJobInterviewService
         _questionPlanRepository = questionPlanRepository;
         _selectedQuestionRepository = selectedQuestionRepository;
         _questionDetailRepository = questionDetailRepository;
+        _questionTypeRepository = questionTypeRepository;
         _scoreSummaryRepository = scoreSummaryRepository;
         _scoreEntryRepository = scoreEntryRepository;
         _draftRepository = draftRepository;
         _presetRepository = presetRepository;
         _pipelineService = pipelineService;
         _currentUserProvider = currentUserProvider;
+        _currentUser = currentUser;
         _unitOfWork = unitOfWork;
         _logger = logger;
         _email = email;
         _templatedEmail = templatedEmail;
         _applicationRepository = applicationRepository;
         _employeeRepository = employeeRepository;
+        _associateRepository = associateRepository;
         _leaveRepository = leaveRepository;
         _travelRepository = travelRepository;
         _portalUrl = (configuration["CandidatePortal:PortalUrl"] ?? "").TrimEnd('/');
@@ -338,11 +365,103 @@ public class JobInterviewService : IJobInterviewService
         return entity;
     }
 
+    // ── Entitlement ───────────────────────────────────────────────────────────
+    //
+    // An interview is not HR-only the way an application is (see JobApplicationController): the people
+    // who have to open it, read the question plan and file a scorecard are ordinary employees sitting on
+    // the panel. But it carries the candidate's name and email, the panel's private comments and the
+    // hire/no-hire recommendation, so "any authenticated employee" — which is what the controller
+    // previously allowed — is far too wide.
+    //
+    // The rule, applied in the service so it holds whichever route reaches it:
+    //   • HR / SuperAdmin           — everything, including recording on an external panelist's behalf.
+    //   • A panelist on THAT interview — read it, and score as themselves.
+    //   • Everyone else             — 403.
+    //
+    // External panelists have no login at all; they confirm by emailed token and HR enters their scores,
+    // which is why an external scorecard is an HR-only write.
+
+    private bool IsHr =>
+        _currentUserProvider.HasRole(Constants.Roles.Hr) ||
+        _currentUserProvider.HasRole(Constants.Roles.SuperAdmin);
+
+    private Guid? CallerEmployeeId => _currentUser.EmployeeId;
+
+    /// <summary>
+    /// The caller's own panelist row on this interview, or null when they do not sit on it.
+    /// </summary>
+    private async Task<JobInterviewPanelist?> GetCallerPanelistAsync(Guid interviewId)
+    {
+        var employeeId = CallerEmployeeId;
+        if (employeeId is null || employeeId == Guid.Empty) return null;
+
+        var panelists = await _panelistRepository.GetByInterviewIdAsync(interviewId);
+        return panelists.FirstOrDefault(p => p.EmployeeId == employeeId && p.TenantId == GetTenantId());
+    }
+
+    /// <summary>Read access: HR, or a panelist on this interview.</summary>
+    private async Task EnsureCanReadInterviewAsync(Guid interviewId)
+    {
+        if (IsHr) return;
+        if (await GetCallerPanelistAsync(interviewId) is not null) return;
+
+        throw new UnauthorizedAccessException(
+            "Only HR and members of this interview's panel can view it.");
+    }
+
+    /// <summary>Write access to the interview record itself (schedule, panel, questions): HR only.</summary>
+    private void EnsureHr(string action)
+    {
+        if (IsHr) return;
+        throw new UnauthorizedAccessException($"Only HR can {action}.");
+    }
+
+    /// <summary>
+    /// Resolves which panelist the caller is allowed to file this scorecard as, and refuses anything else.
+    /// The client used to name the panelist in the payload (or the query string, for drafts), so any
+    /// authenticated user could submit — or read — a scorecard in someone else's name.
+    /// </summary>
+    private async Task EnsureCanScoreAsAsync(Guid intervieweeId, Guid? internalPanelistId, Guid? externalPanelistId)
+    {
+        if (internalPanelistId is null && externalPanelistId is null)
+            throw new InvalidOperationException("A scorecard must name the panelist it belongs to.");
+        if (internalPanelistId is not null && externalPanelistId is not null)
+            throw new InvalidOperationException("A scorecard belongs to one panelist, not both.");
+
+        var interviewee = await GetOwnedIntervieweeAsync(intervieweeId);
+
+        // The panelist must sit on the same interview as the candidate being scored — otherwise a
+        // scorecard could be attributed to a panel the candidate never appeared before.
+        if (internalPanelistId is not null)
+        {
+            var panelist = await GetOwnedPanelistAsync(internalPanelistId.Value);
+            if (panelist.JobInterviewId != interviewee.JobInterviewId)
+                throw new InvalidOperationException("That panelist does not sit on this candidate's interview.");
+
+            if (IsHr) return;
+            if (panelist.EmployeeId == CallerEmployeeId) return;
+
+            throw new UnauthorizedAccessException("You can only score as yourself.");
+        }
+
+        var external = await GetOwnedExternalPanelistAsync(externalPanelistId!.Value);
+        if (external.JobInterviewId != interviewee.JobInterviewId)
+            throw new InvalidOperationException("That panelist does not sit on this candidate's interview.");
+
+        // External associates have no login, so only HR can record on their behalf.
+        EnsureHr("record scores for an external panelist");
+    }
+
     private async Task<string> GenerateInterviewNumberAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var last = await _interviewRepository.GetQueryable()
-            .Where(i => i.TenantId == tenantId && !i.IsDeleted)
+        // ⚠ Counts SOFT-DELETED rows too, via the including-deleted overload — plain GetQueryable()
+        // filters them out. Excluding them makes the sequence reuse a number the moment anything is
+        // deleted, and JobInterviews carries a UNIQUE index on (TenantId, InterviewNumber) that a soft delete does
+        // not release: deleting one draft made the very next create die on a duplicate-key violation,
+        // surfaced as a 500 with raw SQL in it. A reference number is an identifier, not a slot —
+        // once issued it is spent.
+        var last = await _interviewRepository.GetQueryableIncludingDeleted(i => i.TenantId == tenantId)
             .OrderByDescending(i => i.InterviewNumber)
             .Select(i => i.InterviewNumber)
             .FirstOrDefaultAsync(cancellationToken);
@@ -359,6 +478,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<JobInterviewDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInterviewAsync(id);
+        await EnsureCanReadInterviewAsync(id);
         return entity.ToDto();
     }
 
@@ -366,17 +486,26 @@ public class JobInterviewService : IJobInterviewService
     {
         var tenantId = GetTenantId();
         var entity = await _interviewRepository.GetByInterviewNumberAsync(interviewNumber);
-        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
+        if (entity == null || entity.TenantId != tenantId) return null;
+
+        await EnsureCanReadInterviewAsync(entity.Id);
+        return entity.ToDto();
     }
 
     public async Task<JobInterviewDetailDto> GetWithFullDetailsAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInterviewWithDetailsAsync(id);
+        await EnsureCanReadInterviewAsync(id);
         return entity.ToDetailDto();
     }
 
+    // The four list reads below are HR's: they span interviews the caller may have nothing to do with,
+    // and each row carries the candidate names. A panelist reaches their own sessions through
+    // GetMyPanelistSlotsAsync instead.
+
     public async Task<IEnumerable<JobInterviewSummaryDto>> GetByVacancyIdAsync(Guid vacancyId, CancellationToken cancellationToken = default)
     {
+        EnsureHr("list a vacancy's interviews");
         var tenantId = GetTenantId();
         var entities = await _interviewRepository.GetByVacancyIdAsync(vacancyId);
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
@@ -384,6 +513,7 @@ public class JobInterviewService : IJobInterviewService
 
     public async Task<IEnumerable<JobInterviewSummaryDto>> GetByStatusAsync(JobInterviewStatus status, CancellationToken cancellationToken = default)
     {
+        EnsureHr("list interviews by status");
         var tenantId = GetTenantId();
         var entities = await _interviewRepository.GetByStatusAsync(status);
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
@@ -391,6 +521,7 @@ public class JobInterviewService : IJobInterviewService
 
     public async Task<IEnumerable<JobInterviewSummaryDto>> GetByDateRangeAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
+        EnsureHr("list the interview schedule");
         var tenantId = GetTenantId();
         var entities = await _interviewRepository.GetByDateRangeAsync(DateOnly.FromDateTime(from), DateOnly.FromDateTime(to));
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
@@ -398,6 +529,7 @@ public class JobInterviewService : IJobInterviewService
 
     public async Task<IEnumerable<JobInterviewSummaryDto>> GetByRoundAsync(Guid vacancyId, int round, CancellationToken cancellationToken = default)
     {
+        EnsureHr("list a round's interviews");
         var tenantId = GetTenantId();
         var entities = await _interviewRepository.GetByRoundAsync(vacancyId, round);
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
@@ -410,6 +542,9 @@ public class JobInterviewService : IJobInterviewService
         DateOnly date, TimeSpan start, TimeSpan end,
         Guid? excludeInterviewId, CancellationToken cancellationToken = default)
     {
+        // This reads other employees' leave and travel to explain a clash. That is HR's to see.
+        EnsureHr("check panel availability");
+
         var result = new PanelistAvailabilityCheckDto();
 
         var ids       = (panelistEmployeeIds ?? Array.Empty<Guid>()).Distinct().ToList();
@@ -574,8 +709,11 @@ public class JobInterviewService : IJobInterviewService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        EnsureHr("schedule an interview");
+
         await ValidateScheduleAsync(createDto.JobVacancyId, createDto.ScheduledDate, createDto.StartTime, createDto.EndTime,
             createDto.ApplicationIds, cancellationToken);
+        await ValidatePanelAsync(createDto.PanelistEmployeeIds, createDto.ExternalPanelistAssociateIds, current);
 
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.InterviewNumber = await GenerateInterviewNumberAsync(cancellationToken);
@@ -692,9 +830,13 @@ public class JobInterviewService : IJobInterviewService
     {
         var entity = await GetOwnedInterviewAsync(updateDto.Id);
 
+        EnsureHr("edit an interview");
+
         if (entity.Status == JobInterviewStatus.Completed || entity.Status == JobInterviewStatus.Cancelled)
             throw new InvalidOperationException("Completed or cancelled interviews cannot be updated.");
 
+        // Status is deliberately NOT taken from the payload — see UpdateJobInterviewDto. It is owned by
+        // reschedule / cancel / complete, each of which carries the side effects a bare status write skips.
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _interviewRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -704,6 +846,8 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInterviewAsync(id);
+
+        EnsureHr("delete an interview");
 
         if (entity.Status == JobInterviewStatus.Completed)
             throw new InvalidOperationException("Completed interviews cannot be deleted.");
@@ -719,11 +863,15 @@ public class JobInterviewService : IJobInterviewService
     {
         var entity = await GetOwnedInterviewAsync(dto.InterviewId);
 
+        EnsureHr("reschedule an interview");
+
         if (entity.Status == JobInterviewStatus.Completed || entity.Status == JobInterviewStatus.Cancelled)
             throw new InvalidOperationException("Completed or cancelled interviews cannot be rescheduled.");
 
         ValidateSlot(dto.NewDate, dto.NewStartTime, dto.NewEndTime, "rescheduled to a past date");
 
+        // The original date is what the reschedule audit is for; it was on the entity and never written.
+        entity.OriginalDate ??= entity.ScheduledDate;
         entity.ScheduledDate = dto.NewDate;
         entity.StartTime = dto.NewStartTime;
         entity.EndTime = dto.NewEndTime;
@@ -779,8 +927,12 @@ public class JobInterviewService : IJobInterviewService
     {
         var entity = await GetOwnedInterviewAsync(dto.InterviewId);
 
+        EnsureHr("cancel an interview");
+
         if (entity.Status == JobInterviewStatus.Completed)
             throw new InvalidOperationException("A completed interview cannot be cancelled.");
+        if (entity.Status == JobInterviewStatus.Cancelled)
+            throw new InvalidOperationException("This interview is already cancelled.");
 
         entity.Status = JobInterviewStatus.Cancelled;
         entity.CancellationReason = dto.CancellationReason;
@@ -793,6 +945,15 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> CompleteAsync(Guid interviewId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedInterviewAsync(interviewId);
+
+        EnsureHr("close an interview");
+
+        // Completion had no state guard at all, so a cancelled interview could be marked complete —
+        // reviving a session nobody attended, and with it every downstream read that keys off Completed.
+        if (entity.Status == JobInterviewStatus.Cancelled)
+            throw new InvalidOperationException("A cancelled interview cannot be completed.");
+        if (entity.Status == JobInterviewStatus.Completed)
+            throw new InvalidOperationException("This interview is already complete.");
 
         entity.Status = JobInterviewStatus.Completed;
 
@@ -810,16 +971,32 @@ public class JobInterviewService : IJobInterviewService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedInterviewAsync(createDto.JobInterviewId);
+        EnsureHr("change an interview panel");
+
+        // The employee was never validated: an unknown id died on a foreign-key 500 and an id belonging
+        // to another tenant was accepted outright.
+        await EnsureEmployeeInTenantAsync(createDto.EmployeeId, current);
+
+        var existing = (await _panelistRepository.GetByInterviewIdAsync(createDto.JobInterviewId))
+            .Where(p => p.TenantId == current)
+            .ToList();
+        if (existing.Any(p => p.EmployeeId == createDto.EmployeeId))
+            throw new InvalidOperationException("That employee is already on this interview's panel.");
 
         var entity = createDto.ToEntity(current, createdByUserId);
         await _panelistRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read so the response carries the employee's name and the interview number, which a freshly
+        // constructed entity has no navigations for.
+        var saved = await _panelistRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> RemovePanelistAsync(Guid panelistId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPanelistAsync(panelistId);
+        EnsureHr("change an interview panel");
 
         await _panelistRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -829,6 +1006,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<JobInterviewPanelistDto> UpdatePanelistAsync(UpdateJobInterviewPanelistDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPanelistAsync(updateDto.Id);
+        EnsureHr("change an interview panel");
 
         entity.Role       = updateDto.Role;
         entity.IsRequired = updateDto.IsRequired;
@@ -841,6 +1019,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<IEnumerable<JobInterviewPanelistDto>> GetPanelistsAsync(Guid interviewId, CancellationToken cancellationToken = default)
     {
         var interview = await GetOwnedInterviewAsync(interviewId);
+        await EnsureCanReadInterviewAsync(interviewId);
         var entities = await _panelistRepository.GetByInterviewIdAsync(interviewId);
         return entities.Where(e => e.TenantId == interview.TenantId).Select(e => e.ToDto());
     }
@@ -848,6 +1027,11 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> ConfirmPanelistAsync(Guid panelistId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPanelistAsync(panelistId);
+
+        // Confirming an assignment is a statement about yourself. HR may confirm on someone's behalf
+        // (they take the phone call); nobody else may confirm for a colleague.
+        if (!IsHr && entity.EmployeeId != CallerEmployeeId)
+            throw new UnauthorizedAccessException("You can only confirm your own panel assignment.");
 
         entity.IsConfirmed = true;
         entity.ConfirmationDate = DateTime.UtcNow;
@@ -917,6 +1101,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> RecordPanelistAttendanceAsync(Guid panelistId, bool? attended, string? noShowReason, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPanelistAsync(panelistId);
+        await EnsureCanReadInterviewAsync(entity.JobInterviewId);
 
         entity.Attended     = attended;
         entity.NoShowReason = attended == false ? noShowReason : null;
@@ -935,16 +1120,27 @@ public class JobInterviewService : IJobInterviewService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedInterviewAsync(createDto.JobInterviewId);
+        EnsureHr("change an interview panel");
+        await EnsureAssociateInTenantAsync(createDto.AssociateId, current);
+
+        var existing = (await _externalPanelistRepository.GetByInterviewIdAsync(createDto.JobInterviewId))
+            .Where(p => p.TenantId == current)
+            .ToList();
+        if (existing.Any(p => p.AssociateId == createDto.AssociateId))
+            throw new InvalidOperationException("That associate is already on this interview's panel.");
 
         var entity = createDto.ToEntity(current, createdByUserId);
         await _externalPanelistRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var saved = await _externalPanelistRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> RemoveExternalPanelistAsync(Guid externalPanelistId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedExternalPanelistAsync(externalPanelistId);
+        EnsureHr("change an interview panel");
 
         await _externalPanelistRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -954,9 +1150,12 @@ public class JobInterviewService : IJobInterviewService
     public async Task<JobInterviewExternalPanelistDto> UpdateExternalPanelistAsync(UpdateJobInterviewExternalPanelistDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedExternalPanelistAsync(updateDto.Id);
+        EnsureHr("change an interview panel");
 
         entity.Role       = updateDto.Role;
         entity.IsRequired = updateDto.IsRequired;
+        entity.UpdatedAt  = DateTime.UtcNow;
+        entity.UpdatedBy  = updatedByUserId.ToString();
 
         await _externalPanelistRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -966,6 +1165,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<IEnumerable<JobInterviewExternalPanelistDto>> GetExternalPanelistsAsync(Guid interviewId, CancellationToken cancellationToken = default)
     {
         var interview = await GetOwnedInterviewAsync(interviewId);
+        await EnsureCanReadInterviewAsync(interviewId);
         var entities = await _externalPanelistRepository.GetByInterviewIdAsync(interviewId);
         return entities.Where(e => e.TenantId == interview.TenantId).Select(e => e.ToDto());
     }
@@ -973,9 +1173,12 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> RecordExternalPanelistAttendanceAsync(Guid extPanelistId, bool? attended, string? noShowReason, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedExternalPanelistAsync(extPanelistId);
+        await EnsureCanReadInterviewAsync(entity.JobInterviewId);
 
         entity.Attended     = attended;
         entity.NoShowReason = attended == false ? noShowReason : null;
+        entity.UpdatedAt    = DateTime.UtcNow;
+        entity.UpdatedBy    = updatedByUserId.ToString();
 
         await _externalPanelistRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -990,7 +1193,20 @@ public class JobInterviewService : IJobInterviewService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        await GetOwnedInterviewAsync(createDto.JobInterviewId);
+        var interview = await GetOwnedInterviewAsync(createDto.JobInterviewId);
+        EnsureHr("add a candidate to an interview");
+
+        // CreateAsync validated that every application exists, is in-tenant and belongs to the
+        // interview's vacancy. This — the other door onto the same table — validated nothing, so a
+        // candidate who had never applied for the role could be booked into its interview.
+        await ValidateApplicationsForVacancyAsync(
+            interview.JobVacancyId, new List<Guid> { createDto.JobApplicationId }, current);
+
+        var already = (await _intervieweeRepository.GetByInterviewIdAsync(createDto.JobInterviewId))
+            .Where(ie => ie.TenantId == current)
+            .ToList();
+        if (already.Any(ie => ie.JobApplicationId == createDto.JobApplicationId))
+            throw new InvalidOperationException("That candidate is already booked into this interview.");
 
         var entity = createDto.ToEntity(current, createdByUserId);
         await _intervieweeRepository.AddAsync(entity);
@@ -999,12 +1215,18 @@ public class JobInterviewService : IJobInterviewService
         // Note: interview invite emails are NOT sent automatically.
         // Use SendInvitesAsync to send invites on demand.
 
-        return entity.ToDto();
+        // Keep the pipeline in step with the create path, which advances every application it books in.
+        await _pipelineService.AutoAdvanceToStageTypeAsync(
+            createDto.JobApplicationId, RecruitmentPipelineStageType.Interview, createdByUserId, cancellationToken);
+
+        var saved = await _intervieweeRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> RemoveIntervieweeAsync(Guid intervieweeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedIntervieweeAsync(intervieweeId);
+        EnsureHr("remove a candidate from an interview");
 
         await _intervieweeRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1014,6 +1236,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<IEnumerable<JobIntervieweeDto>> GetIntervieweesAsync(Guid interviewId, CancellationToken cancellationToken = default)
     {
         var interview = await GetOwnedInterviewAsync(interviewId);
+        await EnsureCanReadInterviewAsync(interviewId);
         var entities = await _intervieweeRepository.GetByInterviewIdAsync(interviewId);
         return entities.Where(e => e.TenantId == interview.TenantId).Select(e => e.ToDto());
     }
@@ -1023,6 +1246,12 @@ public class JobInterviewService : IJobInterviewService
     {
         // Load interview with full interviewee details for email context
         var fullInterview = await GetOwnedInterviewWithDetailsAsync(interviewId);
+        EnsureHr("send interview invitations");
+
+        if (fullInterview.Status == JobInterviewStatus.Cancelled)
+            throw new InvalidOperationException("Invitations cannot be sent for a cancelled interview.");
+
+        applicationIds ??= new List<Guid>();
 
         var allInterviewees = (await _intervieweeRepository.GetByInterviewIdAsync(interviewId))
             .Where(ie => ie.TenantId == fullInterview.TenantId)
@@ -1083,6 +1312,10 @@ public class JobInterviewService : IJobInterviewService
         CancellationToken cancellationToken = default)
     {
         var fullInterview = await GetOwnedInterviewWithDetailsAsync(interviewId);
+        EnsureHr("notify an interview panel");
+
+        if (fullInterview.Status == JobInterviewStatus.Cancelled)
+            throw new InvalidOperationException("Panel notifications cannot be sent for a cancelled interview.");
 
         var allPanelists    = (await _panelistRepository.GetByInterviewIdAsync(interviewId))
             .Where(p => p.TenantId == fullInterview.TenantId).ToList();
@@ -1207,6 +1440,10 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> UpdateIntervieweeSlotAsync(UpdateIntervieweeSlotDto dto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedIntervieweeAsync(dto.IntervieweeId);
+        EnsureHr("change a candidate's interview slot");
+
+        if (dto.SlotStartTime.HasValue && dto.SlotEndTime.HasValue && dto.SlotEndTime <= dto.SlotStartTime)
+            throw new InvalidOperationException("A candidate's slot must end after it starts.");
 
         entity.SlotStartTime = dto.SlotStartTime;
         entity.SlotEndTime   = dto.SlotEndTime;
@@ -1219,6 +1456,8 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> RecordAttendanceAsync(Guid intervieweeId, bool? attended, string? noShowReason, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedIntervieweeAsync(intervieweeId);
+        // Attendance is recorded in the room, so the panel may record it as well as HR.
+        await EnsureCanReadInterviewAsync(entity.JobInterviewId);
 
         entity.CandidateAttended = attended;
         entity.NoShowReason      = attended == false ? noShowReason : null;
@@ -1231,6 +1470,13 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> RecordOutcomeAsync(RecordIntervieweeOutcomeDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedIntervieweeAsync(dto.IntervieweeId);
+        await EnsureCanReadInterviewAsync(entity.JobInterviewId);
+
+        // The outcome is the panel's verdict on this candidate, so it should not be recorded before the
+        // candidate has been seen. A no-show has no verdict to give.
+        if (entity.CandidateAttended == false)
+            throw new InvalidOperationException(
+                "This candidate was recorded as a no-show, so there is no interview outcome to record.");
 
         entity.Outcome = dto.Outcome;
 
@@ -1248,16 +1494,29 @@ public class JobInterviewService : IJobInterviewService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedInterviewAsync(createDto.JobInterviewId);
+        EnsureHr("change an interview's question plan");
+
+        await EnsureQuestionTypeInTenantAsync(createDto.QuestionTypeId, current);
+
+        var existingPlans = (await _questionPlanRepository.GetByInterviewIdAsync(createDto.JobInterviewId))
+            .Where(p => p.TenantId == current)
+            .ToList();
+        if (existingPlans.Any(p => p.QuestionTypeId == createDto.QuestionTypeId))
+            throw new InvalidOperationException("This interview already has a plan for that question type.");
 
         var entity = createDto.ToEntity(current, createdByUserId);
         await _questionPlanRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        var saved = await _questionPlanRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<JobInterviewQuestionDto>> GetQuestionPlansAsync(Guid interviewId, CancellationToken cancellationToken = default)
     {
         var interview = await GetOwnedInterviewAsync(interviewId);
+        // Panelists must be able to read the questions they are about to ask.
+        await EnsureCanReadInterviewAsync(interviewId);
         var entities = await _questionPlanRepository.GetByInterviewIdAsync(interviewId);
         return entities.Where(e => e.TenantId == interview.TenantId).Select(e => e.ToDto());
     }
@@ -1265,6 +1524,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<JobInterviewQuestionDto> UpdateQuestionPlanAsync(UpdateJobInterviewQuestionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedQuestionPlanAsync(updateDto.Id);
+        EnsureHr("change an interview's question plan");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _questionPlanRepository.UpdateAsync(entity);
@@ -1275,6 +1535,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> DeleteQuestionPlanAsync(Guid questionPlanId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedQuestionPlanAsync(questionPlanId);
+        EnsureHr("change an interview's question plan");
 
         await _questionPlanRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1284,10 +1545,20 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> AddSelectedQuestionAsync(Guid questionPlanId, Guid questionDetailId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var plan = await GetOwnedQuestionPlanAsync(questionPlanId);
+        EnsureHr("change an interview's question plan");
 
         var questionDetail = await _questionDetailRepository.GetByIdAsync(questionDetailId);
         if (questionDetail == null || questionDetail.TenantId != plan.TenantId)
             throw new ArgumentException($"Question detail with ID '{questionDetailId}' not found.");
+
+        // A plan is "N questions of this type" — a question from another type is not a member of it.
+        if (questionDetail.QuestionTypeId != plan.QuestionTypeId)
+            throw new InvalidOperationException("That question belongs to a different question type.");
+
+        var alreadySelected = (await _selectedQuestionRepository.GetByInterviewQuestionIdAsync(questionPlanId))
+            .Any(sq => sq.TenantId == plan.TenantId && sq.QuestionDetailId == questionDetailId);
+        if (alreadySelected)
+            throw new InvalidOperationException("That question is already in this plan.");
 
         var selectedQuestion = new JobInterviewSelectedQuestion
         {
@@ -1305,6 +1576,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<bool> RemoveSelectedQuestionAsync(Guid questionPlanId, Guid questionDetailId, CancellationToken cancellationToken = default)
     {
         await GetOwnedQuestionPlanAsync(questionPlanId);
+        EnsureHr("change an interview's question plan");
         var selectedQuestions = await _selectedQuestionRepository.GetByInterviewQuestionIdAsync(questionPlanId);
         var toRemove = selectedQuestions.FirstOrDefault(sq => sq.QuestionDetailId == questionDetailId && sq.TenantId == GetTenantId());
         if (toRemove == null)
@@ -1318,6 +1590,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task SelectQuestionsAsync(Guid interviewId, CancellationToken cancellationToken = default)
     {
         var interview = await GetOwnedInterviewAsync(interviewId);
+        EnsureHr("draw an interview's questions");
         var plans = (await _questionPlanRepository.GetByInterviewIdAsync(interviewId))
             .Where(p => p.TenantId == interview.TenantId)
             .ToList();
@@ -1357,6 +1630,7 @@ public class JobInterviewService : IJobInterviewService
         Guid interviewId, CancellationToken cancellationToken = default)
     {
         var interview = await GetOwnedInterviewAsync(interviewId);
+        EnsureHr("draw an interview's questions");
         var plans  = (await _questionPlanRepository.GetByInterviewIdAsync(interviewId))
             .Where(p => p.TenantId == interview.TenantId)
             .ToList();
@@ -1364,8 +1638,11 @@ public class JobInterviewService : IJobInterviewService
 
         foreach (var plan in plans)
         {
-            var questions = (await _questionDetailRepository.GetByQuestionTypeIdAsync(plan.QuestionTypeId))
+            var available = (await _questionDetailRepository.GetByQuestionTypeIdAsync(plan.QuestionTypeId))
                 .Where(q => q.TenantId == plan.TenantId && q.IsActive)
+                .ToList();
+
+            var questions = available
                 .OrderBy(_ => Guid.NewGuid())
                 .Take(plan.AllowedPoolSize)
                 .ToList();
@@ -1378,6 +1655,11 @@ public class JobInterviewService : IJobInterviewService
                 RequiredQuestionCount = plan.RequiredQuestionCount,
                 AllowedPoolSize      = plan.AllowedPoolSize,
                 DisplayOrder         = plan.DisplayOrder,
+                // The bank can hold fewer active questions of this type than the plan requires. Nothing
+                // used to say so, and the shortfall only became visible when the panel ran out of
+                // questions mid-interview.
+                AvailableQuestionCount = available.Count,
+                MeetsRequiredCount     = questions.Count >= plan.RequiredQuestionCount,
                 Questions = questions.Select((q, i) => new QuestionPreviewItemDto
                 {
                     QuestionDetailId = q.Id,
@@ -1397,9 +1679,37 @@ public class JobInterviewService : IJobInterviewService
         Guid interviewId, CommitInterviewQuestionsDto dto, CancellationToken cancellationToken = default)
     {
         var interview = await GetOwnedInterviewAsync(interviewId);
+        EnsureHr("save an interview's questions");
+
         var plans = (await _questionPlanRepository.GetByInterviewIdAsync(interviewId))
             .Where(p => p.TenantId == interview.TenantId)
             .ToList();
+
+        // Validate every id BEFORE mutating anything: the commit clears each plan's selections first, so
+        // a bad id half-way through used to leave the plan emptied and only partly rewritten. Same rule
+        // as SetGoalRequiredSkillsAsync — validate the whole set, then write it.
+        foreach (var planSel in dto.Plans)
+        {
+            var plan = plans.FirstOrDefault(p => p.Id == planSel.PlanId);
+            if (plan is null) continue;
+
+            var ids = planSel.QuestionDetailIds.Distinct().ToList();
+            if (ids.Count != planSel.QuestionDetailIds.Count)
+                throw new InvalidOperationException("A question cannot be selected twice in the same plan.");
+            if (ids.Count == 0) continue;
+
+            var found = (await _questionDetailRepository.FindAsync(q => ids.Contains(q.Id)))
+                .Where(q => q.TenantId == interview.TenantId)
+                .ToList();
+
+            var missing = ids.Where(id => found.All(q => q.Id != id)).ToList();
+            if (missing.Count > 0)
+                throw new ArgumentException("One or more selected questions could not be found.");
+
+            if (found.Any(q => q.QuestionTypeId != plan.QuestionTypeId))
+                throw new InvalidOperationException(
+                    "One or more selected questions belong to a different question type than the plan they were assigned to.");
+        }
 
         foreach (var planSel in dto.Plans)
         {
@@ -1439,57 +1749,145 @@ public class JobInterviewService : IJobInterviewService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
-        await GetOwnedIntervieweeAsync(createDto.JobIntervieweeId);
+        var interviewee = await GetOwnedIntervieweeAsync(createDto.JobIntervieweeId);
+        await EnsureCanScoreAsAsync(createDto.JobIntervieweeId, createDto.InternalPanelistId, createDto.ExternalPanelistId);
 
-        // 1. Persist the summary header first so we have its generated Id.
-        var entity = createDto.ToEntity(current, createdByUserId);
-        await _scoreSummaryRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // 1. One scorecard per panelist per candidate. There is no update endpoint, so without this a
+        //    corrected submission simply piled a second scorecard on top of the first and every
+        //    aggregate double-counted that panelist. An unfinalised scorecard is replaced in place;
+        //    a finalised one is the panelist's signed verdict and is refused.
+        var existing = (await _scoreSummaryRepository.GetByIntervieweeIdAsync(createDto.JobIntervieweeId))
+            .FirstOrDefault(s => s.TenantId == current
+                && s.InternalPanelistId == createDto.InternalPanelistId
+                && s.ExternalPanelistId == createDto.ExternalPanelistId);
 
-        // 2. Persist score entries with server-computed WeightedScore.
-        //    Formula: (RawScore / MaxScore) × Weight  — normalises for score-range differences.
-        if (createDto.ScoreEntries.Count > 0)
+        if (existing is { IsFinalized: true })
+            throw new InvalidOperationException(
+                "This panelist has already finalised a scorecard for this candidate. It cannot be replaced.");
+
+        var entries = await BuildScoreEntriesAsync(
+            interviewee, createDto.ScoreEntries, current, createdByUserId, cancellationToken);
+
+        JobInterviewScoreSummary entity;
+        if (existing is null)
         {
-            // Batch-load question details to retrieve Weight and MaxScore.
-            var questionIds = createDto.ScoreEntries.Select(e => e.QuestionDetailId).ToHashSet();
-            var questions   = await _questionDetailRepository.FindAsync(q => questionIds.Contains(q.Id));
-            var questionMap = questions.Where(q => q.TenantId == current).ToDictionary(q => q.Id);
-
-            var entries = createDto.ScoreEntries
-                .Select(e =>
-                {
-                    decimal weighted = 0m;
-                    if (questionMap.TryGetValue(e.QuestionDetailId, out var q) && q.MaxScore > 0)
-                        weighted = Math.Round((e.RawScore / q.MaxScore) * q.Weight, 4);
-
-                    return new JobInterviewScoreEntry
-                    {
-                        TenantId         = current,
-                        ScoreSummaryId   = entity.Id,
-                        QuestionDetailId = e.QuestionDetailId,
-                        RawScore         = e.RawScore,
-                        WeightedScore    = weighted,
-                        Remarks          = e.Remarks,
-                        CreatedBy        = createdByUserId.ToString(),
-                    };
-                })
-                .ToList();
-
-            await _scoreEntryRepository.AddRangeAsync(entries);
-
-            // 3. Refresh summary totals from the persisted entries.
-            entity.TotalRawScore      = entries.Sum(e => e.RawScore);
-            entity.TotalWeightedScore = entries.Sum(e => e.WeightedScore);
-            await _scoreSummaryRepository.UpdateAsync(entity);
+            entity = createDto.ToEntity(current, createdByUserId);
+            await _scoreSummaryRepository.AddAsync(entity);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
+        else
+        {
+            entity = existing;
+            entity.Recommendation = createDto.Recommendation;
+            entity.Comments       = createDto.Comments;
+            entity.EvaluationDate = createDto.EvaluationDate;
+            entity.UpdatedAt      = DateTime.UtcNow;
+            entity.UpdatedBy      = createdByUserId.ToString();
 
-        return entity.ToDto();
+            foreach (var stale in (await _scoreEntryRepository.GetBySummaryIdAsync(entity.Id))
+                     .Where(e => e.TenantId == current))
+                await _scoreEntryRepository.DeleteAsync(stale);
+        }
+
+        // 2. Persist score entries with server-computed WeightedScore.
+        foreach (var e in entries)
+            e.ScoreSummaryId = entity.Id;
+
+        if (entries.Count > 0)
+            await _scoreEntryRepository.AddRangeAsync(entries);
+
+        // 3. Refresh summary totals from the entries just written.
+        entity.TotalRawScore      = entries.Sum(e => e.RawScore);
+        entity.TotalWeightedScore = entries.Sum(e => e.WeightedScore);
+        await _scoreSummaryRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        var saved = await _scoreSummaryRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// Validates a scorecard's entries against the interview's own question set and computes the
+    /// weighted score for each. Formula: (RawScore / MaxScore) × Weight — normalises for score-range
+    /// differences between questions.
+    /// </summary>
+    private async Task<List<JobInterviewScoreEntry>> BuildScoreEntriesAsync(
+        JobInterviewee interviewee,
+        List<CreateJobInterviewScoreEntryDto> scoreEntries,
+        Guid tenantId,
+        Guid createdByUserId,
+        CancellationToken cancellationToken)
+    {
+        if (scoreEntries.Count == 0) return new List<JobInterviewScoreEntry>();
+
+        var questionIds = scoreEntries.Select(e => e.QuestionDetailId).ToList();
+        if (questionIds.Distinct().Count() != questionIds.Count)
+            throw new InvalidOperationException("A question cannot be scored twice on the same scorecard.");
+
+        // The questions must be the ones this interview actually locked in. Previously any question id
+        // was accepted — including another tenant's, which silently scored 0 because the weight lookup
+        // missed, and questions this panel never asked.
+        var selectedIds = await GetSelectedQuestionIdsAsync(interviewee.JobInterviewId, tenantId);
+        var stray = questionIds.Where(id => !selectedIds.Contains(id)).ToList();
+        if (stray.Count > 0)
+            throw new InvalidOperationException(
+                "One or more scored questions are not part of this interview's question set.");
+
+        var questions = (await _questionDetailRepository.FindAsync(q => questionIds.Contains(q.Id)))
+            .Where(q => q.TenantId == tenantId)
+            .ToDictionary(q => q.Id);
+
+        return scoreEntries
+            .Select(e =>
+            {
+                var q = questions[e.QuestionDetailId];
+
+                // The raw score has to sit inside the question's own band. The DTO allows 0–100 while a
+                // question is typically scored 1–10, and (raw / max) × weight then produced a weighted
+                // score many times the question's ceiling — one out-of-range entry could outweigh the
+                // whole rest of the scorecard.
+                if (e.RawScore < q.MinScore || e.RawScore > q.MaxScore)
+                    throw new InvalidOperationException(
+                        $"Score {e.RawScore} for \"{q.QuestionText}\" is outside its {q.MinScore}–{q.MaxScore} range.");
+
+                var weighted = q.MaxScore > 0
+                    ? Math.Round((e.RawScore / q.MaxScore) * q.Weight, 4)
+                    : 0m;
+
+                return new JobInterviewScoreEntry
+                {
+                    TenantId         = tenantId,
+                    QuestionDetailId = e.QuestionDetailId,
+                    RawScore         = e.RawScore,
+                    WeightedScore    = weighted,
+                    Remarks          = e.Remarks,
+                    CreatedBy        = createdByUserId.ToString(),
+                };
+            })
+            .ToList();
+    }
+
+    /// <summary>Every question locked into an interview's plans, across all of them.</summary>
+    private async Task<HashSet<Guid>> GetSelectedQuestionIdsAsync(Guid interviewId, Guid tenantId)
+    {
+        var plans = (await _questionPlanRepository.GetByInterviewIdAsync(interviewId))
+            .Where(p => p.TenantId == tenantId)
+            .ToList();
+
+        var ids = new HashSet<Guid>();
+        foreach (var plan in plans)
+        {
+            var selected = await _selectedQuestionRepository.GetByInterviewQuestionIdAsync(plan.Id);
+            foreach (var sq in selected.Where(s => s.TenantId == tenantId))
+                ids.Add(sq.QuestionDetailId);
+        }
+        return ids;
     }
 
     public async Task<IEnumerable<JobInterviewScoreSummaryDto>> GetScoreSummariesAsync(Guid intervieweeId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedIntervieweeAsync(intervieweeId);
+        var interviewee = await GetOwnedIntervieweeAsync(intervieweeId);
+        await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         var tenantId = GetTenantId();
         var entities = await _scoreSummaryRepository.GetByIntervieweeIdAsync(intervieweeId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
@@ -1500,23 +1898,96 @@ public class JobInterviewService : IJobInterviewService
         var entity = await _scoreSummaryRepository.GetWithScoreEntriesAsync(scoreSummaryId);
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Score summary with ID '{scoreSummaryId}' not found.");
+
+        var interviewee = await GetOwnedIntervieweeAsync(entity.JobIntervieweeId);
+        await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         return entity.ToDetailDto();
     }
 
     public async Task<bool> FinalizeScoreAsync(Guid scoreSummaryId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedScoreSummaryAsync(scoreSummaryId);
+        await EnsureCanScoreAsAsync(entity.JobIntervieweeId, entity.InternalPanelistId, entity.ExternalPanelistId);
+
+        if (entity.IsFinalized)
+            throw new InvalidOperationException("This scorecard is already finalised.");
+
+        await EnsureScorecardCoversRequiredQuestionsAsync(entity, cancellationToken);
 
         entity.IsFinalized = true;
         entity.FinalizedDate = DateTime.UtcNow;
 
         await _scoreSummaryRepository.UpdateAsync(entity);
+
+        // The draft is a scratchpad for a scorecard that has now been signed off. Leaving it behind
+        // means the scoring screen reloads the half-finished version over the submitted one.
+        var draft = await _draftRepository.GetByPanelistAsync(
+            entity.JobIntervieweeId, entity.InternalPanelistId, entity.ExternalPanelistId, cancellationToken);
+        if (draft is not null && draft.TenantId == entity.TenantId)
+            await _draftRepository.DeleteAsync(draft);
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
 
+    /// <summary>
+    /// <c>RequiredQuestionCount</c> is documented on the entity as "minimum number of questions from
+    /// this type that must be asked" — and was read by nothing, so a plan could demand five competency
+    /// questions and be signed off with one. Finalisation is where it bites: a draft may be as
+    /// incomplete as the panelist likes, a signed scorecard may not.
+    /// </summary>
+    private async Task EnsureScorecardCoversRequiredQuestionsAsync(
+        JobInterviewScoreSummary summary, CancellationToken cancellationToken)
+    {
+        var interviewee = await GetOwnedIntervieweeAsync(summary.JobIntervieweeId);
+        var plans = (await _questionPlanRepository.GetByInterviewIdAsync(interviewee.JobInterviewId))
+            .Where(p => p.TenantId == summary.TenantId)
+            .ToList();
+        if (plans.Count == 0) return;   // an unstructured interview has nothing to require
+
+        var scored = (await _scoreEntryRepository.GetBySummaryIdAsync(summary.Id))
+            .Where(e => e.TenantId == summary.TenantId)
+            .Select(e => e.QuestionDetailId)
+            .ToHashSet();
+
+        foreach (var plan in plans)
+        {
+            var selected = (await _selectedQuestionRepository.GetByInterviewQuestionIdAsync(plan.Id))
+                .Where(sq => sq.TenantId == summary.TenantId)
+                .Select(sq => sq.QuestionDetailId)
+                .ToList();
+
+            // Never demand more than the bank could actually supply — that would make the scorecard
+            // unfinalisable through no fault of the panelist.
+            var required = Math.Min(plan.RequiredQuestionCount, selected.Count);
+            var answered = selected.Count(scored.Contains);
+
+            if (answered < required)
+                throw new InvalidOperationException(
+                    $"\"{plan.QuestionType?.TypeName ?? "This section"}\" requires at least {required} " +
+                    $"scored question(s); {answered} were scored.");
+        }
+    }
+
+    /// <summary>The caller's own panel assignments — the diary a panelist opens to find their sessions.</summary>
+    public async Task<IEnumerable<JobInterviewPanelistDto>> GetMyPanelistSlotsAsync(CancellationToken cancellationToken = default)
+    {
+        var employeeId = CallerEmployeeId;
+        if (employeeId is null || employeeId == Guid.Empty)
+            throw new UnauthorizedAccessException("Your user account is not linked to an employee record.");
+
+        var tenantId = GetTenantId();
+        var entities = await _panelistRepository.GetByEmployeeIdAsync(employeeId.Value);
+        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
+    }
+
     public async Task<IEnumerable<JobInterviewPanelistDto>> GetInterviewsByPanelistAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
+        // Reading someone else's interview diary is HR's; reading your own goes through /me above, which
+        // takes the employee from the token rather than the URL.
+        if (employeeId != CallerEmployeeId)
+            EnsureHr("view another employee's interview assignments");
+
         var tenantId = GetTenantId();
         var entities = await _panelistRepository.GetByEmployeeIdAsync(employeeId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
@@ -1524,6 +1995,7 @@ public class JobInterviewService : IJobInterviewService
 
     public async Task<IEnumerable<JobIntervieweeDto>> GetInterviewsByApplicationAsync(Guid applicationId, CancellationToken cancellationToken = default)
     {
+        EnsureHr("view an application's interview history");
         var tenantId = GetTenantId();
         var entities = await _intervieweeRepository.GetByApplicationIdAsync(applicationId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
@@ -1531,7 +2003,10 @@ public class JobInterviewService : IJobInterviewService
 
     public async Task<IEnumerable<JobInterviewScoreSummaryDto>> GetScoresByInternalPanelistAsync(Guid panelistId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPanelistAsync(panelistId);
+        var panelist = await GetOwnedPanelistAsync(panelistId);
+        if (!IsHr && panelist.EmployeeId != CallerEmployeeId)
+            throw new UnauthorizedAccessException("You can only view your own scorecards.");
+
         var tenantId = GetTenantId();
         var entities = await _scoreSummaryRepository.GetByInternalPanelistIdAsync(panelistId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
@@ -1540,6 +2015,7 @@ public class JobInterviewService : IJobInterviewService
     public async Task<IEnumerable<JobInterviewScoreSummaryDto>> GetScoresByExternalPanelistAsync(Guid externalPanelistId, CancellationToken cancellationToken = default)
     {
         await GetOwnedExternalPanelistAsync(externalPanelistId);
+        EnsureHr("view an external panelist's scorecards");
         var tenantId = GetTenantId();
         var entities = await _scoreSummaryRepository.GetByExternalPanelistIdAsync(externalPanelistId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
@@ -1547,7 +2023,8 @@ public class JobInterviewService : IJobInterviewService
 
     public async Task<IEnumerable<JobInterviewScoreSummaryDto>> GetFinalizedScoresForIntervieweeAsync(Guid intervieweeId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedIntervieweeAsync(intervieweeId);
+        var interviewee = await GetOwnedIntervieweeAsync(intervieweeId);
+        await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         var tenantId = GetTenantId();
         var entities = await _scoreSummaryRepository.GetFinalizedForIntervieweeAsync(intervieweeId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
@@ -1556,6 +2033,8 @@ public class JobInterviewService : IJobInterviewService
     public async Task<IEnumerable<JobInterviewScoreEntryDto>> GetScoreEntriesAsync(Guid scoreSummaryId, CancellationToken cancellationToken = default)
     {
         var summary = await GetOwnedScoreSummaryAsync(scoreSummaryId);
+        var interviewee = await GetOwnedIntervieweeAsync(summary.JobIntervieweeId);
+        await EnsureCanReadInterviewAsync(interviewee.JobInterviewId);
         var entities = await _scoreEntryRepository.GetBySummaryIdAsync(scoreSummaryId);
         return entities.Where(e => e.TenantId == summary.TenantId).Select(e => e.ToDto());
     }
@@ -1568,11 +2047,9 @@ public class JobInterviewService : IJobInterviewService
         Guid? externalPanelistId,
         CancellationToken cancellationToken = default)
     {
-        await GetOwnedIntervieweeAsync(intervieweeId);
-        if (internalPanelistId.HasValue)
-            await GetOwnedPanelistAsync(internalPanelistId.Value);
-        if (externalPanelistId.HasValue)
-            await GetOwnedExternalPanelistAsync(externalPanelistId.Value);
+        // A draft is one panelist's unfinished thinking about a candidate. The panelist used to be named
+        // in the query string, so passing a colleague's id read their draft — comments and all.
+        await EnsureCanScoreAsAsync(intervieweeId, internalPanelistId, externalPanelistId);
 
         var tenantId = GetTenantId();
         var entity = await _draftRepository.GetByPanelistAsync(
@@ -1591,11 +2068,13 @@ public class JobInterviewService : IJobInterviewService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedInterviewAsync(interviewId);
-        await GetOwnedIntervieweeAsync(dto.JobIntervieweeId);
-        if (dto.InternalPanelistId.HasValue)
-            await GetOwnedPanelistAsync(dto.InternalPanelistId.Value);
-        if (dto.ExternalPanelistId.HasValue)
-            await GetOwnedExternalPanelistAsync(dto.ExternalPanelistId.Value);
+        var interviewee = await GetOwnedIntervieweeAsync(dto.JobIntervieweeId);
+        await EnsureCanScoreAsAsync(dto.JobIntervieweeId, dto.InternalPanelistId, dto.ExternalPanelistId);
+
+        // The route's interview and the candidate's interview have to be the same one, or the draft is
+        // filed against a session the candidate never sat in.
+        if (interviewee.JobInterviewId != interviewId)
+            throw new InvalidOperationException("That candidate is not booked into this interview.");
 
         var existing = await _draftRepository.GetByPanelistAsync(
             dto.JobIntervieweeId, dto.InternalPanelistId, dto.ExternalPanelistId, cancellationToken);
@@ -1641,22 +2120,83 @@ public class JobInterviewService : IJobInterviewService
         List<Guid>? applicationIds, CancellationToken cancellationToken)
     {
         ValidateSlot(date, start, end, "scheduled in the past");
+        await ValidateApplicationsForVacancyAsync(vacancyId, applicationIds, GetTenantId());
+    }
 
-        if (applicationIds is { Count: > 0 })
+    /// <summary>
+    /// Every application booked into an interview must exist, be in-tenant, and be an application for
+    /// the interview's own vacancy. Factored out of <c>ValidateScheduleAsync</c> so the add-interviewee
+    /// path enforces the same rule — it is the same table, reached by a different route.
+    /// </summary>
+    private async Task ValidateApplicationsForVacancyAsync(
+        Guid vacancyId, List<Guid>? applicationIds, Guid tenantId)
+    {
+        if (applicationIds is not { Count: > 0 }) return;
+
+        var appIds = applicationIds.Distinct().ToList();
+        var apps = (await _applicationRepository.FindAsync(a => appIds.Contains(a.Id)))
+            .Where(a => a.TenantId == tenantId)
+            .ToList();
+
+        var missing = appIds.Where(id => apps.All(a => a.Id != id)).ToList();
+        if (missing.Count > 0)
+            throw new InvalidOperationException("One or more selected applications could not be found.");
+
+        if (apps.Any(a => a.JobVacancyId != vacancyId))
+            throw new InvalidOperationException("One or more selected applications do not belong to the selected vacancy.");
+    }
+
+    /// <summary>
+    /// The panel named on a create payload gets the same checks the add-panelist endpoints now make.
+    /// Without them an unknown employee id died on a foreign-key violation <i>after</i> the interview
+    /// row had already been committed, leaving a half-built interview behind.
+    /// </summary>
+    private async Task ValidatePanelAsync(
+        List<Guid>? panelistEmployeeIds, List<Guid>? externalAssociateIds, Guid tenantId)
+    {
+        if (panelistEmployeeIds is { Count: > 0 })
         {
-            var tenantId = GetTenantId();
-            var appIds = applicationIds.Distinct().ToList();
-            var apps = (await _applicationRepository.FindAsync(a => appIds.Contains(a.Id)))
-                .Where(a => a.TenantId == tenantId)
+            var ids = panelistEmployeeIds.Distinct().ToList();
+            if (ids.Count != panelistEmployeeIds.Count)
+                throw new InvalidOperationException("The same employee cannot be added to the panel twice.");
+
+            var found = (await _employeeRepository.FindAsync(e => ids.Contains(e.Id)))
+                .Where(e => e.TenantId == tenantId)
                 .ToList();
-
-            var missing = appIds.Where(id => apps.All(a => a.Id != id)).ToList();
-            if (missing.Count > 0)
-                throw new InvalidOperationException("One or more selected applications could not be found.");
-
-            if (apps.Any(a => a.JobVacancyId != vacancyId))
-                throw new InvalidOperationException("One or more selected applications do not belong to the selected vacancy.");
+            if (found.Count != ids.Count)
+                throw new InvalidOperationException("One or more selected panelists could not be found.");
         }
+
+        if (externalAssociateIds is { Count: > 0 })
+        {
+            var ids = externalAssociateIds.Distinct().ToList();
+            if (ids.Count != externalAssociateIds.Count)
+                throw new InvalidOperationException("The same associate cannot be added to the panel twice.");
+
+            foreach (var id in ids)
+                await EnsureAssociateInTenantAsync(id, tenantId);
+        }
+    }
+
+    private async Task EnsureEmployeeInTenantAsync(Guid employeeId, Guid tenantId)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId);
+        if (employee == null || employee.TenantId != tenantId || employee.IsDeleted)
+            throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+    }
+
+    private async Task EnsureAssociateInTenantAsync(Guid associateId, Guid tenantId)
+    {
+        var associate = await _associateRepository.GetByIdAsync(associateId);
+        if (associate == null || associate.TenantId != tenantId || associate.IsDeleted)
+            throw new ArgumentException($"External associate with ID '{associateId}' not found.");
+    }
+
+    private async Task EnsureQuestionTypeInTenantAsync(Guid questionTypeId, Guid tenantId)
+    {
+        var type = await _questionTypeRepository.GetByIdAsync(questionTypeId);
+        if (type == null || type.TenantId != tenantId || type.IsDeleted)
+            throw new ArgumentException($"Interview question type with ID '{questionTypeId}' not found.");
     }
 
     /// <summary>Shared slot sanity checks: end after start, and not in the past.</summary>

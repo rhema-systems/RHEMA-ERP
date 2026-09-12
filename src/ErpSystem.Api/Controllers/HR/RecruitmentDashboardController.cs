@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -112,9 +113,15 @@ public sealed class DashboardDeadlineVacancyDto
 // CONTROLLER
 // ============================================================================
 
+/// <summary>
+/// Aggregated recruitment KPIs. HR-gated: the payload carries candidate names on recent
+/// applications, upcoming interviews, offers and hires starting soon — the same PII shape that
+/// <see cref="JobApplicationController"/> restricts to HR, so a bare <c>[Authorize]</c> here would
+/// have let any authenticated employee read it.
+/// </summary>
 [ApiController]
 [Route("api/recruitment-dashboard")]
-[Authorize]
+[Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
 public class RecruitmentDashboardController : ControllerBase
 {
     private readonly IJobVacancyService     _vacancyService;

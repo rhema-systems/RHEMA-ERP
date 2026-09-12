@@ -49,6 +49,8 @@ public class TenderSummaryDto
 /// </summary>
 public class TenderDetailDto
 {
+    public bool UsesControlledTenderLifecycle { get; set; }
+    public int BidCount { get; set; }
     public Guid Id { get; set; }
     public string TenderNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
@@ -87,6 +89,7 @@ public class TenderDetailDto
     // Metadata
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
+    public int? BidValidityPeriodDays { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
 
     // Acceptance Declaration
@@ -191,6 +194,8 @@ public class CreateTenderDto
 
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
+    [Range(1, int.MaxValue)]
+    public int? BidValidityPeriodDays { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
 
     // Acceptance Declaration
@@ -261,6 +266,8 @@ public class UpdateTenderDto
 
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
+    [Range(1, int.MaxValue)]
+    public int? BidValidityPeriodDays { get; set; }
     public string? RequiredDocuments { get; set; } // JSON array of required document types
 
     // Acceptance Declaration

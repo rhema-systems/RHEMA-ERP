@@ -50,6 +50,15 @@ async function getFriendlyErrorMessage(
         parsed?.detail ||
         parsed?.title ||
         (typeof parsed === 'string' ? parsed : message);
+      const validationErrors = parsed?.errors;
+      if (validationErrors && typeof validationErrors === 'object' && !Array.isArray(validationErrors)) {
+        const fields = Object.entries(validationErrors).flatMap(([field, errors]) =>
+          (Array.isArray(errors) ? errors : [errors])
+            .filter((error): error is string => typeof error === 'string' && error.trim().length > 0)
+            .map(error => `${field}: ${error}`)
+        );
+        if (fields.length > 0) message = `${message} ${fields.join(' ')}`;
+      }
     } catch {
       // not JSON, keep text
     }
@@ -956,6 +965,16 @@ export interface PurchaseOrderReceiptDto {
 }
 
 export type ProcurementReceiptSourceEvidenceKind = 1 | 2;
+
+const normalizeReceiptSourceEvidence = (
+  evidence: ProcurementReceiptSourceEvidenceDto
+): ProcurementReceiptSourceEvidenceDto => {
+  const value: unknown = evidence.evidenceKind;
+  const evidenceKind = value === 1 || value === '1' || value === 'Waybill' ? 1
+    : value === 2 || value === '2' || value === 'VatInvoiceCopy' ? 2 : undefined;
+  if (evidenceKind === undefined) throw new Error('Unrecognized receipt evidence type. Refresh or contact support.');
+  return { ...evidence, evidenceKind };
+};
 
 export interface ProcurementReceiptSourceEvidenceDto {
   id: string;
@@ -2246,7 +2265,8 @@ export const purchasingService = {
       { headers: getAuthHeaders() }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
-    return response.json();
+    const overview: ProcurementReceiptSourceEvidenceOverviewDto = await response.json();
+    return { ...overview, evidence: overview.evidence.map(normalizeReceiptSourceEvidence) };
   },
 
   async uploadReceiptSourceEvidence(
@@ -2270,7 +2290,7 @@ export const purchasingService = {
       { method: 'POST', headers: getMultipartAuthHeaders(), body: form }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
-    return response.json();
+    return normalizeReceiptSourceEvidence(await response.json());
   },
 
   async downloadReceiptSourceEvidence(

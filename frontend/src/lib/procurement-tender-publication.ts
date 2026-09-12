@@ -4,6 +4,7 @@ type TenderPublicationSource = {
   tenderType?: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType | number;
+  usesControlledTenderLifecycle?: boolean;
 };
 
 const legacyMethodNames: Record<number, ProcurementMethodType> = {
@@ -49,8 +50,9 @@ export function getTenderPublicationPresentation(
   const method = normalizeMethod(tender.sourcingMethod);
   const hasAdvancedSourcingCase = Boolean(tender.sourcingCaseId?.trim());
   const requiresControlledPublication =
-    hasAdvancedSourcingCase &&
-    Boolean(method && controlledPublicationMethods.has(method));
+    tender.usesControlledTenderLifecycle ??
+    (hasAdvancedSourcingCase &&
+      Boolean(method && controlledPublicationMethods.has(method)));
   const usesStatutoryAdvertisement =
     requiresControlledPublication &&
     Boolean(method && statutoryAdvertisementMethods.has(method));
@@ -74,8 +76,9 @@ export function getTenderPublicationPresentation(
       ? 'Advertisement evidence'
       : 'Publication evidence',
     advancedControlLabel:
-      method === 'QualityBasedSelection' ||
-      method === 'QualityAndCostBasedSelection'
+      requiresControlledPublication &&
+      (method === 'QualityBasedSelection' ||
+        method === 'QualityAndCostBasedSelection')
         ? 'QBS / QCBS Controls'
         : requiresControlledPublication
           ? 'NCT / ICT Controls'
@@ -87,7 +90,16 @@ export function getTenderPublicationPresentation(
           ? 'Restricted / Single Source'
           : undefined,
     supplierAccessMessage: requiresControlledPublication
-      ? 'Publishing records the approved publication controls, releases the tender to its authorised supplier audience, and opens secure bid submission until the published deadline.'
-      : 'Publishing releases this invitation to the selected suppliers through the secure supplier portal and opens bid submission until the published deadline.',
+      ? 'Publishing records the approved publication controls and opens bid submission until the published deadline. Access and participation follow the configured procurement route and eligibility requirements; invitations are notifications, not an open-tender audience restriction.'
+      : 'Publishing opens bid submission until the published deadline. Access and participation follow the configured procurement route and eligibility requirements; invitations are notifications, not an open-tender audience restriction.',
   };
+}
+
+export function getTenderPublicationNotificationMessage(invitationCount: number, externalEmailCount = 0) {
+  if (invitationCount === 0 && externalEmailCount === 0) return 'No individual invitation notifications are configured.';
+  const recipients = [
+    invitationCount > 0 ? `${invitationCount} invited supplier${invitationCount === 1 ? '' : 's'}` : '',
+    externalEmailCount > 0 ? `${externalEmailCount} additional email recipient${externalEmailCount === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' and ');
+  return `Individual invitation notifications will be sent to ${recipients}.`;
 }

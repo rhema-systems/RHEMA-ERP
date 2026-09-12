@@ -350,12 +350,14 @@ public static class StaffSafetyMappingExtensions
         ClosedById = e.ClosedById,
         ClosedByName = e.ClosedBy?.FullName,
         ClosureNotes = e.ClosureNotes,
+        LessonsLearned = e.LessonsLearned,
         InvolvedPersons = e.InvolvedPersons.Select(p => p.ToDto()).ToList(),
         Witnesses = e.Witnesses.Select(w => w.ToDto()).ToList(),
         InvestigationTeam = e.InvestigationTeam.Select(m => m.ToDto()).ToList(),
         CorrectiveActions = e.CorrectiveActions.Select(c => c.ToDto()).ToList(),
         FollowUps = e.FollowUps.Select(f => f.ToDto()).ToList(),
         Documents = e.Documents.Select(d => d.ToDto()).ToList(),
+        StatutorySubmissions = e.StatutorySubmissions.Select(s => s.ToDto()).ToList(),
     };
 
     public static SafetyIncidentSummaryDto ToSummaryDto(this SafetyIncident e) => new()
@@ -434,12 +436,37 @@ public static class StaffSafetyMappingExtensions
         e.RiskScoreAfter = dto.LikelihoodAfter * dto.SeverityAfter;
         e.RequiresInvestigation = dto.RequiresInvestigation;
         e.ReportableToAuthority = dto.ReportableToAuthority;
+        e.LessonsLearned = dto.LessonsLearned;
         e.UpdatedAt = DateTime.UtcNow;
         e.UpdatedBy = userId.ToString();
     }
 
     public static IEnumerable<SafetyIncidentSummaryDto> ToSummaryDtoList(this IEnumerable<SafetyIncident> entities)
         => entities.Select(e => e.ToSummaryDto());
+
+    public static SheStatutoryIncidentSubmissionDto ToDto(this SheStatutoryIncidentSubmission e) => new()
+    {
+        Id = e.Id,
+        CreatedAt = e.CreatedAt,
+        CreatedBy = e.CreatedBy ?? string.Empty,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy,
+        IncidentId = e.IncidentId,
+        IncidentNumber = e.Incident?.IncidentNumber,
+        RegulatoryBodyId = e.RegulatoryBodyId,
+        RegulatoryBodyName = e.RegulatoryBody?.Name ?? string.Empty,
+        Type = e.Type,
+        Method = e.Method,
+        SubmissionDate = e.SubmissionDate,
+        ReferenceNumber = e.ReferenceNumber,
+        SubmittedById = e.SubmittedById,
+        SubmittedByName = e.SubmittedBy?.FullName ?? string.Empty,
+        DocumentPath = e.DocumentPath,
+        AcknowledgementReceived = e.AcknowledgementReceived,
+        AcknowledgementDate = e.AcknowledgementDate,
+        AcknowledgementReference = e.AcknowledgementReference,
+        Notes = e.Notes,
+    };
 
     #endregion
 

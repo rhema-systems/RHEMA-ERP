@@ -48,6 +48,16 @@ public class HealthcareFacility : TenantEntity
     [ForeignKey(nameof(CountryId))]
     public virtual Country? Country { get; set; }
 
+    /// <summary>
+    /// Which administrative area the facility stands in, so "which hospitals are in this district"
+    /// is answerable. <see cref="City"/> becomes a display snapshot once this is set.
+    /// See docs/GEOGRAPHY-REFERENCE-DESIGN.md.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
+
     [MaxLength(50)]
     public string? PrimaryPhone { get; set; }
 
@@ -669,9 +679,25 @@ public class MedicalInsuranceProviderDocument : TenantEntity
     [MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Legacy storage path. This was supplied directly by the API caller, which made it a
+    /// path-injection sink — the third instance of the defect <see cref="MedicalExpenseDocument"/>
+    /// and <see cref="EmployeeMedicalExamDocument"/> were both fixed for, and the one that was
+    /// missed. Provider documents now arrive as multipart content through the controlled boundary
+    /// and this stays empty on new rows. Kept non-nullable so existing rows are untouched.
+    /// </summary>
     [Required]
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     [Required]
     public MedicalInsuranceProviderDocumentType DocumentType { get; set; }
@@ -1415,9 +1441,26 @@ public class NHISClaimDocument : TenantEntity
     [MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Legacy storage path. Required on the create DTO and stored verbatim - the FIFTH instance of
+    /// the path-injection sink in the medical module, after <see cref="MedicalExpenseDocument"/>,
+    /// <see cref="EmployeeMedicalExamDocument"/> and <see cref="MedicalInsuranceProviderDocument"/>
+    /// were each fixed for it (D-10, D-14). Files now arrive through
+    /// <c>POST api/nhis-claims/documents/upload</c> and this stays empty on new rows. Kept
+    /// non-nullable so existing rows are untouched.
+    /// </summary>
     [Required]
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     [MaxLength(500)]
     public string? Description { get; set; }
@@ -1617,9 +1660,24 @@ public class MedicalExpenseDocument : TenantEntity
     [MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Legacy storage path. This was previously supplied directly by the API caller, which made it
+    /// a path-injection sink — the same defect <see cref="EmployeeMedicalExamDocument"/> was fixed
+    /// for. Receipts are now uploaded as multipart content through the controlled boundary and this
+    /// stays empty on new rows.
+    /// </summary>
     [Required]
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     public MedicalDocumentType Type { get; set; }
 

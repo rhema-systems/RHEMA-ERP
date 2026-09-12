@@ -182,17 +182,18 @@ public class CompanyGoalService : ICompanyGoalService
                 u.TenantId == tenantId && u.ParentCompanyGoalId == goalId)
             .CountAsync(cancellationToken);
 
-        // Employee goals can be linked directly to company goal via ParentGoalId
+        // An employee goal aligned straight to a company goal carries it on CompanyGoalId — the
+        // FK behind CompanyGoal.EmployeeGoals. ParentGoalId is the self-referencing parent (another
+        // EmployeeGoal), so matching a company goal id against it never found anything and this
+        // count and average came back 0 / null on every company goal.
         var employeeGoalsCount = await _employeeGoalRepository.GetQueryable(
             e => e.TenantId == tenantId
-              && e.ParentGoalId == goalId
-              && e.ParentType == GoalParentType.Company)
+              && e.CompanyGoalId == goalId)
             .CountAsync(cancellationToken);
 
         var avgProgress = await _employeeGoalRepository.GetQueryable(
             e => e.TenantId == tenantId
-              && e.ParentGoalId == goalId
-              && e.ParentType == GoalParentType.Company
+              && e.CompanyGoalId == goalId
               && (e.Status == GoalStatus.Approved || e.Status == GoalStatus.InProgress))
             .AverageAsync(e => (decimal?)e.ProgressPercent, cancellationToken);
 
@@ -249,6 +250,7 @@ public class CompanyGoalService : ICompanyGoalService
             {
                 Id                = g.Id,
                 AppraisalCycleId  = g.AppraisalCycleId,
+                CycleCode         = g.AppraisalCycle.CycleCode,
                 Title             = g.Title,
                 DescriptionPreview = g.Description != null && g.Description.Length > 200
                     ? g.Description.Substring(0, 200)

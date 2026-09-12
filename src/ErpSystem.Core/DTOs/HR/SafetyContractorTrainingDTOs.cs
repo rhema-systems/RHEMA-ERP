@@ -347,9 +347,6 @@ public class CreateSheContractorNonComplianceDto : CreateDtoBase
 
     [Required]
     public DateTime RectificationDeadline { get; set; }
-
-    public bool IsRepeatViolation { get; set; }
-    public int RepeatCount { get; set; }
 }
 
 public class UpdateSheContractorNonComplianceDto : UpdateDtoBase

@@ -15,6 +15,14 @@ public class StaffTravelFlightBookingRepository : GenericRepository<StaffTravelF
 {
     public StaffTravelFlightBookingRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelFlightBooking?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(f => f.Vendor)
+            .Include(f => f.Segments.OrderBy(s => s.SegmentOrder))
+            .FirstOrDefaultAsync(f => f.Id == id && f.TenantId == tenantId && !f.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelFlightBooking>> GetByRequestIdAsync(Guid requestId)
     {
         return await _dbSet
@@ -76,6 +84,14 @@ public class StaffTravelHotelBookingRepository : GenericRepository<StaffTravelHo
 {
     public StaffTravelHotelBookingRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelHotelBooking?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(h => h.Country)
+            .Include(h => h.Vendor)
+            .FirstOrDefaultAsync(h => h.Id == id && h.TenantId == tenantId && !h.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelHotelBooking>> GetByRequestIdAsync(Guid requestId)
     {
         return await _dbSet
@@ -112,6 +128,13 @@ public class StaffTravelGroundTransportRepository : GenericRepository<StaffTrave
 {
     public StaffTravelGroundTransportRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelGroundTransport?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(g => g.Vendor)
+            .FirstOrDefaultAsync(g => g.Id == id && g.TenantId == tenantId && !g.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelGroundTransport>> GetByRequestIdAsync(Guid requestId)
     {
         return await _dbSet
@@ -137,6 +160,13 @@ public class StaffTravelGroundTransportRepository : GenericRepository<StaffTrave
 public class StaffTravelCarRentalBookingRepository : GenericRepository<StaffTravelCarRentalBooking>, IStaffTravelCarRentalBookingRepository
 {
     public StaffTravelCarRentalBookingRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelCarRentalBooking?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(c => c.Vendor)
+            .FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId && !c.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelCarRentalBooking>> GetByRequestIdAsync(Guid requestId)
     {

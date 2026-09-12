@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/reference/**/*.ts",
+    "src/services/reference/**/*.ts",
+    "src/components/reference/**/*.tsx",
+    "src/app/administration/reference/**/*.tsx",
+    "src/app/administration/layout.tsx",
+    "src/components/layout/sidebar.tsx",
+    "src/components/hr/employee/EmployeeForm.tsx",
+    "src/components/hr/employee/employeeFormMapper.ts",
+    "src/components/hr/employee/tabs/fields.tsx",
+    "src/types/hr/employee.ts",
+    "src/app/hr/employees/new/page.tsx",
+    "src/app/hr/employees/[id]/edit/page.tsx",
+    "src/components/hr/location/LocationForm.tsx",
+    "src/types/hr/location.ts",
+    "src/app/administration/hr/location/locations/new/page.tsx",
+    "src/app/administration/hr/location/locations/[id]/edit/page.tsx",
+    "src/app/administration/hr/settings/company-profile/page.tsx",
+    "src/types/hr/company-profile.ts",
+    "src/components/hr/medical/facility-form.tsx",
+    "src/types/hr/medical.ts"
+  ]
+}

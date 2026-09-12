@@ -3,12 +3,43 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Eye, FileText, Download, ChevronLeft, ChevronRight, CheckCircle, XCircle, Clock } from 'lucide-react';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Search,
+  Eye,
+  FileText,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Award,
+  Loader2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderBidService from '@/services/tenderBidService';
 import { type TenderBidSummaryDto } from '@/services/tenderBidService';
@@ -20,11 +51,13 @@ import { saveAs } from 'file-saver';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { resolveTenderEvaluationHref } from '@/lib/procurement-tender-evaluation-route';
 
 export default function BidsPage() {
   const router = useRouter();
   const { hasPermission } = useAuth();
   const canAdministerTender = hasPermission('procurement.tender.administer');
+  const canEvaluateTender = hasPermission('procurement.tender.evaluate');
   const [bids, setBids] = useState<TenderBidSummaryDto[]>([]);
   const [tenders, setTenders] = useState<TenderDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +65,7 @@ export default function BidsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [tenderFilter, setTenderFilter] = useState('all');
+  const [filtersInitialized, setFiltersInitialized] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [showOpenDialog, setShowOpenDialog] = useState(false);
@@ -39,6 +73,7 @@ export default function BidsPage() {
   const [opening, setOpening] = useState(false);
   const [showBulkOpenDialog, setShowBulkOpenDialog] = useState(false);
   const [bulkOpening, setBulkOpening] = useState(false);
+  const [evaluatingBidId, setEvaluatingBidId] = useState<string | null>(null);
   const pageSize = 10;
 
   useEffect(() => {
@@ -46,8 +81,16 @@ export default function BidsPage() {
   }, []);
 
   useEffect(() => {
-    loadBids();
-  }, [currentPage, searchTerm, statusFilter, tenderFilter]);
+    const requestedTenderId = new URLSearchParams(window.location.search).get(
+      'tenderId'
+    );
+    setTenderFilter(requestedTenderId || 'all');
+    setFiltersInitialized(true);
+  }, []);
+
+  useEffect(() => {
+    if (filtersInitialized) loadBids();
+  }, [currentPage, searchTerm, statusFilter, tenderFilter, filtersInitialized]);
 
   const loadTenders = async () => {
     try {
@@ -65,8 +108,9 @@ export default function BidsPage() {
         status: 'Closed',
       });
       // Combine and sort by creation date
-      const allTenders = [...publishedData.items, ...closedData.items].sort((a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      const allTenders = [...publishedData.items, ...closedData.items].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
       console.log('Loaded tenders:', allTenders);
       setTenders(allTenders);
@@ -111,10 +155,35 @@ export default function BidsPage() {
   const handleTenderFilter = (value: string) => {
     setTenderFilter(value);
     setCurrentPage(1);
+    const query =
+      value === 'all' ? '' : `?tenderId=${encodeURIComponent(value)}`;
+    router.replace(`/procurement/bids${query}`, { scroll: false });
   };
 
   const handleViewBid = (bidId: string) => {
     router.push(`/procurement/bids/${bidId}`);
+  };
+
+  const handleEvaluateBid = async (bid: TenderBidSummaryDto) => {
+    try {
+      setEvaluatingBidId(bid.id);
+      const tender = tenders.find((item) => item.id === bid.tenderId);
+      const href = await resolveTenderEvaluationHref(
+        bid.tenderId,
+        bid.id,
+        tender,
+        tenderService.getTenderById
+      );
+      router.push(href);
+    } catch (error) {
+      toast.error(
+        getProcurementProblemMessage(
+          error,
+          'The evaluation workspace could not be opened.'
+        )
+      );
+      setEvaluatingBidId(null);
+    }
   };
 
   const handleOpenBid = (bidId: string, event: React.MouseEvent) => {
@@ -171,51 +240,77 @@ export default function BidsPage() {
   };
 
   const handleExportToExcel = () => {
-    const exportData = bids.map(bid => ({
+    const exportData = bids.map((bid) => ({
       'Bid Number': bid.bidNumber,
       'Tender Number': bid.tenderNumber,
       'Tender Title': bid.tenderTitle,
       'Business Partner': bid.businessPartnerName,
-      'Total Amount': bid.totalBidAmount,
-      'Currency': bid.currency,
-      'Submitted Date': bid.submittedDate ? format(new Date(bid.submittedDate), 'PPP') : '',
-      'Status': bid.status,
+      'Total Amount': bid.isSealed || bid.isFinancialProposalSealed ? 'Sealed' : bid.totalBidAmount,
+      Currency: bid.currency,
+      'Submitted Date': bid.submittedDate
+        ? format(new Date(bid.submittedDate), 'PPP')
+        : '',
+      Status: bid.status,
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Bids');
 
-    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-    const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const excelBuffer = XLSX.write(workbook, {
+      bookType: 'xlsx',
+      type: 'array',
+    });
+    const data = new Blob([excelBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
     saveAs(data, `Bids_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
 
     toast.success('Bids exported to Excel successfully');
   };
 
   const getSubmittedBidsCount = () => {
-    return bids.filter(bid => bid.status === 'Submitted').length;
+    return bids.filter((bid) => bid.status === 'Submitted').length;
   };
 
   const getStatusBadge = (status: string) => {
-    const statusConfig: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline', className: string }> = {
-      'Submitted': { variant: 'default', className: 'bg-blue-100 text-blue-800' },
-      'Opened': { variant: 'default', className: 'bg-purple-100 text-purple-800' },
-      'UnderEvaluation': { variant: 'default', className: 'bg-yellow-100 text-yellow-800' },
-      'Accepted': { variant: 'default', className: 'bg-green-100 text-green-800' },
-      'Rejected': { variant: 'destructive', className: 'bg-red-100 text-red-800' },
-      'Withdrawn': { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
+    const statusConfig: Record<
+      string,
+      {
+        variant: 'default' | 'secondary' | 'destructive' | 'outline';
+        className: string;
+      }
+    > = {
+      Submitted: { variant: 'default', className: 'bg-blue-100 text-blue-800' },
+      Opened: {
+        variant: 'default',
+        className: 'bg-purple-100 text-purple-800',
+      },
+      UnderEvaluation: {
+        variant: 'default',
+        className: 'bg-yellow-100 text-yellow-800',
+      },
+      Accepted: {
+        variant: 'default',
+        className: 'bg-green-100 text-green-800',
+      },
+      Rejected: {
+        variant: 'destructive',
+        className: 'bg-red-100 text-red-800',
+      },
+      Withdrawn: { variant: 'outline', className: 'bg-gray-100 text-gray-800' },
     };
 
-    const config = statusConfig[status] || { variant: 'outline' as const, className: '' };
+    const config = statusConfig[status] || {
+      variant: 'outline' as const,
+      className: '',
+    };
     return (
       <Badge variant={config.variant} className={config.className}>
         {status}
       </Badge>
     );
   };
-
-
 
   const formatCurrency = (amount?: number, currency?: string) => {
     if (amount === undefined || amount === null) return 'N/A';
@@ -233,12 +328,14 @@ export default function BidsPage() {
           <p className="text-gray-500">View and manage all tender bids</p>
         </div>
         <div className="flex gap-2">
-          {canAdministerTender && tenderFilter !== 'all' && getSubmittedBidsCount() > 0 && (
-            <Button variant="default" onClick={handleBulkOpenBids}>
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Open All Bids ({getSubmittedBidsCount()})
-            </Button>
-          )}
+          {canAdministerTender &&
+            tenderFilter !== 'all' &&
+            getSubmittedBidsCount() > 0 && (
+              <Button variant="default" onClick={handleBulkOpenBids}>
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Open All Bids ({getSubmittedBidsCount()})
+              </Button>
+            )}
           <Button variant="outline" onClick={handleExportToExcel}>
             <Download className="h-4 w-4 mr-2" />
             Export to Excel
@@ -262,7 +359,11 @@ export default function BidsPage() {
                 className="pl-10"
               />
             </div>
-            <Select value={tenderFilter} onValueChange={handleTenderFilter} disabled={loadingTenders}>
+            <Select
+              value={tenderFilter}
+              onValueChange={handleTenderFilter}
+              disabled={loadingTenders}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Filter by tender" />
               </SelectTrigger>
@@ -283,7 +384,9 @@ export default function BidsPage() {
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="Submitted">Submitted</SelectItem>
                 <SelectItem value="Opened">Opened</SelectItem>
-                <SelectItem value="UnderEvaluation">Under Evaluation</SelectItem>
+                <SelectItem value="UnderEvaluation">
+                  Under Evaluation
+                </SelectItem>
                 <SelectItem value="Accepted">Accepted</SelectItem>
                 <SelectItem value="Rejected">Rejected</SelectItem>
                 <SelectItem value="Withdrawn">Withdrawn</SelectItem>
@@ -328,31 +431,42 @@ export default function BidsPage() {
                 <TableBody>
                   {bids.map((bid) => (
                     <TableRow key={bid.id}>
-                      <TableCell className="font-mono font-semibold">{bid.bidNumber}</TableCell>
+                      <TableCell className="font-mono font-semibold">
+                        {bid.bidNumber}
+                      </TableCell>
                       <TableCell>
                         <div>
                           <p className="font-medium">{bid.tenderTitle}</p>
-                          <p className="text-sm text-gray-500">{bid.tenderNumber}</p>
+                          <p className="text-sm text-gray-500">
+                            {bid.tenderNumber}
+                          </p>
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium">{bid.businessPartnerName}</TableCell>
-                      <TableCell className="font-semibold">{formatCurrency(bid.totalBidAmount, bid.currency)}</TableCell>
+                      <TableCell className="font-medium">
+                        {bid.businessPartnerName}
+                      </TableCell>
+                      <TableCell className="font-semibold">
+                        {bid.isSealed || bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
+                      </TableCell>
                       <TableCell>
-                        {bid.submittedDate ? format(new Date(bid.submittedDate), 'PPP') : 'N/A'}
+                        {bid.submittedDate
+                          ? format(new Date(bid.submittedDate), 'PPP')
+                          : 'N/A'}
                       </TableCell>
                       <TableCell>{getStatusBadge(bid.status)}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          {canAdministerTender && bid.status === 'Submitted' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => handleOpenBid(bid.id, e)}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              Open
-                            </Button>
-                          )}
+                          {canAdministerTender &&
+                            bid.status === 'Submitted' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => handleOpenBid(bid.id, e)}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                                Open
+                              </Button>
+                            )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -361,6 +475,22 @@ export default function BidsPage() {
                             <Eye className="h-4 w-4 mr-2" />
                             View
                           </Button>
+                          {canEvaluateTender && (
+                            <Button
+                              size="sm"
+                              disabled={evaluatingBidId === bid.id}
+                              onClick={() => void handleEvaluateBid(bid)}
+                            >
+                              {evaluatingBidId === bid.id ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              ) : (
+                                <Award className="h-4 w-4 mr-2" />
+                              )}
+                              {evaluatingBidId === bid.id
+                                ? 'Opening...'
+                                : 'Evaluate'}
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -378,7 +508,9 @@ export default function BidsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.max(1, prev - 1))
+                      }
                       disabled={currentPage === 1}
                     >
                       <ChevronLeft className="h-4 w-4 mr-2" />
@@ -387,7 +519,9 @@ export default function BidsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+                      }
                       disabled={currentPage === totalPages}
                     >
                       Next
@@ -429,4 +563,3 @@ export default function BidsPage() {
     </div>
   );
 }
-

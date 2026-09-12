@@ -10,11 +10,13 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace ErpSystem.Core.Services.Procurement;
 
-public sealed class ProcurementEvaluationCommitteeControlService
+public sealed partial class ProcurementEvaluationCommitteeControlService
     : IProcurementEvaluationCommitteeControlService
 {
     private const string EventType = "ProcurementEvaluationCommitteeControl";
@@ -22,6 +24,8 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private const string EvaluatePermission = "procurement.tender.evaluate";
     private const string ApprovePermission = "procurement.tender.approve";
     private const string RecallRuleCode = "TDC-EVALUATION-SCORE-RECALL";
+    private const string AppointmentCreatedTopic =
+        "ProcurementEvaluationCommittee.AppointmentCreated.Internal";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly List<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(value => $"DEC-{value:000}").ToList();
@@ -34,6 +38,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly IWorkflowInstanceService _workflowInstances;
     private readonly INotificationTopicPublisher _notificationTopics;
+    private readonly string _frontendUrl;
 
     public ProcurementEvaluationCommitteeControlService(
         IUnitOfWork unitOfWork,
@@ -43,7 +48,8 @@ public sealed class ProcurementEvaluationCommitteeControlService
         IProcurementControlEventService controlEvents,
         IProcurementSourcingCaseService sourcingCases,
         IWorkflowInstanceService workflowInstances,
-        INotificationTopicPublisher notificationTopics)
+        INotificationTopicPublisher notificationTopics,
+        IConfiguration configuration)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -53,6 +59,8 @@ public sealed class ProcurementEvaluationCommitteeControlService
         _sourcingCases = sourcingCases;
         _workflowInstances = workflowInstances;
         _notificationTopics = notificationTopics;
+        _frontendUrl = (configuration["FrontendUrl"] ?? "http://localhost:3000")
+            .TrimEnd('/');
     }
 
     private IGenericRepository<ProcurementEvaluationCommitteeControl> Controls =>
@@ -73,6 +81,12 @@ public sealed class ProcurementEvaluationCommitteeControlService
         _unitOfWork.Repository<ProcurementEvaluationScoreRecall>();
     private IGenericRepository<ProcurementCommittee> CommitteeTemplates =>
         _unitOfWork.Repository<ProcurementCommittee>();
+    private IGenericRepository<BusinessPartnerUser> BusinessPartnerUsers =>
+        _unitOfWork.Repository<BusinessPartnerUser>();
+    private IGenericRepository<TenderInvitation> TenderInvitations =>
+        _unitOfWork.Repository<TenderInvitation>();
+    private IGenericRepository<RequestForQuotationInvitation> RfqInvitations =>
+        _unitOfWork.Repository<RequestForQuotationInvitation>();
     private IGenericRepository<Tender> Tenders => _unitOfWork.Repository<Tender>();
     private IGenericRepository<RequestForQuotation> Rfqs =>
         _unitOfWork.Repository<RequestForQuotation>();
@@ -105,6 +119,10 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 cancellationToken);
         if (control is null)
         {
+            var blockedReasons = new List<string>();
+            if (!source.CommitteePreparationGate.Allowed)
+                blockedReasons.Add(source.CommitteePreparationGate.Message);
+            blockedReasons.Add("No source-specific evaluation committee has been constituted.");
             return new ProcurementEvaluationCommitteeReadinessDto
             {
                 SourceType = sourceType,
@@ -112,8 +130,10 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 SourceReference = source.Reference,
                 SourceExists = true,
                 HasControl = false,
-                BlockedReasons = ["No source-specific evaluation committee has been constituted."],
-                AllowedActions = CanAdminister() ? ["bind"] : []
+                BlockedReasons = blockedReasons,
+                AllowedActions = CanAdminister() && source.CommitteePreparationGate.Allowed
+                    ? ["bind"]
+                    : []
             };
         }
 
@@ -236,12 +256,14 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 item.CreationIdempotencyKey == request.IdempotencyKey,
                 cancellationToken);
         if (replay is not null) return Map(replay, source);
+        EnsureGate(source.CommitteePreparationGate);
 
         var existing = await Controls.GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.SourceType == request.SourceType &&
                 item.SourceId == request.SourceId &&
-                item.Status != ProcurementEvaluationCommitteeControlStatus.Closed &&
+                (item.Status == ProcurementEvaluationCommitteeControlStatus.Draft ||
+                 item.Status == ProcurementEvaluationCommitteeControlStatus.Active) &&
                 !item.IsDeleted)
             .AnyAsync(cancellationToken);
         if (existing)
@@ -260,6 +282,8 @@ public sealed class ProcurementEvaluationCommitteeControlService
             .Include(item => item.Members)
                 .ThenInclude(item => item.Assignment)
                     .ThenInclude(item => item.User)
+                        .ThenInclude(item => item.UserRoles)
+                            .ThenInclude(item => item.Role)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw Validation("EVALUATION_COMMITTEE_TEMPLATE_INVALID",
                 "The selected committee must be an active, current Evaluation Committee.");
@@ -269,6 +293,8 @@ public sealed class ProcurementEvaluationCommitteeControlService
             .ThenBy(item => item.Assignment.RoleName)
             .ThenBy(item => item.Assignment.UserId)
             .ToList();
+        await EnsureCommitteeMembersAreSupplierIndependentAsync(
+            request.SourceType, request.SourceId, members, cancellationToken);
         var templateIssues = CompositionIssues(committee.RequiredQuorum, members);
         if (templateIssues.Count != 0)
             throw Validation("EVALUATION_COMMITTEE_TEMPLATE_INCOMPLETE",
@@ -346,14 +372,21 @@ public sealed class ProcurementEvaluationCommitteeControlService
         }
         CaptureComposition(control);
         await Controls.AddAsync(control);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (
+            IsCommitteeLineagePersistenceFailure(exception))
+        {
+            throw Conflict(
+                "EVALUATION_COMMITTEE_SOURCE_LINEAGE_REJECTED",
+                "The source's recorded procurement policy and configuration lineage could not be retained by the evaluation committee control. Refresh and retry; if the problem continues, an administrator must reconcile the source's immutable procurement lineage.");
+        }
         await RecordAsync(control, "Bound", ProcurementControlEventResult.Succeeded,
             new { request.CommitteeTemplateId, request.Purpose, request.RequiredRoles },
             new { control.Id, control.Version, control.CompositionIntegrityHash },
             correlationId, cancellationToken);
-        foreach (var appointment in control.Appointments)
-            await NotifyAsync("procurement.evaluation.appointment.created", control,
-                appointment.UserId, appointment.Id, cancellationToken);
         return Map(await LoadControlAsync(control.Id, false, cancellationToken), source);
     }
 
@@ -363,16 +396,17 @@ public sealed class ProcurementEvaluationCommitteeControlService
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        Require(request.EvidenceReference, "EVALUATION_COMMITTEE_ACTIVATION_EVIDENCE_REQUIRED",
-            "Constitution or appointment evidence is required.");
         RequireIdempotency(request.IdempotencyKey);
         var control = await LoadControlAsync(committeeControlId, true, cancellationToken);
         await EnforceCapabilityAsync(ManagePermission, control.SourceType, control.SourceId,
-            control.CommitteeCode, correlationId, cancellationToken);
+            null, correlationId, cancellationToken);
         if (control.ActivationIdempotencyKey == request.IdempotencyKey &&
             control.Status == ProcurementEvaluationCommitteeControlStatus.Active)
             return Map(control, await ResolveSourceAsync(control.SourceType, control.SourceId,
                 cancellationToken));
+        var source = await ResolveSourceAsync(control.SourceType, control.SourceId,
+            cancellationToken);
+        EnsureGate(source.CommitteePreparationGate);
         EnsureRowVersion(control.RowVersion, request.RowVersion, "EVALUATION_COMMITTEE");
         if (control.Status != ProcurementEvaluationCommitteeControlStatus.Draft)
             throw Conflict("EVALUATION_COMMITTEE_NOT_DRAFT",
@@ -388,17 +422,22 @@ public sealed class ProcurementEvaluationCommitteeControlService
         control.Status = ProcurementEvaluationCommitteeControlStatus.Active;
         control.ActivatedAtUtc = now;
         control.ActivatedByUserId = _currentUser.UserId;
-        control.ActivationEvidenceReference = request.EvidenceReference.Trim();
+        var evidenceReference = ResolveReference(request.EvidenceReference,
+            "committee-activation", "evidence", control.Id, request.IdempotencyKey);
+        control.ActivationEvidenceReference = evidenceReference;
         control.ActivationIdempotencyKey = request.IdempotencyKey.Trim();
         Touch(control, now);
         await Controls.UpdateAsync(control);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await RecordAsync(control, "Activated", ProcurementControlEventResult.Succeeded,
-            new { request.EvidenceReference }, new { control.Status, control.ActivatedAtUtc },
+            new { EvidenceReference = evidenceReference },
+            new { control.Status, control.ActivatedAtUtc },
             correlationId, cancellationToken,
-            External(request.EvidenceReference, "Committee constitution", "SRC-008"));
-        return Map(control, await ResolveSourceAsync(control.SourceType, control.SourceId,
-            cancellationToken));
+            External(evidenceReference, "Committee constitution", "SRC-008"));
+        foreach (var appointment in control.Appointments.Where(item =>
+                     item.Status == ProcurementEvaluationAppointmentStatus.Pending))
+            await NotifyAppointmentAsync(control, appointment, cancellationToken);
+        return Map(control, source);
     }
 
     public async Task<ProcurementEvaluationAppointmentDto> RespondToAppointmentAsync(
@@ -422,6 +461,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
             appointment.CommitteeControl.CommitteeCode, correlationId, cancellationToken);
         if (appointment.AcceptanceIdempotencyKey == request.IdempotencyKey)
             return MapAppointment(appointment, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(appointment.CommitteeControl.SourceType,
+            appointment.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.CommitteePreparationGate);
         EnsureRowVersion(appointment.RowVersion, request.RowVersion, "EVALUATION_APPOINTMENT");
         if (appointment.Status != ProcurementEvaluationAppointmentStatus.Pending)
             throw Conflict("EVALUATION_APPOINTMENT_ALREADY_RESPONDED",
@@ -430,27 +472,26 @@ public sealed class ProcurementEvaluationCommitteeControlService
             ProcurementEvaluationCommitteeControlStatus.Active)
             throw Conflict("EVALUATION_COMMITTEE_NOT_ACTIVE",
                 "Appointment responses require an active committee control.");
-        if (request.Accept)
-        {
-            Require(request.SignatureReference, "EVALUATION_APPOINTMENT_SIGNATURE_REQUIRED",
-                "Acceptance requires a signature reference.");
-            Require(request.EvidenceReference, "EVALUATION_APPOINTMENT_EVIDENCE_REQUIRED",
-                "Acceptance requires evidence.");
-        }
-        else
+        if (!request.Accept)
         {
             Require(request.Reason, "EVALUATION_APPOINTMENT_DECLINE_REASON_REQUIRED",
                 "A decline reason is required.");
         }
         var now = DateTime.UtcNow;
+        var signatureReference = request.Accept
+            ? ResolveReference(request.SignatureReference, "appointment-acceptance",
+                "signature", appointment.Id, request.IdempotencyKey)
+            : null;
+        var evidenceReference = request.Accept
+            ? ResolveReference(request.EvidenceReference, "appointment-acceptance",
+                "evidence", appointment.Id, request.IdempotencyKey)
+            : null;
         appointment.Status = request.Accept
             ? ProcurementEvaluationAppointmentStatus.Accepted
             : ProcurementEvaluationAppointmentStatus.Declined;
         appointment.AcceptedAtUtc = request.Accept ? now : null;
-        appointment.AcceptanceSignatureReference =
-            request.Accept ? request.SignatureReference!.Trim() : null;
-        appointment.AcceptanceEvidenceReference =
-            request.Accept ? request.EvidenceReference!.Trim() : null;
+        appointment.AcceptanceSignatureReference = signatureReference;
+        appointment.AcceptanceEvidenceReference = evidenceReference;
         appointment.StatusReason = NullIfWhiteSpace(request.Reason);
         appointment.AcceptanceIdempotencyKey = request.IdempotencyKey.Trim();
         Touch(appointment, now);
@@ -464,7 +505,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
             new { appointment.Status, appointment.AcceptedAtUtc },
             correlationId, cancellationToken,
             request.Accept
-                ? External(request.EvidenceReference!, "Appointment acceptance", "SRC-008")
+                ? External(evidenceReference!, "Appointment acceptance", "SRC-008")
                 : null);
         return MapAppointment(appointment, now);
     }
@@ -477,14 +518,16 @@ public sealed class ProcurementEvaluationCommitteeControlService
     {
         Require(request.Declaration, "EVALUATION_COI_DECLARATION_REQUIRED",
             "A conflict-of-interest declaration is required.");
-        Require(request.SignatureReference, "EVALUATION_COI_SIGNATURE_REQUIRED",
-            "The declaration must be signed.");
-        Require(request.EvidenceReference, "EVALUATION_COI_EVIDENCE_REQUIRED",
-            "Declaration evidence is required.");
         RequireIdempotency(request.IdempotencyKey);
         if (request.Outcome == ProcurementEvaluationConflictOutcome.ConflictDeclared)
+        {
             Require(request.ConflictDetails, "EVALUATION_COI_DETAILS_REQUIRED",
                 "Conflict details are required when a conflict is declared.");
+            Require(request.SignatureReference, "EVALUATION_COI_SIGNATURE_REQUIRED",
+                "A declared conflict must be signed.");
+            Require(request.EvidenceReference, "EVALUATION_COI_EVIDENCE_REQUIRED",
+                "Declared-conflict evidence is required.");
+        }
         if (request.ValidFromUtc == default)
             throw Validation("EVALUATION_COI_VALID_FROM_REQUIRED", "ValidFromUtc is required.");
         if (request.ValidToUtc.HasValue && request.ValidToUtc.Value < request.ValidFromUtc)
@@ -507,6 +550,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
         var replay = appointment.ConflictDeclarations
             .FirstOrDefault(item => item.IdempotencyKey == request.IdempotencyKey);
         if (replay is not null) return MapAppointment(appointment, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(appointment.CommitteeControl.SourceType,
+            appointment.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.CommitteePreparationGate);
         EnsureRowVersion(appointment.RowVersion, request.AppointmentRowVersion,
             "EVALUATION_APPOINTMENT");
         if (appointment.Status != ProcurementEvaluationAppointmentStatus.Accepted)
@@ -515,17 +561,22 @@ public sealed class ProcurementEvaluationCommitteeControlService
         var version = appointment.ConflictDeclarations.Select(item => item.Version)
             .DefaultIfEmpty(0).Max() + 1;
         var now = DateTime.UtcNow;
+        var declarationId = Guid.NewGuid();
+        var signatureReference = ResolveReference(request.SignatureReference,
+            "conflict-declaration", "signature", declarationId, request.IdempotencyKey);
+        var evidenceReference = ResolveReference(request.EvidenceReference,
+            "conflict-declaration", "evidence", declarationId, request.IdempotencyKey);
         var declaration = new ProcurementEvaluationConflictDeclaration
         {
-            Id = Guid.NewGuid(),
+            Id = declarationId,
             TenantId = appointment.TenantId,
             AppointmentId = appointment.Id,
             Version = version,
             Outcome = request.Outcome,
             Declaration = request.Declaration.Trim(),
             ConflictDetails = NullIfWhiteSpace(request.ConflictDetails),
-            SignatureReference = request.SignatureReference.Trim(),
-            EvidenceReference = request.EvidenceReference.Trim(),
+            SignatureReference = signatureReference,
+            EvidenceReference = evidenceReference,
             WorkflowEvidenceDocumentId = request.WorkflowEvidenceDocumentId,
             FileUploadRecordId = request.FileUploadRecordId,
             ValidFromUtc = request.ValidFromUtc,
@@ -546,7 +597,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
             new { appointment.Id, declaration.Version, request.Outcome },
             new { declaration.Id, declaration.IntegrityHash },
             correlationId, cancellationToken,
-            Evidence(request.EvidenceReference, request.WorkflowEvidenceDocumentId,
+            Evidence(evidenceReference, request.WorkflowEvidenceDocumentId,
                 request.FileUploadRecordId, "Conflict declaration", "SRC-008"));
         return MapAppointment(appointment, now);
     }
@@ -561,8 +612,6 @@ public sealed class ProcurementEvaluationCommitteeControlService
             "Meeting mode is required.");
         Require(request.MeetingChannel, "EVALUATION_MEETING_CHANNEL_REQUIRED",
             "Meeting channel or venue is required.");
-        Require(request.EvidenceReference, "EVALUATION_MEETING_EVIDENCE_REQUIRED",
-            "Meeting notice or agenda evidence is required.");
         RequireIdempotency(request.IdempotencyKey);
         if (request.ScheduledAtUtc == default)
             throw Validation("EVALUATION_MEETING_SCHEDULE_REQUIRED",
@@ -574,10 +623,13 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 "Remote or hybrid meetings require remote-meeting evidence.");
         var control = await LoadControlAsync(committeeControlId, true, cancellationToken);
         await EnforceCapabilityAsync(ManagePermission, control.SourceType, control.SourceId,
-            control.CommitteeCode, correlationId, cancellationToken);
+            null, correlationId, cancellationToken);
         var replay = control.Meetings.FirstOrDefault(item =>
             item.IdempotencyKey == request.IdempotencyKey);
         if (replay is not null) return MapMeeting(replay, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(control.SourceType, control.SourceId,
+            cancellationToken);
+        EnsureGate(source.MeetingGate);
         EnsureRowVersion(control.RowVersion, request.CommitteeRowVersion,
             "EVALUATION_COMMITTEE");
         EnsureActive(control, DateTime.UtcNow);
@@ -585,9 +637,12 @@ public sealed class ProcurementEvaluationCommitteeControlService
         if (issues.Count != 0)
             throw Validation("EVALUATION_COMMITTEE_COMPOSITION_INCOMPLETE",
                 string.Join(" ", issues));
+        var meetingId = Guid.NewGuid();
+        var evidenceReference = ResolveReference(request.EvidenceReference,
+            "meeting-scheduled", "evidence", meetingId, request.IdempotencyKey);
         var meeting = new ProcurementEvaluationMeeting
         {
-            Id = Guid.NewGuid(),
+            Id = meetingId,
             TenantId = control.TenantId,
             CommitteeControlId = control.Id,
             Sequence = control.Meetings.Select(item => item.Sequence).DefaultIfEmpty(0).Max() + 1,
@@ -596,7 +651,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
             MeetingMode = meetingMode,
             MeetingChannel = request.MeetingChannel.Trim(),
             ScheduledAtUtc = request.ScheduledAtUtc,
-            EvidenceReference = request.EvidenceReference.Trim(),
+            EvidenceReference = evidenceReference,
             RemoteMeetingEvidenceReference =
                 NullIfWhiteSpace(request.RemoteMeetingEvidenceReference),
             IdempotencyKey = request.IdempotencyKey.Trim(),
@@ -625,10 +680,6 @@ public sealed class ProcurementEvaluationCommitteeControlService
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        Require(request.SignatureReference, "EVALUATION_ATTENDANCE_SIGNATURE_REQUIRED",
-            "Signed attendance requires a signature reference.");
-        Require(request.EvidenceReference, "EVALUATION_ATTENDANCE_EVIDENCE_REQUIRED",
-            "Signed attendance evidence is required.");
         RequireIdempotency(request.IdempotencyKey);
         var meeting = await MeetingQuery(true)
             .FirstOrDefaultAsync(item =>
@@ -655,6 +706,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
             item.IdempotencyKey == request.IdempotencyKey &&
             item.AppointmentId == appointment.Id);
         if (replay is not null) return MapAttendance(replay);
+        var source = await ResolveSourceAsync(meeting.CommitteeControl.SourceType,
+            meeting.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.MeetingGate);
         if (meeting.AttendanceRecords.Any(item => item.AppointmentId == appointment.Id))
             throw Conflict("EVALUATION_ATTENDANCE_ALREADY_SIGNED",
                 "Attendance has already been signed for this appointment.");
@@ -663,21 +717,32 @@ public sealed class ProcurementEvaluationCommitteeControlService
         if (eligibility.Count != 0)
             throw Validation("EVALUATION_ATTENDANCE_MEMBER_INELIGIBLE",
                 string.Join(" ", eligibility));
+        var attendanceId = Guid.NewGuid();
+        var signatureReference = ResolveReference(request.SignatureReference,
+            "attendance", "signature", attendanceId, request.IdempotencyKey);
+        var evidenceReference = ResolveReference(request.EvidenceReference,
+            "attendance", "evidence", attendanceId, request.IdempotencyKey);
         var attendance = new ProcurementEvaluationAttendanceRecord
         {
-            Id = Guid.NewGuid(),
+            Id = attendanceId,
             TenantId = meeting.TenantId,
             MeetingId = meeting.Id,
             AppointmentId = appointment.Id,
             IsPresent = request.IsPresent,
             SignedAtUtc = now,
-            SignatureReference = request.SignatureReference.Trim(),
-            EvidenceReference = request.EvidenceReference.Trim(),
+            SignatureReference = signatureReference,
+            EvidenceReference = evidenceReference,
             WasEligibleAtSignature = true,
             IdempotencyKey = request.IdempotencyKey.Trim()
         };
         CaptureAttendance(attendance, appointment);
         await Attendance.AddAsync(attendance);
+        // A failed quorum is a historical attempt, not a live attendance tally.
+        // Reopen the meeting before saving new attendance so the SQL lifecycle
+        // guard does not compare it with that stale attempt. Retain its snapshot
+        // and audit evidence; only ConfirmQuorumAsync can confirm the new quorum.
+        if (meeting.Status == ProcurementEvaluationMeetingStatus.QuorumFailed)
+            meeting.Status = ProcurementEvaluationMeetingStatus.Draft;
         Touch(meeting, now);
         await Meetings.UpdateAsync(meeting);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -692,7 +757,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
             },
             new { attendance.Id, attendance.IntegrityHash },
             correlationId, cancellationToken,
-            External(request.EvidenceReference, "Signed attendance", "SRC-008"));
+            External(evidenceReference, "Signed attendance", "SRC-008"));
         return MapAttendance(attendance);
     }
 
@@ -702,8 +767,6 @@ public sealed class ProcurementEvaluationCommitteeControlService
         string correlationId,
         CancellationToken cancellationToken = default)
     {
-        Require(request.EvidenceReference, "EVALUATION_QUORUM_EVIDENCE_REQUIRED",
-            "Quorum confirmation evidence is required.");
         RequireIdempotency(request.IdempotencyKey);
         var meeting = await MeetingQuery(true)
             .FirstOrDefaultAsync(item =>
@@ -713,11 +776,14 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 "The evaluation meeting was not found.");
         await EnforceCapabilityAsync(ManagePermission,
             meeting.CommitteeControl.SourceType, meeting.CommitteeControl.SourceId,
-            meeting.CommitteeControl.CommitteeCode, correlationId, cancellationToken);
+            null, correlationId, cancellationToken);
         if (meeting.QuorumIdempotencyKey == request.IdempotencyKey &&
             meeting.Status is ProcurementEvaluationMeetingStatus.QuorumConfirmed or
                 ProcurementEvaluationMeetingStatus.QuorumFailed)
             return MapMeeting(meeting, DateTime.UtcNow);
+        var source = await ResolveSourceAsync(meeting.CommitteeControl.SourceType,
+            meeting.CommitteeControl.SourceId, cancellationToken);
+        EnsureGate(source.MeetingGate);
         EnsureRowVersion(meeting.RowVersion, request.RowVersion, "EVALUATION_MEETING");
         if (meeting.Status is ProcurementEvaluationMeetingStatus.QuorumConfirmed or
             ProcurementEvaluationMeetingStatus.Closed)
@@ -766,7 +832,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
             ? ProcurementEvaluationMeetingStatus.QuorumConfirmed
             : ProcurementEvaluationMeetingStatus.QuorumFailed;
         meeting.StartedAtUtc ??= now;
-        meeting.EvidenceReference = request.EvidenceReference.Trim();
+        var evidenceReference = ResolveReference(request.EvidenceReference,
+            "quorum-confirmation", "evidence", meeting.Id, request.IdempotencyKey);
+        meeting.EvidenceReference = evidenceReference;
         meeting.QuorumIdempotencyKey = request.IdempotencyKey.Trim();
         CaptureQuorum(meeting, signedAppointments);
         Touch(meeting, now);
@@ -775,7 +843,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         await RecordAsync(meeting.CommitteeControl, "QuorumEvaluated",
             met ? ProcurementControlEventResult.Allowed :
                 ProcurementControlEventResult.Denied,
-            new { meeting.Id, request.EvidenceReference },
+            new { meeting.Id, EvidenceReference = evidenceReference },
             new
             {
                 meeting.QuorumMet,
@@ -785,7 +853,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 meeting.QuorumIntegrityHash
             },
             correlationId, cancellationToken,
-            External(request.EvidenceReference, "Quorum confirmation", "SRC-008"));
+            External(evidenceReference, "Quorum confirmation", "SRC-008"));
         return MapMeeting(meeting, now);
     }
 
@@ -1166,7 +1234,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
         await EnforceCapabilityAsync(ApprovePermission,
             recall.ScoreSheet.CommitteeControl.SourceType,
             recall.ScoreSheet.CommitteeControl.SourceId,
-            recall.ScoreSheet.CommitteeControl.CommitteeCode,
+            null,
             correlationId, cancellationToken);
         if (recall.DecisionIdempotencyKey == request.IdempotencyKey &&
             recall.Status != ProcurementEvaluationScoreRecallStatus.PendingApproval)
@@ -1235,7 +1303,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 "The scorer or recall requester cannot approve the shared recall workflow.");
         var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
         {
-            ControlCode = "SOD-EVALUATION-SCORER-RECALL-APPROVER",
+            // A recall is a procurement transaction: its requester and original
+            // scorer remain makers, and its decision must use the shared checker.
+            ControlCode = "SOD-INITIATOR-APPROVER",
             SourceType = EventType,
             SourceReference = recall.ScoreSheet.CommitteeControl.SourceReference,
             ProhibitedActorUserIds = new List<Guid>
@@ -1342,6 +1412,57 @@ public sealed class ProcurementEvaluationCommitteeControlService
                    "The evaluation committee control was not found.");
     }
 
+    private async Task EnsureCommitteeMembersAreSupplierIndependentAsync(
+        ProcurementEvaluationSourceType sourceType,
+        Guid sourceId,
+        IReadOnlyCollection<ProcurementCommitteeMember> members,
+        CancellationToken cancellationToken)
+    {
+        var memberUserIds = members
+            .Select(item => item.Assignment.UserId)
+            .Distinct()
+            .ToList();
+        if (memberUserIds.Count == 0) return;
+
+        var hasExternalUser = members.Any(member =>
+            member.Assignment.User.UserRoles.Any(userRole =>
+                string.Equals(userRole.Role.Name, Constants.Roles.ExternalUser,
+                    StringComparison.OrdinalIgnoreCase)));
+        if (hasExternalUser)
+            throw Validation(
+                "EVALUATION_COMMITTEE_EXTERNAL_MEMBER_PROHIBITED",
+                "External supplier users cannot be appointed to an evaluation committee.");
+
+        var invitedSupplierIds = sourceType == ProcurementEvaluationSourceType.Tender
+            ? await TenderInvitations.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.TenderId == sourceId &&
+                    !item.IsDeleted)
+                .Select(item => item.BusinessPartnerId)
+                .Distinct()
+                .ToListAsync(cancellationToken)
+            : await RfqInvitations.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId &&
+                    item.RfqId == sourceId &&
+                    !item.IsDeleted)
+                .Select(item => item.BusinessPartnerId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+        if (invitedSupplierIds.Count == 0) return;
+
+        var hasInvitedSupplierLink = await BusinessPartnerUsers.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                memberUserIds.Contains(item.UserId) &&
+                invitedSupplierIds.Contains(item.BusinessPartnerId) &&
+                item.IsActive &&
+                !item.IsDeleted)
+            .AnyAsync(cancellationToken);
+        if (hasInvitedSupplierLink)
+            throw Validation(
+                "EVALUATION_COMMITTEE_INVITED_SUPPLIER_MEMBER_PROHIBITED",
+                "Users linked to a supplier invited to this procurement source cannot be appointed to its evaluation committee.");
+    }
+
     private async Task<SourceLineage> ResolveSourceAsync(
         ProcurementEvaluationSourceType sourceType,
         Guid sourceId,
@@ -1354,7 +1475,8 @@ public sealed class ProcurementEvaluationCommitteeControlService
             var tender = await LoadTenderSourceAsync(sourceId, cancellationToken);
             if (tender.SourcingCase is null)
                 tender = await RecoverTenderSourceLineageAsync(tender, cancellationToken);
-            return SourceLineage.From(tender);
+            return await ApplyTenderEvaluationLifecycleAsync(
+                SourceLineage.From(tender), tender, cancellationToken);
         }
         var rfq = await Rfqs.GetQueryable(item =>
                 item.Id == sourceId &&
@@ -1369,6 +1491,95 @@ public sealed class ProcurementEvaluationCommitteeControlService
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw NotFound("EVALUATION_SOURCE_NOT_FOUND", "The RFQ was not found.");
         return SourceLineage.From(rfq);
+    }
+
+    private async Task<SourceLineage> ApplyTenderEvaluationLifecycleAsync(
+        SourceLineage source,
+        Tender tender,
+        CancellationToken cancellationToken)
+    {
+        var state = await TenderControls.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId &&
+                item.TenderId == tender.Id &&
+                !item.IsDeleted)
+            .AsNoTracking()
+            .Select(item => new
+            {
+                item.Status,
+                item.SubmissionDeadlineUtc,
+                HasOnTimeSubmission = item.SubmissionReceipts.Any(receipt =>
+                    !receipt.IsDeleted &&
+                    receipt.Disposition ==
+                    ProcurementTenderSubmissionDisposition.OnTimeAccepted)
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (state is null)
+        {
+            var sourcing = tender.SourcingCase;
+            var requiresAdvanced = sourcing is null || ProcurementTenderRouting.RequiresControlledLifecycle(
+                sourcing.SelectedMethod,
+                ProcurementTenderRouting.HasAdvancedAuthority(sourcing.AuthorityRouteId, sourcing.AuthorityRouteReference));
+            if (!requiresAdvanced && (tender.Status is "Published" or "Closed" or "Awarded") &&
+                tender.SubmissionDeadline.HasValue)
+            {
+                var hasSubmission = await _unitOfWork.Repository<TenderBid>().GetQueryable(bid =>
+                        bid.TenantId == _currentUser.TenantId && bid.TenderId == tender.Id && !bid.IsDeleted &&
+                        (bid.Status == "Submitted" || bid.Status == "Opened" || bid.Status == "UnderEvaluation" ||
+                         bid.Status == "Evaluated" || bid.Status == "Awarded") &&
+                        bid.SubmittedDate != default && bid.SubmittedDate <= tender.SubmissionDeadline.Value)
+                    .AnyAsync(cancellationToken);
+                var preparation = hasSubmission ? LifecycleGate.Ready : LifecycleGate.Blocked(
+                    "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED",
+                    "At least one on-time sealed bid must be registered before the evaluation committee is constituted or begins member actions.");
+                return source with
+                {
+                    CommitteePreparationGate = preparation,
+                    MeetingGate = !hasSubmission ? preparation : DateTime.UtcNow < tender.SubmissionDeadline.Value
+                        ? LifecycleGate.Blocked("EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE",
+                            "The bidding window must close before an evaluation meeting, attendance or quorum can be recorded.")
+                        : LifecycleGate.Ready
+                };
+            }
+            var notPublished = LifecycleGate.Blocked(
+                "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED",
+                "Publish the approved tender and open its governed bidding window before constituting the evaluation committee.");
+            return source with
+            {
+                CommitteePreparationGate = notPublished,
+                MeetingGate = notPublished
+            };
+        }
+
+        if (!state.HasOnTimeSubmission)
+        {
+            var noSubmission = LifecycleGate.Blocked(
+                "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED",
+                "At least one on-time sealed bid must be registered before the evaluation committee is constituted or begins member actions.");
+            return source with
+            {
+                CommitteePreparationGate = noSubmission,
+                MeetingGate = noSubmission
+            };
+        }
+
+        var committeeGate = LifecycleGate.Ready;
+        var meetingGate = DateTime.UtcNow < state.SubmissionDeadlineUtc
+            ? LifecycleGate.Blocked(
+                "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE",
+                "The bidding window must close before an evaluation meeting, attendance or quorum can be recorded.")
+            : LifecycleGate.Ready;
+        return source with
+        {
+            CommitteePreparationGate = committeeGate,
+            MeetingGate = meetingGate
+        };
+    }
+
+    private static void EnsureGate(LifecycleGate gate)
+    {
+        if (!gate.Allowed)
+            throw Conflict(gate.Code, gate.Message);
     }
 
     private async Task<Tender> LoadTenderSourceAsync(
@@ -1667,6 +1878,10 @@ public sealed class ProcurementEvaluationCommitteeControlService
         var blocked = new List<string>();
         if (control.Status != ProcurementEvaluationCommitteeControlStatus.Active)
             blocked.Add("The committee control is not active.");
+        if (!source.CommitteePreparationGate.Allowed)
+            blocked.Add(source.CommitteePreparationGate.Message);
+        if (!source.MeetingGate.Allowed)
+            blocked.Add(source.MeetingGate.Message);
         if (!IsEffective(control, now))
             blocked.Add("The committee control is not currently effective.");
         blocked.AddRange(compositionIssues);
@@ -1698,7 +1913,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
             SignedVotingAttendanceCount =
                 latestMeeting?.SignedVotingAttendanceCount ?? 0,
             BlockedReasons = blocked.Distinct().ToList(),
-            AllowedActions = BuildAllowedActions(control, now)
+            AllowedActions = BuildAllowedActions(control, source, now)
         };
     }
 
@@ -1740,6 +1955,10 @@ public sealed class ProcurementEvaluationCommitteeControlService
             ActivatedAtUtc = control.ActivatedAtUtc,
             ActivatedByUserId = control.ActivatedByUserId,
             ActivationEvidenceReference = control.ActivationEvidenceReference,
+            RetiredAtUtc = control.RetiredAtUtc,
+            RetiredByUserId = control.RetiredByUserId,
+            RetirementReason = control.RetirementReason,
+            RetirementEvidenceReference = control.RetirementEvidenceReference,
             CompositionIntegrityHash = control.CompositionIntegrityHash,
             RequiredRoles = control.RequiredRoles.OrderBy(item => item.MemberKind)
                 .ThenBy(item => item.RoleName)
@@ -1773,7 +1992,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 .OrderByDescending(item => item.RequestedAtUtc)
                 .Select(MapRecall).ToList(),
             Timeline = BuildTimeline(control),
-            AllowedActions = BuildAllowedActions(control, now),
+            AllowedActions = BuildAllowedActions(control, source, now),
             BlockedReasons = BuildReadiness(control, source).BlockedReasons,
             RowVersion = Convert.ToBase64String(control.RowVersion)
         };
@@ -1933,6 +2152,15 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 ActorUserId = control.ActivatedByUserId ?? Guid.Empty,
                 Reference = control.ActivationEvidenceReference
             });
+        if (control.RetiredAtUtc.HasValue)
+            result.Add(new ProcurementEvaluationTimelineEntryDto
+            {
+                OccurredAtUtc = control.RetiredAtUtc.Value,
+                Action = "Draft committee retired",
+                Outcome = control.RetirementReason ?? "Retired",
+                ActorUserId = control.RetiredByUserId ?? Guid.Empty,
+                Reference = control.RetirementEvidenceReference
+            });
         result.AddRange(control.Appointments
             .Where(item => item.AcceptedAtUtc.HasValue)
             .Select(item => new ProcurementEvaluationTimelineEntryDto
@@ -1990,29 +2218,43 @@ public sealed class ProcurementEvaluationCommitteeControlService
 
     private List<string> BuildAllowedActions(
         ProcurementEvaluationCommitteeControl control,
+        SourceLineage source,
         DateTime now)
     {
         var actions = new List<string>();
         if (CanAdminister() && control.Status ==
             ProcurementEvaluationCommitteeControlStatus.Draft)
-            actions.Add("activate");
-        if (CanAdminister() && control.Status ==
+        {
+            if (source.CommitteePreparationGate.Allowed)
+                actions.Add("activate");
+            actions.Add("retireDraft");
+        }
+        if (source.CommitteePreparationGate.Allowed && CanAdminister() && control.Status ==
+            ProcurementEvaluationCommitteeControlStatus.Retired)
+            actions.Add("bind");
+        if (source.MeetingGate.Allowed && CanAdminister() && control.Status ==
             ProcurementEvaluationCommitteeControlStatus.Active)
             actions.Add("createMeeting");
-        if (CanAdminister() && control.Meetings.Any(item =>
+        if (source.MeetingGate.Allowed && CanAdminister() && control.Meetings.Any(item =>
                 item.Status is ProcurementEvaluationMeetingStatus.Draft or
                     ProcurementEvaluationMeetingStatus.QuorumFailed))
             actions.Add("confirmQuorum");
+        var acceptsMemberActions = source.CommitteePreparationGate.Allowed && control.Status ==
+                                   ProcurementEvaluationCommitteeControlStatus.Active &&
+                                   IsEffective(control, now);
         var appointment = control.Appointments.FirstOrDefault(item =>
             item.UserId == _currentUser.UserId);
-        if (appointment?.Status == ProcurementEvaluationAppointmentStatus.Pending)
+        if (acceptsMemberActions &&
+            appointment?.Status == ProcurementEvaluationAppointmentStatus.Pending)
             actions.Add("respondToAppointment");
-        if (appointment?.Status == ProcurementEvaluationAppointmentStatus.Accepted)
+        if (acceptsMemberActions &&
+            appointment?.Status == ProcurementEvaluationAppointmentStatus.Accepted)
             actions.Add("submitConflictDeclaration");
-        if (appointment is not null &&
+        if (acceptsMemberActions && appointment is not null &&
             AppointmentEligibilityIssues(appointment, now).Count == 0)
         {
-            actions.Add("signAttendance");
+            if (source.MeetingGate.Allowed)
+                actions.Add("signAttendance");
             if (control.Meetings.Any(item =>
                     item.Status == ProcurementEvaluationMeetingStatus.QuorumConfirmed &&
                     item.QuorumMet &&
@@ -2459,6 +2701,51 @@ public sealed class ProcurementEvaluationCommitteeControlService
         }, cancellationToken);
     }
 
+    private async Task NotifyAppointmentAsync(
+        ProcurementEvaluationCommitteeControl control,
+        ProcurementEvaluationCommitteeAppointment appointment,
+        CancellationToken cancellationToken)
+    {
+        var sourcePath = control.SourceType == ProcurementEvaluationSourceType.Tender
+            ? $"/procurement/tenders/{control.SourceId:D}/committee-controls"
+            : $"/procurement/rfqs/{control.SourceId:D}/committee-controls";
+        var actionUrl = $"{_frontendUrl}{sourcePath}";
+
+        await _notificationTopics.PublishAsync(new NotificationTopicEvent
+        {
+            TenantId = control.TenantId,
+            TopicKey = AppointmentCreatedTopic,
+            NotificationType = "ProcurementEvaluationCommittee",
+            EntityType = EventType,
+            EntityId = appointment.Id,
+            TriggeredByUserId = _currentUser.UserId,
+            Data = new Dictionary<string, object>
+            {
+                ["SourceType"] = control.SourceType.ToString(),
+                ["SourceId"] = control.SourceId,
+                ["SourceReference"] = control.SourceReference,
+                ["CommitteeControlId"] = control.Id,
+                ["CommitteeCode"] = control.CommitteeCode,
+                ["CommitteeName"] = control.CommitteeName,
+                ["AppointmentId"] = appointment.Id,
+                ["MemberKind"] = appointment.MemberKind.ToString(),
+                ["RoleName"] = appointment.RoleName,
+                ["TargetUserId"] = appointment.UserId,
+                ["ActionUrl"] = actionUrl
+            },
+            Email = new NotificationTopicEmailOptions
+            {
+                SubjectTemplateOverride =
+                    "Evaluation committee appointment: {{SourceReference}}",
+                HtmlBodyTemplateOverride =
+                    "<p>You have been appointed as <strong>{{MemberKind}}</strong> to {{CommitteeName}} for {{SourceReference}}.</p>" +
+                    "<p><a href=\"{{ActionUrl}}\">Review and respond to the appointment</a></p>",
+                TextBodyTemplateOverride =
+                    "You have been appointed as {{MemberKind}} to {{CommitteeName}} for {{SourceReference}}. Review and respond: {{ActionUrl}}"
+            }
+        }, cancellationToken);
+    }
+
     private static ProcurementControlEventEvidenceReference External(
         string reference,
         string label,
@@ -2505,8 +2792,7 @@ public sealed class ProcurementEvaluationCommitteeControlService
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (HasPlatformSuperAdministratorBypass() ||
-            _currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
+        if (_currentUser.HasRegisteredProcurementPermission("procurement.records.read"))
             return;
         throw new ProcurementEvaluationCommitteeAuthorizationException(
             "The procurement records read permission is required.");
@@ -2523,15 +2809,10 @@ public sealed class ProcurementEvaluationCommitteeControlService
     }
 
     private bool CanAdminister() =>
-        HasPlatformSuperAdministratorBypass() ||
         _currentUser.HasRegisteredProcurementPermission(ManagePermission);
 
     private bool CanApprove() =>
-        HasPlatformSuperAdministratorBypass() ||
         _currentUser.HasRegisteredProcurementPermission(ApprovePermission);
-
-    private bool HasPlatformSuperAdministratorBypass() =>
-        _currentUser.HasRole(Constants.Roles.SuperAdmin);
 
     private string ActorName() =>
         string.IsNullOrWhiteSpace(_currentUser.FullName)
@@ -2604,6 +2885,25 @@ public sealed class ProcurementEvaluationCommitteeControlService
 
     private static string? NullIfWhiteSpace(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private string ResolveReference(
+        string? supplied,
+        string action,
+        string referenceKind,
+        Guid subjectId,
+        string idempotencyKey)
+    {
+        if (!string.IsNullOrWhiteSpace(supplied)) return supplied.Trim();
+
+        var fingerprint = ComputeHash(string.Join('|',
+            _currentUser.TenantId.ToString("N"),
+            _currentUser.UserId.ToString("N"),
+            action,
+            referenceKind,
+            subjectId.ToString("N"),
+            idempotencyKey.Trim()));
+        return $"urn:tdc:procurement:evaluation-committee:{action}:{referenceKind}:{fingerprint}";
+    }
 
     private static void Touch(BaseEntity entity, DateTime? now = null)
     {
@@ -2679,6 +2979,20 @@ public sealed class ProcurementEvaluationCommitteeControlService
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
             .ToLowerInvariant();
 
+    internal static bool IsCommitteeLineagePersistenceFailure(Exception exception)
+    {
+        const string guardMessage =
+            "Evaluation committee source, template, policy, method, configuration, workflow, or tenant lineage is invalid.";
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains(guardMessage, StringComparison.OrdinalIgnoreCase) &&
+                (current is not SqlException sqlException || sqlException.Number == 51301))
+                return true;
+        }
+
+        return false;
+    }
+
     private static ProcurementEvaluationCommitteeNotFoundException NotFound(
         string code,
         string message) => new(code, message);
@@ -2701,7 +3015,9 @@ public sealed class ProcurementEvaluationCommitteeControlService
         int ConfigurationProfileVersion,
         Guid MethodRuleId,
         string MethodRuleCode,
-        Guid? WorkflowDefinitionId)
+        Guid? WorkflowDefinitionId,
+        LifecycleGate CommitteePreparationGate,
+        LifecycleGate MeetingGate)
     {
         public static SourceLineage From(Tender tender)
         {
@@ -2742,7 +3058,17 @@ public sealed class ProcurementEvaluationCommitteeControlService
                 profile.Version,
                 sourcingCase.MethodRuleId,
                 sourcingCase.MethodRuleCode,
-                methodRule.WorkflowDefinitionId);
+                methodRule.WorkflowDefinitionId,
+                LifecycleGate.Ready,
+                LifecycleGate.Ready);
         }
+    }
+
+    private sealed record LifecycleGate(bool Allowed, string Code, string Message)
+    {
+        public static LifecycleGate Ready { get; } = new(true, string.Empty, string.Empty);
+
+        public static LifecycleGate Blocked(string code, string message) =>
+            new(false, code, message);
     }
 }

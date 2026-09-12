@@ -18,6 +18,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { employeeService } from '@/services/hr/employee.service';
 import type { EmployeeDetail } from '@/types/hr/employee';
 import { ContactsTab } from '@/components/hr/employee/tabs/ContactsTab';
+import { DocumentsTab } from '@/components/hr/employee/tabs/DocumentsTab';
 import { EmergencyContactsTab } from '@/components/hr/employee/tabs/EmergencyContactsTab';
 import { DependentsTab } from '@/components/hr/employee/tabs/DependentsTab';
 import { QualificationsTab } from '@/components/hr/employee/tabs/QualificationsTab';
@@ -29,8 +30,11 @@ import { ExpatriateTab } from '@/components/hr/employee/tabs/ExpatriateTab';
 import { PositionHistoryTab } from '@/components/hr/employee/tabs/PositionHistoryTab';
 import { SalaryAssignmentsTab } from '@/components/hr/employee/tabs/SalaryAssignmentsTab';
 import { RefereesTab } from '@/components/hr/employee/tabs/RefereesTab';
+import { RelieversTab } from '@/components/hr/employee/tabs/RelieversTab';
+import { TeamsTab } from '@/components/hr/employee/tabs/TeamsTab';
 import { GuarantorsTab } from '@/components/hr/employee/tabs/GuarantorsTab';
 import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
+import { offPayrollReasonLabel, PAYROLL_ISSUE_LABELS } from '@/types/hr/employee';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -78,6 +82,13 @@ export default function EmployeeDetailPage() {
     queryKey: ['hr', 'employees', e?.managerId, 'lookup'],
     queryFn: () => employeeService.getById(e?.managerId as string),
     enabled: !!e?.managerId,
+  });
+
+  // Payroll's own answer beside HR's flag — whether the person is set up and active in Payroll.
+  const { data: payroll } = useQuery({
+    queryKey: ['hr', 'employees', id, 'payroll-status'],
+    queryFn: () => employeeService.getPayrollStatus(id),
+    enabled: !!id,
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'employees'] });
@@ -176,10 +187,15 @@ export default function EmployeeDetailPage() {
             <TabsTrigger value="contracts">Contracts</TabsTrigger>
             <TabsTrigger value="expatriate">Expatriate</TabsTrigger>
             <TabsTrigger value="position-history">Position History</TabsTrigger>
+            {/* Slice 7. Who covers for this employee while they are away — read by the
+                leave request form to seed its two reliever slots by priority. */}
+            <TabsTrigger value="teams">Teams</TabsTrigger>
+            <TabsTrigger value="relievers">Relievers</TabsTrigger>
             <TabsTrigger value="salary">Salary</TabsTrigger>
             <TabsTrigger value="referees">Referees</TabsTrigger>
             <TabsTrigger value="guarantors">Guarantors</TabsTrigger>
             <TabsTrigger value="bank">Bank</TabsTrigger>
+            <TabsTrigger value="documents">Documents</TabsTrigger>
           </TabsList>
         </div>
 
@@ -219,12 +235,58 @@ export default function EmployeeDetailPage() {
           </InfoCard>
 
           <InfoCard title="Compensation & Tax">
-            <InfoRow label="Salary" value={money(e.salary)} />
+            <InfoRow
+              label="Payroll"
+              value={
+                e.isOnPayroll ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900 dark:text-emerald-100">
+                    On payroll
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-800 dark:bg-slate-700 dark:text-slate-100">
+                    Not on payroll
+                  </span>
+                )
+              }
+            />
+            {/* Payroll's side: is the person set up and active in the payroll module? The two are
+                different owners' facts; a mismatch is named here and listed on the reconciliation screen. */}
+            <InfoRow
+              label="In Payroll module"
+              value={
+                payroll
+                  ? payroll.hasPayrollProfile
+                    ? payroll.payrollActive
+                      ? 'Set up · active'
+                      : 'Set up · switched off'
+                    : 'Not set up'
+                  : undefined
+              }
+            />
+            {payroll?.issue && (
+              <InfoRow
+                label="Attention"
+                value={<span className="text-amber-700 dark:text-amber-300">{PAYROLL_ISSUE_LABELS[payroll.issue]}</span>}
+              />
+            )}
+            {e.isOnPayroll ? (
+              <>
+                <InfoRow label="Monthly basic salary" value={money(e.salary)} />
+                <InfoRow label="Pay Tax" value={yn(e.payTax)} />
+                <InfoRow label="SS Fund" value={yn(e.ssFund)} />
+                <InfoRow label="Gross Up" value={yn(e.grossUp)} />
+                <InfoRow label="Tier 2 Only" value={yn(e.tier2Only)} />
+                <InfoRow label="Overtime" value={yn(e.overtime)} />
+              </>
+            ) : (
+              <>
+                <InfoRow label="Paid instead by" value={offPayrollReasonLabel(e.offPayrollReason)} />
+                <InfoRow label="Arrangement" value={e.offPayrollNote} />
+              </>
+            )}
             <InfoRow label="Tax Number" value={e.taxNumber} />
             <InfoRow label="SSNIT Number" value={e.socialSecurityNumber} />
             <InfoRow label="TIN" value={e.tinNumber} />
-            <InfoRow label="Pay Tax" value={yn(e.payTax)} />
-            <InfoRow label="SS Fund" value={yn(e.ssFund)} />
           </InfoCard>
 
           {isTerminated && (
@@ -236,6 +298,9 @@ export default function EmployeeDetailPage() {
           )}
         </TabsContent>
 
+        <TabsContent value="documents" className="pt-4">
+          <DocumentsTab employeeId={id} />
+        </TabsContent>
         <TabsContent value="contacts" className="pt-4">
           <ContactsTab employeeId={id} />
         </TabsContent>
@@ -267,7 +332,13 @@ export default function EmployeeDetailPage() {
           <PositionHistoryTab employeeId={id} />
         </TabsContent>
         <TabsContent value="salary" className="pt-4">
-          <SalaryAssignmentsTab employeeId={id} />
+          <SalaryAssignmentsTab employeeId={id} isOnPayroll={e.isOnPayroll} />
+        </TabsContent>
+        <TabsContent value="teams" className="pt-4">
+          <TeamsTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="relievers" className="pt-4">
+          <RelieversTab employeeId={id} />
         </TabsContent>
         <TabsContent value="referees" className="pt-4">
           <RefereesTab employeeId={id} />

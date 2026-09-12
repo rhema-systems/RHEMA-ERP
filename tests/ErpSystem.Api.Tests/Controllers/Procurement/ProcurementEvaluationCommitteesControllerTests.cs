@@ -169,6 +169,34 @@ public sealed class ProcurementEvaluationCommitteesControllerTests
         fixture.Service.VerifyAll();
     }
 
+    [Fact]
+    public async Task RetireDraftForwardsGovernedRequestAndCorrelation()
+    {
+        var fixture = new Fixture();
+        var committeeId = Guid.NewGuid();
+        var request = new RetireProcurementEvaluationCommitteeDraftRequest
+        {
+            RowVersion = "AQ==",
+            Reason = "The selected committee composition is incorrect.",
+            IdempotencyKey = "retire-draft-1"
+        };
+        fixture.Service.Setup(service => service.RetireDraftAsync(
+                committeeId, request, "corr-0208", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementEvaluationCommitteeDto
+            {
+                Id = committeeId,
+                Status = ProcurementEvaluationCommitteeControlStatus.Retired
+            });
+
+        var result = await fixture.Controller.RetireDraft(
+            committeeId, request, default);
+
+        result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeAssignableTo<ProcurementEvaluationCommitteeDto>()
+            .Which.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Retired);
+        fixture.Service.VerifyAll();
+    }
+
     [Theory]
     [InlineData("missing", 404)]
     [InlineData("conflict", 409)]

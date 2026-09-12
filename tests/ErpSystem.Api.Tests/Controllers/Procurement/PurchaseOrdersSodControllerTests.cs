@@ -24,6 +24,67 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class PurchaseOrdersSodControllerTests
 {
     [Fact]
+    public async Task CreationRunsSourceReservationInsideStrategyAndRollsBackBeforeReturningValidation()
+    {
+        var unit = new Mock<IUnitOfWork>();
+        var insideStrategy = false;
+        var active = false;
+        unit.SetupGet(x => x.HasActiveTransaction).Returns(() => active);
+        unit.Setup(x => x.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task<ActionResult<PurchaseOrderDetailDto>>>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Func<Task<ActionResult<PurchaseOrderDetailDto>>> operation, CancellationToken _) =>
+            {
+                insideStrategy = true;
+                try { return await operation(); }
+                finally { insideStrategy = false; }
+            });
+        unit.Setup(x => x.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, It.IsAny<CancellationToken>()))
+            .Callback(() => { insideStrategy.Should().BeTrue(); active = true; })
+            .Returns(Task.CompletedTask);
+        unit.Setup(x => x.RollbackAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => { insideStrategy.Should().BeTrue(); active = false; })
+            .Returns(Task.CompletedTask);
+        var source = new Mock<IProcurementPurchaseOrderSourceService>();
+        source.Setup(x => x.ResolveAsync(It.IsAny<ProcurementPurchaseOrderSourceType>(), It.IsAny<Guid>(),
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPurchaseOrderSourceResolution { CurrencyCode = "GHS" });
+        source.Setup(x => x.ReserveAsync(It.IsAny<ProcurementPurchaseOrderSourceResolution>(),
+                It.IsAny<IReadOnlyCollection<ProcurementPurchaseOrderSourceOrderLine>>(), It.IsAny<decimal>(),
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => { insideStrategy.Should().BeTrue(); active.Should().BeTrue(); })
+            .ThrowsAsync(new ProcurementPurchaseOrderSourceValidationException("TEST_SOURCE_CHANGED", "Source changed."));
+        var user = new Mock<ICurrentUserProvider>();
+        user.SetupGet(x => x.TenantId).Returns(Guid.NewGuid());
+        var repository = new Mock<IPurchaseOrderRepository>();
+        repository.Setup(x => x.GenerateOrderNumberAsync()).ReturnsAsync("TEST-PO");
+        var controller = new PurchaseOrdersController(repository.Object,
+            Mock.Of<IPurchaseOrderItemRepository>(), Mock.Of<IPurchaseOrderReceiptRepository>(),
+            Mock.Of<IPurchaseOrderReceiptItemRepository>(), Mock.Of<IBusinessPartnerRepository>(),
+            Mock.Of<IInventoryItemRepository>(), Mock.Of<IWarehouseRepository>(), Mock.Of<IInventoryValuationService>(),
+            Mock.Of<IProjectService>(), unit.Object, user.Object, Mock.Of<IWorkflowIntegrationService>(),
+            Mock.Of<IWorkflowStatusAdapterRegistry>(), Mock.Of<IWorkflowService>(), Mock.Of<ISupplierValidationService>(),
+            source.Object, Mock.Of<IProcurementPurchaseOrderComplianceService>(), Mock.Of<IProcurementPurchaseOrderSodService>(),
+            Mock.Of<IProcurementReceiptSourceControlService>(), Mock.Of<IProcurementReceiptInspectionService>(),
+            Mock.Of<IProcurementReceiptDocumentService>(), Mock.Of<IProcurementControlEventService>(),
+            Mock.Of<IProcurementBudgetCommitmentLifecycleService>(), Mock.Of<ILogger<PurchaseOrdersController>>())
+        { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
+
+        var result = await controller.CreatePurchaseOrder(new CreatePurchaseOrderDto
+        {
+            SourceType = ProcurementPurchaseOrderSourceType.ApprovedException,
+            SourceId = Guid.NewGuid(), SupplierId = Guid.NewGuid(), RequestedById = Guid.NewGuid(),
+            Items = [new() { InventoryItemId = Guid.NewGuid(), OrderedQuantity = 1, UnitPrice = 750, UnitOfMeasure = "EA" }]
+        });
+
+        var failure = result.Result.Should().BeOfType<UnprocessableEntityObjectResult>().Subject;
+        JsonSerializer.Serialize(failure.Value).Should().Contain("TEST_SOURCE_CHANGED");
+        active.Should().BeFalse();
+        unit.Verify(x => x.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
+        unit.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+        repository.Verify(x => x.CreatePurchaseOrderAsync(It.IsAny<PurchaseOrder>()), Times.Never);
+    }
+
+    [Fact]
     public void MultiPoProjectionKeepsImmutableHistorySequenceWhileSummaryAdvances()
     {
         var resolver = typeof(PurchaseOrdersController).GetMethod(

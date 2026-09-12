@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
 
@@ -73,7 +74,26 @@ public interface IJobCandidateService
     Task<bool> DeleteInterestAsync(Guid interestId, CancellationToken cancellationToken = default);
 
     // Document operations
-    Task<JobCandidateDocumentDto> AddDocumentAsync(CreateJobCandidateDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records a document the HR side has already pushed through the controlled-upload gate.
+    ///
+    /// <para>Replaces a <c>CreateJobCandidateDocumentDto</c> overload that took a caller-supplied
+    /// <c>filePath</c>: nothing was scanned, nothing was stored, and the row recorded a path to a file
+    /// the server had never received. The DTO is deleted rather than ignored so it cannot drift back —
+    /// the same treatment the three recruitment attachment types got. Mirrors
+    /// <c>ICandidatePortalService.AddDocumentAsync</c>, which is how the candidate's own uploads have
+    /// always been written.</para>
+    /// </summary>
+    Task<JobCandidateDocumentDto> AddDocumentAsync(
+        Guid candidateId,
+        JobCandidateDocumentType documentType,
+        string fileName,
+        Guid tenantId,
+        Guid createdByUserId,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null);
     Task<IEnumerable<JobCandidateDocumentDto>> GetDocumentsAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 

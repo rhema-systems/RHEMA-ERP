@@ -3,12 +3,13 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalSettingsController : ControllerBase
 {
     private readonly IAppraisalSettingsService _settingsService;
@@ -111,6 +112,7 @@ public class AppraisalSettingsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(AppraisalSettingsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalSettingsDto createDto)
     {
         try
@@ -142,6 +144,7 @@ public class AppraisalSettingsController : ControllerBase
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(AppraisalSettingsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalSettingsDto updateDto)
     {
         try
@@ -202,6 +205,7 @@ public class AppraisalSettingsController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         try

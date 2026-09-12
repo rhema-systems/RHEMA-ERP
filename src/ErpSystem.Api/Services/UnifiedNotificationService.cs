@@ -36,6 +36,10 @@ namespace ErpSystem.Api.Services;
 /// </summary>
 public class UnifiedNotificationService : INotificationService
 {
+    // Audit text is not a replayable email payload, including legacy rows created before
+    // direct delivery was separated from the background queue.
+    public const string RedactedEmailAuditBody =
+        "Sensitive email content omitted from notification audit storage.";
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEmailService _emailService;
     private readonly ISmsSender _smsSender;
@@ -70,7 +74,19 @@ public class UnifiedNotificationService : INotificationService
 
     #region Direct Notifications
 
-    public async Task SendEmailAsync(string to, string subject, string body, bool isHtml = true)
+    public Task SendEmailAsync(
+        string to,
+        string subject,
+        string body,
+        bool isHtml = true) =>
+        SendEmailAsync(to, subject, body, isHtml, persistBody: true);
+
+    public async Task SendEmailAsync(
+        string to,
+        string subject,
+        string body,
+        bool isHtml,
+        bool persistBody)
     {
         Notification? logEntity = null;
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
@@ -79,15 +95,26 @@ public class UnifiedNotificationService : INotificationService
         {
             _logger.LogInformation("Sending email to {EmailAddress} with subject: {Subject}", to, subject);
 
-            logEntity = await TryCreateEmailLogAsync(tenantId, to, subject, body, isHtml, attachments: null);
+            logEntity = await TryCreateEmailLogAsync(
+                tenantId,
+                to,
+                subject,
+                persistBody
+                    ? body
+                    : RedactedEmailAuditBody,
+                isHtml,
+                attachments: null);
 
-            await _emailService.SendEmailAsync(new EmailDto
+            var sent = await _emailService.SendEmailAsync(new EmailDto
             {
                 To = to,
                 Subject = subject,
                 Body = body,
                 IsHtml = isHtml
             });
+            if (!sent)
+                throw new InvalidOperationException(
+                    "The email delivery provider reported that the message was not sent.");
 
             await TryMarkEmailLogSentAsync(logEntity);
             _logger.LogInformation("Email sent successfully to {EmailAddress}", to);
@@ -126,7 +153,10 @@ public class UnifiedNotificationService : INotificationService
                 }).ToList()
             };
 
-            await _emailService.SendEmailAsync(emailDto);
+            var sent = await _emailService.SendEmailAsync(emailDto);
+            if (!sent)
+                throw new InvalidOperationException(
+                    "The email delivery provider reported that the message was not sent.");
 
             await TryMarkEmailLogSentAsync(logEntity);
             _logger.LogInformation("Email with attachments sent successfully to {EmailAddress}", to);
@@ -356,7 +386,9 @@ public class UnifiedNotificationService : INotificationService
                 Title = subject ?? string.Empty,
                 Message = body ?? string.Empty,
                 Priority = "Normal",
-                Status = "Pending",
+                // The direct caller owns this send. A Pending audit row lets the dispatcher
+                // race it (and, for sensitive mail, send the redaction instead of the secret).
+                Status = "Sending",
                 IsRead = false,
                 ScheduledFor = DateTime.UtcNow,
                 SentAt = null,
@@ -1506,6 +1538,7 @@ public class UnifiedNotificationService : INotificationService
                 .AsNoTracking()
                 .Where(n =>
                     !n.IsDeleted &&
+                    n.Message != RedactedEmailAuditBody &&
                     (n.Status == "Pending" || n.Status == "Failed" || n.Status == "Processing") &&
                     n.SentAt == null &&
                     n.ScheduledFor <= now &&
@@ -1728,6 +1761,7 @@ SET [Status] = {"Processing"},
     [LastError] = NULL
 WHERE [Id] = {notificationId}
   AND [IsDeleted] = 0
+  AND [Message] <> {RedactedEmailAuditBody}
   AND [SentAt] IS NULL
   AND ([Status] = {"Pending"} OR [Status] = {"Failed"} OR [Status] = {"Processing"})
   AND [ScheduledFor] <= {now}

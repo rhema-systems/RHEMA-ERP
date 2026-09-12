@@ -8,6 +8,15 @@ namespace ErpSystem.Data.Seeders;
 /// Seeds sample External Associate data for an existing tenant (typically DEFAULT).
 /// Safe to run multiple times (idempotent by email address).
 /// </summary>
+/// <remarks>
+/// ⚠ These numbers were <c>EXT-001</c>..<c>EXT-0nn</c> — three digits — while
+/// <c>ExternalAssociateService</c> mints four (<c>EXT-0001</c>). Two formats for one series, so a
+/// seeded <c>EXT-001</c> and a minted <c>EXT-0001</c> would sit in the register looking like the same
+/// reference on two different people, and the generator's <c>int.TryParse</c> would read the seeded
+/// rows as numbers 1..n and mint straight over them in the other format. Normalised to D4 in areas
+/// 19-23 slice 8. Nothing had to be migrated: this seeder has never run on DEFAULT, whose seven live
+/// associates all carry four-digit numbers from a recruitment e2e fixture.
+/// </remarks>
 public sealed class ExternalAssociateDataSeeder
 {
     private readonly ApplicationDbContext _context;
@@ -42,7 +51,7 @@ public sealed class ExternalAssociateDataSeeder
         {
             new
             {
-                AssociateNumber = "EXT-001",
+                AssociateNumber = "EXT-0001",
                 Title = "Dr.",
                 FirstName = "Samuel",
                 MiddleName = "",
@@ -57,7 +66,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-002",
+                AssociateNumber = "EXT-0002",
                 Title = "Mrs.",
                 FirstName = "Grace",
                 MiddleName = "Ama",
@@ -72,7 +81,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-003",
+                AssociateNumber = "EXT-0003",
                 Title = "Mr.",
                 FirstName = "Kweku",
                 MiddleName = "",
@@ -87,7 +96,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-004",
+                AssociateNumber = "EXT-0004",
                 Title = "Ms.",
                 FirstName = "Abena",
                 MiddleName = "",
@@ -102,7 +111,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-005",
+                AssociateNumber = "EXT-0005",
                 Title = "Mr.",
                 FirstName = "Emmanuel",
                 MiddleName = "Kofi",
@@ -117,7 +126,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-006",
+                AssociateNumber = "EXT-0006",
                 Title = "Dr.",
                 FirstName = "Comfort",
                 MiddleName = "",
@@ -132,7 +141,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-007",
+                AssociateNumber = "EXT-0007",
                 Title = "Mr.",
                 FirstName = "Nana",
                 MiddleName = "Yaw",
@@ -147,7 +156,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-008",
+                AssociateNumber = "EXT-0008",
                 Title = "Mrs.",
                 FirstName = "Joana",
                 MiddleName = "",
@@ -162,7 +171,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-009",
+                AssociateNumber = "EXT-0009",
                 Title = "Prof.",
                 FirstName = "Richard",
                 MiddleName = "Kwame",
@@ -177,7 +186,7 @@ public sealed class ExternalAssociateDataSeeder
             },
             new
             {
-                AssociateNumber = "EXT-010",
+                AssociateNumber = "EXT-0010",
                 Title = "Ms.",
                 FirstName = "Harriet",
                 MiddleName = "",

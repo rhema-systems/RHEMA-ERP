@@ -85,6 +85,10 @@ public sealed class ProcurementEvaluationCommitteeDto
     public DateTime? ActivatedAtUtc { get; set; }
     public Guid? ActivatedByUserId { get; set; }
     public string? ActivationEvidenceReference { get; set; }
+    public DateTime? RetiredAtUtc { get; set; }
+    public Guid? RetiredByUserId { get; set; }
+    public string? RetirementReason { get; set; }
+    public string? RetirementEvidenceReference { get; set; }
     public string CompositionIntegrityHash { get; set; } = string.Empty;
     public List<ProcurementEvaluationRoleRequirementDto> RequiredRoles { get; set; } = new();
     public List<ProcurementEvaluationAppointmentDto> Members { get; set; } = new();
@@ -262,7 +266,16 @@ public sealed class SaveProcurementEvaluationRoleRequirementRequest
 public sealed class ActivateProcurementEvaluationCommitteeRequest
 {
     [Required] public string RowVersion { get; set; } = string.Empty;
-    [Required, StringLength(500)] public string EvidenceReference { get; set; } = string.Empty;
+    [StringLength(500)] public string? EvidenceReference { get; set; }
+    [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+}
+
+public sealed class RetireProcurementEvaluationCommitteeDraftRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, StringLength(1000, MinimumLength = 10)]
+    public string Reason { get; set; } = string.Empty;
+    [StringLength(500)] public string? EvidenceReference { get; set; }
     [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
 }
 
@@ -281,8 +294,8 @@ public sealed class SubmitProcurementEvaluationConflictDeclarationRequest
     public ProcurementEvaluationConflictOutcome Outcome { get; set; }
     [Required, StringLength(2000)] public string Declaration { get; set; } = string.Empty;
     [StringLength(2000)] public string? ConflictDetails { get; set; }
-    [Required, StringLength(500)] public string SignatureReference { get; set; } = string.Empty;
-    [Required, StringLength(500)] public string EvidenceReference { get; set; } = string.Empty;
+    [StringLength(500)] public string? SignatureReference { get; set; }
+    [StringLength(500)] public string? EvidenceReference { get; set; }
     public Guid? WorkflowEvidenceDocumentId { get; set; }
     public Guid? FileUploadRecordId { get; set; }
     public DateTime ValidFromUtc { get; set; }
@@ -297,7 +310,7 @@ public sealed class CreateProcurementEvaluationMeetingRequest
     [Required, StringLength(200)] public string MeetingMode { get; set; } = string.Empty;
     [Required, StringLength(500)] public string MeetingChannel { get; set; } = string.Empty;
     public DateTime ScheduledAtUtc { get; set; }
-    [Required, StringLength(500)] public string EvidenceReference { get; set; } = string.Empty;
+    [StringLength(500)] public string? EvidenceReference { get; set; }
     [StringLength(500)] public string? RemoteMeetingEvidenceReference { get; set; }
     [Required, StringLength(100)] public string CommitteeRowVersion { get; set; } = string.Empty;
     [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
@@ -306,8 +319,8 @@ public sealed class CreateProcurementEvaluationMeetingRequest
 public sealed class SignProcurementEvaluationAttendanceRequest
 {
     public bool IsPresent { get; set; } = true;
-    [Required, StringLength(500)] public string SignatureReference { get; set; } = string.Empty;
-    [Required, StringLength(500)] public string EvidenceReference { get; set; } = string.Empty;
+    [StringLength(500)] public string? SignatureReference { get; set; }
+    [StringLength(500)] public string? EvidenceReference { get; set; }
     [Required, StringLength(100)] public string MeetingRowVersion { get; set; } = string.Empty;
     [Required, StringLength(100)] public string AppointmentRowVersion { get; set; } = string.Empty;
     [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
@@ -316,7 +329,7 @@ public sealed class SignProcurementEvaluationAttendanceRequest
 public sealed class ConfirmProcurementEvaluationQuorumRequest
 {
     [Required] public string RowVersion { get; set; } = string.Empty;
-    [Required, StringLength(500)] public string EvidenceReference { get; set; } = string.Empty;
+    [StringLength(500)] public string? EvidenceReference { get; set; }
     [StringLength(500)] public string? RemoteMeetingEvidenceReference { get; set; }
     [Required, StringLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
 }

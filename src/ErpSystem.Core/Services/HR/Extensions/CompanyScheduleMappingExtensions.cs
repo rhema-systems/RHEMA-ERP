@@ -34,8 +34,8 @@ public static class CompanyScheduleMappingExtensions
             VenueAddress = entity.VenueAddress,
             OnlineMeetingLink = entity.OnlineMeetingLink,
             MeetingPassword = entity.MeetingPassword,
-            StationId = entity.StationId,
-            StationName = entity.Station?.Name,
+            LocationId = entity.LocationId,
+            LocationName = entity.SiteLocation?.Name,
             OrganizerId = entity.OrganizerId,
             OrganizerName = entity.Organizer?.FullName ?? string.Empty,
             DepartmentId = entity.DepartmentId,
@@ -127,8 +127,8 @@ public static class CompanyScheduleMappingExtensions
             VenueAddress = entity.VenueAddress,
             OnlineMeetingLink = entity.OnlineMeetingLink,
             MeetingPassword = entity.MeetingPassword,
-            StationId = entity.StationId,
-            StationName = entity.Station?.Name,
+            LocationId = entity.LocationId,
+            LocationName = entity.SiteLocation?.Name,
             OrganizerId = entity.OrganizerId,
             OrganizerName = entity.Organizer?.FullName ?? string.Empty,
             DepartmentId = entity.DepartmentId,
@@ -203,7 +203,7 @@ public static class CompanyScheduleMappingExtensions
             VenueAddress = dto.VenueAddress,
             OnlineMeetingLink = dto.OnlineMeetingLink,
             MeetingPassword = dto.MeetingPassword,
-            StationId = dto.StationId,
+            LocationId = dto.LocationId,
             DepartmentId = dto.DepartmentId,
             Scope = dto.Scope,
             EstimatedAttendees = dto.EstimatedAttendees,
@@ -242,7 +242,7 @@ public static class CompanyScheduleMappingExtensions
         entity.VenueAddress = dto.VenueAddress;
         entity.OnlineMeetingLink = dto.OnlineMeetingLink;
         entity.MeetingPassword = dto.MeetingPassword;
-        entity.StationId = dto.StationId;
+        entity.LocationId = dto.LocationId;
         entity.DepartmentId = dto.DepartmentId;
         entity.Scope = dto.Scope;
         entity.EstimatedAttendees = dto.EstimatedAttendees;
@@ -477,8 +477,8 @@ public static class CompanyScheduleMappingExtensions
             RoomCode = entity.RoomCode,
             RoomName = entity.RoomName,
             Description = entity.Description,
-            StationId = entity.StationId,
-            StationName = entity.Station?.Name ?? string.Empty,
+            LocationId = entity.LocationId,
+            LocationName = entity.SiteLocation?.Name ?? string.Empty,
             Location = entity.Location,
             Floor = entity.Floor,
             Building = entity.Building,
@@ -509,7 +509,7 @@ public static class CompanyScheduleMappingExtensions
             Id = entity.Id,
             RoomCode = entity.RoomCode,
             RoomName = entity.RoomName,
-            StationName = entity.Station?.Name ?? string.Empty,
+            LocationName = entity.SiteLocation?.Name ?? string.Empty,
             Location = entity.Location,
             Capacity = entity.Capacity,
             Type = entity.Type,
@@ -525,7 +525,7 @@ public static class CompanyScheduleMappingExtensions
             RoomCode = dto.RoomCode,
             RoomName = dto.RoomName,
             Description = dto.Description,
-            StationId = dto.StationId,
+            LocationId = dto.LocationId,
             Location = dto.Location,
             Floor = dto.Floor,
             Building = dto.Building,
@@ -550,7 +550,7 @@ public static class CompanyScheduleMappingExtensions
         entity.RoomCode = dto.RoomCode;
         entity.RoomName = dto.RoomName;
         entity.Description = dto.Description;
-        entity.StationId = dto.StationId;
+        entity.LocationId = dto.LocationId;
         entity.Location = dto.Location;
         entity.Floor = dto.Floor;
         entity.Building = dto.Building;
@@ -743,8 +743,8 @@ public static class CompanyScheduleMappingExtensions
             EndDate = entity.EndDate,
             Type = entity.Type,
             AffectsAllStations = entity.AffectsAllStations,
-            StationId = entity.StationId,
-            StationName = entity.Station?.Name,
+            LocationId = entity.LocationId,
+            LocationName = entity.SiteLocation?.Name,
             DepartmentId = entity.DepartmentId,
             DepartmentName = entity.Department?.Name,
             IsPaidClosure = entity.IsPaidClosure,
@@ -770,7 +770,7 @@ public static class CompanyScheduleMappingExtensions
             EndDate = dto.EndDate,
             Type = dto.Type,
             AffectsAllStations = dto.AffectsAllStations,
-            StationId = dto.StationId,
+            LocationId = dto.LocationId,
             DepartmentId = dto.DepartmentId,
             IsPaidClosure = dto.IsPaidClosure,
             CountsAsWorkingDay = dto.CountsAsWorkingDay,
@@ -786,7 +786,7 @@ public static class CompanyScheduleMappingExtensions
         entity.EndDate = dto.EndDate;
         entity.Type = dto.Type;
         entity.AffectsAllStations = dto.AffectsAllStations;
-        entity.StationId = dto.StationId;
+        entity.LocationId = dto.LocationId;
         entity.DepartmentId = dto.DepartmentId;
         entity.IsPaidClosure = dto.IsPaidClosure;
         entity.CountsAsWorkingDay = dto.CountsAsWorkingDay;

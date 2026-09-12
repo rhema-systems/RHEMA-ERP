@@ -8,6 +8,17 @@ import type {
   ReasonCode,
   ReasonCodeRequest,
   Department,
+  QualificationLevel,
+  QualificationLevelRequest,
+  CertifyingBody,
+  CertifyingBodyRequest,
+  StaffNumberFormat,
+  StaffNumberFormatRequest,
+  StaffNumberCounterState,
+  IdentificationExpiryItem,
+  IdentificationExpiryRunResult,
+  IdentificationExpiryRun,
+  IdentificationExpiryLogEntry,
 } from '@/types/hr/lookups';
 
 /**
@@ -133,3 +144,120 @@ export const qualificationService = new QualificationService();
 export const identificationTypeService = new IdentificationTypeService();
 export const reasonCodeService = new ReasonCodeService();
 export const departmentService = new DepartmentService();
+
+// ── Lane 3b: reference dimensions ───────────────────────────────────────────
+
+/**
+ * api/hr/reference — the qualification ladder, the certifying-body catalogue, and the per-register
+ * staff-numbering rules.
+ */
+class ReferenceDimensionService {
+  private readonly baseUrl = '/hr/reference';
+
+  // Qualification levels
+  getQualificationLevels(activeOnly = false): Promise<QualificationLevel[]> {
+    return apiService.get<QualificationLevel[]>(`${this.baseUrl}/qualification-levels`, { activeOnly });
+  }
+  createQualificationLevel(data: QualificationLevelRequest): Promise<QualificationLevel> {
+    return apiService.post<QualificationLevel>(`${this.baseUrl}/qualification-levels`, data);
+  }
+  updateQualificationLevel(id: string, data: QualificationLevelRequest): Promise<QualificationLevel> {
+    return apiService.put<QualificationLevel>(`${this.baseUrl}/qualification-levels/${id}`, { id, ...data });
+  }
+  removeQualificationLevel(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/qualification-levels/${id}`);
+  }
+
+  // Certifying bodies
+  getCertifyingBodies(activeOnly = false): Promise<CertifyingBody[]> {
+    return apiService.get<CertifyingBody[]>(`${this.baseUrl}/certifying-bodies`, { activeOnly });
+  }
+  createCertifyingBody(data: CertifyingBodyRequest): Promise<CertifyingBody> {
+    return apiService.post<CertifyingBody>(`${this.baseUrl}/certifying-bodies`, data);
+  }
+  updateCertifyingBody(id: string, data: CertifyingBodyRequest): Promise<CertifyingBody> {
+    return apiService.put<CertifyingBody>(`${this.baseUrl}/certifying-bodies/${id}`, { id, ...data });
+  }
+  removeCertifyingBody(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/certifying-bodies/${id}`);
+  }
+
+  // Staff number formats
+  /**
+   * ⚠ An EMPTY list is meaningful, not an unconfigured screen: with no rule, every register is
+   * numbered by hand. The screen must say so rather than showing an empty table.
+   */
+  getStaffNumberFormats(): Promise<StaffNumberFormat[]> {
+    return apiService.get<StaffNumberFormat[]>(`${this.baseUrl}/staff-number-formats`);
+  }
+  createStaffNumberFormat(data: StaffNumberFormatRequest): Promise<StaffNumberFormat> {
+    return apiService.post<StaffNumberFormat>(`${this.baseUrl}/staff-number-formats`, data);
+  }
+  updateStaffNumberFormat(id: string, data: StaffNumberFormatRequest): Promise<StaffNumberFormat> {
+    return apiService.put<StaffNumberFormat>(`${this.baseUrl}/staff-number-formats/${id}`, { id, ...data });
+  }
+  removeStaffNumberFormat(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/staff-number-formats/${id}`);
+  }
+  /** What a format would produce, composed by the server rather than re-implemented here. */
+  previewStaffNumberFormat(data: {
+    prefix: string; separator: string; includeYear: boolean;
+    yearDigits: number; sequenceDigits: number; suffix: string;
+  }): Promise<{ example: string }> {
+    return apiService.post<{ example: string }>(`${this.baseUrl}/staff-number-formats/preview`, data);
+  }
+
+  /**
+   * Where a rule's counter stands against the numbers already in the register.
+   *
+   * ⚠ Reads only. A format can be perfectly configured and still be about to issue a number
+   * somebody already has, because numbers that arrived by data load were never counted.
+   */
+  getStaffNumberCounter(id: string): Promise<StaffNumberCounterState> {
+    return apiService.get<StaffNumberCounterState>(`${this.baseUrl}/staff-number-formats/${id}/counter`);
+  }
+
+  /** Moves the counter past every number the rule could reissue. Forward-only and idempotent. */
+  reconcileStaffNumberCounter(id: string): Promise<StaffNumberCounterState> {
+    return apiService.post<StaffNumberCounterState>(
+      `${this.baseUrl}/staff-number-formats/${id}/counter/reconcile`, {});
+  }
+}
+
+/** api/hr/identification-expiry — the sweep. Kept apart: that is an engine, not reference data. */
+class IdentificationExpiryService {
+  private readonly baseUrl = '/hr/identification-expiry';
+
+  /**
+   * What is expiring across the workforce, at BOTH tiers.
+   *
+   * ⚠ Gated on a policy, not filtered by recipient — so this is HR's whole view. `routedToEmployeeId`
+   * says whose job a card is, not who may see it.
+   */
+  preview(): Promise<IdentificationExpiryItem[]> {
+    return apiService.get<IdentificationExpiryItem[]>(`${this.baseUrl}/preview`);
+  }
+
+  /** Runs the sweep now. The nightly host runs the same code path. */
+  run(): Promise<IdentificationExpiryRunResult> {
+    return apiService.post<IdentificationExpiryRunResult>(`${this.baseUrl}/run`, {});
+  }
+
+  /**
+   * The most recent passes, newest first.
+   *
+   * A pass that queued nothing still appears — that is the point. "It ran and found nothing" and
+   * "it never ran" are indistinguishable from the dispatch log alone.
+   */
+  getRuns(count = 20): Promise<IdentificationExpiryRun[]> {
+    return apiService.get<IdentificationExpiryRun[]>(`${this.baseUrl}/runs`, { count });
+  }
+
+  /** Reminders actually raised, over a trailing window. */
+  getLog(days = 14): Promise<IdentificationExpiryLogEntry[]> {
+    return apiService.get<IdentificationExpiryLogEntry[]>(`${this.baseUrl}/log`, { days });
+  }
+}
+
+export const referenceDimensionService = new ReferenceDimensionService();
+export const identificationExpiryService = new IdentificationExpiryService();

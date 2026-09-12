@@ -67,6 +67,8 @@ export interface WorkflowApprovalActionsProps {
   hideSatisfiedTaskDocumentUploads?: boolean;
   hideSatisfiedTaskDocumentSection?: boolean;
   hideDocumentChecklistItems?: boolean;
+  /** Hide delegation/correction routes when the domain workspace cannot recover those states. */
+  hideGovernanceActions?: boolean;
   approveLabel?: string;
   rejectLabel?: string;
 
@@ -109,6 +111,7 @@ export function WorkflowApprovalActions({
   hideSatisfiedTaskDocumentUploads = false,
   hideSatisfiedTaskDocumentSection = false,
   hideDocumentChecklistItems = false,
+  hideGovernanceActions = false,
   approveLabel = 'Approve',
   rejectLabel = 'Reject',
   size = 'sm',
@@ -336,6 +339,7 @@ export function WorkflowApprovalActions({
     return getWorkflowChecklistAttachments(item, index, effectiveTaskAttachments).length === 0;
   });
   const taskConfirmDisabled =
+    forwardActionsDisabled ||
     taskProcessing ||
     taskChecklistUploadingKey !== null ||
     missingTaskDocumentRequirements.length > 0 ||
@@ -870,7 +874,7 @@ export function WorkflowApprovalActions({
           </>
         )}
 
-        {effectiveCanApprove && workflowSummary?.currentUserApprovalId && (
+        {!hideGovernanceActions && effectiveCanApprove && workflowSummary?.currentUserApprovalId && (
           <>
             <DropdownMenuItem onSelect={event => { event.preventDefault(); void openGovernanceAction('delegate'); }}><UserRoundCog className="mr-2 h-4 w-4" />Delegate</DropdownMenuItem>
             <DropdownMenuItem onSelect={event => { event.preventDefault(); void openGovernanceAction('send-back'); }}><CornerUpLeft className="mr-2 h-4 w-4" />Send back</DropdownMenuItem>
@@ -1182,7 +1186,7 @@ export function WorkflowApprovalActions({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        {governanceDialogs}
+        {!hideGovernanceActions && governanceDialogs}
         {resubmitDialog}
       </>
     );
@@ -1244,7 +1248,7 @@ export function WorkflowApprovalActions({
           </>
         )}
 
-        {effectiveCanApprove && workflowSummary?.currentUserApprovalId && (
+        {!hideGovernanceActions && effectiveCanApprove && workflowSummary?.currentUserApprovalId && (
           <>
             <Button size={size} variant="outline" onClick={() => void openGovernanceAction('delegate')} title="Delegate approval"><UserRoundCog className={iconOnly ? 'h-4 w-4' : 'mr-1 h-4 w-4'} />{!iconOnly && 'Delegate'}</Button>
             <Button size={size} variant="outline" onClick={() => void openGovernanceAction('send-back')} title="Send back for correction"><CornerUpLeft className={iconOnly ? 'h-4 w-4' : 'mr-1 h-4 w-4'} />{!iconOnly && 'Send back'}</Button>
@@ -1558,7 +1562,7 @@ export function WorkflowApprovalActions({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {governanceDialogs}
+      {!hideGovernanceActions && governanceDialogs}
       {resubmitDialog}
     </div>
   );

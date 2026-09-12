@@ -81,6 +81,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
     public async Task<ProcurementBudgetCommitmentLedgerEntry> CommitContractAsync(
         Contract contract, string correlationId, CancellationToken cancellationToken = default)
     {
+        EnsureContextAndTransaction();
         EnsureSourceTenant(contract.TenantId);
         var contractExists = await _unitOfWork.Repository<Contract>()
             .GetQueryable(item => item.Id == contract.Id &&
@@ -97,6 +98,26 @@ public sealed class ProcurementBudgetCommitmentLifecycleService : IProcurementBu
             .SingleOrDefaultAsync(cancellationToken);
         if (!requisitionId.HasValue)
             throw Error("CONTRACT_BUDGET_REQUISITION_REQUIRED", "The activated contract has no source purchase requisition.");
+        var existingContractEntry = await FindEntryAsync(
+            ProcurementBudgetCommitmentLedgerEntryType.FormalCommitment,
+            ContractSource, contract.Id, cancellationToken);
+        if (existingContractEntry is null)
+        {
+            var coverage = await ProcurementSupplyContractCoverage.ResolveAsync(
+                _unitOfWork, _currentUser.TenantId, contract, requisitionId.Value, cancellationToken);
+            if (coverage is not null)
+            {
+                // Serialize the coverage decision with budget/receipt mutations,
+                // then re-read it. Activation retains the proof in its check audit.
+                _ = await _reservationStore.GetBudgetForUpdateAsync(_currentUser.TenantId,
+                    coverage.FormalEntry.ProcurementBudgetId, cancellationToken)
+                    ?? throw Error("BUDGET_NOT_FOUND", "The committed procurement budget is unavailable.");
+                coverage = await ProcurementSupplyContractCoverage.ResolveAsync(
+                    _unitOfWork, _currentUser.TenantId, contract, requisitionId.Value, cancellationToken)
+                    ?? throw Error("CONTRACT_PO_COMMITMENT_COVERAGE_INVALID", "The approved PO coverage changed during activation.");
+                return coverage.FormalEntry;
+            }
+        }
         return await CommitAsync(requisitionId.Value, ContractSource, contract.Id,
             contract.ContractNumber, contract.ContractValue, contract.Currency,
             correlationId, cancellationToken);

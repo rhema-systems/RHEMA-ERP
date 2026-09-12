@@ -137,7 +137,8 @@ public class TrainingCompletionService : ITrainingCompletionService
 
         _logger.LogInformation("Training completion recorded for nomination {NominationId}", dto.NominationId);
 
-        return entity.ToDto();
+        // Freshly written: no Nomination/Employee loaded, so map from a re-read instead.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<BulkCompletionResultDto> BulkRecordCompletionAsync(BulkRecordCompletionDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -204,6 +205,25 @@ public class TrainingCompletionService : ITrainingCompletionService
 
         if (entity.IsVerifiedByManager)
             throw new InvalidOperationException("This completion record has already been verified.");
+
+        // ⚠ Finish-plan lane 4 (2026-09-01): the certificate gates the completion. A programme flagged
+        // ProvidesCertificate had the flag read by nothing — a passed completion could be verified,
+        // write its skills to the profile and close, with no certificate ever issued. The flag is
+        // per programme, so this is the per-programme gate TDC asked for: a PASSED completion of a
+        // certificate-bearing programme is not verifiable until an active certificate exists for
+        // the nomination. A failed completion needs no certificate and is not held.
+        var program = entity.Nomination?.Schedule?.Program;
+        if (entity.IsPassed && program is { ProvidesCertificate: true })
+        {
+            var tenantId = GetTenantId();
+            var hasCertificate = await _certificateRepository.GetQueryable()
+                .AnyAsync(c => c.TenantId == tenantId
+                            && c.NominationId == entity.NominationId
+                            && c.Status == CertificateStatus.Active, cancellationToken);
+            if (!hasCertificate)
+                throw new InvalidOperationException(
+                    $"\"{program.ProgramName}\" issues a certificate. Issue the certificate for this nomination before verifying the completion.");
+        }
 
         entity.IsVerifiedByManager = true;
         entity.VerifiedById = updatedByUserId;
@@ -301,7 +321,11 @@ public class TrainingCompletionService : ITrainingCompletionService
 
         _logger.LogInformation("Training certificate issued: {CertificateNumber} for employee {EmployeeId}", entity.CertificateNumber, dto.EmployeeId);
 
-        return entity.ToDto();
+        // A freshly written entity has no Employee/Program/Nomination loaded, so mapping it directly
+        // hands back a certificate with a blank holder and programme — on the one response the caller
+        // is most likely to render straight onto a screen.
+        var saved = await _certificateRepository.GetByIdAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<bool> RevokeCertificateAsync(RevokeCertificateDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)

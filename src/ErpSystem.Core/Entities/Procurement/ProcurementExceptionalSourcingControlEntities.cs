@@ -12,7 +12,7 @@ public sealed class ProcurementExceptionalSourcingControl : TenantEntity
     public Guid SourcingCaseId { get; set; }
     public Guid MethodRuleId { get; set; }
     public Guid ExceptionRuleId { get; set; }
-    public Guid AuthorityRouteId { get; set; }
+    public Guid? AuthorityRouteId { get; set; }
     public ProcurementMethodType Method { get; set; }
     [Required, StringLength(100)] public string MethodRuleCode { get; set; } = string.Empty;
     [Required, StringLength(100)] public string ExceptionRuleCode { get; set; } = string.Empty;
@@ -83,7 +83,7 @@ public sealed class ProcurementExceptionalSourcingControl : TenantEntity
     public ProcurementSourcingCase SourcingCase { get; set; } = null!;
     public ProcurementPolicyMethodRule MethodRule { get; set; } = null!;
     public ProcurementPolicyExceptionRule ExceptionRule { get; set; } = null!;
-    public ProcurementRequisitionAuthorityRoute AuthorityRoute { get; set; } = null!;
+    public ProcurementRequisitionAuthorityRoute? AuthorityRoute { get; set; }
     public WorkflowDefinition WorkflowDefinition { get; set; } = null!;
     public WorkflowInstance? WorkflowInstance { get; set; }
     public TenderNegotiation? Negotiation { get; set; }

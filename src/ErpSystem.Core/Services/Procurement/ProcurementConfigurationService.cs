@@ -196,6 +196,9 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
         CancellationToken cancellationToken = default)
     {
         EnsureEditor();
+        if (request.Status == ProcurementConfigurationDecisionStatus.Withdrawn)
+            throw ValidationException(decisionKey,
+                new[] { "Withdrawn cannot be assigned through decision editing. Use the governed DEC-011 withdrawal action on its published profile." });
         var profile = await FindProfileAsync(profileId, tracked: true, cancellationToken);
         var decision = await FindDecisionAsync(profileId, decisionKey, tracked: true, cancellationToken);
         ProcurementConfigurationLifecyclePolicy.EnsureEditable(profile);
@@ -209,6 +212,15 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             ProcurementConfigurationLifecyclePolicy.EnsureDecisionEditable(profile, decision);
 
         var before = DecisionSnapshot(decision);
+        if (returnToProposed && !CanManageAccess())
+        {
+            await AddRevisionAsync(profile.Id, decision.Id, "ReturnDecisionToProposed", "Rejected", correlationId,
+                "The TDC access-management permission is required to return a configuration decision to proposed.", before, null);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            throw new ProcurementConfigurationAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to return a configuration decision to proposed.");
+        }
+
         var definition = ProcurementConfigurationDecisionRegistry.GetRequired(decision.DecisionKey);
         var valueValidation = ProcurementConfigurationDecisionRegistry.Validate(
             decision.DecisionKey,
@@ -218,6 +230,15 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             throw ValidationException(decision.DecisionKey, valueValidation.Errors);
 
         ValidateDecisionState(request, decision.DecisionKey);
+        if (request.Status == ProcurementConfigurationDecisionStatus.Approved && !CanManageAccess())
+        {
+            await AddRevisionAsync(profile.Id, decision.Id, "ApproveDecision", "Rejected", correlationId,
+                "The TDC access-management permission is required to approve a configuration decision.", before, null);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            throw new ProcurementConfigurationAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to approve a configuration decision.");
+        }
+
         decision.SchemaVersion = request.SchemaVersion;
         decision.OwnerGroup = request.OwnerGroup.Trim();
         decision.Status = request.Status;
@@ -313,6 +334,47 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
         return mappedProfile.Decisions.Single(item => item.DecisionKey == definition.DecisionKey);
     }
 
+    public async Task<ProcurementConfigurationProfileDto> WithdrawDecisionAsync(
+        Guid profileId,
+        string decisionKey,
+        WithdrawProcurementConfigurationDecisionRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureEditor();
+        if (!string.Equals(decisionKey?.Trim(), "DEC-011", StringComparison.OrdinalIgnoreCase))
+            throw ValidationException(decisionKey,
+                new[] { "Only the optional DEC-011 supplier-risk decision supports governed withdrawal. Other decisions and the profile must remain unchanged." });
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length > 1000)
+            throw ValidationException("DEC-011",
+                new[] { "A withdrawal reason of 1 through 1000 characters is required for the retained audit." });
+
+        var profile = await FindProfileAsync(profileId, tracked: true, cancellationToken);
+        await EnsurePublisherAsync(profile, "WithdrawDecision", correlationId, cancellationToken);
+        var decision = await FindDecisionAsync(profileId, "DEC-011", tracked: true, cancellationToken);
+        var now = DateTime.UtcNow;
+        if (!ProcurementConfigurationLifecyclePolicy.IsRuntimeEligible(profile, now) ||
+            decision.Status != ProcurementConfigurationDecisionStatus.Approved ||
+            decision.ApprovalStatus != ProcurementConfigurationApprovalStatus.Approved ||
+            (decision.EffectiveFrom.HasValue && decision.EffectiveFrom.Value > now) ||
+            (decision.EffectiveTo.HasValue && decision.EffectiveTo.Value < now))
+            throw new ProcurementConfigurationConflictException(
+                "Only the currently approved, effective DEC-011 decision in a published profile can be withdrawn.");
+        EnsureRowVersion(decision.RowVersion, request.RowVersion, "DEC-011");
+
+        // This is the sole narrow exception to published-decision immutability:
+        // deactivate the optional rule, never rewrite its value or approval/evidence
+        // history, and never retire the profile or change its other decisions.
+        var before = DecisionSnapshot(decision);
+        decision.Status = ProcurementConfigurationDecisionStatus.Withdrawn;
+        SetModified(decision);
+        await Decisions.UpdateAsync(decision);
+        await AddRevisionAsync(profile.Id, decision.Id, "WithdrawDecision", "Succeeded",
+            correlationId, request.Reason.Trim(), before, DecisionSnapshot(decision));
+        await SaveWithConcurrencyAsync("DEC-011", cancellationToken);
+        return await GetProfileAsync(profile.Id, cancellationToken);
+    }
+
     public async Task<ProcurementConfigurationValidationResultDto> ValidateProfileAsync(
         Guid id,
         string correlationId,
@@ -337,6 +399,15 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     {
         EnsureEditor();
         var profile = await FindProfileAsync(id, tracked: true, cancellationToken);
+        if (!CanManageAccess())
+        {
+            await AddRevisionAsync(profile.Id, null, "Publish", "Rejected", correlationId,
+                "Direct publish rejected: TDC access-management permission is required.", ProfileSnapshot(profile), null);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            throw new ProcurementConfigurationAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to publish procurement configuration profiles.");
+        }
+
         ProcurementConfigurationLifecyclePolicy.EnsureCanPublish(profile);
         EnsureRowVersion(profile.RowVersion, request.RowVersion, "profile");
         var validation = await BuildValidationAsync(profile, cancellationToken);
@@ -429,6 +500,7 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     {
         EnsureEditor();
         var profile = await FindProfileAsync(id, tracked: true, cancellationToken);
+        await EnsurePublisherAsync(profile, "Retire", correlationId, cancellationToken);
         ProcurementConfigurationLifecyclePolicy.EnsureCanRetire(profile);
         EnsureRowVersion(profile.RowVersion, request.RowVersion, "profile");
 
@@ -493,7 +565,11 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             {
                 clonedDecision.SchemaVersion = sourceDecision.SchemaVersion;
                 clonedDecision.OwnerGroup = sourceDecision.OwnerGroup;
-                clonedDecision.Status = ProcurementConfigurationDecisionStatus.Proposed;
+                // An explicit withdrawal must not be silently reactivated by a
+                // later profile revision. The source retains its original evidence.
+                clonedDecision.Status = IsWithdrawnRiskDecision(sourceDecision)
+                    ? ProcurementConfigurationDecisionStatus.Withdrawn
+                    : ProcurementConfigurationDecisionStatus.Proposed;
                 clonedDecision.ApprovalStatus = definition.RequiresRenewedApproval
                     ? ProcurementConfigurationApprovalStatus.Pending
                     : sourceDecision.ApprovalStatus;
@@ -709,6 +785,17 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             }
 
             var decision = matching[0];
+            if (IsWithdrawnRiskDecision(decision))
+            {
+                warnings.Add(new ProcurementConfigurationValidationIssueDto
+                {
+                    Code = "DECISION_WITHDRAWN",
+                    DecisionKey = decision.DecisionKey,
+                    Message = "DEC-011 was explicitly withdrawn. Its historical value is retained but is not an active supplier-risk policy.",
+                    Severity = "Warning"
+                });
+                continue;
+            }
             if (string.IsNullOrWhiteSpace(decision.OwnerGroup))
                 AddError(errors, "OWNER_REQUIRED", "A decision owner group is required.", definition.DecisionKey);
             if (!decision.DecisionDate.HasValue)
@@ -959,6 +1046,20 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
                ?? throw new ProcurementConfigurationNotFoundException($"{key} was not found in this profile.");
     }
 
+    private async Task EnsurePublisherAsync(
+        ProcurementConfigurationProfile profile,
+        string action,
+        string correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (CanManageAccess()) return;
+        await AddRevisionAsync(profile.Id, null, action, "Rejected", correlationId,
+            $"Direct {action.ToLowerInvariant()} rejected: TDC access-management permission is required.", ProfileSnapshot(profile), null);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        throw new ProcurementConfigurationAuthorizationException(
+            $"SuperAdmin or the TDC ICT Administrator role is required to {action.ToLowerInvariant()} procurement configuration profiles.");
+    }
+
     private void EnsureAuthenticatedTenant()
     {
         if (!_currentUser.IsAuthenticated || _currentUser.TenantId == Guid.Empty || _currentUser.UserId == Guid.Empty)
@@ -968,10 +1069,16 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
     private void EnsureEditor()
     {
         EnsureAuthenticatedTenant();
-        // The API mutation boundary requires the registered procurement.access.manage
-        // permission. Domain validation here must not reintroduce legacy generic-role
-        // gates that reject a permission-authorized TDC ICT administrator.
+        if (!CanManageAccess())
+            throw new ProcurementConfigurationAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to administer procurement configuration.");
     }
+
+    private bool CanManageAccess() =>
+        _currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) ||
+        _currentUser.Roles.Any(role =>
+            ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, "procurement.access.manage"));
 
     private static void ValidateDecisionState(
         SaveProcurementConfigurationDecisionRequest request,
@@ -1138,11 +1245,18 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
 
     private static bool IsDecisionComplete(ProcurementConfigurationDecision decision)
     {
+        // Complete describes a resolved configuration decision, not runtime
+        // eligibility. Runtime consumers still require the Approved status.
+        if (IsWithdrawnRiskDecision(decision)) return true;
         if (!ProcurementConfigurationDecisionRegistry.TryGet(decision.DecisionKey, out var definition)) return false;
         return decision.Status == ProcurementConfigurationDecisionStatus.Approved &&
                (!definition.RequiresApproval || decision.ApprovalStatus == ProcurementConfigurationApprovalStatus.Approved) &&
                (!definition.RequiresEvidence || decision.EvidenceStatus != ProcurementConfigurationEvidenceStatus.Missing);
     }
+
+    private static bool IsWithdrawnRiskDecision(ProcurementConfigurationDecision decision) =>
+        decision.DecisionKey == "DEC-011" &&
+        decision.Status == ProcurementConfigurationDecisionStatus.Withdrawn;
 
     private static ProcurementConfigurationValidationException ValidationException(
         string? decisionKey,

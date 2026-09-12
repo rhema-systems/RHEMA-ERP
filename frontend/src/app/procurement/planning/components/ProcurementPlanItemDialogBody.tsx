@@ -285,20 +285,6 @@ export function ProcurementPlanItemDialogBody({
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="procurementMethod">Method</Label>
-                <Select value={form.procurementMethod || 'DirectPurchase'} onValueChange={(value) => updateForm('procurementMethod', value)}>
-                  <SelectTrigger id="procurementMethod" className="h-9">
-                    <SelectValue placeholder="Select method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DirectPurchase">Direct Purchase</SelectItem>
-                    <SelectItem value="RFQ">RFQ</SelectItem>
-                    <SelectItem value="Tender">Tender</SelectItem>
-                    <SelectItem value="Framework">Framework</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
                 <Label>Market Analysis</Label>
                 <Select value={form.marketAnalysisId || 'none'} onValueChange={onMarketAnalysisSelect}>
                   <SelectTrigger className="h-9">

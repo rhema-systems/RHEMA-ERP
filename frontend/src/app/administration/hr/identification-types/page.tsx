@@ -115,6 +115,7 @@ export default function IdentificationTypesPage() {
                   <TableHead>Issuing authority</TableHead>
                   <TableHead>Country</TableHead>
                   <TableHead>Expires</TableHead>
+                  <TableHead>Expiry warning</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-[70px]"></TableHead>
                 </TableRow>
@@ -134,7 +135,7 @@ export default function IdentificationTypesPage() {
                   ))
                 ) : types.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={8}>
                       <EmptyState
                         icon={IdCard}
                         title={search ? 'No matching types' : 'No identification types yet'}
@@ -172,6 +173,20 @@ export default function IdentificationTypesPage() {
                         {t.issuingCountryName || '—'}
                       </TableCell>
                       <TableCell>{t.hasExpiryDate ? 'Yes' : 'No'}</TableCell>
+                      {/*
+                        Shown in the list, not only on the form: an unset warning time is the usual
+                        reason the expiry sweep raises nothing, and it is invisible unless somebody
+                        opens every type in turn.
+                      */}
+                      <TableCell>
+                        {!t.hasExpiryDate ? (
+                          <span className="text-muted-foreground">n/a</span>
+                        ) : t.expiryNotificationLeadDays == null ? (
+                          <span className="text-amber-600 dark:text-amber-500">Never warns</span>
+                        ) : (
+                          `${t.expiryNotificationLeadDays} days ahead`
+                        )}
+                      </TableCell>
                       <TableCell>
                         <StatusBadge active={t.isActive} />
                       </TableCell>

@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
@@ -9,13 +13,343 @@ using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
-public sealed class ProcurementAwardReadinessServiceTests
+public sealed partial class ProcurementAwardReadinessServiceTests
 {
+    [Fact]
+    public async Task FormalTenderUsesOneAggregateLockedProjectionPerRequiredPhase()
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddFormalControlledEvaluationAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            fixture.Request("aggregate-phase-projections"),
+            "aggregate-phase-projections");
+
+        var prerequisites = result.PrerequisiteGroups
+            .SelectMany(group => group.Items)
+            .ToList();
+        prerequisites.Should().Contain(item =>
+                item.Code == "CURRENT_TECHNICAL_SCORES" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed)
+            .And.Contain(item =>
+                item.Code == "CURRENT_FINANCIAL_SCORES" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed)
+            .And.Contain(item =>
+                item.Code == "TENDER_TECHNICAL_FINANCIAL_SCORER_SOD" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed);
+        result.Evaluations.Should().OnlyContain(item =>
+            item.ScoreAttempts.Count == 1);
+    }
+
+    [Fact]
+    public async Task FormalTenderBlocksWhenAggregatePhasesWereLockedBySameEvaluator()
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddFormalControlledEvaluationAsync(useSamePhaseEvaluator: true);
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            fixture.Request("aggregate-scorer-sod"),
+            "aggregate-scorer-sod");
+
+        var prerequisites = result.PrerequisiteGroups
+            .SelectMany(group => group.Items)
+            .ToList();
+        prerequisites.Should().Contain(item =>
+                item.Code == "CURRENT_TECHNICAL_SCORES" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed)
+            .And.Contain(item =>
+                item.Code == "CURRENT_FINANCIAL_SCORES" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed)
+            .And.Contain(item =>
+                item.Code == "TENDER_TECHNICAL_FINANCIAL_SCORER_SOD" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Failed);
+        result.BlockedReasons.Should().Contain(item =>
+            item.Contains("TENDER_TECHNICAL_FINANCIAL_SCORER_SOD",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SubmittedLockedLegacyEvaluationProducesWinnerRecommendation()
+    {
+        await using var fixture = new Fixture();
+        fixture.Evaluation.Status = "Submitted";
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddLockedScoreAttemptAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            fixture.Request("submitted-winner"),
+            "submitted-winner");
+
+        result.Recommendation.SubjectIds.Should().ContainSingle()
+            .Which.Should().Be(fixture.Bid.Id);
+        result.Recommendation.BusinessPartnerIds.Should().ContainSingle()
+            .Which.Should().Be(fixture.Partner.Id);
+        result.Recommendation.RecommendedByUserId.Should()
+            .Be(fixture.Evaluation.TenderEvaluator.UserId);
+        result.Evaluations.Should().ContainSingle(item =>
+            item.EvaluationId == fixture.Evaluation.Id &&
+            item.Status == "Submitted" &&
+            item.ScoreAttempts.Count == 1 &&
+            item.ScoreAttempts[0].Status == ProcurementEvaluationScoreSheetStatus.Locked);
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item =>
+                item.Code == "LEGACY_RECOMMENDATION_UNAMBIGUOUS" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed)
+            .And.Contain(item =>
+                item.Code == "LEGACY_EVALUATIONS_COMPLETE" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed)
+            .And.Contain(item =>
+                item.Code == "LEGACY_SCORE_ATTEMPTS_CURRENT" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed);
+    }
+
+    [Fact]
+    public async Task DraftLegacyEvaluationBlocksWinnerDespiteSubmittedRecommendation()
+    {
+        await using var fixture = new Fixture();
+        fixture.Evaluation.Status = "Submitted";
+        await fixture.Context.SaveChangesAsync();
+        var draft = await fixture.AddDraftEvaluationAsync();
+        await fixture.AddLockedScoreAttemptAsync(fixture.Evaluation);
+        var request = fixture.Request("draft-incomplete");
+        request.ExpectedRecommendedSubjectIds.Clear();
+        request.ExpectedBusinessPartnerIds.Clear();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            request,
+            "draft-incomplete");
+
+        result.Status.Should().Be(ProcurementAwardReadinessDecisionStatus.Blocked);
+        result.Recommendation.SubjectIds.Should().BeEmpty();
+        result.Recommendation.BusinessPartnerIds.Should().BeEmpty();
+        result.AllowedActions.Should().NotContain("RecordAward");
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item =>
+                item.Code == "LEGACY_EVALUATIONS_COMPLETE" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Failed);
+    }
+
+    [Fact]
+    public async Task ThreeStandardVotersOnSameBidRetainThreeExactLockedEvaluationAttempts()
+    {
+        await using var fixture = new Fixture();
+        var second = await fixture.AddDraftEvaluationAsync();
+        var third = await fixture.AddDraftEvaluationAsync();
+        var evaluations = new[] { fixture.Evaluation, second, third };
+        foreach (var evaluation in evaluations)
+        {
+            evaluation.Status = "Submitted";
+            evaluation.SubmittedDate = DateTime.UtcNow.AddMinutes(-1);
+            evaluation.TotalScore = 90m;
+        }
+        fixture.Tender.Status = "Evaluated";
+        fixture.Bid.Status = "Evaluated";
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddLockedScoreAttemptAsync(evaluations);
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id, fixture.Request("three-standard-voters"),
+            "three-standard-voters");
+
+        result.Recommendation.SubjectIds.Should().Equal(fixture.Bid.Id);
+        result.Evaluations.Should().HaveCount(3);
+        result.Evaluations.Should().OnlyContain(item => item.ScoreAttempts.Count == 1);
+        foreach (var evaluation in evaluations)
+        {
+            var attempt = result.Evaluations.Single(item => item.EvaluationId == evaluation.Id)
+                .ScoreAttempts.Single();
+            attempt.ScoreSubjectId.Should().Be(fixture.Bid.Id);
+            attempt.SubmittedByUserId.Should().Be(evaluation.TenderEvaluator.UserId);
+        }
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item => item.Code == "LEGACY_SCORE_ATTEMPTS_CURRENT" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed);
+    }
+
+    [Fact]
+    public async Task StandardScoreProjectionCannotChangeAfterItsImmutableAttemptWasLocked()
+    {
+        await using var fixture = new Fixture();
+        fixture.Evaluation.Status = "Submitted";
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddLockedScoreAttemptAsync();
+        fixture.Evaluation.TotalScore = 99m;
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id, fixture.Request("changed-standard-projection"),
+            "changed-standard-projection");
+
+        result.IsReady.Should().BeFalse();
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item => item.Code == "LEGACY_SCORE_ATTEMPTS_CURRENT" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Failed);
+    }
+
+    [Fact]
+    public async Task StandardLockedSnapshotRemainsCurrentAfterSqlDateTimeKindAndDecimalScaleRoundTrip()
+    {
+        await using var fixture = new Fixture();
+        fixture.Evaluation.Status = "Submitted";
+        fixture.Evaluation.TotalScore = 90.00m;
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddLockedScoreAttemptAsync();
+        fixture.Evaluation.SubmittedDate = DateTime.SpecifyKind(
+            fixture.Evaluation.SubmittedDate!.Value, DateTimeKind.Unspecified);
+        fixture.Evaluation.TotalScore = 90.0000m;
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id, fixture.Request("sql-roundtrip-standard-attempt"),
+            "sql-roundtrip-standard-attempt");
+
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item => item.Code == "LEGACY_SCORE_ATTEMPTS_CURRENT" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed);
+    }
+
+    [Fact]
+    public async Task MissingOneOfThreeStandardVotersLockedAttemptsRemainsBlocked()
+    {
+        await using var fixture = new Fixture();
+        var second = await fixture.AddDraftEvaluationAsync();
+        var third = await fixture.AddDraftEvaluationAsync();
+        foreach (var evaluation in new[] { fixture.Evaluation, second, third })
+        {
+            evaluation.Status = "Submitted";
+            evaluation.SubmittedDate = DateTime.UtcNow.AddMinutes(-1);
+        }
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddLockedScoreAttemptAsync(fixture.Evaluation, second);
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id, fixture.Request("missing-standard-voter-attempt"),
+            "missing-standard-voter-attempt");
+
+        result.IsReady.Should().BeFalse();
+        result.Evaluations.Single(item => item.EvaluationId == third.Id)
+            .ScoreAttempts.Should().BeEmpty();
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item => item.Code == "LEGACY_SCORE_ATTEMPTS_CURRENT" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Failed);
+    }
+
+    [Fact]
+    public async Task RecalledStandardEvaluationIsReplacedByNewProjectionWithoutLosingOtherVoters()
+    {
+        await using var fixture = new Fixture();
+        var second = await fixture.AddDraftEvaluationAsync();
+        var third = await fixture.AddDraftEvaluationAsync();
+        foreach (var evaluation in new[] { fixture.Evaluation, second, third })
+        {
+            evaluation.Status = "Submitted";
+            evaluation.SubmittedDate = DateTime.UtcNow.AddMinutes(-5);
+        }
+        await fixture.Context.SaveChangesAsync();
+        var replacement = await fixture.AddReplacementEvaluationAsync("Submitted");
+        await fixture.AddLockedScoreAttemptAsync(fixture.Evaluation, second, third, replacement);
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id, fixture.Request("replacement-standard-projection"),
+            "replacement-standard-projection");
+
+        result.Evaluations.Should().HaveCount(3);
+        result.Evaluations.Should().NotContain(item => item.EvaluationId == fixture.Evaluation.Id);
+        result.Evaluations.Single(item => item.EvaluationId == replacement.Id)
+            .ScoreAttempts.Should().ContainSingle(item => item.Attempt == 2 &&
+                item.Status == ProcurementEvaluationScoreSheetStatus.Locked);
+        result.Evaluations.Should().OnlyContain(item => item.ScoreAttempts.Count == 1);
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item => item.Code == "LEGACY_SCORE_ATTEMPTS_CURRENT" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Passed);
+    }
+
+    [Fact]
+    public async Task NewStandardDraftCannotReusePreviousSubmittedRecommendation()
+    {
+        await using var fixture = new Fixture();
+        fixture.Evaluation.Status = "Submitted";
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddLockedScoreAttemptAsync();
+        var replacement = await fixture.AddReplacementEvaluationAsync("Draft");
+        var request = fixture.Request("draft-standard-replacement");
+        request.ExpectedRecommendedSubjectIds.Clear();
+        request.ExpectedBusinessPartnerIds.Clear();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id, request, "draft-standard-replacement");
+
+        result.IsReady.Should().BeFalse();
+        result.Recommendation.SubjectIds.Should().BeEmpty();
+        result.Evaluations.Should().ContainSingle(item => item.EvaluationId == replacement.Id &&
+            item.Status == "Draft");
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item => item.Code == "LEGACY_EVALUATIONS_COMPLETE" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Failed);
+    }
+
+    [Theory]
+    [InlineData("PriceScore")]
+    [InlineData("QualityScore")]
+    [InlineData("DeliveryScore")]
+    [InlineData("ExperienceScore")]
+    [InlineData("TechnicalScore")]
+    [InlineData("ComplianceScore")]
+    [InlineData("TotalScore")]
+    [InlineData("EvaluationCriteriaJson")]
+    [InlineData("TechnicalComments")]
+    [InlineData("CommercialComments")]
+    [InlineData("OverallComments")]
+    [InlineData("IsRecommended")]
+    [InlineData("Recommendation")]
+    [InlineData("status")]
+    [InlineData("submittedAtUtc")]
+    [InlineData("schemaVersion")]
+    public async Task StandardLockedSnapshotRequiresEveryScoringAndRecommendationField(string field)
+    {
+        await using var fixture = new Fixture();
+        fixture.Evaluation.Status = "Submitted";
+        await fixture.Context.SaveChangesAsync();
+        await fixture.AddLockedScoreAttemptAsync();
+        var sheet = await fixture.Context.ProcurementEvaluationScoreSheets.SingleAsync();
+        var snapshot = JsonNode.Parse(sheet.ScoreSnapshotJson)!;
+        if (field.EndsWith("Score", StringComparison.Ordinal)) snapshot[field] = 99m;
+        else if (field == "IsRecommended") snapshot[field] = false;
+        else snapshot[field] = "changed after locking";
+        sheet.ScoreSnapshotJson = snapshot.ToJsonString();
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id, fixture.Request($"changed-snapshot-{field}"),
+            $"changed-snapshot-{field}");
+
+        result.IsReady.Should().BeFalse();
+        result.PrerequisiteGroups.SelectMany(group => group.Items)
+            .Should().Contain(item => item.Code == "LEGACY_SCORE_ATTEMPTS_CURRENT" &&
+                item.Status == ProcurementAwardReadinessPrerequisiteStatus.Failed);
+    }
+
     [Fact]
     public async Task RepeatedLegacyEvaluationIsIdempotentAndLatestHashRemainsCurrent()
     {
@@ -89,6 +423,37 @@ public sealed class ProcurementAwardReadinessServiceTests
         (await fixture.Context.ProcurementAwardReadinessDecisions
                 .SingleAsync())
             .IntegrityHash.Should().HaveLength(64);
+    }
+
+    [Theory]
+    [InlineData(false, ProcurementAwardReadinessPrerequisiteStatus.Passed)]
+    [InlineData(true, ProcurementAwardReadinessPrerequisiteStatus.Failed)]
+    public async Task VerificationReadinessAllowsOptionalCommentsButStillRequiresConfiguredDocuments(
+        bool requiresDocument, ProcurementAwardReadinessPrerequisiteStatus expected)
+    {
+        await using var fixture = new Fixture();
+        await fixture.AddFailedVerificationAsync();
+        var bidder = await fixture.Context.Set<TenderAwardVerificationBidder>().SingleAsync();
+        bidder.Status = "Passed";
+        var item = await fixture.Context.Set<TenderAwardVerificationItemResult>().SingleAsync();
+        item.Status = "Passed";
+        item.VerifiedById = Guid.NewGuid();
+        item.Comments = null;
+        var checklistItem = await fixture.Context.Set<AwardVerificationChecklistItem>().SingleAsync();
+        checklistItem.RequiresDocument = requiresDocument;
+        await fixture.Context.SaveChangesAsync();
+        var verification = await fixture.Context.Set<TenderAwardVerification>().SingleAsync();
+        verification.CompletedDate = DateTime.UtcNow;
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(
+            ProcurementAwardReadinessSourceType.Tender,
+            fixture.Tender.Id,
+            fixture.Request("optional-verification-comments"),
+            "optional-verification-comments");
+
+        result.PrerequisiteGroups.SelectMany(group => group.Items).Should().Contain(item =>
+            item.Code == "AWARD_VERIFICATION_PASSED" && item.Status == expected);
     }
 
     [Fact]
@@ -286,7 +651,7 @@ public sealed class ProcurementAwardReadinessServiceTests
                 {
                     Allowed = true
                 });
-            var events = new Mock<IProcurementControlEventService>();
+            var events = ControlEvents = new Mock<IProcurementControlEventService>();
             events.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
                     It.IsAny<CancellationToken>()))
@@ -296,7 +661,10 @@ public sealed class ProcurementAwardReadinessServiceTests
                 _current.Object,
                 Access.Object,
                 sod.Object,
-                events.Object);
+                events.Object,
+                new SupplierValidationService(_unitOfWork, _current.Object,
+                    EvidencePacks.Object, events.Object,
+                    NullLogger<SupplierValidationService>.Instance));
         }
 
         public Guid TenantId { get; }
@@ -308,6 +676,8 @@ public sealed class ProcurementAwardReadinessServiceTests
         public TenderEvaluation Evaluation { get; }
         public BusinessPartner Partner { get; }
         public Mock<IProcurementAccessControlService> Access { get; }
+        public Mock<IProcurementSupplierEvidencePackService> EvidencePacks { get; } = new();
+        public Mock<IProcurementControlEventService> ControlEvents { get; }
         public ProcurementAwardReadinessService Service { get; }
 
         public EvaluateProcurementAwardReadinessRequest Request(string key) => new()
@@ -316,6 +686,223 @@ public sealed class ProcurementAwardReadinessServiceTests
             ExpectedRecommendedSubjectIds = [Bid.Id],
             ExpectedBusinessPartnerIds = [Partner.Id]
         };
+
+        public async Task AddFormalControlledEvaluationAsync(
+            bool useSamePhaseEvaluator = false)
+        {
+            var technicalEvaluatorId = Guid.NewGuid();
+            var financialEvaluatorId = useSamePhaseEvaluator
+                ? technicalEvaluatorId
+                : Guid.NewGuid();
+            var technicalSnapshot = JsonSerializer.Serialize(new
+            {
+                evaluatorUserId = technicalEvaluatorId,
+                scores = new[] { new { bidId = Bid.Id, score = 90m, qualified = true } }
+            });
+            var financialSnapshot = JsonSerializer.Serialize(new
+            {
+                evaluatorUserId = financialEvaluatorId,
+                recommendedBidId = Bid.Id,
+                recommendationReason = "Best evaluated responsive bid.",
+                scores = new[] { new { bidId = Bid.Id, evaluatedAmount = 1000m } }
+            });
+            var now = DateTime.UtcNow;
+            var control = new ProcurementTenderControl
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TenderId = Tender.Id,
+                SourcingCaseId = Guid.NewGuid(),
+                MethodRuleId = Guid.NewGuid(),
+                AuthorityRouteId = Guid.NewGuid(),
+                Method = ProcurementMethodType.NationalCompetitiveTendering,
+                MethodRuleCode = "METHOD-NCT",
+                AuthorityRouteReference = "AUTH-NCT",
+                Status = ProcurementTenderControlStatus.Approved,
+                AdvertisementReference = "ADV-NCT",
+                PublicationChannel = "GHANEPS",
+                TenderDocumentReference = "DOC-NCT",
+                TenderDocumentVersion = "1",
+                AdvertisementEvidenceReference = "evidence://advertisement",
+                AdvertisedAtUtc = now.AddDays(-5),
+                SubmissionDeadlineUtc = now.AddDays(-2),
+                OpeningScheduledAtUtc = now.AddDays(-2),
+                OpenedAtUtc = now.AddDays(-1),
+                TechnicalEvaluatedAtUtc = now.AddHours(-8),
+                TechnicalEvaluationSnapshotJson = technicalSnapshot,
+                TechnicalEvaluationIntegrityHash = HashJson(technicalSnapshot),
+                TechnicalEvaluationEvidenceReference = "evidence://technical",
+                FinancialEvaluatedAtUtc = now.AddHours(-4),
+                FinancialEvaluationSnapshotJson = financialSnapshot,
+                FinancialEvaluationIntegrityHash = HashJson(financialSnapshot),
+                FinancialEvaluationEvidenceReference = "evidence://financial",
+                RecommendedBidId = Bid.Id,
+                AuthorityApprovalReference = "approval://authority",
+                ApprovalActorsJson = JsonSerializer.Serialize(new[] { Guid.NewGuid() }),
+                ApprovedAtUtc = now.AddHours(-2),
+                ApprovedById = Guid.NewGuid(),
+                LifecycleSnapshotJson = "{}",
+                IntegrityHash = new string('t', 64),
+                RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            var committee = new ProcurementEvaluationCommitteeControl
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                SourceType = ProcurementEvaluationSourceType.Tender,
+                SourceId = Tender.Id,
+                Version = 1,
+                SourceReference = Tender.TenderNumber,
+                Purpose = "Controlled aggregate tender evaluation.",
+                Status = ProcurementEvaluationCommitteeControlStatus.Active,
+                CommitteeTemplateId = Guid.NewGuid(),
+                CommitteeCode = "TDC_EVALUATION",
+                CommitteeName = "Tender Evaluation Committee",
+                RequiredQuorum = 2,
+                PolicySetId = Guid.NewGuid(),
+                PolicyCode = "TDC-POLICY",
+                PolicyVersion = 1,
+                MethodRuleId = control.MethodRuleId,
+                MethodRuleCode = control.MethodRuleCode,
+                EffectiveFromUtc = now.AddDays(-5),
+                ActivatedAtUtc = now.AddDays(-5),
+                ActivatedByUserId = Guid.NewGuid(),
+                ActivationEvidenceReference = "evidence://committee-activation",
+                CompositionSnapshotJson = "{}",
+                CompositionIntegrityHash = new string('c', 64),
+                CreationIdempotencyKey = $"committee-{Guid.NewGuid():N}",
+                RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            var technicalAppointment = Appointment(
+                committee, technicalEvaluatorId, "Technical Evaluator");
+            var financialAppointment = useSamePhaseEvaluator
+                ? technicalAppointment
+                : Appointment(committee, financialEvaluatorId, "Financial Evaluator");
+            var additionalVotingAppointment = Appointment(
+                committee, Guid.NewGuid(), "Independent Voting Evaluator");
+            var technicalMeeting = Meeting(
+                committee, ProcurementEvaluationPhase.Technical, 1);
+            var financialMeeting = Meeting(
+                committee, ProcurementEvaluationPhase.Financial, 2);
+            var technicalSheet = ScoreSheet(
+                committee,
+                technicalMeeting,
+                technicalAppointment,
+                ProcurementEvaluationPhase.Technical,
+                technicalSnapshot);
+            var financialSheet = ScoreSheet(
+                committee,
+                financialMeeting,
+                financialAppointment,
+                ProcurementEvaluationPhase.Financial,
+                financialSnapshot);
+
+            Context.AddRange(
+                control,
+                committee,
+                technicalAppointment,
+                additionalVotingAppointment,
+                technicalMeeting,
+                financialMeeting,
+                technicalSheet,
+                financialSheet);
+            if (!useSamePhaseEvaluator)
+                Context.Add(financialAppointment);
+            await Context.SaveChangesAsync();
+        }
+
+        private ProcurementEvaluationCommitteeAppointment Appointment(
+            ProcurementEvaluationCommitteeControl committee,
+            Guid userId,
+            string roleName) => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            CommitteeControlId = committee.Id,
+            CommitteeControl = committee,
+            CommitteeMemberId = Guid.NewGuid(),
+            ResponsibilityAssignmentId = Guid.NewGuid(),
+            UserId = userId,
+            UserDisplayName = roleName,
+            RoleName = roleName,
+            MemberKind = ProcurementCommitteeMemberKind.VotingMember,
+            IsVoting = true,
+            EffectiveFromUtc = DateTime.UtcNow.AddDays(-5),
+            Status = ProcurementEvaluationAppointmentStatus.Accepted,
+            AcceptedAtUtc = DateTime.UtcNow.AddDays(-4),
+            AcceptanceSignatureReference = "signature://acceptance",
+            AcceptanceEvidenceReference = "evidence://acceptance",
+            RowVersion = Guid.NewGuid().ToByteArray()
+        };
+
+        private ProcurementEvaluationMeeting Meeting(
+            ProcurementEvaluationCommitteeControl committee,
+            ProcurementEvaluationPhase phase,
+            int sequence) => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            CommitteeControlId = committee.Id,
+            CommitteeControl = committee,
+            Sequence = sequence,
+            Phase = phase,
+            Status = ProcurementEvaluationMeetingStatus.Closed,
+            MeetingMode = "Physical",
+            MeetingChannel = "Board room",
+            ScheduledAtUtc = DateTime.UtcNow.AddDays(-2),
+            StartedAtUtc = DateTime.UtcNow.AddDays(-2),
+            ClosedAtUtc = DateTime.UtcNow.AddDays(-2).AddHours(1),
+            EligibleVotingMemberCount = 3,
+            SignedVotingAttendanceCount = 3,
+            ChairPresent = true,
+            SecretaryPresent = true,
+            QuorumMet = true,
+            EvidenceReference = $"evidence://{phase}-meeting",
+            QuorumSnapshotJson = "{}",
+            QuorumIntegrityHash = new string('q', 64),
+            IdempotencyKey = $"meeting-{phase}-{Guid.NewGuid():N}",
+            RowVersion = Guid.NewGuid().ToByteArray()
+        };
+
+        private ProcurementEvaluationScoreSheet ScoreSheet(
+            ProcurementEvaluationCommitteeControl committee,
+            ProcurementEvaluationMeeting meeting,
+            ProcurementEvaluationCommitteeAppointment appointment,
+            ProcurementEvaluationPhase phase,
+            string snapshot) => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TenantId,
+            CommitteeControlId = committee.Id,
+            CommitteeControl = committee,
+            MeetingId = meeting.Id,
+            Meeting = meeting,
+            AppointmentId = appointment.Id,
+            Appointment = appointment,
+            Phase = phase,
+            ScoreSubjectType = "ProcurementTenderControl",
+            ScoreSubjectId = Tender.Id,
+            Attempt = 1,
+            Status = ProcurementEvaluationScoreSheetStatus.Locked,
+            SubmittedAtUtc = DateTime.UtcNow.AddHours(-4),
+            SubmittedByUserId = appointment.UserId,
+            SubmittedByName = appointment.UserDisplayName,
+            ScoreSnapshotJson = snapshot,
+            SignatureReference = $"signature://{phase}",
+            EvidenceReference = $"evidence://{phase}",
+            IntegrityHash = HashJson(snapshot),
+            IdempotencyKey = $"score-{phase}-{Guid.NewGuid():N}",
+            RowVersion = Guid.NewGuid().ToByteArray()
+        };
+
+        private static string HashJson(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            var normalized = JsonSerializer.Serialize(document.RootElement);
+            return Convert.ToHexString(SHA256.HashData(
+                    Encoding.UTF8.GetBytes(normalized)))
+                .ToLowerInvariant();
+        }
 
         public void SwitchTenant(Guid tenantId) => _tenantId = tenantId;
 
@@ -370,6 +957,147 @@ public sealed class ProcurementAwardReadinessServiceTests
             };
             Context.AddRange(template, item, verification, bidder, result);
             await Context.SaveChangesAsync();
+        }
+
+        public async Task<TenderEvaluation> AddDraftEvaluationAsync()
+        {
+            var evaluator = new TenderEvaluator
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TenderId = Tender.Id,
+                UserId = Guid.NewGuid(),
+                Role = "Evaluator",
+                Status = "Assigned"
+            };
+            var draft = new TenderEvaluation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TenderBidId = Bid.Id,
+                TenderEvaluatorId = evaluator.Id,
+                TenderEvaluator = evaluator,
+                TenderBid = Bid,
+                EvaluationDate = DateTime.UtcNow,
+                Status = "Draft",
+                TotalScore = 75m,
+                IsRecommended = false
+            };
+            Context.AddRange(evaluator, draft);
+            await Context.SaveChangesAsync();
+            return draft;
+        }
+
+        public async Task AddLockedScoreAttemptAsync(params TenderEvaluation[] evaluations)
+        {
+            if (evaluations.Length == 0)
+                evaluations = [Evaluation];
+            var committee = new ProcurementEvaluationCommitteeControl
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                SourceType = ProcurementEvaluationSourceType.Tender,
+                SourceId = Tender.Id,
+                Version = 1,
+                SourceReference = Tender.TenderNumber,
+                Purpose = "Evaluate tender bids.",
+                Status = ProcurementEvaluationCommitteeControlStatus.Active,
+                CommitteeTemplateId = Guid.NewGuid(),
+                CommitteeCode = "TDC_EVALUATION",
+                CommitteeName = "Tender Evaluation Committee",
+                RequiredQuorum = 1,
+                PolicySetId = Guid.NewGuid(),
+                PolicyCode = "TDC-POLICY",
+                PolicyVersion = 1,
+                MethodRuleId = Guid.NewGuid(),
+                MethodRuleCode = "METHOD-NCT",
+                EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+                ActivatedAtUtc = DateTime.UtcNow.AddDays(-1),
+                ActivatedByUserId = Guid.NewGuid(),
+                ActivationEvidenceReference = "evidence://committee-activation",
+                CompositionSnapshotJson = "{}",
+                CompositionIntegrityHash = new string('c', 64),
+                CreationIdempotencyKey = $"committee-{Guid.NewGuid():N}",
+                RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            var scores = evaluations
+                .GroupBy(item => new { item.TenderBidId, item.TenderEvaluatorId })
+                .SelectMany(group =>
+            {
+                var attempts = group.ToList();
+                var appointment = new ProcurementEvaluationCommitteeAppointment
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    CommitteeControlId = committee.Id,
+                    CommitteeControl = committee,
+                    CommitteeMemberId = Guid.NewGuid(),
+                    ResponsibilityAssignmentId = Guid.NewGuid(),
+                    UserId = attempts[0].TenderEvaluator.UserId,
+                    MemberKind = ProcurementCommitteeMemberKind.VotingMember,
+                    RoleName = "Evaluator",
+                    IsVoting = true,
+                    Status = ProcurementEvaluationAppointmentStatus.Accepted,
+                    EffectiveFromUtc = DateTime.UtcNow.AddDays(-1),
+                    AcceptedAtUtc = DateTime.UtcNow.AddDays(-1),
+                    AcceptanceSignatureReference = "signature://acceptance",
+                    AcceptanceEvidenceReference = "evidence://acceptance",
+                    RowVersion = Guid.NewGuid().ToByteArray()
+                };
+                return attempts.Select((evaluation, index) => new ProcurementEvaluationScoreSheet
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    CommitteeControlId = committee.Id,
+                    CommitteeControl = committee,
+                    MeetingId = Guid.NewGuid(),
+                    AppointmentId = appointment.Id,
+                    Appointment = appointment,
+                    Phase = ProcurementEvaluationPhase.Combined,
+                    ScoreSubjectType = "TenderEvaluation",
+                    ScoreSubjectId = evaluation.TenderBidId,
+                    Attempt = index + 1,
+                    Status = index == attempts.Count - 1
+                        ? ProcurementEvaluationScoreSheetStatus.Locked
+                        : ProcurementEvaluationScoreSheetStatus.Recalled,
+                    SubmittedAtUtc = evaluation.SubmittedDate ?? evaluation.EvaluationDate,
+                    SubmittedByUserId = evaluation.TenderEvaluator.UserId,
+                    SubmittedByName = "Assigned Tender Evaluator",
+                    ScoreSnapshotJson = TenderEvaluationService.BuildLegacyScoreSnapshot(
+                        evaluation, evaluation.SubmittedDate ?? evaluation.EvaluationDate),
+                    SignatureReference = "signature://evaluation",
+                    EvidenceReference = "evidence://evaluation",
+                    IntegrityHash = new string('s', 64),
+                    IdempotencyKey = $"score-{Guid.NewGuid():N}",
+                    RowVersion = Guid.NewGuid().ToByteArray()
+                });
+            })
+                .ToList();
+            Context.Add(committee);
+            Context.AddRange(scores);
+            await Context.SaveChangesAsync();
+        }
+
+        public async Task<TenderEvaluation> AddReplacementEvaluationAsync(string status)
+        {
+            var replacement = new TenderEvaluation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TenderBidId = Bid.Id,
+                TenderBid = Bid,
+                TenderEvaluatorId = Evaluation.TenderEvaluatorId,
+                TenderEvaluator = Evaluation.TenderEvaluator,
+                Status = status,
+                EvaluationDate = DateTime.UtcNow,
+                SubmittedDate = status == "Submitted" ? DateTime.UtcNow : null,
+                TotalScore = 91m,
+                IsRecommended = true,
+                Recommendation = "Retained replacement recommendation."
+            };
+            Context.Add(replacement);
+            await Context.SaveChangesAsync();
+            return replacement;
         }
 
         public async ValueTask DisposeAsync()

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace ErpSystem.Core.DTOs.HR;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,4 +69,49 @@ public sealed class GoalWithRiskDto
 
     /// <summary>0 when not at risk; higher value = greater urgency.</summary>
     public int     RiskSeverityScore { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Goal Risk Settings DTOs
+//
+//  The administration side of the pipeline above: the thresholds themselves,
+//  read and written through IGoalRiskSettingsService.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>The goal-risk thresholds in force for the tenant.</summary>
+public sealed class GoalRiskSettingsDto
+{
+    /// <summary>Null until the tenant saves its own thresholds.</summary>
+    public Guid? Id { get; init; }
+
+    /// <summary>
+    /// False when these are the built-in defaults rather than a stored row. The screen uses
+    /// this to say the tenant is running on defaults, and to decide whether "reset" does anything.
+    /// </summary>
+    public bool IsConfigured { get; init; }
+
+    /// <summary>Days before the due date at which a goal counts as close to deadline.</summary>
+    public int DaysRemainingThreshold { get; init; }
+
+    /// <summary>Progress a goal must have reached by then to escape being flagged.</summary>
+    public int MinimumProgressPercent { get; init; }
+
+    /// <summary>Slack allowed against linearly-expected progress before flagging.</summary>
+    public int ExpectedProgressTolerancePercent { get; init; }
+
+    public DateTime? UpdatedAt { get; init; }
+    public string? UpdatedBy { get; init; }
+}
+
+/// <summary>Write model for the goal-risk thresholds.</summary>
+public sealed class UpdateGoalRiskSettingsDto
+{
+    [Range(1, 365)]
+    public int DaysRemainingThreshold { get; set; }
+
+    [Range(0, 100)]
+    public int MinimumProgressPercent { get; set; }
+
+    [Range(0, 100)]
+    public int ExpectedProgressTolerancePercent { get; set; }
 }

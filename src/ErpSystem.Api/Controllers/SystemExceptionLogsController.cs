@@ -9,7 +9,7 @@ namespace ErpSystem.Api.Controllers;
 
 [ApiController]
 [Route("api/admin/system-exception-logs")]
-[Authorize(Roles = "SuperAdmin,TenantAdmin")]
+[Authorize]
 public class SystemExceptionLogsController : ControllerBase
 {
     private readonly IUnitOfWork _unitOfWork;
@@ -27,6 +27,7 @@ public class SystemExceptionLogsController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = "AuditGovernanceRead")]
     public async Task<ActionResult<PagedResult<SystemExceptionLogListItemDto>>> Get(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -107,6 +108,7 @@ public class SystemExceptionLogsController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = "AuditGovernanceRead")]
     public async Task<ActionResult<SystemExceptionLogDetailDto>> GetById(Guid id)
     {
         try
@@ -157,6 +159,7 @@ public class SystemExceptionLogsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/resolve")]
+    [Authorize(Policy = "AuditGovernanceManage")]
     public async Task<IActionResult> Resolve(Guid id, [FromBody] ResolveExceptionLogDto dto)
     {
         try
@@ -188,6 +191,7 @@ public class SystemExceptionLogsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = "AuditGovernanceManage")]
     public async Task<IActionResult> Delete(Guid id)
     {
         try
@@ -212,6 +216,7 @@ public class SystemExceptionLogsController : ControllerBase
     }
 
     [HttpPost("clear")]
+    [Authorize(Policy = "AuditGovernanceManage")]
     public async Task<IActionResult> Clear()
     {
         try

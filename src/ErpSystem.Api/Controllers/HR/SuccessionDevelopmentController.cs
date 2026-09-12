@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/succession-development")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class SuccessionDevelopmentController : ControllerBase
 {
     private readonly ISuccessionDevelopmentActivityService _service;
@@ -53,6 +54,7 @@ public class SuccessionDevelopmentController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDevelopmentActivitySummaryDto>>> GetOverdue()
         => Ok(await _service.GetOverdueActivitiesAsync());
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<SuccessionDevelopmentActivityDto>> Create([FromBody] CreateSuccessionDevelopmentActivityDto dto)
     {
@@ -68,6 +70,7 @@ public class SuccessionDevelopmentController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<SuccessionDevelopmentActivityDto>> Update(Guid id, [FromBody] UpdateSuccessionDevelopmentActivityDto dto)
     {
@@ -80,6 +83,7 @@ public class SuccessionDevelopmentController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -99,6 +103,7 @@ public class SuccessionDevelopmentController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDevelopmentMilestoneDto>>> GetOverdueMilestones()
         => Ok(await _service.GetOverdueMilestonesAsync());
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{activityId:guid}/milestones")]
     public async Task<ActionResult<SuccessionDevelopmentMilestoneDto>> AddMilestone(
         Guid activityId, [FromBody] CreateSuccessionDevelopmentMilestoneDto dto)
@@ -116,6 +121,7 @@ public class SuccessionDevelopmentController : ControllerBase
         return CreatedAtAction(nameof(GetMilestones), new { activityId }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("milestones/{milestoneId:guid}")]
     public async Task<ActionResult<SuccessionDevelopmentMilestoneDto>> UpdateMilestone(
         Guid milestoneId, [FromBody] UpdateSuccessionDevelopmentMilestoneDto dto)
@@ -129,6 +135,7 @@ public class SuccessionDevelopmentController : ControllerBase
         return Ok(await _service.UpdateMilestoneAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("milestones/{milestoneId:guid}/complete")]
     public async Task<IActionResult> CompleteMilestone(Guid milestoneId)
     {
@@ -139,6 +146,7 @@ public class SuccessionDevelopmentController : ControllerBase
         return Ok(new { message = "Milestone marked as complete." });
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("milestones/{milestoneId:guid}")]
     public async Task<IActionResult> DeleteMilestone(Guid milestoneId)
     {

@@ -25,7 +25,11 @@ export type PositionChangeReason =
   | 'Transfer'
   | 'Restructure'
   | 'Termination'
-  | 'Other';
+  | 'Other'
+  // Added with area 8, so the timeline can say which kind of move it was.
+  | 'Secondment'
+  | 'ActingAppointment'
+  | 'Redesignation';
 export type DependentRelationship =
   | 'Spouse'
   | 'Son'
@@ -73,6 +77,9 @@ export const POSITION_CHANGE_REASON_OPTIONS = asOptions([
   'Promotion',
   'Demotion',
   'Transfer',
+  'Secondment',
+  'ActingAppointment',
+  'Redesignation',
   'Restructure',
   'Termination',
   'Other',
@@ -311,7 +318,12 @@ export interface EmployeeSkill {
   certificationDate?: string | null;
   certificationExpiryDate?: string | null;
   certificationNumber?: string | null;
+  /** Free text, kept for certifiers that are not in the catalogue. */
   certifyingBody?: string | null;
+  /** The catalogued certifier, where there is one. */
+  certifyingBodyId?: string | null;
+  /** Resolved by the server — the reads Include the body, so this is not a silent null. */
+  certifyingBodyName?: string | null;
   isVerified: boolean;
   isCertificationExpired: boolean;
   notes?: string | null;
@@ -326,6 +338,7 @@ export interface CreateEmployeeSkillRequest {
   certificationExpiryDate?: string | null;
   certificationNumber?: string | null;
   certifyingBody?: string | null;
+  certifyingBodyId?: string | null;
   notes?: string | null;
 }
 
@@ -338,6 +351,12 @@ export interface UpdateEmployeeSkillRequest {
   certificationExpiryDate?: string | null;
   certificationNumber?: string | null;
   certifyingBody?: string | null;
+  /**
+   * ⚠ Applied UNCONDITIONALLY by the service, unlike every other field here. Those treat null as
+   * "unchanged", which means they can never be cleared; for a picker that would be a trap, so this
+   * one is always sent and null genuinely means "no catalogued body".
+   */
+  certifyingBodyId?: string | null;
   notes?: string | null;
   isVerified?: boolean;
 }
@@ -449,12 +468,36 @@ export interface EmployeeContract {
   workingHoursPerWeek: number;
   vacationDaysPerYear: number;
   sickDaysPerYear: number;
+  /**
+   * The probation term and the date it was passed.
+   *
+   * ⚠ Both were settable on create and update and readable NOWHERE until 2026-09-01, so the edit
+   * form hardcoded them blank. Instrument 03 cannot see this class of gap: it scans Create/Update
+   * DTOs, not read ones.
+   */
+  probationPeriodDays?: number | null;
+  confirmationDate?: string | null;
+  /** The currency the salary is in. A salary was previously shown as a bare number. */
+  currencyCode?: string | null;
+  /** Full time, part time, shift, flexi, remote, hybrid — not the same axis as employmentType. */
+  workSchedule?: WorkArrangementType | null;
   terms?: string | null;
+  specialConditions?: string | null;
+  notes?: string | null;
   isActive: boolean;
   contractPath?: string | null;
   terminationDate?: string | null;
   terminationReason?: string | null;
 }
+
+/** HREnums.cs `WorkArrangementType` — 1..6. */
+export type WorkArrangementType =
+  | 'FullTime'
+  | 'PartTime'
+  | 'Shift'
+  | 'Flexi'
+  | 'Remote'
+  | 'Hybrid';
 
 export interface CreateEmployeeContractRequest {
   employeeId: string;
@@ -493,7 +536,34 @@ export interface TerminateContractRequest {
 
 // ── Expatriate assignments ──────────────────────────────────────────────────────
 
+/** A family member accompanying an expatriate assignee. */
+export interface ExpatriateFamilyMember {
+  id: string;
+  expatriateAssignmentId: string;
+  fullName: string;
+  /** ⚠ The SAME enum a dependant uses, with the same description-for-Other companion. */
+  relationship: string;
+  relationshipDescription?: string | null;
+  gender?: string | null;
+  genderDescription?: string | null;
+  dateOfBirth?: string | null;
+  passportNumber?: string | null;
+  passportExpiryDate?: string | null;
+  /** Their own residence permit — separate from the assignee's. */
+  residentPermitNumber?: string | null;
+  residentPermitIssueDate?: string | null;
+  residentPermitExpiryDate?: string | null;
+  arrivalDate?: string | null;
+  departureDate?: string | null;
+  notes?: string | null;
+}
+
 export interface ExpatriateAssignment {
+  /**
+   * ⚠ Populated by the DETAIL read only — the list read is a summary and returns none. A panel
+   * that binds to a list row would render "nobody accompanied them" for a posting with three.
+   */
+  familyMembers?: ExpatriateFamilyMember[];
   id: string;
   employeeId: string;
   homeCountryId: string;
@@ -506,9 +576,16 @@ export interface ExpatriateAssignment {
   relocationDate?: string | null;
   assignmentObjective?: string | null;
   visaType?: string | null;
+  /** ⚠ When the visa was ISSUED — every permit carried an expiry and no issue date. */
+  visaIssueDate?: string | null;
   visaExpiryDate?: string | null;
   workPermitNumber?: string | null;
+  workPermitIssueDate?: string | null;
   workPermitExpiryDate?: string | null;
+  /** ⚠ A different instrument from the work permit, on a different authority's clock. */
+  residentPermitNumber?: string | null;
+  residentPermitIssueDate?: string | null;
+  residentPermitExpiryDate?: string | null;
 }
 
 export interface CreateExpatriateAssignmentRequest {
@@ -521,9 +598,16 @@ export interface CreateExpatriateAssignmentRequest {
   familyAccompanying: boolean;
   assignmentObjective?: string | null;
   visaType?: string | null;
+  /** ⚠ When the visa was ISSUED — every permit carried an expiry and no issue date. */
+  visaIssueDate?: string | null;
   visaExpiryDate?: string | null;
   workPermitNumber?: string | null;
+  workPermitIssueDate?: string | null;
   workPermitExpiryDate?: string | null;
+  /** ⚠ A different instrument from the work permit, on a different authority's clock. */
+  residentPermitNumber?: string | null;
+  residentPermitIssueDate?: string | null;
+  residentPermitExpiryDate?: string | null;
 }
 
 export interface UpdateExpatriateAssignmentRequest
@@ -648,6 +732,11 @@ export interface UpdateEmployeeRefereeRequest extends Partial<CreateEmployeeRefe
 // ── Guarantors ──────────────────────────────────────────────────────────────────
 
 export interface EmployeeGuarantor {
+  // ⚠ Read-only: the photograph arrives through POST employee-documents/guarantors/{id}/photo.
+  hasPhoto?: boolean;
+  photoFileName?: string | null;
+  photoMimeType?: string | null;
+  photoFileSizeBytes?: number | null;
   id: string;
   employeeId: string;
   isPrimary: boolean;
@@ -670,6 +759,12 @@ export interface EmployeeGuarantor {
   employerAddress?: string | null;
   employerPhone?: string | null;
   monthlyIncome?: number | null;
+  /** ⚠ What they stand surety FOR — distinct from monthlyIncome, which is what they earn. */
+  amountGuaranteed?: number | null;
+  /** Validated against Finance's currency master. Null means HR's configured default. */
+  amountGuaranteedCurrencyCode?: string | null;
+  /** How the guarantor describes their gender, where gender is Other. */
+  genderDescription?: string | null;
   nationalIdType?: string | null;
   /** The detail projection masks the ID number; writes use nationalIdNumber. */
   nationalIdNumberMasked?: string | null;
@@ -707,6 +802,12 @@ export interface CreateEmployeeGuarantorRequest {
   employerAddress?: string | null;
   employerPhone?: string | null;
   monthlyIncome?: number | null;
+  /** ⚠ What they stand surety FOR — distinct from monthlyIncome, which is what they earn. */
+  amountGuaranteed?: number | null;
+  /** Validated against Finance's currency master. Null means HR's configured default. */
+  amountGuaranteedCurrencyCode?: string | null;
+  /** How the guarantor describes their gender, where gender is Other. */
+  genderDescription?: string | null;
   nationalIdType?: string | null;
   nationalIdNumber?: string | null;
   nationalIdExpiryDate?: string | null;

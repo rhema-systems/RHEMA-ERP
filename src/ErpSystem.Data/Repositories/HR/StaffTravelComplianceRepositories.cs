@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.StaffTravel;
+﻿using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +14,15 @@ namespace ErpSystem.Data.Repositories.HR;
 public class StaffTravelDocumentRepository : GenericRepository<StaffTravelDocument>, IStaffTravelDocumentRepository
 {
     public StaffTravelDocumentRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelDocument?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(d => d.Employee)
+            .Include(d => d.IssuingCountry)
+            .Include(d => d.VerifiedBy)
+            .FirstOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId && !d.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelDocument>> GetAllWithDetailsAsync()
     {
@@ -85,6 +94,12 @@ public class StaffTravelVisaRequirementRepository : GenericRepository<StaffTrave
     {
         return await _dbSet
             .Include(r => r.PassportCountry)
+            // ⚠ DestinationCountry was NOT included, while GetRequirementAsync beside it includes
+            // both — so this list resolved the passport name and returned a null destination name
+            // for every row, though the DTO declares it. Measured 2026-09-01 (lane 5b): the lookup
+            // answered "Ghana"/"United Kingdom" and this list answered "Ghana"/null. The uneven
+            // `.Include` shape.
+            .Include(r => r.DestinationCountry)
             .Where(r => r.DestinationCountryId == destinationCountryId && !r.IsDeleted)
             .ToListAsync();
     }
@@ -97,6 +112,15 @@ public class StaffTravelVisaRequirementRepository : GenericRepository<StaffTrave
 public class StaffTravelVisaApplicationRepository : GenericRepository<StaffTravelVisaApplication>, IStaffTravelVisaApplicationRepository
 {
     public StaffTravelVisaApplicationRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelVisaApplication?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(v => v.Employee)
+            .Include(v => v.DestinationCountry)
+            .Include(v => v.Vendor)
+            .FirstOrDefaultAsync(v => v.Id == id && v.TenantId == tenantId && !v.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelVisaApplication>> GetAllWithDetailsAsync()
     {
@@ -159,6 +183,14 @@ public class StaffTravelRiskAssessmentRepository : GenericRepository<StaffTravel
 {
     public StaffTravelRiskAssessmentRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelRiskAssessment?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.AssessedBy)
+            .Include(a => a.DestinationCountry)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelRiskAssessment>> GetByRequestIdAsync(Guid requestId)
     {
         return await _dbSet
@@ -204,6 +236,13 @@ public class StaffTravelAlertRepository : GenericRepository<StaffTravelAlert>, I
 {
     public StaffTravelAlertRepository(ApplicationDbContext context) : base(context) { }
 
+    public async Task<StaffTravelAlert?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.Country)
+            .FirstOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId && !a.IsDeleted);
+    }
+
     public async Task<IEnumerable<StaffTravelAlert>> GetActiveAlertsAsync()
     {
         return await _dbSet
@@ -226,6 +265,8 @@ public class StaffTravelAlertRepository : GenericRepository<StaffTravelAlert>, I
     {
         var now = DateTime.UtcNow;
         return await _dbSet
+            // The country is projected onto the DTO this read now returns in full.
+            .Include(a => a.Country)
             .Where(a => a.CountryId == countryId && a.IsActive && !a.IsDeleted
                      && a.EffectiveFrom <= now && (a.EffectiveTo == null || a.EffectiveTo >= now))
             .OrderByDescending(a => a.Severity)
@@ -267,10 +308,14 @@ public class StaffTravelAlertNotificationRepository : GenericRepository<StaffTra
             .ToListAsync();
     }
 
+    // ⚠ StaffTravelRequest is included on both of these because the DTO carries RequestNumber and
+    // the traveller's own screen has to say WHICH trip an alert is about. TravelAlert alone left
+    // that column blank.
     public async Task<IEnumerable<StaffTravelAlertNotification>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _dbSet
             .Include(n => n.TravelAlert)
+            .Include(n => n.StaffTravelRequest)
             .Where(n => n.EmployeeId == employeeId && !n.IsDeleted)
             .OrderByDescending(n => n.NotificationSentAt)
             .ToListAsync();
@@ -280,9 +325,29 @@ public class StaffTravelAlertNotificationRepository : GenericRepository<StaffTra
     {
         return await _dbSet
             .Include(n => n.TravelAlert)
+            .Include(n => n.StaffTravelRequest)
             .Where(n => n.EmployeeId == employeeId && !n.IsAcknowledged && !n.IsDeleted)
             .OrderByDescending(n => n.NotificationSentAt)
             .ToListAsync();
+    }
+
+    /// <summary>
+    /// One notification with every navigation its DTO projects — the alert, the trip and the
+    /// employee.
+    /// </summary>
+    /// <remarks>
+    /// The plain <c>GetByIdAsync</c> loads none of them, so <c>CreateAlertNotificationAsync</c>
+    /// re-read with it and still returned a row whose <c>alertTitle</c>, <c>requestNumber</c> and
+    /// <c>employeeName</c> were all blank — the desk saw three empty columns on the row it had
+    /// just created and the right ones after a refetch.
+    /// </remarks>
+    public async Task<StaffTravelAlertNotification?> GetByIdWithDetailsAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(n => n.TravelAlert)
+            .Include(n => n.StaffTravelRequest)
+            .Include(n => n.Employee)
+            .FirstOrDefaultAsync(n => n.Id == id && !n.IsDeleted);
     }
 }
 
@@ -293,6 +358,13 @@ public class StaffTravelAlertNotificationRepository : GenericRepository<StaffTra
 public class StaffTravelInsurancePolicyRepository : GenericRepository<StaffTravelInsurancePolicy>, IStaffTravelInsurancePolicyRepository
 {
     public StaffTravelInsurancePolicyRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelInsurancePolicy?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(i => i.Vendor)
+            .FirstOrDefaultAsync(i => i.Id == id && i.TenantId == tenantId && !i.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelInsurancePolicy>> GetByRequestIdAsync(Guid requestId)
     {
@@ -328,6 +400,13 @@ public class StaffTravelInsurancePolicyRepository : GenericRepository<StaffTrave
 public class StaffTravelHealthRequirementRepository : GenericRepository<StaffTravelHealthRequirement>, IStaffTravelHealthRequirementRepository
 {
     public StaffTravelHealthRequirementRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<StaffTravelHealthRequirement?> GetWithDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await _dbSet
+            .Include(h => h.Country)
+            .FirstOrDefaultAsync(h => h.Id == id && h.TenantId == tenantId && !h.IsDeleted);
+    }
 
     public async Task<IEnumerable<StaffTravelHealthRequirement>> GetByCountryAsync(Guid countryId)
     {

@@ -156,8 +156,8 @@ export default function ProcurementSourcingCasesPage() {
   const effectiveMethod = form.selectedMethod ?? recommendedMethod;
   const isMethodOverride = Boolean(
     form.selectedMethod &&
-    recommendedMethod &&
-    form.selectedMethod !== recommendedMethod
+      recommendedMethod &&
+      form.selectedMethod !== recommendedMethod
   );
   const recommendationCandidate = readiness.data?.methodCandidates.find(
     (candidate) => candidate.method === recommendedMethod
@@ -430,6 +430,7 @@ export default function ProcurementSourcingCasesPage() {
                 {cases.data?.items.map((item) => {
                   const actions = procurementSourcingCaseActions(
                     item,
+                    canManage,
                     canApprove
                   );
                   return (
@@ -555,7 +556,8 @@ export default function ProcurementSourcingCasesPage() {
                     <TableCell>
                       <p className="font-medium">{source.requisitionNumber}</p>
                       <p className="text-xs text-muted-foreground">
-                        {source.releaseReference ?? 'Release recorded automatically when the case is created'}
+                        {source.releaseReference ??
+                          'Release recorded automatically when the case is created'}
                       </p>
                     </TableCell>
                     <TableCell>
@@ -631,8 +633,8 @@ export default function ProcurementSourcingCasesPage() {
             <DialogDescription>
               The server derives the procurement method from the effective
               policy and threshold. Assign every approved requisition line to
-              exactly one lot. The release audit record is created automatically;
-              a different method requires an approved exception.
+              exactly one lot. The release audit record is created
+              automatically; a different method requires an approved exception.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
@@ -656,7 +658,9 @@ export default function ProcurementSourcingCasesPage() {
                         value={source.requisitionId}
                       >
                         {source.requisitionNumber}
-                        {source.releaseReference ? ` · ${source.releaseReference}` : ' · Ready'}
+                        {source.releaseReference
+                          ? ` · ${source.releaseReference}`
+                          : ' · Ready'}
                       </SelectItem>
                     ))}
                 </SelectContent>

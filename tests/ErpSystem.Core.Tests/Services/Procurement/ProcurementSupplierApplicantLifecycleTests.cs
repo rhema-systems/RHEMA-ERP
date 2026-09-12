@@ -1116,6 +1116,17 @@ public sealed class ProcurementSupplierApplicantLifecycleTests
                     DeliveredMessages.Add(body);
                     return Task.CompletedTask;
                 });
+            _notifications.Setup(item => item.SendEmailAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<bool>(), It.IsAny<bool>()))
+                .Returns((string _, string _, string body, bool _, bool _) =>
+                {
+                    if (FailCredentialDelivery)
+                        return Task.FromException(
+                            new InvalidOperationException("delivery unavailable"));
+                    DeliveredMessages.Add(body);
+                    return Task.CompletedTask;
+                });
             _notifications.Setup(item => item.SendSmsAsync(
                     It.IsAny<string>(), It.IsAny<string>()))
                 .Returns((string _, string message) =>

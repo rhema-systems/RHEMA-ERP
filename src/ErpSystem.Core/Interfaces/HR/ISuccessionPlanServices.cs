@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -37,8 +37,8 @@ public interface ISuccessionPlanService
 
     // Workflow
     Task<bool> SubmitForReviewAsync(Guid planId, Guid submittedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ReviewAsync(ReviewSuccessionPlanDto reviewDto, CancellationToken cancellationToken = default);
-    Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, CancellationToken cancellationToken = default);
+    Task<bool> RejectAsync(RejectSuccessionPlanDto rejectDto, Guid rejectedByEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, Guid approvedByEmployeeId, CancellationToken cancellationToken = default);
 
     // Competency requirement operations
     Task<IEnumerable<CompetencyLookupDto>> GetAllActiveCompetenciesAsync(CancellationToken cancellationToken = default);
@@ -48,8 +48,20 @@ public interface ISuccessionPlanService
     Task<bool> DeleteCompetencyRequirementAsync(Guid requirementId, CancellationToken cancellationToken = default);
 
     // Action operations
-    Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<SuccessionActionSummaryDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default);
+    Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, Guid assignedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The plan's actions, in full.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This returned <c>SuccessionActionSummaryDto</c> — nine of the update DTO's thirteen
+    /// fields were absent from it, so an edit form built on this read would have wiped the
+    /// assigner, the candidate, the start and completion dates, the completion and outcome notes,
+    /// the dependency and the success flag on every save. A per-parent read feeds a panel that
+    /// must edit; a cross-record read (by status, by priority, overdue) feeds a list and stays a
+    /// summary. Sixth occurrence of that shape.
+    /// </remarks>
+    Task<IEnumerable<SuccessionActionDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default);
     Task<SuccessionActionDto> UpdateActionAsync(UpdateSuccessionActionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteActionAsync(Guid actionId, CancellationToken cancellationToken = default);
 
@@ -58,12 +70,15 @@ public interface ISuccessionPlanService
     Task<SuccessionPlanHistoryDto?> GetLatestSnapshotAsync(Guid planId, CancellationToken cancellationToken = default);
 
     // Document operations
-    Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForPlanAsync(Guid planId, CancellationToken cancellationToken = default);
     Task<IEnumerable<SuccessionDocumentDto>> GetConfidentialDocumentsAsync(Guid planId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 
     // Dashboard
+    /// <summary>Staff movements raised against this plan — read-only across the area-8 seam.</summary>
+    Task<IEnumerable<SuccessionPlanMovementDto>> GetMovementsAsync(Guid planId, CancellationToken cancellationToken = default);
+
     Task<SuccessionDashboardDto> GetDashboardAsync(int? planYear = null, CancellationToken cancellationToken = default);
 }
 
@@ -93,7 +108,7 @@ public interface ISuccessionCandidateService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Workflow
-    Task<bool> AssessAsync(AssessCandidateDto assessDto, CancellationToken cancellationToken = default);
+    Task<bool> AssessAsync(AssessCandidateDto assessDto, Guid assessedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> SelectCandidateAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -129,7 +144,7 @@ public interface ISuccessionCandidateService
     Task<bool> DeleteDevelopmentActivityAsync(Guid activityId, CancellationToken cancellationToken = default);
 
     // Document operations
-    Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 }
@@ -189,7 +204,7 @@ public interface ITalentPoolService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Member operations
-    Task<TalentPoolMemberDto> AddMemberAsync(CreateTalentPoolMemberDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    Task<TalentPoolMemberDto> AddMemberAsync(CreateTalentPoolMemberDto createDto, Guid tenantId, Guid createdByUserId, Guid nominatedByEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<TalentPoolMemberSummaryDto>> GetMembersAsync(Guid poolId, CancellationToken cancellationToken = default);
     Task<TalentPoolMemberDto> GetMemberByIdAsync(Guid memberId, CancellationToken cancellationToken = default);
     Task<TalentPoolMemberDto> UpdateMemberAsync(UpdateTalentPoolMemberDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
@@ -202,7 +217,7 @@ public interface ITalentPoolService
     Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetDevelopmentActivitiesForMemberAsync(Guid memberId, CancellationToken cancellationToken = default);
 
     // Member document operations
-    Task<SuccessionDocumentDto> AddDocumentForMemberAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    Task<SuccessionDocumentDto> AddDocumentForMemberAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForMemberAsync(Guid memberId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 }
@@ -230,7 +245,11 @@ public interface ITalentReviewSessionService
     // CRUD
     Task<TalentReviewSessionDto> CreateAsync(CreateTalentReviewSessionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<TalentReviewSessionDto> UpdateAsync(UpdateTalentReviewSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, CancellationToken cancellationToken = default);
+    /// <summary>Performance suggested from the latest scored appraisal, plus the previous
+    /// nine-box placement. A suggestion only — see decision D-4.</summary>
+    Task<TalentRatingSuggestionDto> GetRatingSuggestionAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, Guid finalizedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Rating operations
@@ -243,7 +262,7 @@ public interface ITalentReviewSessionService
     Task<IEnumerable<TalentReviewRatingSummaryDto>> GetCalibratedRatingsAsync(Guid sessionId, CancellationToken cancellationToken = default);
     Task<IEnumerable<TalentReviewRatingSummaryDto>> GetPendingCalibrationAsync(Guid sessionId, CancellationToken cancellationToken = default);
     Task<TalentReviewRatingDto> UpdateRatingAsync(UpdateTalentReviewRatingDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, CancellationToken cancellationToken = default);
+    Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, Guid confirmedByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteRatingAsync(Guid ratingId, CancellationToken cancellationToken = default);
 }
 

@@ -26,6 +26,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { useAuth } from '@/hooks/use-auth';
 import { useWorkflowEntitySummaries, formatPendingApprovers } from '@/hooks/useWorkflowEntitySummaries';
 import { leaveService } from '@/services/hr/leave.service';
 import { LEAVE_STATUS_OPTIONS } from '@/types/hr/leave-request';
@@ -40,7 +41,12 @@ const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
  */
 export default function LeaveRequestsPage() {
   const router = useRouter();
-  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const { user } = useAuth();
+  // 2026-09-03: open the caller's own history first. The API answers self-or-HR.Leave.Read, so a
+  // plain employee who lands here (the leaf is open to all staff) sees their requests instead of
+  // an empty picker and a 403 on whoever they choose; HR still switches employee freely.
+  const [employeeId, setEmployeeId] = useState<string | null>(user?.employeeId ?? null);
+  const selfLabel = user?.employeeId ? [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Me' : null;
   const [year, setYear] = useState<string>(String(currentYear));
   const [status, setStatus] = useState<string>(ALL);
   const [page, setPage] = useState(1);
@@ -85,6 +91,7 @@ export default function LeaveRequestsPage() {
               <label className="text-sm font-medium">Employee</label>
               <EmployeePicker
                 value={employeeId}
+                initialLabel={employeeId === user?.employeeId ? selfLabel : null}
                 onChange={(v) => {
                   setEmployeeId(v);
                   setPage(1);

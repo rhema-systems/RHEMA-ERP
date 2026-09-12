@@ -1,4 +1,4 @@
-using ErpSystem.Core.Interfaces.Maintenance;
+﻿using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces;
@@ -227,10 +227,301 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("ProbationPeriod") || key == Normalize("PROBATION_PERIOD") || key == Normalize("Probation Period"))
+            {
+                // Two plain lookups rather than an Include: this file has no EF Core dependency and
+                // every other resolver here reads the same way. Keeping it that way is cheaper than
+                // pulling EntityFrameworkCore into the display layer for one navigation.
+                var probation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.ProbationPeriod>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var probationEmployee = probation == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Employee>()
+                        .FirstOrDefaultAsync(e => e.Id == probation.EmployeeId);
+                info.EntityType = "ProbationPeriod";
+                info.EntityNumber = probationEmployee?.EmployeeNumber;
+                // The approver is being asked to make someone permanent, so the name and the date
+                // the probation ends are what they need before they open it. Deliberately no rating
+                // or recommendation here: a notification travels further than the record.
+                info.EntityName = probation == null
+                    ? null
+                    : $"{probationEmployee?.FullName ?? "Employee"} — probation ends {probation.CurrentEndDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/probation/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("ManpowerBudget") || key == Normalize("MANPOWER_BUDGET") || key == Normalize("Manpower Budget"))
+            {
+                var budget = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.ManpowerBudget>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var unit = budget?.OrganizationUnitId == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.OrganizationUnit>()
+                        .FirstOrDefaultAsync(u => u.Id == budget.OrganizationUnitId);
+                info.EntityType = "ManpowerBudget";
+                info.EntityNumber = budget?.BudgetNumber;
+                // The unit, the year and the headcount being asked for. An approver deciding a
+                // manpower budget is deciding how many people a department may have, so the number
+                // belongs in the notification rather than one click away.
+                info.EntityName = budget == null
+                    ? null
+                    : $"{unit?.Name ?? "Organisation"} {budget.FiscalYear} — {budget.PlannedHeadcount} post(s)";
+                info.ActionUrl = $"/hr/manpower-budgets/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("JobDescription") || key == Normalize("JOB_DESCRIPTION") || key == Normalize("Job Description"))
+            {
+                var jobDescription = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.JobDescription>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                var jobPosition = jobDescription == null
+                    ? null
+                    : await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeePosition>()
+                        .FirstOrDefaultAsync(p => p.Id == jobDescription.PositionId);
+                info.EntityType = "JobDescription";
+                info.EntityNumber = jobDescription?.JobDescriptionNumber;
+                // The position and the version are what an approver needs before opening it: the
+                // same job title arrives every year, and "v1" and "v4" are different decisions.
+                info.EntityName = jobDescription == null
+                    ? null
+                    : $"{jobDescription.JobTitle} — {jobPosition?.Title ?? "position"} (v{jobDescription.VersionNumber})";
+                info.ActionUrl = $"/hr/job-descriptions/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("StaffMovement") || key == Normalize("STAFF_MOVEMENT") || key == Normalize("Staff Movement"))
+            {
+                var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffMovement";
+                info.EntityNumber = movement?.MovementNumber;
+                // An approver needs to know what kind of move it is and when it lands before they
+                // open it — those two decide whether it is theirs to worry about today.
+                info.EntityName = movement == null
+                    ? null
+                    : $"{movement.MovementType} effective {movement.EffectiveDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/movements/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("StaffTravelRequest") || key == Normalize("STAFF_TRAVEL_REQUEST") || key == Normalize("Staff Travel Request"))
+            {
+                var travel = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffTravelRequest";
+                info.EntityNumber = travel?.RequestNumber;
+                // Route and dates, because that is what decides whether an approver must act today:
+                // travel approved after the departure date is worthless. The purpose is left out on
+                // purpose — see the notification templates for why.
+                info.EntityName = travel == null
+                    ? null
+                    : $"{travel.OriginCity} to {travel.DestinationCity}, {travel.TravelStartDate:dd MMM yyyy}";
+                // /hr/travel/requests/{id} never existed — the approver's desk
+                // detail is /hr/travel/{id}.
+                info.ActionUrl = $"/hr/travel/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("StaffDisciplinaryAction") || key == Normalize("STAFF_DISCIPLINARY_ACTION") || key == Normalize("Staff Disciplinary Action"))
+            {
+                var disciplinaryCase = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "StaffDisciplinaryAction";
+                info.EntityNumber = disciplinaryCase?.CaseNumber;
+                // Severity and the proposed sanction, and deliberately NOT the employee's name or
+                // the allegation. This string travels into notification subjects and approval
+                // queues, which are seen more widely than the case itself — an approver opens the
+                // record to learn who it concerns.
+                info.EntityName = disciplinaryCase == null
+                    ? null
+                    : $"{disciplinaryCase.Severity} disciplinary decision";
+                info.ActionUrl = $"/hr/discipline/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("AppraisalTemplate") || key == Normalize("APPRAISAL_TEMPLATE") || key == Normalize("Appraisal Template"))
+            {
+                var template = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.AppraisalTemplate>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "AppraisalTemplate";
+                info.EntityName = template?.TemplateName;
+                info.ActionUrl = $"/administration/hr/performance/templates/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("SalaryReviewProposal") || key == Normalize("SALARY_REVIEW_PROPOSAL") || key == Normalize("Salary Review Proposal"))
+            {
+                var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.SalaryReviewProposal>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "SalaryReviewProposal";
+                info.EntityName = proposal == null
+                    ? null
+                    : $"{proposal.ProposalType} — {proposal.Employee?.FullName}";
+                info.ActionUrl = $"/hr/performance/proposals/salary-review/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("EmploymentActionProposal") || key == Normalize("EMPLOYMENT_ACTION_PROPOSAL") || key == Normalize("Employment Action Proposal"))
+            {
+                var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.EmploymentActionProposal>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "EmploymentActionProposal";
+                info.EntityName = proposal == null
+                    ? null
+                    : $"{proposal.ActionType} — {proposal.Employee?.FullName}";
+                info.ActionUrl = $"/hr/performance/proposals/employment-action/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("PerformanceImprovementPlan") || key == Normalize("PERFORMANCE_IMPROVEMENT_PLAN") || key == Normalize("Performance Improvement Plan"))
+            {
+                var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "PerformanceImprovementPlan";
+                info.EntityName = plan == null
+                    ? null
+                    : $"{plan.PipNumber} — {plan.Employee?.FullName}";
+                info.ActionUrl = $"/hr/performance/pip/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("StaffRequisition") || key == Normalize("STAFF_REQUISITION") || key == Normalize("Staff Requisition"))
+            {
+                var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Requisition.StaffRequisition>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Position);
+                info.EntityType = "StaffRequisition";
+                info.EntityName = requisition == null
+                    ? null
+                    : $"{requisition.RequisitionNumber} — {requisition.RequisitionTitle}";
+                info.ActionUrl = $"/hr/recruitment/requisitions/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("EmployeeSeparation") || key == Normalize("EMPLOYEE_SEPARATION") || key == Normalize("Employee Separation"))
+            {
+                var separation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSeparation>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "EmployeeSeparation";
+                info.EntityNumber = separation?.SeparationNumber;
+                // ⚠ The PERSON is the subject of an exit, so their name belongs in what the signatory
+                // reads in their queue. "SEP-2026-0031" alone says nothing about who is leaving, and
+                // this is a signature that ends somebody's employment — the one approval in the
+                // inbox that should never be given without knowing whose it is.
+                info.EntityName = separation == null
+                    ? null
+                    : separation.Employee == null
+                        ? separation.SeparationNumber
+                        : $"{separation.SeparationNumber} — {separation.Employee.FirstName} {separation.Employee.LastName}";
+                info.ActionUrl = $"/hr/separations/{entityId}";
+                return info;
+            }
+
+            // ⚠ FULLY QUALIFIED, and it has to be: this file carries
+            // `using ErpSystem.Core.Entities.Finance.FixedAssets`, so a bare `AssetTransfer` here is
+            // Finance's, and the key "AssetTransfer" is already claimed by it further down. HR's
+            // staff-asset records answer to `HrAssetRequisition` / `HrAssetTransfer` for exactly
+            // that reason — the three-level name collision.
+            if (key == Normalize("HrAssetRequisition") || key == Normalize("HR_ASSET_REQUISITION") || key == Normalize("HR Asset Requisition"))
+            {
+                var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetRequisition>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.AssetType, x => x.RequestedBy);
+                info.EntityType = "HrAssetRequisition";
+                info.EntityNumber = requisition?.RequisitionNumber;
+                // What is being asked for and by whom, because an approver deciding "yes, issue it"
+                // needs both: "REQ-20260823-A1B2C3" alone says nothing about whether a laptop for a
+                // new starter is a reasonable thing to sign.
+                info.EntityName = requisition == null
+                    ? null
+                    : requisition.AssetType == null
+                        ? requisition.RequisitionNumber
+                        : $"{requisition.RequisitionNumber} — {requisition.Quantity} × {requisition.AssetType.Name}";
+                info.ActionUrl = $"/hr/assets/requisitions/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("HrAssetTransfer") || key == Normalize("HR_ASSET_TRANSFER") || key == Normalize("HR Asset Transfer"))
+            {
+                var transfer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetTransfer>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Asset);
+                info.EntityType = "HrAssetTransfer";
+                info.EntityNumber = transfer?.TransferNumber;
+                info.EntityName = transfer == null
+                    ? null
+                    : transfer.Asset == null
+                        ? transfer.TransferNumber
+                        : $"{transfer.TransferNumber} — {transfer.Asset.AssetName}";
+                info.ActionUrl = $"/hr/assets/transfers/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("HrAssetSurcharge") || key == Normalize("HR_ASSET_SURCHARGE") || key == Normalize("HR Asset Surcharge"))
+            {
+                var surcharge = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetSurcharge>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee);
+                info.EntityType = "HrAssetSurcharge";
+                info.EntityNumber = surcharge?.SurchargeNumber;
+                // Who is being charged and how much, because that is the whole of what an approver
+                // is being asked to sign. A reference alone would make a decision about somebody's
+                // pay look like a filing action.
+                info.EntityName = surcharge == null
+                    ? null
+                    : surcharge.Employee == null
+                        ? surcharge.SurchargeNumber
+                        : $"{surcharge.SurchargeNumber} — {surcharge.Employee.FirstName} {surcharge.Employee.LastName}, "
+                          + $"{surcharge.CurrencyCode} {surcharge.AssessedAmount:0.00}";
+                info.ActionUrl = $"/hr/assets/surcharges/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("SuccessionPlan") || key == Normalize("SUCCESSION_PLAN") || key == Normalize("Succession Plan"))
+            {
+                var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.SuccessionPlanning.SuccessionPlan>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Position);
+                info.EntityType = "SuccessionPlan";
+                info.EntityNumber = plan?.PlanNumber;
+                // The position is the subject of a succession plan, so it belongs in the name an
+                // approver reads in their queue — "SP-2026-0007" alone says nothing about what is
+                // being approved.
+                info.EntityName = plan == null
+                    ? null
+                    : $"{plan.PlanNumber} — {plan.Position?.Title ?? plan.PlanName}";
+                info.ActionUrl = $"/hr/succession/{entityId}";
+                return info;
+            }
+
+            if (key == Normalize("JobOffer") || key == Normalize("JOB_OFFER") || key == Normalize("Job Offer"))
+            {
+                var offer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobOffer>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Application);
+                info.EntityType = "JobOffer";
+                info.EntityNumber = offer?.OfferNumber;
+                info.EntityName = offer == null
+                    ? null
+                    : $"{offer.OfferNumber} — {offer.PositionTitle}";
+                info.ActionUrl = $"/hr/recruitment/offers/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("TrainingNomination") || key == Normalize("TRAINING_NOMINATION") || key == Normalize("Training Nomination"))
             {
+                var nomination = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingNomination>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Employee, x => x.Schedule);
+                string? nomProgramName = null;
+                if (nomination?.Schedule != null)
+                {
+                    var nomProgram = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Training.TrainingProgram>()
+                        .FirstOrDefaultAsync(p => p.Id == nomination.Schedule.ProgramId);
+                    nomProgramName = nomProgram?.ProgramName;
+                }
                 info.EntityType = "TrainingNomination";
-                info.ActionUrl = $"/hr/training/nominations?nominationId={entityId}";
+                info.EntityNumber = nomination?.NominationNumber;
+                info.EntityName = nomination == null
+                    ? null
+                    : $"{nomination.Employee?.FullName} — {nomProgramName ?? nomination.Schedule?.ScheduleNumber}";
+                // The old "/hr/training/nominations?nominationId=" pointed at a
+                // route that never existed. The reader of a workflow item is the APPROVER, so it
+                // lands on the desk nomination detail.
+                info.ActionUrl = $"/hr/training/nominations/{entityId}";
                 return info;
             }
 

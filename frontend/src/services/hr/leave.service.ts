@@ -8,6 +8,7 @@ import type {
   RejectLeaveRequest,
   CloseLeaveRequest,
   LeaveBalance,
+  LeaveRelieverClash,
   LeaveBalanceDetail,
   RecalculateLeaveBalanceRequest,
   LeaveAdjustment,
@@ -201,6 +202,26 @@ class LeaveService {
 /** api/hr/leave-plans — annual leave planning, approved through the workflow engine. */
 class LeavePlanService {
   private readonly baseUrl = '/hr/leave-plans';
+
+  /**
+   * Is this reliever free over these dates? Same answer the register carries per row as
+   * `relieverClashes`, asked before the plan exists. (Finish-plan lane 4.)
+   */
+  getRelieverClashes(
+    relieverId: string,
+    startDate: string,
+    endDate: string,
+    excludePlanId?: string | null,
+  ): Promise<LeaveRelieverClash[]> {
+    return apiService.get<LeaveRelieverClash[]>(`${this.baseUrl}/reliever-clashes`, {
+      params: {
+        relieverId,
+        startDate,
+        endDate,
+        ...(excludePlanId ? { excludePlanId } : {}),
+      },
+    });
+  }
 
   getByYear(year = 0): Promise<LeavePlan[]> {
     return apiService.get<LeavePlan[]>(this.baseUrl, { year });

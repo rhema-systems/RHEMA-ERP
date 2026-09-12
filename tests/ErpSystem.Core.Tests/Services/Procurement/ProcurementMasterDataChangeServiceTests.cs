@@ -41,7 +41,7 @@ public sealed class ProcurementMasterDataChangeServiceTests
     public async Task PolicyRejectsOverlappingMakerAndCheckerRolesBeforeWriting()
     {
         await using var fixture = new Fixture();
-        fixture.Switch(fixture.MakerUserId, "SuperAdmin");
+        fixture.Switch(fixture.MakerUserId, ProcurementAccessControlRegistry.IctAdministratorRole);
         var request = PolicyRequest();
         request.CheckerRoles = new() { "TDC_PROCUREMENT_OFFICER" };
 
@@ -302,7 +302,7 @@ public sealed class ProcurementMasterDataChangeServiceTests
         await fixture.AddActivePolicyAsync();
         var current = await fixture.Context.ProcurementMasterDataControlPolicies.SingleAsync();
         var futureFrom = DateTime.UtcNow.AddDays(30);
-        fixture.Switch(fixture.MakerUserId, "SuperAdmin");
+        fixture.Switch(fixture.MakerUserId, ProcurementAccessControlRegistry.IctAdministratorRole);
         var replacementRequest = PolicyRequest();
         replacementRequest.EffectiveFromUtc = futureFrom;
         var draft = await fixture.Service.SavePolicyAsync(null, replacementRequest, "trace-future-policy-create");

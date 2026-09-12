@@ -202,7 +202,7 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
                 IsCompliant = false,
                 Code = "PO_GHANEPS_AWARD_MAPPING_MISSING",
                 Message =
-                    "The effective DEC-009 profile has no applicable award-notification mapping for this source."
+                    "No award-notification exchange is configured for this source. Planning/APP exchange is a separate control."
             };
         }
 
@@ -1457,6 +1457,12 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
             if (string.IsNullOrWhiteSpace(raw))
                 throw Validation("GHANEPS_MAPPING_ENTRY_REQUIRED",
                     "DEC-009 FileTemplateMappings cannot contain null or empty elements.");
+            // DEC-009 predates the tender/award event schema and its approved
+            // planning profiles can retain the Plan=APP descriptor. APP has its
+            // own submission lifecycle; this descriptor is not an award mapping.
+            // Preserve the stored value/hash and still validate every other entry.
+            if (IsLegacyPlanningMapping(raw))
+                continue;
             try
             {
                 var normalizedMapping = NormalizeJson(raw, "GHANEPS_MAPPING_INVALID",
@@ -1491,6 +1497,14 @@ public sealed class ProcurementGhanepsExchangeService : IProcurementGhanepsExcha
             EnsureUtc(valueFrom),
             valueTo.HasValue ? EnsureUtc(valueTo.Value) : null,
             mappings);
+    }
+
+    private static bool IsLegacyPlanningMapping(string value)
+    {
+        var parts = value.Split('=', StringSplitOptions.TrimEntries);
+        return parts.Length == 2 &&
+            string.Equals(parts[0], "Plan", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(parts[1], "APP", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<ResolvedSource> ResolveSourceAsync(

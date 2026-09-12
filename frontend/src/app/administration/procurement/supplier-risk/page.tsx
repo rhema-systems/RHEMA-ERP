@@ -187,7 +187,7 @@ export default function SupplierRiskPage() {
     ['Overdue', summary.data?.overdueAssessmentCount ?? 0],
     ['Open alerts', summary.data?.openAlertCount ?? 0],
     ['Escalated', summary.data?.escalatedAlertCount ?? 0],
-    ['Award blocked', summary.data?.awardBlockedSupplierCount ?? 0],
+    ['Active policy blocks', summary.data?.awardBlockedSupplierCount ?? 0],
   ];
 
   if (!canRead) {
@@ -245,10 +245,10 @@ export default function SupplierRiskPage() {
       </Alert>
 
       {summary.data && !summary.data.policyAvailable && (
-        <Alert variant="destructive" data-testid="supplier-risk-policy-gate">
+        <Alert data-testid="supplier-risk-policy-gate">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>DEC-011 release configuration required</AlertTitle>
-          <AlertDescription>{summary.data.policyReleaseGate}</AlertDescription>
+          <AlertTitle>No active risk assessment policy</AlertTitle>
+          <AlertDescription>{summary.data.policyReleaseGate} Assessment history is retained below. Use award readiness for the current supplier eligibility decision.</AlertDescription>
         </Alert>
       )}
 
@@ -293,7 +293,7 @@ export default function SupplierRiskPage() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle className="text-base">Current assessment register</CardTitle>
+            <CardTitle className="text-base">Assessment history</CardTitle>
             <div className="relative w-full sm:w-80">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -334,7 +334,7 @@ export default function SupplierRiskPage() {
                   <TableHead>Max spend share</TableHead>
                   <TableHead>Single source</TableHead>
                   <TableHead>Alerts</TableHead>
-                  <TableHead>Award</TableHead>
+                  <TableHead>Recorded outcome</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -369,7 +369,7 @@ export default function SupplierRiskPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant={item.awardBlocked ? 'destructive' : 'outline'}>
-                        {item.awardBlocked ? 'Blocked' : 'Allowed'}
+                        {item.awardBlocked ? 'Blocked at assessment' : 'Allowed at assessment'}
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -404,7 +404,7 @@ export default function SupplierRiskPage() {
                   </p>
                 </div>
                 <Badge variant={selected.awardBlocked ? 'destructive' : 'outline'}>
-                  {selected.awardBlocked ? 'Award blocked' : 'Award allowed'}
+                  {selected.awardBlocked ? 'Blocked at assessment' : 'Allowed at assessment'}
                 </Badge>
               </div>
             </CardHeader>

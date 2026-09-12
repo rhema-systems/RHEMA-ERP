@@ -1,4 +1,4 @@
-namespace ErpSystem.Core.Interfaces;
+﻿namespace ErpSystem.Core.Interfaces;
 
 /// <summary>
 /// Generates unique, human-readable reference numbers (e.g. NOM-2025-001) using a per-tenant,
@@ -35,4 +35,33 @@ public interface INumberSequenceService
     /// <see cref="Guid.Empty"/> and violate the NumberSequences → Tenants foreign key.
     /// </summary>
     Task<long> NextAsync(string key, Guid tenantId, int? year = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Raises the counter for <paramref name="key"/> so the next number issued is greater than
+    /// <paramref name="minimum"/>, and returns the watermark it now stands at.
+    /// </summary>
+    /// <remarks>
+    /// <para>For DATA LOADS. Numbers that already exist were not issued by this counter — they were
+    /// loaded, seeded or migrated — so the counter knows nothing about them and would reissue them
+    /// one by one. This is how a load tells it what has already been used.</para>
+    ///
+    /// <para>⚠ It only ever moves the counter FORWARD. A minimum below the current watermark is a
+    /// no-op, because lowering a counter hands out numbers that are already in the register — the
+    /// exact failure this method exists to prevent.</para>
+    ///
+    /// <para>Written as one guarded update rather than a loop of <see cref="NextAsync"/> calls: a
+    /// register loaded with 8,000 staff would otherwise cost 8,000 round trips, and a loop with any
+    /// step limit gives up silently on the loads that need it most.</para>
+    /// </remarks>
+    Task<long> AdvanceToAtLeastAsync(
+        string key, long minimum, int? year = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Where the counter stands, without moving it. <c>0</c> when it has never issued a number.
+    /// </summary>
+    /// <remarks>
+    /// The watermark, i.e. the value LAST issued — the next number out will be one higher. Exists so
+    /// a settings screen can say what the counter will do before somebody finds out by hiring.
+    /// </remarks>
+    Task<long> PeekAsync(string key, int? year = null, CancellationToken cancellationToken = default);
 }

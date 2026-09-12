@@ -221,6 +221,7 @@ public sealed class ProcurementSourcingCaseDto
 
 public sealed class ProcurementSourcingCaseEntryGateDto
 {
+    public bool HasAdvancedAuthorityRoute { get; set; }
     public Guid? SourcingCaseId { get; set; }
     public string SourcingCaseNumber { get; set; } = string.Empty;
     public Guid SourcingReleaseId { get; set; }

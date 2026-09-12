@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Threading.RateLimiting;
 using ErpSystem.Api.Authorization;
 using ErpSystem.Api.HealthChecks;
@@ -105,11 +105,6 @@ namespace ErpSystem.Api.Extensions
             var jwtSettings = configuration.GetSection("JwtSettings");
             var key = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JWT SecretKey not found"));
 
-            // Fail fast if the external-portal key/audience are not distinct from the internal ones —
-            // otherwise portal tokens would validate on the default bearer scheme registered below and
-            // could satisfy internal [Authorize] attributes.
-            ErpSystem.Api.Security.PortalAuth.ValidateDistinctFromInternal(configuration);
-
             services.AddAuthentication(x =>
             {
                 x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -147,18 +142,12 @@ namespace ErpSystem.Api.Extensions
                         return Task.CompletedTask;
                     }
                 };
-            })
-            // Named bearer handler for the external portals (candidate careers + consultant-client).
-            // Portal tokens are signed with JwtSettings:PortalSecretKey and carry JwtSettings:PortalAudience,
-            // both distinct from the internal token settings above, so they only validate on this scheme.
-            // The validation parameters are the single source of truth in PortalAuth, shared with the
-            // portals' own ValidateToken methods so the two can never drift.
-            .AddJwtBearer(ErpSystem.Api.Security.PortalAuth.Scheme, x =>
-            {
-                x.RequireHttpsMetadata = false; // Set to true in production
-                x.SaveToken = true;
-                x.TokenValidationParameters = ErpSystem.Api.Security.PortalAuth.TokenValidationParameters(configuration);
             });
+            // The named PortalBearer handler (distinct signing key + audience for the bespoke
+            // candidate/consultant portals) was retired 2026-08-31 with its last tenant, the
+            // consultant-client portal. Every external principal now holds a main-scheme token
+            // whose role (Candidate, ConsultantClient, ExternalUser) is fenced by the dedicated
+            // access middlewares and named in the InternalOnly blocklist.
 
             // Register JWT service
             services.AddScoped<IJwtTokenService, JwtTokenService>();
@@ -570,6 +559,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ITwoFactorAuthService, TwoFactorAuthService>();
             services.AddScoped<IDeviceSessionService, DeviceSessionService>();
             services.AddScoped<IPasswordResetService, PasswordResetService>();
+            services.AddScoped<IInternalUserTemporaryPasswordResetService, InternalUserTemporaryPasswordResetService>();
 
             // Configure HttpClient for geolocation services
             services.AddHttpClient("geolocation", client =>
@@ -585,6 +575,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 client.DefaultRequestHeaders.Add("User-Agent", "ERP-System/1.0");
             });
             services.AddScoped<ErpSystem.Api.Services.ICaptchaVerificationService, ErpSystem.Api.Services.CaptchaVerificationService>();
+
+            // User↔employee matching rules (login resolver, auto-link, HR unlinked queue)
+            services.AddScoped<ErpSystem.Api.Services.IEmployeeLinkResolutionService, ErpSystem.Api.Services.EmployeeLinkResolutionService>();
 
             services.AddScoped<ISecurityService, SecurityService>();
             // User context services
@@ -607,6 +600,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
             services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
                 provider.GetRequiredService<ErpSystem.Core.Services.Inventory.InventoryStatutoryReportService>());
+            // FR-HR-113. Unlike its procurement and inventory siblings this provider lives in the
+            // API project, because its gate is the ASP.NET AwardsReadPolicy rather than a module
+            // access-control service - see the remarks on HrAwardsReportService.
+            services.AddScoped<ErpSystem.Api.Services.Reports.HrAwardsReportService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.ISystemReportProvider>(provider =>
+                provider.GetRequiredService<ErpSystem.Api.Services.Reports.HrAwardsReportService>());
             services.AddScoped<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAuditComplianceReportService>(provider =>
                 provider.GetRequiredService<ErpSystem.Core.Services.Procurement.AuditComplianceReportService>());
@@ -1026,6 +1025,54 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // HR Services - NOW ENABLED
             services.AddScoped<IEmployeeService, EmployeeService>();
+            // HR's payroll-membership statement beside payroll's own profile; the one place HR
+            // reaches into payroll (through IPayrollService's public upsert, create-only).
+            services.AddScoped<IPayrollMembershipService, PayrollMembershipService>();
+
+            // Staff numbering is per-register configuration, not a compiled-in format.
+            services.AddScoped<ErpSystem.Core.Services.HR.IStaffNumberService,
+                               ErpSystem.Core.Services.HR.StaffNumberService>();
+
+            // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): template, check, review,
+            // commit. Lives in Api because it reads and writes workbooks (ClosedXML) and stores the
+            // upload through the HR document gate; every employee still goes through IEmployeeService.
+            services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeImportService,
+                               ErpSystem.Api.Services.HR.EmployeeImport.EmployeeImportService>();
+
+            // Reference dimensions: the qualification ladder, certifying bodies, and the
+            // staff-numbering rules themselves.
+            services.AddScoped<ErpSystem.Core.Services.HR.IReferenceDimensionService,
+                               ErpSystem.Core.Services.HR.ReferenceDimensionService>();
+
+            // Shared cross-module reference data: administrative geography (Region / District /
+            // Town and their equivalents in any country). Registered here for now because this is
+            // where the HR module's services are wired and HR is its first consumer; it belongs to
+            // no module. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.
+            services.AddScoped<ErpSystem.Core.Services.Reference.IGeographyService,
+                               ErpSystem.Core.Services.Reference.GeographyService>();
+
+            // Every module that stores a GeoAreaId registers a probe here, so the geography service
+            // can refuse to delete an area still in use without having to know what a module is.
+            // ⚠ A consumer that gains a GeoAreaId and forgets this line gets NO protection: the
+            // deletes are soft, so the foreign key never fires.
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.EmployeeGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.LocationGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.CompanyProfileGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.HealthcareFacilityGeoAreaConsumer>();
+
+            // The company seal and signature, versioned rather than overwritten.
+            services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
+                               ErpSystem.Core.Services.HR.CompanySealAssetService>();
+
+            // The identification-expiry sweep. ⚠ The SERVICE and its HOST are registered together
+            // on purpose: two HR engines existed, had endpoints, and had never
+            // run because nothing hosted them.
+            services.AddScoped<ErpSystem.Core.Services.HR.IIdentificationExpiryReminderService,
+                               ErpSystem.Core.Services.HR.IdentificationExpiryReminderService>();
 
             // Organization Structure Services
             services.AddScoped<IOrganizationStructureService, OrganizationStructureService>();
@@ -1222,6 +1269,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementAccessControlSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.ProcurementStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.InventoryStatutoryReportSeeder>();
+            services.AddScoped<ErpSystem.Data.Seeders.HrAwardsReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.AuditComplianceReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.QuantitySurveyStatutoryReportSeeder>();
             services.AddScoped<ErpSystem.Data.Seeders.CivilEngineeringStatutoryReportSeeder>();
@@ -1371,10 +1419,34 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                             claim.Type == "supplier_applicant_session") &&
                         ctx.User.HasClaim(
                             "auth_provider", "ApplicantToken")))
+                // The candidate-facing recruitment surface (api/candidate/*). Role-based like
+                // ExternalOnly; CandidateAccessMiddleware is the outer fence that keeps the same
+                // tokens off everything else.
+                .AddPolicy("CandidateOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        ctx.User.IsInRole(Constants.Roles.Candidate)))
+                // The consultant-client surface (api/client-portal/*). Role-based like
+                // CandidateOnly; ConsultantClientAccessMiddleware is the outer fence that keeps
+                // the same tokens off everything else. Replaced the PortalBearer-scheme
+                // "ConsultantClientPortal" policy 2026-08-31 when client contacts moved onto the
+                // main JWT scheme (invite-only, no self-registration).
+                .AddPolicy("ConsultantClientOnly", policy =>
+                    policy.RequireAssertion(ctx =>
+                        ctx.User?.Identity?.IsAuthenticated == true &&
+                        ctx.User.IsInRole(Constants.Roles.ConsultantClient)))
+                // ⚠ InternalOnly is a BLOCKLIST, not an allowlist: every self-registered public
+                // role must be named here or its holders satisfy the policy on every internal
+                // endpoint that uses it. Candidate was added 2026-08-30 when candidates moved
+                // onto the main JWT scheme — without it, a careers signup would have counted as
+                // "internal" everywhere this policy guards. ConsultantClient followed 2026-08-31
+                // for exactly the same reason (invited, but still a member of the public).
                 .AddPolicy("InternalOnly", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true &&
-                        !ctx.User.IsInRole(Constants.Roles.ExternalUser)))
+                        !ctx.User.IsInRole(Constants.Roles.ExternalUser) &&
+                        !ctx.User.IsInRole(Constants.Roles.Candidate) &&
+                        !ctx.User.IsInRole(Constants.Roles.ConsultantClient)))
                 .AddPolicy("AuditGovernanceRead", policy =>
                     policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
                 .AddPolicy("AuditGovernanceManage", policy =>
@@ -1417,25 +1489,12 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 // without granting broader MaintenanceWrite permissions.
                 .AddPolicy("FleetInspectionWrite", policy =>
                     policy.RequireRole("Employee", "Manager", "MaintenanceManager", "Maintenance Manager", "TenantAdmin", "SuperAdmin"))
-                // External portal policies. These run ONLY on the dedicated PortalBearer scheme (portal
-                // tokens use a distinct signing key + audience, see PortalAuth) and require the matching
-                // user_type claim, so an internal staff token can never satisfy them and vice-versa.
-                //
-                // email_verified is required as defence in depth. Both portal JWT services already emit
-                // the claim as literal "true"/"false" but nothing enforced it, so a token minted before
-                // verification stayed valid for its full seven days. Requiring it here invalidates any
-                // such token immediately — which is the point — so portal clients must treat a 403 on a
-                // portal route as "sign in again", not as a permanent refusal.
-                .AddPolicy("CandidatePortal", policy =>
-                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
-                          .RequireAuthenticatedUser()
-                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.CandidateUserType)
-                          .RequireClaim("email_verified", "true"))
-                .AddPolicy("ConsultantClientPortal", policy =>
-                    policy.AddAuthenticationSchemes(ErpSystem.Api.Security.PortalAuth.Scheme)
-                          .RequireAuthenticatedUser()
-                          .RequireClaim(ErpSystem.Api.Security.PortalAuth.UserTypeClaim, ErpSystem.Api.Security.PortalAuth.ClientUserType)
-                          .RequireClaim("email_verified", "true"));
+                // The dedicated PortalBearer scheme and its "ConsultantClientPortal" policy were
+                // retired 2026-08-31 with the bespoke consultant-client portal — its last tenant.
+                // Client contacts now hold main-scheme tokens under the ConsultantClient role,
+                // fenced by ConsultantClientAccessMiddleware and the "ConsultantClientOnly"
+                // policy above (the "CandidatePortal" sibling went the same way 2026-08-30).
+                ;
 
             authorizationBuilder
                 .AddPolicy(FinancePermissions.ConfigureChartOfAccountsPolicy, policy =>
@@ -1465,6 +1524,107 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
             }
 
+            // HR leave policies. The organisation-wide surface — every request,
+            // everyone's balances, the adjustment ledger, the type catalogue's writes and the
+            // year-end jobs — authorizes on these. Employee self-service (file, amend, cancel,
+            // view OWN leave) deliberately does NOT: those stay on InternalOnly with a
+            // self-or-permission ownership check at the endpoint, and approve/reject stay with
+            // the workflow assignee, validated per request by CanUserApproveAsync.
+            // Same ladder — Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.LeaveReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewLeave,
+                        HrPermissions.MaintainLeave,
+                        HrPermissions.AdministerLeave)))
+                .AddPolicy(HrPermissions.LeaveWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainLeave,
+                        HrPermissions.AdministerLeave)))
+                .AddPolicy(HrPermissions.LeaveAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerLeave)));
+
+            // HR attendance & time policies — attendance proper plus the consultant
+            // timesheet/engagement/invoicing registers. Same split as leave: org-wide surfaces
+            // authorize here, token-actor acts (punch, raising your own regularization) and own-
+            // record reads stay on InternalOnly with ownership checks, and approvals stay with
+            // the workflow assignee. Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.AttendanceReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewAttendance,
+                        HrPermissions.MaintainAttendance,
+                        HrPermissions.AdministerAttendance)))
+                .AddPolicy(HrPermissions.AttendanceWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainAttendance,
+                        HrPermissions.AdministerAttendance)))
+                .AddPolicy(HrPermissions.AttendanceAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerAttendance)));
+
+            // HR compensation & benefits policies: emoluments, pay components,
+            // salary structure, benefit policies and enrollments. Money data follows the medical
+            // shape — org-wide surfaces authorize here, an employee's own pay makeup, benefits,
+            // dependents and beneficiaries are ownership checks on the endpoint, and the benefit
+            // CATALOGUE reads stay open (an employee needs to see what benefits exist).
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.CompensationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewCompensation,
+                        HrPermissions.MaintainCompensation,
+                        HrPermissions.AdministerCompensation)))
+                .AddPolicy(HrPermissions.CompensationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainCompensation,
+                        HrPermissions.AdministerCompensation)))
+                .AddPolicy(HrPermissions.CompensationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerCompensation)));
+
+            // HR training & learning policies: programs, plans, schedules,
+            // nominations, requests, completions, needs assessments, budgets, vendors, trainers,
+            // learning paths, mentoring, compliance training and service bonds. Same split as the
+            // earlier slices: org-wide surfaces authorize here, an employee's own training record
+            // and self-service acts (nominate self, respond, withdraw) are ownership checks on
+            // the endpoint, and workflow-validated approvals stay with the assignee.
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.TrainingReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewTraining,
+                        HrPermissions.MaintainTraining,
+                        HrPermissions.AdministerTraining)))
+                .AddPolicy(HrPermissions.TrainingWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainTraining,
+                        HrPermissions.AdministerTraining)))
+                .AddPolicy(HrPermissions.TrainingAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerTraining)));
+
+            // HR recruitment policies: requisitions, vacancies, adverts, candidates,
+            // applications, interviews, offers, hires and pre-employment checks. Same split as the
+            // earlier slices: org-wide surfaces authorize here, a panelist's own interview surface
+            // is a membership check on the endpoint, the anonymous surfaces (public job listings,
+            // email-token offer responses and panelist confirms) keep their deliberate
+            // AllowAnonymous + rate limits, and the candidate portal keeps its own scheme.
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.RecruitmentReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewRecruitment,
+                        HrPermissions.MaintainRecruitment,
+                        HrPermissions.AdministerRecruitment)))
+                .AddPolicy(HrPermissions.RecruitmentWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainRecruitment,
+                        HrPermissions.AdministerRecruitment)))
+                .AddPolicy(HrPermissions.RecruitmentAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerRecruitment)));
             foreach (var permission in ProcurementAccessControlRegistry.Permissions)
             {
                 authorizationBuilder.AddPolicy(permission.Code, policy =>
@@ -1500,7 +1660,322 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         HrPermissions.AdministerMedical)));
 
+            // HR staff-travel policies. Same story as medical: all eight travel controllers
+            // carried a bare [Authorize], so any authenticated employee could read colleagues'
+            // passport and visa records, the cash-advance register and the expense-claim ledger.
+            // Same ladder — Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.TravelReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewTravel,
+                        HrPermissions.MaintainTravel,
+                        HrPermissions.AdministerTravel)))
+                .AddPolicy(HrPermissions.TravelWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainTravel,
+                        HrPermissions.AdministerTravel)))
+                .AddPolicy(HrPermissions.TravelAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerTravel)));
+
+            // HR succession & talent policies. Measured 2026-08-18: all nine controllers carried a
+            // bare [Authorize] with no method-level policy anywhere, so a plain Employee account
+            // listed every succession plan in the tenant, read candidate readiness and
+            // retention-risk flags, and both created and deleted a plan. Same ladder again —
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.SuccessionReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewSuccession,
+                        HrPermissions.MaintainSuccession,
+                        HrPermissions.AdministerSuccession)))
+                .AddPolicy(HrPermissions.SuccessionWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainSuccession,
+                        HrPermissions.AdministerSuccession)))
+                .AddPolicy(HrPermissions.SuccessionAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerSuccession)));
+
+            // HR probation & confirmation policies. Measured 2026-08-18: ProbationController
+            // carried a bare [Authorize], so any authenticated employee could list who in the
+            // tenant is on probation, read their performance/conduct/attitude ratings and the
+            // reviewer's comments, extend a probation period, and confirm or terminate it — the
+            // last of those decides whether a colleague's employment becomes permanent. Same
+            // ladder again — Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.ProbationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewProbation,
+                        HrPermissions.MaintainProbation,
+                        HrPermissions.AdministerProbation)))
+                .AddPolicy(HrPermissions.ProbationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainProbation,
+                        HrPermissions.AdministerProbation)))
+                .AddPolicy(HrPermissions.ProbationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerProbation)));
+
+            // HR job architecture, competency and manpower budget policies.
+            // Measured 2026-08-19: all five controllers — JobAnalysis, hr/job-architecture,
+            // competencies, employee-competencies, position-competencies — carried a bare
+            // [Authorize] across 149 endpoints. Any authenticated employee could read every
+            // colleague's competency assessment and gap analysis, rewrite an approved job
+            // description, and approve a manpower budget. Three families rather than one because
+            // the audiences differ: HR authors job descriptions, line managers assess
+            // competencies, and budget holders own the establishment. Same ladder throughout —
+            // Administer implies Write implies Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.JobArchitectureReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewJobArchitecture,
+                        HrPermissions.MaintainJobArchitecture,
+                        HrPermissions.AdministerJobArchitecture)))
+                .AddPolicy(HrPermissions.JobArchitectureWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainJobArchitecture,
+                        HrPermissions.AdministerJobArchitecture)))
+                .AddPolicy(HrPermissions.JobArchitectureAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerJobArchitecture)))
+                .AddPolicy(HrPermissions.CompetencyReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewCompetency,
+                        HrPermissions.MaintainCompetency,
+                        HrPermissions.AdministerCompetency)))
+                .AddPolicy(HrPermissions.CompetencyWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainCompetency,
+                        HrPermissions.AdministerCompetency)))
+                .AddPolicy(HrPermissions.CompetencyAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerCompetency)))
+                .AddPolicy(HrPermissions.ManpowerBudgetReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewManpowerBudget,
+                        HrPermissions.MaintainManpowerBudget,
+                        HrPermissions.AdministerManpowerBudget)))
+                .AddPolicy(HrPermissions.ManpowerBudgetWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainManpowerBudget,
+                        HrPermissions.AdministerManpowerBudget)))
+                .AddPolicy(HrPermissions.ManpowerBudgetAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerManpowerBudget)));
+
+            // HR separation, clearance & exit policies. Registered ahead of the
+            // controllers so the seed lands before any gate goes on — permissions resolve from the
+            // database, so gating first would 403 every endpoint for all but SuperAdmin.
+            //
+            // Same ladder — Administer implies Write implies Read — but note what is deliberately
+            // NOT here. FR-HR-092 (the MD signs every non-procedural termination) and FR-HR-185
+            // (Internal Audit reviews the settlement before payment) are anchored on
+            // Constants.Roles.ManagingDirectorAny and Constants.Roles.InternalAudit and read off
+            // the record, not off this family: HR holds Read and Write, and must never be able to
+            // sign off its own terminations or release its own payments.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.SeparationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewSeparation,
+                        HrPermissions.MaintainSeparation,
+                        HrPermissions.AdministerSeparation)))
+                .AddPolicy(HrPermissions.SeparationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainSeparation,
+                        HrPermissions.AdministerSeparation)))
+                .AddPolicy(HrPermissions.SeparationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerSeparation)));
+
+            // Staff Awards & Recognition. Same ladder: Administer implies Write implies
+            // Read. What is deliberately NOT gated on this family is the employee's own surface:
+            // nominating a colleague and voting for a nominee are acts every employee performs, so
+            // they live on the self-service controller behind bare [Authorize] with the actor taken
+            // from the token. Gating them here would lock the whole workforce out of the feature
+            // the area exists for — the area-15b trap, where a permission gate was used for an
+            // actor who is defined by the record rather than by a grant.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.AwardsReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewAwards,
+                        HrPermissions.MaintainAwards,
+                        HrPermissions.AdministerAwards)))
+                .AddPolicy(HrPermissions.AwardsWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainAwards,
+                        HrPermissions.AdministerAwards)))
+                .AddPolicy(HrPermissions.AwardsAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerAwards)));
+
+            // Performance. Same ladder: Administer implies Write implies Read.
+            // Deliberately NOT gated on this family: every token-actor self surface (self/manager/
+            // peer evaluation, acknowledge, appeals, own goals and journal), goal approve/reject
+            // (the goal workflow validates the direct manager per goal), PIP approve/reject (the
+            // workflow engine validates the assignee per instance), and the PIP authoring role gate
+            // (managers author PIPs for their reports — a permission would lock every line manager
+            // out of the corrective surface).
+            authorizationBuilder
+                .AddPolicy(HrPermissions.PerformanceReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewPerformance,
+                        HrPermissions.MaintainPerformance,
+                        HrPermissions.AdministerPerformance)))
+                .AddPolicy(HrPermissions.PerformanceWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainPerformance,
+                        HrPermissions.AdministerPerformance)))
+                .AddPolicy(HrPermissions.PerformanceAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerPerformance)));
+
+            // Employee records & foundation. Same ladder. Deliberately NOT gated on
+            // this family: the lean directory reads that feed the shared employee picker (POST
+            // paged and the by-unit/level/location, direct-report, management-chain, by-id and
+            // by-number reads all return the summary EmployeeDto — no DOB, pay or identifiers),
+            // the aggregate stats tiles on the HR landing page, the dead technician routes
+            // (in-process maintenance consumers bypass HTTP), the foundation reference reads
+            // (org/location structures, positions lists, lookups — pickers feed every module),
+            // and the whole employee portal (token-actor by construction, service-enforced
+            // self-or-HR). The PII line: {id}/details and {id}/profile and every per-employee
+            // sub-record read carry salary, tax/SSN, address and bank data — those are Read.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.EmployeeReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewEmployees,
+                        HrPermissions.MaintainEmployees,
+                        HrPermissions.AdministerEmployees)))
+                .AddPolicy(HrPermissions.EmployeeWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainEmployees,
+                        HrPermissions.AdministerEmployees)))
+                .AddPolicy(HrPermissions.EmployeeAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerEmployees)));
+
+            // SHE. Same ladder, converted from the area's SuperAdmin/HR role gates
+            // by verb (reads → Read, writes and every desk decision → Write, deletes → Admin), so
+            // the SHE desk keeps its exact reach and a future SHE-officer role can be granted the
+            // family without the HR role. Deliberately NOT gated: incident,
+            // hazard and environmental-incident reporting, stop-work raise, PPE and stop-work
+            // "mine" reads, and risk-assessment acknowledgements — any-internal-actor by design.
+            // The two SHE health controllers stay on the HR.Medical.* policies (the slice-9
+            // ownership boundary), not this family.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.SheReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewShe,
+                        HrPermissions.MaintainShe,
+                        HrPermissions.AdministerShe)))
+                .AddPolicy(HrPermissions.SheWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainShe,
+                        HrPermissions.AdministerShe)))
+                .AddPolicy(HrPermissions.SheAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerShe)));
+
+            // The four mechanically converted areas (orientation, assets, movements,
+            // discipline & grievance). Every endpoint gate in these areas was HR-desk-shaped
+            // (SuperAdmin/HR variants, no decision roles at the attribute level), so the conversion
+            // is verb-mechanical per family: reads → Read, desk ops → Write, deletes → Admin. The
+            // areas' deliberate opens (self-service acknowledge/respond/mine surfaces, the employee
+            // portal) are untouched, and the record-level actor rules (movement workflow assignees,
+            // discipline natural justice) stay in the services where their areas put them.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.OrientationReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewOrientation,
+                        HrPermissions.MaintainOrientation,
+                        HrPermissions.AdministerOrientation)))
+                .AddPolicy(HrPermissions.OrientationWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainOrientation,
+                        HrPermissions.AdministerOrientation)))
+                .AddPolicy(HrPermissions.OrientationAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerOrientation)))
+                .AddPolicy(HrPermissions.AssetsReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewAssets,
+                        HrPermissions.MaintainAssets,
+                        HrPermissions.AdministerAssets)))
+                .AddPolicy(HrPermissions.AssetsWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainAssets,
+                        HrPermissions.AdministerAssets)))
+                .AddPolicy(HrPermissions.AssetsAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerAssets)))
+                .AddPolicy(HrPermissions.MovementsReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewMovements,
+                        HrPermissions.MaintainMovements,
+                        HrPermissions.AdministerMovements)))
+                .AddPolicy(HrPermissions.MovementsWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainMovements,
+                        HrPermissions.AdministerMovements)))
+                .AddPolicy(HrPermissions.MovementsAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerMovements)))
+                .AddPolicy(HrPermissions.DisciplineReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewDiscipline,
+                        HrPermissions.MaintainDiscipline,
+                        HrPermissions.AdministerDiscipline)))
+                .AddPolicy(HrPermissions.DisciplineWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainDiscipline,
+                        HrPermissions.AdministerDiscipline)))
+                .AddPolicy(HrPermissions.DisciplineAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerDiscipline)));
+
+            // The company/administration tail: the company profile, the HR policy
+            // settings, the external-associate register and the (dormant, UI-less) company
+            // schedule. Verb-mechanical as everywhere — reads → Read, desk work → Write,
+            // deletes → Admin — with one deliberate exception: writing the HR policy settings is
+            // Admin, not Write, because its knobs move trust boundaries (the procedural-absence
+            // threshold of FR-HR-092, the enforcement modes of FR-HR-136) and the previous role
+            // gate held that write to SuperAdmin/TenantAdmin. HR's Read+Write grant preserves the
+            // desk's exact reach; granting HR the Admin permission is TDC's one-line change if it
+            // ever wants HR to hold those knobs.
+            authorizationBuilder
+                .AddPolicy(HrPermissions.CompanyReadPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.ViewCompany,
+                        HrPermissions.MaintainCompany,
+                        HrPermissions.AdministerCompany)))
+                .AddPolicy(HrPermissions.CompanyWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.MaintainCompany,
+                        HrPermissions.AdministerCompany)))
+                .AddPolicy(HrPermissions.CompanyAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        HrPermissions.AdministerCompany)));
+
             foreach (var permission in HrPermissions.All)
+            {
+                authorizationBuilder.AddPolicy(permission.Name, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(permission.Name)));
+            }
+
+            // Shared cross-module reference data (administrative geography). Its own family
+            // because the data is not HR's — see ReferenceDataPermissions. There is no Read
+            // policy on purpose: every module's address form lists regions, so reads are
+            // InternalOnly.
+            authorizationBuilder
+                .AddPolicy(ReferenceDataPermissions.GeographyWritePolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        ReferenceDataPermissions.MaintainGeography,
+                        ReferenceDataPermissions.AdministerGeography)))
+                .AddPolicy(ReferenceDataPermissions.GeographyAdminPolicy, policy =>
+                    policy.Requirements.Add(new PermissionRequirement(
+                        ReferenceDataPermissions.AdministerGeography)));
+
+            foreach (var permission in ReferenceDataPermissions.All)
             {
                 authorizationBuilder.AddPolicy(permission.Name, policy =>
                     policy.Requirements.Add(new PermissionRequirement(permission.Name)));
@@ -1520,12 +1995,19 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
         {
             // Custom middleware registered as IMiddleware
             services.AddTransient<ErpSystem.Api.Middleware.ExternalUserAccessMiddleware>();
+            services.AddTransient<ErpSystem.Api.Middleware.CandidateAccessMiddleware>();
+            services.AddTransient<ErpSystem.Api.Middleware.ConsultantClientAccessMiddleware>();
             services.AddScoped<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
 
             services.AddControllers(options =>
                 {
                     options.Conventions.Add(new FinancePermissionAuthorizationConvention());
                     options.Filters.AddService<ErpSystem.Api.Filters.SystemExceptionResultLoggingFilter>();
+
+                    // [Required] on a non-nullable Guid accepts Guid.Empty, so an
+                    // omitted foreign key passed validation and died on the FK as a 500 naming
+                    // nothing. HR DTOs only — see HrRequiredGuidActionFilter.
+                    options.Filters.Add<ErpSystem.Api.Filters.HrRequiredGuidActionFilter>();
                 })
                 .AddJsonOptions(options =>
                 {
@@ -1923,6 +2405,53 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Reclaims public CV uploads that were never attached to an application.
             services.AddHostedService<ErpSystem.Api.Services.HR.PublicCvUploadTicketSweeper>();
+
+            // SHE reminder engine: hourly sweep — permit auto-expiry,
+            // due-date reminder ladders, tiered escalation. Sweep logic is scoped
+            // (ISheReminderService) so the run-now endpoint shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.SheReminderBackgroundService>();
+
+            // Staff movement reminder engine: daily sweep — assignments ending,
+            // returns and approvals overdue, effective dates reached with nobody implementing.
+            // Sweep logic is scoped (IStaffMovementReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.StaffMovementReminderBackgroundService>();
+
+            // Discipline reminder engine: daily sweep — the 48-hour written query,
+            // the four-week investigation, hearings coming up, both appeal windows, corrective
+            // actions, expiring warnings, unpaid fines, and grievances at an unanswered rung.
+            // Sweep logic is scoped (IDisciplineReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.DisciplineReminderBackgroundService>();
+
+            // Probation reminder engine: daily sweep — FR-HR-032's confirmation
+            // form a month before the end, FR-HR-140's expiry notice at the tenant's lead time, a
+            // probation past its end date with no outcome recorded, overdue reviews, and reviews the
+            // employee has never acknowledged. Sweep logic is scoped (IProbationReminderService) so
+            // run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.ProbationReminderBackgroundService>();
+            services.AddHostedService<ErpSystem.Api.Services.HR.IdentificationExpiryReminderBackgroundService>();
+
+            // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
+
+            // Separation reminder engine (FR-HR-111): daily sweep — a retirement
+            // or a contract expiry approaching with no exit raised, a clearance with mandatory lines
+            // unanswered, a settlement sitting with Internal Audit, and a settlement approved and
+            // never completed. Sweep logic is scoped (ISeparationReminderService) so run-now shares
+            // it. ⚠ Until this registration the engine ran only when somebody pressed the button,
+            // which is what FR-HR-093's "advance alerts" actually depended on.
+            services.AddHostedService<ErpSystem.Api.Services.HR.SeparationReminderBackgroundService>();
+
+            // Asset reminder engine: daily sweep — maintenance due within
+            // the horizon, maintenance already overdue on the escalation ladder, and assets
+            // that require regular servicing with no next date at all. Sweep logic is scoped
+            // (IAssetReminderService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.AssetReminderBackgroundService>();
+
+            // Employee bulk-import committer: polls for sessions HR has confirmed and writes them
+            // in batches, one fresh scope per batch. There is no job queue in this API, so the
+            // session row IS the work item (Status = CommitRequested). Logic is scoped
+            // (IEmployeeImportService.CommitBatchAsync); the host only paces and locks.
+            services.AddHostedService<ErpSystem.Api.Services.HR.EmployeeImport.EmployeeImportCommitBackgroundService>();
 
             // Durable delivery for emails an account is unusable without (portal verification).
             services.AddScoped<ErpSystem.Core.Interfaces.Common.ITransactionalEmailQueue,

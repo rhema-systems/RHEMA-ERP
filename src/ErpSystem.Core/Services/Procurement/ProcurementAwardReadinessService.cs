@@ -27,19 +27,22 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
     private readonly IProcurementAccessControlService _accessControl;
     private readonly IProcurementSodGuardService _sodGuard;
     private readonly IProcurementControlEventService _controlEvents;
+    private readonly ISupplierValidationService _supplierValidation;
 
     public ProcurementAwardReadinessService(
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
         IProcurementAccessControlService accessControl,
         IProcurementSodGuardService sodGuard,
-        IProcurementControlEventService controlEvents)
+        IProcurementControlEventService controlEvents,
+        ISupplierValidationService supplierValidation)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _accessControl = accessControl;
         _sodGuard = sodGuard;
         _controlEvents = controlEvents;
+        _supplierValidation = supplierValidation;
     }
 
     private IGenericRepository<ProcurementAwardReadinessDecision> Decisions =>
@@ -605,12 +608,19 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .GetQueryable(item => item.TenantId == _currentUser.TenantId &&
                                   item.TenderBid.TenderId == tender.Id && !item.IsDeleted)
             .Include(item => item.TenderBid)
+            .Include(item => item.TenderEvaluator)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
-        var recommended = evaluations
-            .Where(item => item.IsRecommended &&
-                           string.Equals(item.Status, "Approved", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        // A recalled sheet can be replaced by a new evaluation projection.
+        // Retain the latest projection per bidder/voter, including a new draft
+        // so an unfinished replacement cannot reuse the previous recommendation.
+        // The separate SOD resolver deliberately retains all evaluator history.
+        evaluations = ProcurementTenderEvaluationProjectionPolicy.SelectCurrent(evaluations);
+        var evaluationsComplete = evaluations.Count != 0 &&
+                                  evaluations.All(IsCompletedLegacyEvaluation);
+        var recommended = evaluationsComplete
+            ? evaluations.Where(item => item.IsRecommended).ToList()
+            : new List<TenderEvaluation>();
         var recommendedBidIds = recommended.Select(item => item.TenderBidId).Distinct().ToList();
         var recommendedPartnerIds = recommended.Select(item => item.TenderBid.BusinessPartnerId)
             .Distinct().ToList();
@@ -638,9 +648,11 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             EvidenceReference = recommended.Count == 1
                 ? $"tender-evaluation:{recommended[0].Id:N}"
                 : null,
-            RecommendedAtUtc = recommended.Max(item => (DateTime?)item.SubmittedDate ?? item.EvaluationDate),
+            RecommendedAtUtc = recommended.Count == 0
+                ? null
+                : recommended.Max(item => (DateTime?)item.SubmittedDate ?? item.EvaluationDate),
             RecommendedByUserId = recommended.Count == 1
-                ? recommended[0].TenderEvaluatorId
+                ? recommended[0].TenderEvaluator.UserId
                 : null
         };
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Source,
@@ -651,7 +663,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Recommendation,
             "LEGACY_RECOMMENDATION_UNAMBIGUOUS",
             recommendedBidIds.Count == 1 && recommendedPartnerIds.Count == 1,
-            "Exactly one approved recommended tender bid and supplier are retained.",
+            "Exactly one completed, immutable recommended tender bid and supplier are retained.",
             "Resolve conflicting or incomplete evaluator recommendations.",
             "TenderEvaluation", recommended.Count == 1 ? recommended[0].Id : null);
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.AuthorityAndWorkflow,
@@ -684,11 +696,9 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         }
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Evaluation,
             "LEGACY_EVALUATIONS_COMPLETE",
-            evaluations.Count != 0 &&
-            evaluations.All(item => string.Equals(
-                item.Status, "Approved", StringComparison.OrdinalIgnoreCase)),
-            "Every retained legacy evaluator result is approved.",
-            "Complete or remove draft/rejected evaluator results through the evaluation workflow.");
+            evaluationsComplete,
+            "Every retained legacy evaluator result is submitted and immutable.",
+            "Submit or remove draft/rejected evaluator results through the controlled committee workflow.");
         await AddLegacyScoreLineageAsync(state, tender.Id, evaluations, cancellationToken);
         await AddSuppliersAsync(state, tender.RequiresPrequalification,
             state.Recommendation.RecommendedAtUtc, cancellationToken);
@@ -719,13 +729,14 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             return;
         }
         var control = controls[0];
+        var petty = control.Method == ProcurementMethodType.PettyPurchase;
         state.Method = control.Method;
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Source,
             "EXCEPTIONAL_SOURCE_CURRENT",
             control.Status == ProcurementExceptionalSourcingControlStatus.Recommended &&
             tender.Status is not "Awarded" and not "Cancelled",
-            "The exceptional source has reached a negotiated recommendation and is not awarded.",
-            "Complete approval, negotiation, and recommendation before award.",
+            petty ? "The Petty Purchase has an approved quotation recommendation and is not awarded." : "The exceptional source has reached a negotiated recommendation and is not awarded.",
+            petty ? "Complete independent approval and quotation recommendation before award." : "Complete approval, negotiation, and recommendation before award.",
             "ProcurementExceptionalSourcingControl", control.Id, control.IntegrityHash);
         state.Authority = new ProcurementAwardReadinessAuthorityDto
         {
@@ -737,7 +748,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             WorkflowInstanceId = control.WorkflowInstanceId,
             ApprovalReference = control.PpaApprovalReference ??
                                 control.ManagingDirectorApprovalReference ??
-                                control.BoardApprovalReference,
+                                control.BoardApprovalReference ??
+                                (petty && control.WorkflowInstanceId.HasValue ? $"workflow:{control.WorkflowInstanceId.Value:N}" : null),
             ApprovedAtUtc = control.ApprovedAtUtc,
             ApprovedByUserId = control.ApprovedById,
             ApprovalActorUserIds = ParseGuids(control.ApprovalActorsJson)
@@ -760,12 +772,12 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             bid is not null && control.RecommendedAtUtc.HasValue &&
             !string.IsNullOrWhiteSpace(control.RecommendationReason) &&
             !string.IsNullOrWhiteSpace(control.RecommendationEvidenceReference),
-            "The negotiated recommendation identifies one current bid and supplier with evidence.",
-            "Complete the negotiated recommendation and attach its evidence.",
+            petty ? "The approved quotation recommendation identifies one current bid and supplier with evidence." : "The negotiated recommendation identifies one current bid and supplier with evidence.",
+            petty ? "Complete the approved quotation recommendation and attach its evidence." : "Complete the negotiated recommendation and attach its evidence.",
             "ProcurementExceptionalSourcingControl", control.Id, control.IntegrityHash);
         state.Evaluations.Add(new ProcurementAwardReadinessEvaluationDto
         {
-            EvaluationType = "ExceptionalNegotiatedRecommendation",
+            EvaluationType = petty ? "PettyQuotationRecommendation" : "ExceptionalNegotiatedRecommendation",
             EvaluationId = control.Id,
             Phase = ProcurementEvaluationPhase.Combined,
             Status = control.Status.ToString(),
@@ -774,16 +786,19 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             IntegrityHash = control.IntegrityHash
         });
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.Evaluation,
-            "EXCEPTIONAL_NEGOTIATION_EVALUATED",
+            petty ? "PETTY_QUOTATION_REVIEWED" : "EXCEPTIONAL_NEGOTIATION_EVALUATED",
+            petty ? bid is not null && bid.TotalBidAmount > 0 && bid.TotalBidAmount <= tender.EstimatedValue &&
+                control.ApprovedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
+                !string.IsNullOrWhiteSpace(control.SupplierSelectionEvidenceReference) :
             control.NegotiatedAtUtc.HasValue && control.RecommendedAtUtc.HasValue &&
             !string.IsNullOrWhiteSpace(control.NegotiationMinutesEvidenceReference) &&
             !string.IsNullOrWhiteSpace(control.NegotiationOutcomeReference),
-            "Negotiation minutes, outcome, and resulting recommendation are retained.",
-            "Complete the negotiation record and recommendation.");
+            petty ? "The approved supplier quotation and recommendation are retained." : "Negotiation minutes, outcome, and resulting recommendation are retained.",
+            petty ? "Review and recommend the recorded quotation within the approved value." : "Complete the negotiation record and recommendation.");
         Add(state, ProcurementAwardReadinessPrerequisiteGroup.ScoreIntegrity,
             "EXCEPTIONAL_SCORE_NOT_APPLICABLE",
             ProcurementAwardReadinessPrerequisiteStatus.NotApplicable,
-            "The source-applicable evaluation is a negotiated recommendation, not committee score sheets.",
+            petty ? "The source-applicable evaluation is an approved quotation recommendation, not committee score sheets." : "The source-applicable evaluation is a negotiated recommendation, not committee score sheets.",
             null);
         await AddWorkflowAsync(state, cancellationToken);
         await AddSuppliersAsync(state, tender.RequiresPrequalification,
@@ -794,9 +809,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             null, control.JustificationEvidenceReference);
         AddEvidence(state, "EXCEPTIONAL_SUPPLIER_SELECTION", "Supplier selection evidence",
             null, control.SupplierSelectionEvidenceReference);
-        AddEvidence(state, "EXCEPTIONAL_NEGOTIATION", "Negotiation minutes",
-            control.NegotiationId, control.NegotiationMinutesEvidenceReference);
-        AddEvidence(state, "EXCEPTIONAL_RECOMMENDATION", "Negotiated recommendation",
+        if (!petty)
+            AddEvidence(state, "EXCEPTIONAL_NEGOTIATION", "Negotiation minutes",
+                control.NegotiationId, control.NegotiationMinutesEvidenceReference);
+        AddEvidence(state, "EXCEPTIONAL_RECOMMENDATION", petty ? "Approved quotation recommendation" : "Negotiated recommendation",
             control.RecommendedBidId, control.RecommendationEvidenceReference);
         AddEvidence(state, "EXCEPTIONAL_AUTHORITY", "Exceptional authority approval",
             control.WorkflowInstanceId, state.Authority.ApprovalReference);
@@ -902,15 +918,21 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                 !item.IsDeleted)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
-        var requiredVoters = current.Appointments.Count(item =>
-            !item.IsDeleted &&
-            item.Status == ProcurementEvaluationAppointmentStatus.Accepted &&
-            item.IsVoting);
+        var eligibleVotingAppointments = current.Appointments
+            .Where(item =>
+                !item.IsDeleted &&
+                item.Status == ProcurementEvaluationAppointmentStatus.Accepted &&
+                item.IsVoting)
+            .ToDictionary(item => item.Id);
 
         foreach (var requirement in expected)
         {
             var phaseSheets = latest.Where(item => item.Phase == requirement.Phase).ToList();
-            var hasCoverage = requiredVoters > 0 && phaseSheets.Count == requiredVoters;
+            var hasCoverage = phaseSheets.Count == 1 &&
+                              eligibleVotingAppointments.TryGetValue(
+                                  phaseSheets[0].AppointmentId,
+                                  out var appointment) &&
+                              appointment.UserId == phaseSheets[0].SubmittedByUserId;
             var allLocked = phaseSheets.Count != 0 &&
                             phaseSheets.All(item =>
                                 item.Status == ProcurementEvaluationScoreSheetStatus.Locked);
@@ -925,14 +947,16 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             Add(state, ProcurementAwardReadinessPrerequisiteGroup.ScoreIntegrity,
                 $"CURRENT_{requirement.Phase.ToString().ToUpperInvariant()}_SCORES",
                 hasCoverage && allLocked && projectionsMatch && !hasUnresolvedRecall,
-                $"Every accepted voting evaluator has one current locked {requirement.Phase} attempt matching the retained projection.",
-                $"Complete missing {requirement.Phase} scores or replace recalled/stale attempts.",
+                $"Exactly one current aggregate locked {requirement.Phase} projection is retained by an eligible voting evaluator.",
+                $"Retain one eligible aggregate {requirement.Phase} score projection or replace recalled/stale attempts.",
                 "ProcurementEvaluationCommitteeControl", current.Id,
                 current.CompositionIntegrityHash);
 
             var evaluation = state.Evaluations.FirstOrDefault(item =>
                 item.Phase == requirement.Phase &&
-                item.EvaluationId == scoreSubjectId);
+                (item.EvaluationId == scoreSubjectId ||
+                 string.Equals(item.EvaluationType, scoreSubjectType,
+                     StringComparison.Ordinal)));
             if (evaluation is not null)
                 evaluation.ScoreAttempts = phaseSheets.Select(sheet => MapScore(
                     sheet,
@@ -942,6 +966,43 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                 AddEvidence(state, $"SCORE_{requirement.Phase.ToString().ToUpperInvariant()}",
                     $"{requirement.Phase} locked score attempt {sheet.Attempt}",
                     sheet.Id, sheet.EvidenceReference);
+        }
+
+        var requiresTechnicalFinancialSeparation = expected.Any(item =>
+                                                     item.Phase == ProcurementEvaluationPhase.Technical) &&
+                                                 expected.Any(item =>
+                                                     item.Phase == ProcurementEvaluationPhase.Financial);
+        if (requiresTechnicalFinancialSeparation)
+        {
+            var technicalSheets = latest.Where(item =>
+                item.Phase == ProcurementEvaluationPhase.Technical).ToList();
+            var financialSheets = latest.Where(item =>
+                item.Phase == ProcurementEvaluationPhase.Financial).ToList();
+            var technicalSheet = technicalSheets.FirstOrDefault();
+            var financialSheet = financialSheets.FirstOrDefault();
+            var distinctEligibleScorers = technicalSheets.Count == 1 &&
+                                          financialSheets.Count == 1 &&
+                                          technicalSheet is not null &&
+                                          financialSheet is not null &&
+                                          technicalSheet.SubmittedByUserId !=
+                                          financialSheet.SubmittedByUserId &&
+                                          eligibleVotingAppointments.TryGetValue(
+                                              technicalSheet.AppointmentId,
+                                              out var technicalAppointment) &&
+                                          technicalAppointment.UserId ==
+                                          technicalSheet.SubmittedByUserId &&
+                                          eligibleVotingAppointments.TryGetValue(
+                                              financialSheet.AppointmentId,
+                                              out var financialAppointment) &&
+                                          financialAppointment.UserId ==
+                                          financialSheet.SubmittedByUserId;
+            Add(state, ProcurementAwardReadinessPrerequisiteGroup.ScoreIntegrity,
+                "TENDER_TECHNICAL_FINANCIAL_SCORER_SOD",
+                distinctEligibleScorers,
+                "The aggregate technical and financial projections were locked by distinct eligible evaluators.",
+                "Assign distinct eligible voting evaluators to the technical and financial phases.",
+                "ProcurementEvaluationCommitteeControl", current.Id,
+                current.CompositionIntegrityHash);
         }
     }
 
@@ -970,18 +1031,21 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             return;
         }
 
-        var evaluationIds = evaluations.Select(item => item.Id).ToHashSet();
+        // The committee owns one attempt stream per voter and bid. The immutable
+        // snapshot identifies the evaluation projection; the subject is the bid.
+        var bidIds = evaluations.Select(item => item.TenderBidId).ToHashSet();
         var sheets = await _unitOfWork.Repository<ProcurementEvaluationScoreSheet>()
             .GetQueryable(item =>
                 item.TenantId == _currentUser.TenantId &&
                 item.CommitteeControlId == current.Id &&
                 item.Phase == ProcurementEvaluationPhase.Combined &&
                 item.ScoreSubjectType == "TenderEvaluation" &&
-                evaluationIds.Contains(item.ScoreSubjectId) &&
+                bidIds.Contains(item.ScoreSubjectId) &&
                 !item.IsDeleted)
+            .Include(item => item.Appointment)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
-        var latest = sheets.GroupBy(item => item.ScoreSubjectId)
+        var latest = sheets.GroupBy(item => new { item.AppointmentId, item.ScoreSubjectId })
             .Select(group => group.OrderByDescending(item => item.Attempt)
                 .ThenByDescending(item => item.SubmittedAtUtc).First())
             .ToList();
@@ -994,10 +1058,12 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .AsNoTracking()
             .ToListAsync(cancellationToken);
         var allCurrent = evaluations.Count != 0 &&
+                         latest.Count == evaluations.Count &&
                          evaluations.All(evaluation =>
-                             latest.Count(sheet => sheet.ScoreSubjectId == evaluation.Id &&
+                             latest.Count(sheet => LegacyScoreMatchesEvaluation(evaluation, sheet) &&
                                                    sheet.Status ==
-                                                   ProcurementEvaluationScoreSheetStatus.Locked) == 1) &&
+                                                   ProcurementEvaluationScoreSheetStatus.Locked &&
+                                                   LegacyScoreSnapshotMatches(evaluation, sheet)) == 1) &&
                          !recalls.Any(item =>
                              item.Status is ProcurementEvaluationScoreRecallStatus.PendingApproval or
                                  ProcurementEvaluationScoreRecallStatus.Approved);
@@ -1010,7 +1076,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             current.CompositionIntegrityHash);
         foreach (var sheet in latest)
         {
-            var dto = state.Evaluations.SingleOrDefault(item => item.EvaluationId == sheet.ScoreSubjectId);
+            var evaluationId = TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId");
+            var dto = state.Evaluations.SingleOrDefault(item => item.EvaluationId == evaluationId);
             if (dto is not null)
                 dto.ScoreAttempts.Add(MapScore(sheet,
                     recalls.Where(item => item.ScoreSheetId == sheet.Id)
@@ -1113,23 +1180,27 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                     "Replace the foreign/stale recommendation.");
                 continue;
             }
-            var errors = new List<string>();
-            var warnings = new List<string>();
-            if (!partner.IsActive) errors.Add("Supplier is inactive.");
-            if (partner.IsBlacklisted) errors.Add("Supplier is blacklisted.");
-            if (!BusinessPartnerLifecyclePolicy.IsApproved(partner.ApprovalStatus))
-                errors.Add("Supplier approval is not current.");
+            var baseline = await _supplierValidation.EvaluateBaselineEligibilityAsync(
+                new SupplierEligibilityEvaluationRequest
+                {
+                    BusinessPartnerId = partner.Id,
+                    Boundary = SupplierEligibilityBoundary.Award,
+                    IncludeFinancialWarnings = true,
+                    // The immutable readiness decision owns this operation's audit.
+                    RecordAudit = false,
+                    SourceType = "ProcurementAwardReadiness",
+                    SourceReference = partner.PartnerCode
+                }, cancellationToken);
+            var errors = baseline.Errors.ToList();
+            var warnings = baseline.Warnings.ToList();
+            if (!baseline.IsValid && errors.Count == 0)
+                errors.Add("The shared supplier eligibility checks did not pass.");
             if (!partner.ApprovedById.HasValue && !partner.CreatedById.HasValue)
                 errors.Add("Supplier controller lineage is missing.");
-            if (!BusinessPartnerLifecyclePolicy.IsOperationalRegistration(
-                    partner.RegistrationStatus))
-                errors.Add("Supplier registration is not approved.");
             if (!partner.PartnerType.Contains("Supplier", StringComparison.OrdinalIgnoreCase) &&
                 !partner.PartnerType.Contains("Contractor", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(partner.PartnerType, "Both", StringComparison.OrdinalIgnoreCase))
                 errors.Add("Business partner is not eligible for procurement award.");
-            if (partner.RiskLevel is "High" or "Critical")
-                warnings.Add($"Supplier risk is {partner.RiskLevel}.");
             await AddSupplierRiskAsync(partner, errors, warnings, cancellationToken);
             var supplier = new ProcurementAwardReadinessSupplierDto
             {
@@ -1171,6 +1242,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                     partner.IsBlacklisted,
                     partner.ApprovalStatus,
                     partner.RegistrationStatus,
+                    baseline.DecisionHash,
                     partner.UpdatedAt
                 })));
             if (requiresPrequalification)
@@ -1340,16 +1412,12 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             return;
         }
         var bidder = bidders[0];
-        var requiredItems = bidder.ItemResults.Where(item =>
-            !item.IsDeleted &&
-            item.ChecklistItem is { IsActive: true, IsRequired: true }).ToList();
+        var requiredItems = bidder.ItemResults.Where(AwardVerificationEvidencePolicy.IsRequired).ToList();
         var requiredPassed = requiredItems.Count != 0 &&
                              requiredItems.All(item =>
                                  item.IsVerified &&
-                                 item.Status is "Passed" or "NotApplicable");
-        var requiredEvidence = requiredItems.All(item =>
-            item.Status == "NotApplicable" ||
-            item.Documents.Any(document => !document.IsDeleted));
+                                 item.Status == "Passed");
+        var requiredEvidence = requiredItems.All(AwardVerificationEvidencePolicy.HasEvidence);
         var templateCurrent = verification.Template is { IsActive: true } &&
                               (!verification.CompletedDate.HasValue ||
                                (!verification.Template.UpdatedAt.HasValue ||
@@ -1837,15 +1905,17 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                          StringComparison.OrdinalIgnoreCase)))
         {
             if (evaluation.TenderEvaluator is null ||
+                evaluation.TenderEvaluator.IsDeleted ||
                 evaluation.TenderEvaluator.TenantId != _currentUser.TenantId ||
                 evaluation.TenderEvaluator.TenderId != source.Id ||
                 evaluation.TenderEvaluatorId != evaluation.TenderEvaluator.Id ||
+                evaluation.TenderEvaluator.UserId == Guid.Empty ||
+                evaluation.TenderBid.IsDeleted ||
                 evaluation.TenderBid.TenantId != _currentUser.TenantId)
                 throw AmbiguousEvaluatorLineage(
                     "A legacy tender evaluation has missing or foreign evaluator lineage.");
             state.ValidEvaluationIds.Add(evaluation.Id);
-            state.LegacyEvaluationActors[evaluation.Id] =
-                evaluation.TenderEvaluator.UserId;
+            state.LegacyEvaluations[evaluation.Id] = evaluation;
             state.Items.Add(DirectEvaluatorLineage(
                 "LegacyTenderEvaluation",
                 evaluation.Id,
@@ -1877,7 +1947,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         state.MethodRuleCode = control.MethodRuleCode;
         if (control.RecommendedById is { } evaluatorId)
             state.Items.Add(DirectEvaluatorLineage(
-                "ExceptionalNegotiatedRecommendation",
+                control.Method == ProcurementMethodType.PettyPurchase
+                    ? "PettyQuotationRecommendation" : "ExceptionalNegotiatedRecommendation",
                 control.Id,
                 evaluatorId,
                 ProcurementEvaluationPhase.Combined,
@@ -1888,7 +1959,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             control.WorkflowInstanceId,
             control.ApprovedById,
             ParseGuids(control.ApprovalActorsJson),
-            cancellationToken);
+            cancellationToken,
+            knownSubmitterId: control.SubmittedForApprovalById,
+            expectedEntityId: source.Id,
+            expectedDefinitionId: control.WorkflowDefinitionId);
     }
 
     private async Task AddCommitteeScoreEvaluatorLineageAsync(
@@ -1965,11 +2039,11 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                             : source.IsLegacyTender
                                 ? "LegacyTenderCommitteeScore"
                                 : "FormalTenderCommitteeScore",
-                    EvaluationId = sheet.ScoreSubjectType == "TenderEvaluation" ||
-                                   sheet.ScoreSubjectType ==
-                                   "ProcurementRfqEvaluation"
-                        ? sheet.ScoreSubjectId
-                        : null,
+                    EvaluationId = sheet.ScoreSubjectType == "TenderEvaluation"
+                        ? TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId")
+                        : sheet.ScoreSubjectType == "ProcurementRfqEvaluation"
+                            ? sheet.ScoreSubjectId
+                            : null,
                     CommitteeControlId = sheet.CommitteeControlId,
                     AppointmentId = sheet.AppointmentId,
                     ScoreSheetId = sheet.Id,
@@ -2002,13 +2076,84 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                    state.ValidEvaluationIds.Contains(
                        sheet.ScoreSubjectId);
         if (source.IsLegacyTender)
-            return sheet.ScoreSubjectType == "TenderEvaluation" &&
-                   state.LegacyEvaluationActors.TryGetValue(
-                       sheet.ScoreSubjectId, out var evaluatorId) &&
-                   evaluatorId == sheet.SubmittedByUserId;
+            return TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId") is { } evaluationId &&
+                   state.LegacyEvaluations.TryGetValue(evaluationId, out var evaluation) &&
+                   LegacyScoreMatchesEvaluation(evaluation, sheet);
         return sheet.ScoreSubjectType ==
                "ProcurementTenderControl" &&
                sheet.ScoreSubjectId == source.Id;
+    }
+
+    private static bool LegacyScoreMatchesEvaluation(
+        TenderEvaluation evaluation,
+        ProcurementEvaluationScoreSheet sheet) =>
+        sheet.ScoreSubjectType == "TenderEvaluation" &&
+        sheet.Phase == ProcurementEvaluationPhase.Combined &&
+        sheet.ScoreSubjectId == evaluation.TenderBidId &&
+        sheet.TenantId == evaluation.TenantId &&
+        sheet.Appointment is not null &&
+        sheet.Appointment.TenantId == evaluation.TenantId &&
+        sheet.Appointment.CommitteeControlId == sheet.CommitteeControlId &&
+        sheet.Appointment.UserId == sheet.SubmittedByUserId &&
+        evaluation.TenderEvaluator is not null &&
+        evaluation.TenderEvaluator.TenantId == evaluation.TenantId &&
+        evaluation.TenderEvaluator.UserId == sheet.SubmittedByUserId &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluationId") == evaluation.Id &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "TenderBidId") == evaluation.TenderBidId &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "TenderEvaluatorId") == evaluation.TenderEvaluatorId &&
+        TryGetJsonGuid(sheet.ScoreSnapshotJson, "evaluatorUserId") == sheet.SubmittedByUserId;
+
+    private static bool LegacyScoreSnapshotMatches(
+        TenderEvaluation evaluation,
+        ProcurementEvaluationScoreSheet sheet)
+    {
+        var submittedAtUtc = evaluation.SubmittedDate ?? evaluation.UpdatedAt ?? evaluation.EvaluationDate;
+        // SQL datetime2 retains the UTC instant, but not DateTime.Kind. Restore
+        // the writer's UTC designation without converting the stored value.
+        if (submittedAtUtc.Kind == DateTimeKind.Unspecified)
+            submittedAtUtc = DateTime.SpecifyKind(submittedAtUtc, DateTimeKind.Utc);
+        var expected = TenderEvaluationService.BuildLegacyScoreSnapshot(evaluation, submittedAtUtc);
+        try
+        {
+            using var actualDocument = JsonDocument.Parse(sheet.ScoreSnapshotJson);
+            using var expectedDocument = JsonDocument.Parse(expected);
+            return ScoreSnapshotValuesEqual(actualDocument.RootElement, expectedDocument.RootElement);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ScoreSnapshotValuesEqual(JsonElement actual, JsonElement expected)
+    {
+        if (actual.ValueKind != expected.ValueKind) return false;
+        switch (actual.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var actualProperties = actual.EnumerateObject().ToList();
+                var expectedProperties = expected.EnumerateObject().ToList();
+                return actualProperties.Count == expectedProperties.Count &&
+                       actualProperties.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count() == actualProperties.Count &&
+                       expectedProperties.All(property =>
+                           actual.TryGetProperty(property.Name, out var value) &&
+                           ScoreSnapshotValuesEqual(value, property.Value));
+            case JsonValueKind.Array:
+                var actualItems = actual.EnumerateArray().ToList();
+                var expectedItems = expected.EnumerateArray().ToList();
+                return actualItems.Count == expectedItems.Count &&
+                       actualItems.Zip(expectedItems).All(pair => ScoreSnapshotValuesEqual(pair.First, pair.Second));
+            case JsonValueKind.Number:
+                // Decimal scale may change on a database round trip. Values
+                // must remain exactly equal; no floating-point tolerance.
+                return actual.TryGetDecimal(out var actualValue) &&
+                       expected.TryGetDecimal(out var expectedValue) &&
+                       actualValue == expectedValue;
+            case JsonValueKind.String:
+                return actual.GetString() == expected.GetString();
+            default:
+                return actual.GetRawText() == expected.GetRawText();
+        }
     }
 
     private async Task AddAuthorityActorsAsync(
@@ -2016,7 +2161,10 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         Guid? workflowInstanceId,
         Guid? approvedById,
         IReadOnlyCollection<Guid> declaredActorIds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? knownSubmitterId = null,
+        Guid? expectedEntityId = null,
+        Guid? expectedDefinitionId = null)
     {
         var declared = declaredActorIds
             .Where(item => item != Guid.Empty)
@@ -2051,7 +2199,18 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
             .Select(item => item!.Value)
             .Distinct()
             .ToListAsync(cancellationToken);
-        if (workflow is null || actual.Count == 0 ||
+        // Legacy exceptional controls included the submitter in ApprovalActorsJson.
+        // Exclude only the exact workflow initiator when they did not approve.
+        // Keep all actual approvals and reject every other unmatched actor.
+        if (workflow is not null && knownSubmitterId.HasValue &&
+            workflow.InitiatedById == knownSubmitterId.Value &&
+            !actual.Contains(knownSubmitterId.Value) &&
+            approvedById != knownSubmitterId)
+            declared.Remove(knownSubmitterId.Value);
+        if (workflow is null || workflow.Status != WorkflowInstanceStatus.Completed ||
+            (expectedEntityId.HasValue && workflow.EntityId != expectedEntityId.Value) ||
+            (expectedDefinitionId.HasValue && workflow.WorkflowDefinitionId != expectedDefinitionId.Value) ||
+            actual.Count == 0 ||
             declared.Any(item => !actual.Contains(item)))
             throw AmbiguousEvaluatorLineage(
                 "Authority approval actors do not match the exact completed workflow lineage.");
@@ -2186,6 +2345,14 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         {
             var suppliers = await ResolveRecommendedSupplierIdsAsync(
                 source, cancellationToken);
+            if (suppliers.Count == 0 && source.IsLegacyTender)
+            {
+                // A draft or otherwise incomplete legacy evaluation has no award candidate yet.
+                // The readiness evaluation below remains fail closed on its recommendation and
+                // evaluation gates; supplier-controller SOD becomes applicable only after a
+                // completed immutable recommendation exists.
+                return;
+            }
             var supplierControllers = await _unitOfWork.Repository<BusinessPartner>()
                 .GetQueryable(item =>
                     item.TenantId == _currentUser.TenantId &&
@@ -2259,12 +2426,16 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                 item.TenantId == _currentUser.TenantId &&
                 item.TenderBid.TenderId == source.Id &&
                 item.IsRecommended &&
-                item.Status == "Approved" &&
+                (item.Status == "Submitted" || item.Status == "Approved") &&
                 !item.IsDeleted)
             .Select(item => item.TenderBid.BusinessPartnerId)
             .Distinct()
             .ToListAsync(cancellationToken);
     }
+
+    private static bool IsCompletedLegacyEvaluation(TenderEvaluation evaluation) =>
+        string.Equals(evaluation.Status, "Submitted", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(evaluation.Status, "Approved", StringComparison.OrdinalIgnoreCase);
 
     private async Task EnsureCapabilityAsync(
         string permission,
@@ -2584,6 +2755,8 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
                     item.Status,
                     item.VerifiedDate,
                     item.VerifiedById,
+                    item.Comments,
+                    requiresDocument = item.ChecklistItem?.RequiresDocument,
                     documents = item.Documents.Where(document => !document.IsDeleted)
                         .OrderBy(document => document.Id)
                         .Select(document => new
@@ -2603,7 +2776,9 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         try
         {
             using var document = JsonDocument.Parse(json);
-            return document.RootElement.TryGetProperty(property, out var value)
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty(property, out var value) &&
+                   value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
         }
@@ -2733,7 +2908,7 @@ public sealed class ProcurementAwardReadinessService : IProcurementAwardReadines
         public List<ProcurementAwardEvaluatorLineageDto> Items { get; } = [];
         public HashSet<Guid> ApprovalActorUserIds { get; } = [];
         public HashSet<Guid> ValidEvaluationIds { get; } = [];
-        public Dictionary<Guid, Guid> LegacyEvaluationActors { get; } = [];
+        public Dictionary<Guid, TenderEvaluation> LegacyEvaluations { get; } = [];
         public Guid? MethodRuleId { get; set; }
         public string? MethodRuleCode { get; set; }
     }

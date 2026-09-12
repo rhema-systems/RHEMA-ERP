@@ -779,6 +779,7 @@ export interface WorkflowEvidenceDocumentDto {
   documentName?: string;
   documentType?: string;
   fileName: string;
+  filePath: string;
   sha256: string;
   documentOwnerId: string;
   issueDate?: string;
@@ -791,6 +792,8 @@ export interface WorkflowEvidenceDocumentDto {
   verifiedById?: string;
   verifiedAt?: string;
   verificationNotes?: string;
+  canVerify?: boolean;
+  verificationBlockedReason?: string;
   malwareScanStatus: number;
   retainUntil: string;
   isLegalHold: boolean;

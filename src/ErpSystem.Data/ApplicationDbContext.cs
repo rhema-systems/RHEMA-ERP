@@ -14,6 +14,7 @@ using ErpSystem.Core.Entities.Pricing;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
+using ErpSystem.Core.Entities.Reference;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -455,6 +456,32 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<DataRetentionJobRun> DataRetentionJobRuns { get; set; }
     public DbSet<AuditRecordLifecycleEvent> AuditRecordLifecycleEvents { get; set; }
 
+    #region Shared Reference Data
+
+    // Administrative geography — Region / State / Municipal / District / Town / Ward, as one
+    // configurable tree per country. Deliberately sits ABOVE the HR region: HR is the first
+    // consumer, not the owner. Estate, Sales, Procurement and Inventory all carry the same
+    // free-text region and district columns and are expected to move onto this.
+    // See docs/GEOGRAPHY-REFERENCE-DESIGN.md.
+    //
+    // ⚠ Not to be confused with Location/LocationLevel below. A Location is one of OUR sites and
+    // is the target of ~30 foreign keys; a GeoArea is a place on the map, true whether or not the
+    // company operates there.
+
+    /// <summary>One country's way of dividing itself up (Ghana: Region → District → Town).</summary>
+    public DbSet<GeoScheme> GeoSchemes { get; set; } = null!;
+
+    /// <summary>A tier of a scheme. Its Name is the label every address form prints.</summary>
+    public DbSet<GeoLevel> GeoLevels { get; set; } = null!;
+
+    /// <summary>An actual administrative area, effective-dated so boundary changes keep history.</summary>
+    public DbSet<GeoArea> GeoAreas { get; set; } = null!;
+
+    /// <summary>Alternate names an area answers to, so old spreadsheets still resolve.</summary>
+    public DbSet<GeoAreaAlias> GeoAreaAliases { get; set; } = null!;
+
+    #endregion Shared Reference Data
+
     #region HR Entities
 
     #region Company Setup
@@ -503,6 +530,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EmployeeWorkHistory> EmployeeWorkHistories { get; set; }
     public DbSet<EmployeeContractDetail> EmployeeContractDetails { get; set; }
     public DbSet<ExpatriateAssignment> ExpatriateAssignments { get; set; }
+    public DbSet<ExpatriateFamilyMember> ExpatriateFamilyMembers { get; set; }
     public DbSet<EmployeePositionHistory> EmployeePositionHistories { get; set; }
     public DbSet<EmployeeSalaryAssignment> EmployeeSalaryAssignments { get; set; }
     public DbSet<EmployeeReferee> EmployeeReferees { get; set; }
@@ -577,6 +605,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     public DbSet<Country> Countries { get; set; }
     public DbSet<Qualification> Qualifications { get; set; }
+
+    /// <summary>The ordered academic / professional ladder a Qualification can sit on.</summary>
+    public DbSet<QualificationLevel> QualificationLevels { get; set; }
+
+    /// <summary>Catalogued bodies that certify a skill, replacing free-text certifier names.</summary>
+    public DbSet<CertifyingBody> CertifyingBodies { get; set; }
+
+    /// <summary>Per-register staff-number formats. One row per employee register per tenant.</summary>
+    public DbSet<StaffNumberFormat> StaffNumberFormats { get; set; }
     public DbSet<ExternalAssociate> ExternalAssociates { get; set; }
 
     #endregion
@@ -718,6 +755,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<LicenseType> LicenseTypes { get; set; }
     public DbSet<BusinessPartnerLicense> BusinessPartnerLicenses { get; set; }
     public DbSet<BusinessPartnerContact> BusinessPartnerContacts { get; set; }
+    public DbSet<BusinessPartnerBankAccount> BusinessPartnerBankAccounts { get; set; }
     public DbSet<BusinessPartnerDocument> BusinessPartnerDocuments { get; set; }
     public DbSet<BusinessPartnerFinancial> BusinessPartnerFinancials { get; set; }
     public DbSet<BusinessPartnerRegistration> BusinessPartnerRegistrations { get; set; }
@@ -1265,6 +1303,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new TenderPaymentConfiguration());
         builder.ApplyConfiguration(new TenderBidLotConfiguration());
         builder.ApplyConfiguration(new TenderBidItemConfiguration());
+        builder.ApplyConfiguration(new TenderEvaluationConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationConfiguration());
         builder.ApplyConfiguration(new TenderNegotiationItemConfiguration());
         builder.ApplyConfiguration(new TenderAwardConfiguration());
@@ -5444,6 +5483,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure all tenant relationships to avoid cascade conflicts
         ConfigureGlobalTenantRelationships(builder);
 
+        // Shared cross-module reference data (administrative geography) — see
+        // docs/GEOGRAPHY-REFERENCE-DESIGN.md. Configured before HR because HR consumes it, not the
+        // other way round.
+        ConfigureReferenceModule(builder);
+
         // Configure HR Management entities
         // [HR-MODULE-PORT] All HR entity configuration lives in ApplicationDbContext.HR.cs.
         ConfigureHrModule(builder);
@@ -6011,7 +6055,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<PayrollJournalLine>(entity =>
         {
-            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.SequenceNo }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.PayrollRunId, e.SequenceNo })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.AccountCode });
         });
 
@@ -7524,6 +7570,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(bpc => bpc.BusinessPartner)
                 .WithMany(bp => bp.Contacts)
                 .HasForeignKey(bpc => bpc.BusinessPartnerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<BusinessPartnerBankAccount>(entity =>
+        {
+            entity.ToTable("BusinessPartnerBankAccounts");
+            entity.HasIndex(account => new { account.TenantId, account.BusinessPartnerId });
+            entity.HasIndex(account => new { account.TenantId, account.BusinessPartnerId, account.IsPrimary })
+                .IsUnique()
+                .HasFilter("[IsPrimary] = 1 AND [IsDeleted] = 0");
+
+            entity.HasOne(account => account.BusinessPartner)
+                .WithMany(partner => partner.BankAccounts)
+                .HasForeignKey(account => account.BusinessPartnerId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -9567,6 +9627,144 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.Property(e => e.EstimatedValue).HasColumnType("decimal(18,2)");
             entity.Property(e => e.AgreedValue).HasColumnType("decimal(18,2)");
+        });
+    }
+
+    /// <summary>
+    /// Shared cross-module reference data: administrative geography. See
+    /// docs/GEOGRAPHY-REFERENCE-DESIGN.md for the decisions behind this shape.
+    /// </summary>
+    private static void ConfigureReferenceModule(ModelBuilder builder)
+    {
+        // ════════════════════════════════════════════════════════════════════════════════════
+        //  GEO SCHEME
+        // ════════════════════════════════════════════════════════════════════════════════════
+        builder.Entity<GeoScheme>(entity =>
+        {
+            entity.ToTable("GeoSchemes");
+
+            // Filtered on IsDeleted: a soft-deleted scheme must not hold its code hostage.
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_GeoScheme_Tenant_Code");
+
+            entity.HasIndex(e => new { e.TenantId, e.CountryId })
+                .HasDatabaseName("IX_GeoScheme_Tenant_Country");
+
+            // Restrict, not Cascade: deleting a country must not silently take its whole division
+            // scheme — and every address that resolved through it — with it.
+            entity.HasOne(e => e.Country)
+                .WithMany()
+                .HasForeignKey(e => e.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Levels)
+                .WithOne(e => e.Scheme)
+                .HasForeignKey(e => e.SchemeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Areas)
+                .WithOne(e => e.Scheme)
+                .HasForeignKey(e => e.SchemeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ════════════════════════════════════════════════════════════════════════════════════
+        //  GEO LEVEL
+        // ════════════════════════════════════════════════════════════════════════════════════
+        builder.Entity<GeoLevel>(entity =>
+        {
+            entity.ToTable("GeoLevels");
+
+            entity.HasIndex(e => new { e.TenantId, e.SchemeId, e.LevelNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_GeoLevel_Tenant_Scheme_LevelNum");
+
+            entity.HasIndex(e => new { e.TenantId, e.SchemeId, e.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_GeoLevel_Tenant_Scheme_Code");
+
+            entity.HasOne(e => e.Scheme)
+                .WithMany(e => e.Levels)
+                .HasForeignKey(e => e.SchemeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Areas)
+                .WithOne(e => e.GeoLevel)
+                .HasForeignKey(e => e.GeoLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ════════════════════════════════════════════════════════════════════════════════════
+        //  GEO AREA
+        // ════════════════════════════════════════════════════════════════════════════════════
+        builder.Entity<GeoArea>(entity =>
+        {
+            entity.ToTable("GeoAreas");
+
+            // The code is the seeder's idempotency key, so it is unique per scheme — not per
+            // level. Two tiers of the same scheme sharing a code would break re-seeding.
+            entity.HasIndex(e => new { e.TenantId, e.SchemeId, e.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_GeoArea_Tenant_Scheme_Code");
+
+            entity.HasIndex(e => e.ParentAreaId)
+                .HasDatabaseName("IX_GeoArea_ParentId");
+
+            entity.HasIndex(e => e.GeoLevelId)
+                .HasDatabaseName("IX_GeoArea_LevelId");
+
+            // The address widget's cascade query: "children of this parent, at this level, active".
+            entity.HasIndex(e => new { e.TenantId, e.ParentAreaId, e.IsActive })
+                .HasDatabaseName("IX_GeoArea_Tenant_Parent_Active");
+
+            // Name lookups are how the import resolver and backfill find an area.
+            entity.HasIndex(e => new { e.TenantId, e.SchemeId, e.Name })
+                .HasDatabaseName("IX_GeoArea_Tenant_Scheme_Name");
+
+            entity.HasOne(e => e.ParentArea)
+                .WithMany(e => e.ChildAreas)
+                .HasForeignKey(e => e.ParentAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ⚠ Configured explicitly even though nothing navigates back. An unpaired navigation
+            // left to convention mints a shadow FK column (GeoAreaId1) that silently duplicates
+            // this one.
+            entity.HasOne(e => e.SupersededByArea)
+                .WithMany()
+                .HasForeignKey(e => e.SupersededByGeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(e => e.Aliases)
+                .WithOne(e => e.GeoArea)
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Cascade); // aliases are meaningless without their area
+        });
+
+        // ════════════════════════════════════════════════════════════════════════════════════
+        //  GEO AREA ALIAS
+        // ════════════════════════════════════════════════════════════════════════════════════
+        builder.Entity<GeoAreaAlias>(entity =>
+        {
+            entity.ToTable("GeoAreaAliases");
+
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId, e.Alias })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_GeoAreaAlias_Tenant_Area_Alias");
+
+            // The resolver's lookup: "does any area answer to this name?"
+            entity.HasIndex(e => new { e.TenantId, e.Alias })
+                .HasDatabaseName("IX_GeoAreaAlias_Tenant_Alias");
+
+            entity.HasOne(e => e.GeoArea)
+                .WithMany(e => e.Aliases)
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 
@@ -12275,7 +12473,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_SchemaVersion", "[SchemaVersion] > 0");
                 table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_DecisionKey", "[DecisionKey] LIKE 'DEC-[0-9][0-9][0-9]'");
                 table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_EffectivePeriod", "[EffectiveTo] IS NULL OR [EffectiveFrom] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
-                table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3)");
+                table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3) OR ([Status] = 4 AND [DecisionKey] = 'DEC-011')");
             });
             entity.HasOne(item => item.Profile)
                 .WithMany(item => item.Decisions)

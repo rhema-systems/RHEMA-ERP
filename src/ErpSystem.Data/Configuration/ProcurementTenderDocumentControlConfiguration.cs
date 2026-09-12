@@ -16,7 +16,9 @@ public sealed class ProcurementTenderDocumentTemplateVersionConfiguration :
                 "CK_ProcurementTenderDocumentTemplateVersions_State",
                 "[Version] >= 1 AND [PolicySetVersion] >= 1 AND [Status] BETWEEN 0 AND 3 " +
                 "AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]) " +
-                "AND LEN([ContentChecksumSha256]) = 64 AND LEN([IntegrityHash]) = 64 " +
+                "AND (([Status] IN (0, 1) AND LEN([ContentChecksumSha256]) IN (0, 64)) " +
+                "OR ([Status] IN (2, 3) AND LEN([ContentChecksumSha256]) = 64)) " +
+                "AND LEN([IntegrityHash]) = 64 " +
                 "AND ISJSON([LifecycleSnapshotJson]) = 1");
             table.HasCheckConstraint(
                 "CK_ProcurementTenderDocumentTemplateVersions_ContentEvidence",
@@ -184,12 +186,19 @@ public sealed class ProcurementTenderDocumentChangeConfiguration :
                 "CK_ProcurementTenderDocumentChanges_Kind",
                 "([ChangeType] = 0 AND [PreviousTemplateVersionId] IS NOT NULL AND [NewTemplateVersionId] IS NOT NULL " +
                 "AND [PreviousTemplateVersionId] <> [NewTemplateVersionId] " +
-                "AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL) OR " +
+                "AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL " +
+                "AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR " +
                 "([ChangeType] IN (1, 2) AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL " +
-                "AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc])");
+                "AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] " +
+                "AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR " +
+                "([ChangeType] = 3 AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL " +
+                "AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] " +
+                "AND [NewOpeningScheduledAtUtc] IS NOT NULL AND [NewOpeningScheduledAtUtc] > [NewValueUtc] " +
+                "AND ([PreviousOpeningScheduledAtUtc] IS NULL OR [NewOpeningScheduledAtUtc] > [PreviousOpeningScheduledAtUtc]) " +
+                "AND [RequiresAcknowledgement] = 0)");
             table.HasCheckConstraint(
                 "CK_ProcurementTenderDocumentChanges_State",
-                "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 2 AND [Status] BETWEEN 0 AND 2 " +
+                "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 3 AND [Status] BETWEEN 0 AND 2 " +
                 "AND (([Status] = 0 AND [DecidedAtUtc] IS NULL AND [DecidedByUserId] IS NULL " +
                 "AND [WorkflowOutcome] IS NULL AND [ApprovalReference] IS NULL " +
                 "AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR " +

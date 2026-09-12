@@ -1,3 +1,4 @@
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Core.Interfaces.HR;
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR
     /// </summary>
     [ApiController]
     [Route("api/hr/leave-year-end")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public class LeaveYearEndController : ControllerBase
     {
         private readonly ILeaveYearEndService _yearEndService;
@@ -29,6 +30,8 @@ namespace ErpSystem.Api.Controllers.HR
         /// carried-over balance (capped at each leave type's MaxCarryOverDays). Idempotent.
         /// </summary>
         [HttpPost("carry-over")]
+        // W3: a year-end job rewrites every balance in the tenant - admin tier only.
+        [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
         [ProducesResponseType(typeof(LeaveYearEndResult), StatusCodes.Status200OK)]
         public async Task<ActionResult<LeaveYearEndResult>> ProcessCarryOver(
             [FromQuery] int fromYear, [FromQuery] Guid? employeeId = null)
@@ -45,6 +48,8 @@ namespace ErpSystem.Api.Controllers.HR
         /// past their window. Idempotent per balance.
         /// </summary>
         [HttpPost("forfeiture")]
+        // W3: a year-end job rewrites every balance in the tenant - admin tier only.
+        [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
         [ProducesResponseType(typeof(LeaveYearEndResult), StatusCodes.Status200OK)]
         public async Task<ActionResult<LeaveYearEndResult>> ProcessForfeiture(
             [FromQuery] int year, [FromQuery] DateOnly? asOf = null, [FromQuery] Guid? employeeId = null)
@@ -52,8 +57,17 @@ namespace ErpSystem.Api.Controllers.HR
             if (year < 2000)
                 return BadRequest(new { message = "A valid year is required." });
 
-            var result = await _yearEndService.ProcessForfeitureAsync(year, asOf, employeeId);
-            return Ok(result);
+            try
+            {
+                var result = await _yearEndService.ProcessForfeitureAsync(year, asOf, employeeId);
+                return Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // An admin account not linked to an employee cannot be the forfeiture's actor
+                // (PerformedBy is an Employee foreign key) — say so rather than 500.
+                return BadRequest(new { message = ex.Message });
+            }
         }
     }
 }

@@ -1,14 +1,25 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Reusable pre-employment check templates — "which checks a hire of this kind needs".
+///
+/// <para>⚠ Setup data, and previously the worst-scoped surface in recruitment: the service behind
+/// this controller had no tenancy at all, so the list returned every tenant's templates and every
+/// by-id operation acted on whichever tenant owned that id. Scoping is now explicit in the service
+/// and its repository.</para>
+/// </summary>
 [ApiController]
 [Route("api/pre-employment-check-templates")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[RecruitmentBusinessRules]
 public class PreEmploymentCheckTemplateController : ControllerBase
 {
     private readonly IPreEmploymentCheckTemplateService _service;
@@ -26,10 +37,12 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     // QUERIES
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<PreEmploymentCheckTemplateDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateDetailDto>> GetWithItems(Guid id)
         => Ok(await _service.GetWithItemsAsync(id));
 
@@ -37,6 +50,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     // CRUD
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateDetailDto>> Create(
         [FromBody] CreatePreEmploymentCheckTemplateDto dto)
     {
@@ -55,6 +69,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateDto>> Update(
         Guid id,
         [FromBody] UpdatePreEmploymentCheckTemplateDto dto)
@@ -71,6 +86,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -81,6 +97,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     // ITEMS
 
     [HttpPost("{id:guid}/items")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateItemDto>> AddItem(
         Guid id,
         [FromBody] CreatePreEmploymentCheckTemplateItemDto dto)
@@ -102,6 +119,7 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpPut("{id:guid}/items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<PreEmploymentCheckTemplateItemDto>> UpdateItem(
         Guid id,
         Guid itemId,
@@ -121,9 +139,12 @@ public class PreEmploymentCheckTemplateController : ControllerBase
     }
 
     [HttpDelete("{id:guid}/items/{itemId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteItem(Guid id, Guid itemId)
     {
-        await _service.DeleteItemAsync(itemId);
+        // The route always carried the owning template id; the service simply ignored it and found
+        // the item by scanning every tenant's templates. It is passed through now.
+        await _service.DeleteItemAsync(id, itemId);
         return NoContent();
     }
 }

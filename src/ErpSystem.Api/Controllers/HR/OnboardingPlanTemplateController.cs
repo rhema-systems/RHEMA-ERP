@@ -1,14 +1,18 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>Onboarding checklist authoring — HR only.</summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/onboarding-plan-templates")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class OnboardingPlanTemplateController : ControllerBase
 {
     private readonly IOnboardingPlanTemplateService _service;
@@ -26,22 +30,32 @@ public class OnboardingPlanTemplateController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingPlanTemplateSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("{id:guid}/with-tasks")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDetailDto>> GetWithTaskTemplates(Guid id)
         => Ok(await _service.GetWithTaskTemplatesAsync(id));
 
-    [HttpGet("position/{positionId:guid}")]
-    public async Task<ActionResult<IEnumerable<OnboardingPlanTemplateSummaryDto>>> GetByPosition(Guid positionId)
-        => Ok(await _service.GetByPositionIdAsync(positionId));
+    // ⚠ Removed: GET position/{positionId}. It took a position id and ignored it, returning every
+    // active template — OnboardingPlanTemplate has no link to a position, and the only position on the
+    // graph (OnboardingTaskTemplate.OwnerPositionId) says who *performs* a task, not who a template is
+    // *for*. Answering it properly needs template applicability rules, modelled on the
+    // OrientationAudienceRule shape this module already uses (TargetType / TargetEntityId /
+    // IsInclusive), so that onboarding can be scoped by grade, org unit and location too — not just
+    // position. That endpoint should arrive as GET /applicable?positionId=&orgUnitId=&gradeId=, so
+    // reinstating this one-dimensional route now would only bake in the wrong shape.
+    // Callers pick a template from `all`, or fall back to `default`.
 
     [HttpGet("default")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto?>> GetDefault()
         => Ok(await _service.GetDefaultAsync());
 
@@ -50,6 +64,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto>> Create(
         [FromBody] CreateOnboardingPlanTemplateDto dto)
     {
@@ -68,6 +83,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingPlanTemplateDto>> Update(
         Guid id, [FromBody] UpdateOnboardingPlanTemplateDto dto)
     {
@@ -82,6 +98,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -93,10 +110,12 @@ public class OnboardingPlanTemplateController : ControllerBase
     // =========================================================================
 
     [HttpGet("{planTemplateId:guid}/task-templates")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OnboardingTaskTemplateDto>>> GetTaskTemplates(Guid planTemplateId)
         => Ok(await _service.GetTaskTemplatesAsync(planTemplateId));
 
     [HttpPost("{planTemplateId:guid}/task-templates")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskTemplateDto>> AddTaskTemplate(
         Guid planTemplateId, [FromBody] CreateOnboardingTaskTemplateDto dto)
     {
@@ -114,6 +133,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpPut("task-templates/{taskTemplateId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OnboardingTaskTemplateDto>> UpdateTaskTemplate(
         Guid taskTemplateId, [FromBody] UpdateOnboardingTaskTemplateDto dto)
     {
@@ -128,6 +148,7 @@ public class OnboardingPlanTemplateController : ControllerBase
     }
 
     [HttpDelete("task-templates/{taskTemplateId:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> DeleteTaskTemplate(Guid taskTemplateId)
     {
         await _service.DeleteTaskTemplateAsync(taskTemplateId);

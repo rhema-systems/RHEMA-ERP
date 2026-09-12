@@ -92,7 +92,14 @@ public interface IAwardAttachmentService
     Task<AwardAttachmentDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<AwardAttachmentDto>> GetByAwardIdAsync(Guid awardId);
     Task<IEnumerable<AwardAttachmentDto>> GetByTypeAsync(Guid awardId, AwardAttachmentType type);
-    Task<AwardAttachmentDto> CreateAsync(Guid tenantId, Guid awardId, Guid userId, CreateAwardAttachmentDto dto);
+    /// <summary>
+    /// ⚠ The file's own facts are parameters, not DTO fields: a caller may describe what a file is
+    /// and may not say where it lives (ledger D-39).
+    /// </summary>
+    Task<AwardAttachmentDto> CreateAsync(
+        Guid tenantId, Guid awardId, Guid uploadedById, Guid userId, CreateAwardAttachmentDto dto,
+        string fileName, string filePath, long? fileSizeBytes,
+        Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId);
     Task DeleteAsync(Guid id);
 }
 
@@ -120,6 +127,18 @@ public interface IAwardNominationService
     Task<AwardNominationDto> UpdateAsync(Guid id, Guid userId, UpdateAwardNominationDto dto);
     Task DeleteAsync(Guid id);
     Task<AwardNominationDto> SubmitAsync(Guid id, Guid userId);
+
+    /// <summary>
+    /// An employee taking back their own nomination before it has been submitted.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <c>DeleteAsync</c> on purpose. That one is the awards desk removing a record
+    /// and is gated on <c>HR.Awards.Admin</c>; this one is the nominator changing their mind, is
+    /// available to any employee, and therefore has to prove ownership and refuse anything that has
+    /// already left draft. Sharing a method between the two would mean one guard standing for two
+    /// very different acts.
+    /// </remarks>
+    Task WithdrawOwnAsync(Guid id, Guid employeeId);
     Task<AwardNominationDto> AssignToCommitteeAsync(Guid id, Guid committeeId, Guid userId);
     Task<AwardNominationDto> SetOutcomeAsync(Guid id, Guid userId, SetNominationOutcomeDto dto);
 }
@@ -144,7 +163,11 @@ public interface IAwardNomineeContributionService
 public interface IAwardNominationAttachmentService
 {
     Task<IEnumerable<AwardNominationAttachmentDto>> GetByNominationIdAsync(Guid nominationId);
-    Task<AwardNominationAttachmentDto> AddAsync(Guid nominationId, Guid uploadedById, Guid userId, CreateAwardNominationAttachmentDto dto);
+    /// <summary>⚠ Same shape and same reason as the award attachment above.</summary>
+    Task<AwardNominationAttachmentDto> AddAsync(
+        Guid nominationId, Guid uploadedById, Guid userId, CreateAwardNominationAttachmentDto dto,
+        string fileName, string filePath, long? fileSizeBytes,
+        Guid? fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId);
     Task UpdateAsync(Guid id, Guid userId, UpdateAwardNominationAttachmentDto dto);
     Task RemoveAsync(Guid id);
 }
@@ -181,9 +204,23 @@ public interface IAwardCommitteeReviewService
     Task<AwardCommitteeReviewDto?> GetReviewAsync(Guid nominationId, Guid reviewerId);
     Task<IEnumerable<AwardCommitteeReviewDto>> GetByNominationIdAsync(Guid nominationId);
     Task<IEnumerable<AwardCommitteeReviewDto>> GetByReviewerIdAsync(Guid reviewerId);
-    Task<IEnumerable<AwardCommitteeReviewDto>> GetPendingReviewsAsync(Guid reviewerId);
-    Task<int> GetApprovalCountAsync(Guid nominationId);
-    Task<int> GetRejectionCountAsync(Guid nominationId);
+    /// <summary>
+    /// Nominations this member still owes a score on.
+    /// </summary>
+    /// <remarks>
+    /// Returns <b>nominations</b>, not reviews. Before slice 6 this asked the review table for rows
+    /// with a null <c>ReviewDate</c> — placeholder rows that the seeder created to mean "pending".
+    /// A review row now IS a score and is stamped when it is written, so that query can only ever
+    /// return nothing. The real question is which nominations are with a committee this person sits
+    /// on and carry no score from them yet.
+    /// </remarks>
+    Task<IEnumerable<AwardNominationSummaryDto>> GetPendingReviewsAsync(Guid reviewerId);
+    /// <summary>
+    /// Whether this reviewer's committees have any nomination in THIS cycle — scored or still owed.
+    /// The gate for reading a cycle's committee result (area 25 slice 9: the previous check was
+    /// cycle-agnostic, so one review anywhere opened every cycle's scores).
+    /// </summary>
+    Task<bool> IsInvolvedInCycleAsync(Guid reviewerId, Guid cycleId);
     Task<AwardCommitteeReviewDto> SubmitReviewAsync(Guid nominationId, Guid reviewerId, Guid userId, SubmitCommitteeReviewDto dto);
     Task<AwardCommitteeReviewDto> UpdateReviewAsync(Guid id, Guid userId, UpdateCommitteeReviewDto dto);
 }
@@ -210,3 +247,115 @@ public interface ILongServiceAwardService
 
 
 
+
+#region Award Cycle & Eligibility Services
+
+public interface IAwardCycleService
+{
+    Task<IEnumerable<AwardCycleSummaryDto>> GetByAwardTypeIdAsync(Guid awardTypeId);
+    Task<IEnumerable<AwardCycleSummaryDto>> GetOpenForNominationAsync();
+    Task<IEnumerable<AwardCycleSummaryDto>> GetOpenForVotingAsync();
+    Task<AwardCycleDto?> GetByIdAsync(Guid id);
+    Task<AwardCycleDto> CreateAsync(Guid tenantId, Guid userId, CreateAwardCycleDto dto);
+    Task<AwardCycleDto> UpdateAsync(Guid id, Guid userId, UpdateAwardCycleDto dto);
+    Task<AwardCycleDto> PublishAsync(Guid id, Guid userId);
+    Task<AwardCycleDto> CancelAsync(Guid id, Guid userId, string reason);
+    Task DeleteAsync(Guid id);
+}
+
+public interface IAwardEligibilityService
+{
+    /// <summary>Who qualifies, one page at a time, with the ineligible and their reasons (D-9).</summary>
+    Task<AwardEligibilityResultDto> EvaluateAsync(
+        Guid awardTypeId, DateTime? asOf, string? filter = null, int page = 1, int pageSize = 50,
+        string? search = null);
+
+    /// <summary>Who an employee may nominate: the qualified only, paged, and without reasons.</summary>
+    Task<PagedResult<AwardEligibilityVerdictDto>> GetCandidatesAsync(
+        Guid awardTypeId, string? search = null, int page = 1, int pageSize = 25);
+    Task<AwardEligibilityVerdictDto> EvaluateEmployeeAsync(Guid awardTypeId, Guid employeeId, DateTime? asOf);
+}
+
+#endregion
+
+
+#region Award Voting
+
+public interface IAwardCommitteeScoringService
+{
+    /// <summary>
+    /// The committee's scores for a cycle: the average each nomination received, and the winner.
+    /// </summary>
+    Task<AwardCommitteeResultDto> GetResultAsync(Guid cycleId);
+}
+
+public interface IAwardVotingService
+{
+    /// <summary>What an employee sees when they come to vote, including what they already chose.</summary>
+    Task<AwardBallotDto> GetBallotAsync(Guid cycleId, Guid voterId);
+
+    /// <summary>
+    /// Cast, or change, this voter's single ballot for the cycle. Changing it updates the existing
+    /// row rather than adding another — a second row would break one-vote-per-voter and
+    /// double-count the tally.
+    /// </summary>
+    Task<AwardVoteDto> CastAsync(Guid cycleId, Guid voterId, Guid userId, CastAwardVoteDto dto);
+
+    Task<AwardVoteDto?> GetMyVoteAsync(Guid cycleId, Guid voterId);
+    Task WithdrawMyVoteAsync(Guid cycleId, Guid voterId);
+
+    /// <summary>
+    /// The tally, or the reason it is withheld. Counts are not returned while voting is open.
+    /// </summary>
+    Task<AwardVoteResultDto> GetResultAsync(Guid cycleId);
+}
+
+#endregion
+
+
+#region Award Candidate Generation
+
+public interface IAwardCandidateGenerationService
+{
+    /// <summary>
+    /// Puts forward everybody the award's performance triggers match, as nominations on the cycle.
+    /// </summary>
+    Task<AwardGenerationResultDto> GenerateAsync(Guid cycleId, Guid userId);
+}
+
+#endregion
+
+#region Long Service Milestones and the sweep
+
+/// <summary>The ladder HR maintains: which years earn an award, and what each rung carries.</summary>
+public interface ILongServiceMilestoneService
+{
+    Task<IEnumerable<LongServiceMilestoneDto>> GetLadderAsync(Guid awardTypeId);
+    Task<LongServiceMilestoneDto?> GetByIdAsync(Guid id);
+    Task<LongServiceMilestoneDto> CreateAsync(Guid userId, CreateLongServiceMilestoneDto dto);
+    Task<LongServiceMilestoneDto> UpdateAsync(Guid id, Guid userId, UpdateLongServiceMilestoneDto dto);
+    Task DeleteAsync(Guid id);
+
+    /// <summary>Fill in the rungs this award does not have yet. Never overwrites an existing one.</summary>
+    Task<LongServiceLadderSeedResultDto> SeedDefaultLadderAsync(
+        Guid awardTypeId, Guid userId, IReadOnlyList<int>? years = null);
+}
+
+/// <summary>
+/// Grants the long-service awards that have fallen due.
+/// </summary>
+/// <remarks>
+/// The two methods run <b>the same calculation</b> and differ only in whether the result is written.
+/// That is the point of the pair: a preview computed separately from the run is how a screen comes
+/// to promise something the button does not then do.
+/// </remarks>
+public interface ILongServiceSweepService
+{
+    /// <summary>Who would be granted an award, and who is disqualified. Writes nothing.</summary>
+    Task<LongServiceSweepResultDto> PreviewAsync(Guid awardTypeId, DateTime? asOf = null);
+
+    /// <summary>The same calculation, with the awards actually created.</summary>
+    Task<LongServiceSweepResultDto> RunAsync(Guid awardTypeId, Guid userId, DateTime? asOf = null);
+}
+
+#endregion

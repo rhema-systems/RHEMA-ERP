@@ -135,7 +135,11 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
             .GetQueryable(item => item.TenantId == tenantId && !item.IsDeleted &&
                 item.Status == UserTenantStatus.Active &&
                 (item.ExpiresAt == null || item.ExpiresAt > DateTime.UtcNow) && item.User.IsActive)
-            .OrderBy(item => item.User.UserName)
+            .OrderByDescending(item => item.User.UserRoles.Any(role =>
+                role.Role.Name == ProcurementAccessControlRegistry.InternalAuditRole))
+            .ThenByDescending(item => item.User.UserRoles.Any(role =>
+                role.Role.Name == ProcurementAccessControlRegistry.IctAdministratorRole))
+            .ThenBy(item => item.User.UserName)
             .Select(item => item.UserId)
             .FirstOrDefaultAsync(cancellationToken);
         if (systemActorId == Guid.Empty)
@@ -552,12 +556,15 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
 
     private static bool IsUniqueConstraintViolation(Exception exception)
     {
-        if (exception is DbUpdateException { InnerException: not null } updateException)
-            return IsUniqueConstraintViolation(updateException.InnerException);
+        if (exception is DbUpdateException updateException &&
+            updateException.InnerException is Exception updateInnerException)
+            return IsUniqueConstraintViolation(updateInnerException);
         if (exception is SqlException sqlException)
-            return sqlException.Number is 2601 or 2627;
-        return exception.InnerException is not null &&
-               IsUniqueConstraintViolation(exception.InnerException);
+            return sqlException.Number is 2601 or 2627 &&
+                   sqlException.Message.Contains("ProcurementControlEvents", StringComparison.OrdinalIgnoreCase) &&
+                   sqlException.Message.Contains("EventKey", StringComparison.OrdinalIgnoreCase);
+        return exception.InnerException is Exception innerException &&
+               IsUniqueConstraintViolation(innerException);
     }
 
     private static void ValidateWrite(ProcurementControlEventWriteRequest request)
@@ -583,9 +590,11 @@ public sealed class ProcurementControlEventService : IProcurementControlEventSer
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        // History and integrity endpoints require procurement.audit.read. Keeping
-        // a second role allow-list here would reject other permission-bearing TDC
-        // oversight roles such as Head of Procurement and Finance Reviewer.
+        if (!_currentUser.Roles.Any(role =>
+                ProcurementAccessControlRegistry.RoleGrantsPermission(
+                    role, "procurement.audit.read")))
+            throw new ProcurementControlEventAuthorizationException(
+                "A TDC role granting procurement audit access is required to view control-event history.");
     }
 
     private void EnsureAuthenticatedTenant()

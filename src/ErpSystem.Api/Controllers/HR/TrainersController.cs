@@ -1,14 +1,17 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/trainers")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[TrainingBusinessRulesAttribute]
 public class TrainersController : ControllerBase
 {
     private readonly ITrainerService _service;
@@ -25,22 +28,27 @@ public class TrainersController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainerProfileSummaryDto>>> GetAll(CancellationToken ct)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainerProfileSummaryDto>>> GetActive(CancellationToken ct)
         => Ok(await _service.GetActiveAsync(ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainerProfileDto>> GetById(Guid id, CancellationToken ct)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("vendor/{vendorId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainerProfileSummaryDto>>> GetByVendorId(Guid vendorId, CancellationToken ct)
         => Ok(await _service.GetByVendorIdAsync(vendorId, ct));
 
     [HttpGet("available")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainerProfileSummaryDto>>> GetAvailableForDateRange(
         [FromQuery] DateTime from,
         [FromQuery] DateTime to,
@@ -52,6 +60,7 @@ public class TrainersController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainerProfileDto>> Create([FromBody] CreateTrainerProfileDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -67,6 +76,7 @@ public class TrainersController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainerProfileDto>> Update(Guid id, [FromBody] UpdateTrainerProfileDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -79,6 +89,7 @@ public class TrainersController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -90,6 +101,7 @@ public class TrainersController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/skills")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainerSkillDto>> AddSkill(Guid id, [FromBody] CreateTrainerSkillDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -105,10 +117,12 @@ public class TrainersController : ControllerBase
     }
 
     [HttpGet("{id:guid}/skills")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainerSkillDto>>> GetSkills(Guid id, CancellationToken ct)
         => Ok(await _service.GetSkillsAsync(id, ct));
 
     [HttpPut("skills/{skillId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainerSkillDto>> UpdateSkill(Guid skillId, [FromBody] UpdateTrainerSkillDto dto, CancellationToken ct)
     {
         if (skillId != dto.Id) return BadRequest("ID mismatch.");
@@ -121,6 +135,7 @@ public class TrainersController : ControllerBase
     }
 
     [HttpDelete("skills/{skillId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteSkill(Guid skillId, CancellationToken ct)
     {
         await _service.DeleteSkillAsync(skillId, ct);
@@ -132,6 +147,7 @@ public class TrainersController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/availability")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainerAvailabilityDto>> AddAvailability(Guid id, [FromBody] CreateTrainerAvailabilityDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -147,10 +163,12 @@ public class TrainersController : ControllerBase
     }
 
     [HttpGet("{id:guid}/availability")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainerAvailabilityDto>>> GetAvailability(Guid id, CancellationToken ct)
         => Ok(await _service.GetAvailabilityAsync(id, ct));
 
     [HttpPut("availability/{availabilityId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainerAvailabilityDto>> UpdateAvailability(Guid availabilityId, [FromBody] UpdateTrainerAvailabilityDto dto, CancellationToken ct)
     {
         if (availabilityId != dto.Id) return BadRequest("ID mismatch.");
@@ -163,6 +181,7 @@ public class TrainersController : ControllerBase
     }
 
     [HttpDelete("availability/{availabilityId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> DeleteAvailability(Guid availabilityId, CancellationToken ct)
     {
         await _service.DeleteAvailabilityAsync(availabilityId, ct);

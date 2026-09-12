@@ -730,7 +730,7 @@ type ProjectWorkspaceStaticReferenceData = {
   currencyContext: ProjectWorkspaceCurrencyContext;
   unitsOfMeasure: UnitOfMeasureDto[];
   maintenanceAssets: MaintenanceAssetLookupOption[];
-  companyAssets: FixedAsset[];
+  financeFixedAssets: FixedAsset[];
   methodologyCatalog: ProjectCatalogEntryDto[];
   billingTypeCatalog: ProjectCatalogEntryDto[];
   fundingSourceCatalog: ProjectCatalogEntryDto[];
@@ -1438,7 +1438,7 @@ export default function ProjectWorkspacePage({
   const [maintenanceAssets, setMaintenanceAssets] = useState<
     MaintenanceAssetLookupOption[]
   >([]);
-  const [companyAssets, setCompanyAssets] = useState<FixedAsset[]>([]);
+  const [financeFixedAssets, setFinanceFixedAssets] = useState<FixedAsset[]>([]);
   const [methodologyCatalog, setMethodologyCatalog] = useState<
     ProjectCatalogEntryDto[]
   >([]);
@@ -1836,7 +1836,7 @@ export default function ProjectWorkspacePage({
         currencyContext,
         loadedUnitsOfMeasure,
         loadedMaintenanceAssets,
-        loadedCompanyAssets,
+        loadedFixedAssets,
         catalogResults,
       ] = await Promise.all([
         userService.searchUsers('').catch(() => []),
@@ -1886,7 +1886,7 @@ export default function ProjectWorkspacePage({
         currencyContext,
         unitsOfMeasure: loadedUnitsOfMeasure,
         maintenanceAssets: loadedMaintenanceAssets,
-        companyAssets: loadedCompanyAssets,
+        financeFixedAssets: loadedFixedAssets,
         methodologyCatalog:
           catalogResults[0].status === 'fulfilled'
             ? catalogResults[0].value
@@ -2049,7 +2049,7 @@ export default function ProjectWorkspacePage({
     setBaseCurrency(staticReferenceData.currencyContext.baseCurrency);
     setUnitsOfMeasure(staticReferenceData.unitsOfMeasure);
     setMaintenanceAssets(staticReferenceData.maintenanceAssets);
-    setCompanyAssets(staticReferenceData.companyAssets);
+    setFinanceFixedAssets(staticReferenceData.financeFixedAssets);
     setMethodologyCatalog(staticReferenceData.methodologyCatalog);
     setBillingTypeCatalog(staticReferenceData.billingTypeCatalog);
     setFundingSourceCatalog(staticReferenceData.fundingSourceCatalog);
@@ -6519,7 +6519,7 @@ export default function ProjectWorkspacePage({
             assetLinkTypeOptions={assetLinkTypeOptions}
             assetLinkStatusOptions={assetLinkStatusOptions}
             maintenanceAssets={maintenanceAssets}
-            companyAssets={companyAssets}
+            financeFixedAssets={financeFixedAssets}
             jobCards={projectLinkOptions.jobCards}
             onAddAssetLink={addAssetLink}
             externalPolicy={externalPolicy}

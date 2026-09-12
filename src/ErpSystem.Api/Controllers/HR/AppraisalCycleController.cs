@@ -6,12 +6,13 @@ using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalCycleController : ControllerBase
 {
     private readonly IAppraisalCycleService _cycleService;
@@ -156,6 +157,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalCycleDto createDto)
     {
         try
@@ -187,6 +189,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalCycleDto updateDto)
     {
         try
@@ -223,6 +226,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/open")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> OpenCycle(Guid id)
     {
         try
@@ -264,6 +268,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/close")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> CloseCycle(Guid id)
     {
         try
@@ -306,6 +311,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/generate-appraisals")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> GenerateAppraisals(Guid id)
     {
         try
@@ -334,11 +340,44 @@ public class AppraisalCycleController : ControllerBase
     }
 
     /// <summary>
+    /// Raise in-app deadline reminders for every phase of this cycle that is overdue or
+    /// closing soon, addressed to the employees in scope. Safe to run more than once —
+    /// an identical unread reminder is not duplicated.
+    /// </summary>
+    [HttpPost("{id:guid}/deadline-reminders")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
+    public async Task<IActionResult> SendDeadlineReminders(Guid id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var raised = await _cycleService.SendDeadlineRemindersAsync(id, cancellationToken);
+            return Ok(new { NotificationsRaised = raised });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending deadline reminders for cycle {CycleId}", id);
+            return StatusCode(500, "An error occurred while sending deadline reminders");
+        }
+    }
+
+    /// <summary>
     /// Get comprehensive progress metrics for an appraisal cycle
     /// </summary>
     [HttpGet("{id:guid}/progress")]
     [ProducesResponseType(typeof(AppraisalCycleProgressDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetCycleProgress(Guid id)
     {
         try
@@ -387,6 +426,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpGet("{id:guid}/employees")]
     [ProducesResponseType(typeof(IEnumerable<Guid>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetEmployeesInScope(Guid id)
     {
         try
@@ -411,6 +451,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         try
@@ -442,6 +483,7 @@ public class AppraisalCycleController : ControllerBase
     [ProducesResponseType(typeof(AppraisalCycleTargetDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddCycleTarget(Guid cycleId, [FromBody] CreateAppraisalCycleTargetDto createDto)
     {
         try
@@ -493,6 +535,7 @@ public class AppraisalCycleController : ControllerBase
     [ProducesResponseType(typeof(AppraisalCycleTargetDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateCycleTarget(Guid cycleId, Guid targetId, [FromBody] UpdateAppraisalCycleTargetDto updateDto)
     {
         try
@@ -529,6 +572,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpDelete("{cycleId:guid}/targets/{targetId:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> RemoveCycleTarget(Guid cycleId, Guid targetId)
     {
         try
@@ -558,6 +602,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpGet("{cycleId:guid}/coverage-preview")]
     [ProducesResponseType(typeof(CoveragePreviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetCoveragePreview(
         Guid cycleId,
         [FromQuery] int pageNumber = 1,

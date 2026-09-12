@@ -323,6 +323,15 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     {
         EnsureEditor();
         var policySet = await FindPolicySetAsync(id, tracked: true, cancellationToken);
+        if (!CanManageAccess())
+        {
+            await AddRevisionAsync(policySet.Id, null, null, "Publish", "Rejected", correlationId,
+                "The TDC access-management permission is required to publish an executable procurement policy.", PolicySnapshot(policySet), null);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            throw new ProcurementPolicyAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to publish executable procurement policies.");
+        }
+
         ProcurementPolicyLifecyclePolicy.EnsureCanPublish(policySet);
         EnsureRowVersion(policySet.RowVersion, request.RowVersion, "policy");
         var validation = await BuildValidationAsync(policySet, cancellationToken);
@@ -405,6 +414,15 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     {
         EnsureEditor();
         var policySet = await FindPolicySetAsync(id, tracked: true, cancellationToken);
+        if (!CanManageAccess())
+        {
+            await AddRevisionAsync(policySet.Id, null, null, "Retire", "Rejected", correlationId,
+                "The TDC access-management permission is required to retire an executable procurement policy.", PolicySnapshot(policySet), null);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            throw new ProcurementPolicyAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to retire executable procurement policies.");
+        }
+
         ProcurementPolicyLifecyclePolicy.EnsureCanRetire(policySet);
         EnsureRowVersion(policySet.RowVersion, request.RowVersion, "policy");
         var before = PolicySnapshot(policySet);
@@ -681,9 +699,13 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
                 item.TenantId == _currentUser.TenantId && item.ProfileId == source.Id)
             .AsNoTracking().ToListAsync(cancellationToken);
         if (decisions.Count != ProcurementConfigurationDecisionRegistry.Definitions.Count ||
-            decisions.Any(item => item.Status != ProcurementConfigurationDecisionStatus.Approved ||
-                                  item.ApprovalStatus != ProcurementConfigurationApprovalStatus.Approved))
-            throw ValidationException("SOURCE_CONFIGURATION_INCOMPLETE", "The source configuration does not contain fourteen approved decisions.");
+            ProcurementConfigurationDecisionRegistry.Definitions.Any(definition =>
+                decisions.Count(item => item.DecisionKey == definition.DecisionKey) != 1) ||
+            decisions.Any(item =>
+                !(item.DecisionKey == "DEC-011" && item.Status == ProcurementConfigurationDecisionStatus.Withdrawn) &&
+                (item.Status != ProcurementConfigurationDecisionStatus.Approved ||
+                 item.ApprovalStatus != ProcurementConfigurationApprovalStatus.Approved)))
+            throw ValidationException("SOURCE_CONFIGURATION_INCOMPLETE", "The source configuration must contain all fourteen governed decisions, with each approved or the optional DEC-011 explicitly withdrawn.");
 
         var tenantRoles = (await _roleService.GetRolesForTenantAsync(_currentUser.TenantId, cancellationToken))
             .Where(item => !string.IsNullOrWhiteSpace(item.Name))
@@ -1496,10 +1518,16 @@ public sealed class ProcurementPolicyService : IProcurementPolicyService
     private void EnsureEditor()
     {
         EnsureAuthenticatedTenant();
-        // The controller requires procurement.access.manage for every mutation.
-        // Keep tenant and lifecycle enforcement in the domain without narrowing
-        // the authorized actor back to legacy generic roles.
+        if (!CanManageAccess())
+            throw new ProcurementPolicyAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to administer procurement policy.");
     }
+
+    private bool CanManageAccess() =>
+        _currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) ||
+        _currentUser.Roles.Any(role =>
+            ProcurementAccessControlRegistry.RoleGrantsPermission(
+                role, "procurement.access.manage"));
 
     private void Touch(ProcurementPolicySet policySet)
     {

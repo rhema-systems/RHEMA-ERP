@@ -83,6 +83,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
             .Include(t => t.Bids)
             .Include(t => t.Invitations)
             .Include(t => t.CreatedBy)
+            .Include(t => t.SourcingCase)
             .OrderByDescending(t => t.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -103,6 +104,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
             .Where(t => !t.IsDeleted && t.Status == "Published" && t.PublishDate <= DateTime.UtcNow)
             .Include(t => t.Items)
             .Include(t => t.Documents.Where(d => d.IsPublic))
+            .Include(t => t.SourcingCase)
             .OrderByDescending(t => t.PublishDate)
             .ToListAsync();
     }
@@ -116,6 +118,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
                        t.PublishDate <= now &&
                        t.SubmissionDeadline > now)
             .Include(t => t.Items)
+            .Include(t => t.SourcingCase)
             .OrderBy(t => t.SubmissionDeadline)
             .ToListAsync();
     }
@@ -125,6 +128,7 @@ public class TenderRepository : GenericRepository<Tender>, ITenderRepository
         return await _dbSet
             .Where(t => !t.IsDeleted && t.Status == status)
             .Include(t => t.Items)
+            .Include(t => t.SourcingCase)
             .OrderByDescending(t => t.CreatedAt)
             .ToListAsync();
     }

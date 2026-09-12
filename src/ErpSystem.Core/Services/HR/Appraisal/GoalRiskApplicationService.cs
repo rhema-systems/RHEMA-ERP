@@ -144,7 +144,7 @@ public sealed class GoalRiskService
             return [];
 
         // ── 3. Load active settings ONCE ──────────────────────────────────
-        // Throws GoalRiskSettingNotFoundException if no active record exists.
+        // Falls back to the documented defaults when the tenant has none configured.
         var settings = await _settingsProvider.GetActiveAsync(cancellationToken);
 
         // ── 4. Evaluate risk in memory after materialisation ─────────────

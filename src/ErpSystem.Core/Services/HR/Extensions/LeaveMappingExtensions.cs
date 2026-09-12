@@ -232,7 +232,7 @@ namespace ErpSystem.Application.Extensions
             RelieverId = dto.RelieverId,
             SecondRelieverId = dto.SecondRelieverId,
             Notes = dto.Notes,
-            PlannedBy = dto.PlannedBy,
+            // PlannedBy is stamped by the service from the token (finish-plan lane 4).
             Year = dto.Year
         };
 

@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class CountryController : ControllerBase
 {
     private readonly ICountryService _countryService;
@@ -90,6 +91,7 @@ public class CountryController : ControllerBase
     /// Creates a new country.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(CountryDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -113,6 +115,7 @@ public class CountryController : ControllerBase
     /// Updates an existing country.
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(CountryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -139,6 +142,7 @@ public class CountryController : ControllerBase
     /// Deletes a country.
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id)

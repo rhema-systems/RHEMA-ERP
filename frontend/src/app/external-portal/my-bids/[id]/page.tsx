@@ -38,6 +38,7 @@ import { type PerformanceBondRequestDto } from '@/services/performanceBondServic
 import * as tenderAwardService from '@/services/tenderAwardService';
 import { type TenderAwardDto } from '@/services/tenderAwardService';
 import { format } from 'date-fns';
+import { getSupportingDocuments, getSupportingDocumentRequirements } from '@/lib/procurement-bid-documents';
 
 export default function BidDetailPage() {
   const params = useParams();
@@ -254,6 +255,9 @@ export default function BidDetailPage() {
 
   const canWithdraw = bid.status === 'Submitted' || bid.status === 'Draft';
 
+  const supportingDocuments = getSupportingDocuments(bid.documents);
+  const supportingRequirements = getSupportingDocumentRequirements(tender);
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
@@ -468,7 +472,7 @@ export default function BidDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="documents">
             <FileText className="h-4 w-4 mr-2" />
-            Documents ({bid.documents?.filter(doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal').length || 0})
+            Documents ({supportingDocuments.length})
           </TabsTrigger>
           <TabsTrigger value="info">
             <Info className="h-4 w-4 mr-2" />
@@ -760,38 +764,27 @@ export default function BidDetailPage() {
             <CardHeader>
               <CardTitle>Supporting Documents</CardTitle>
               <CardDescription>
-                {(() => {
-                  try {
-                    const requirements = tender?.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
-                    const requiredCount = requirements.filter((r: any) => r.isRequired).length;
-                    const optionalCount = requirements.length - requiredCount;
-                    // Exclude proposal documents from count
-                    const uploadedCount = bid.documents?.filter(
-                      doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
-                    ).length || 0;
-                    return requirements.length > 0
-                      ? `${requirements.length} requirement(s) - ${requiredCount} required, ${optionalCount} optional • ${uploadedCount} file(s) uploaded`
-                      : `${uploadedCount} file(s) uploaded`;
-                  } catch {
-                    const uploadedCount = bid.documents?.filter(
-                      doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
-                    ).length || 0;
-                    return `${uploadedCount} file(s) uploaded`;
-                  }
-                })()}
+                {supportingDocuments.length} supporting file(s) uploaded. Technical and commercial proposals are shown separately.
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {supportingRequirements === null ? (
+                <div role="alert" className="mb-4 rounded-lg border p-3 text-sm">
+                  <p className="font-medium">Document requirements unavailable</p>
+                  <p>Uploaded files are listed below, but completeness cannot be checked until the tender requirements load correctly.</p>
+                </div>
+              ) : supportingRequirements.length === 0 ? (
+                <p className="mb-4 text-sm text-muted-foreground">No supporting-document requirements were configured for this tender. Technical and commercial proposals are listed under Proposals.</p>
+              ) : (
+                <p className="mb-4 text-sm text-muted-foreground">Upload presence does not confirm document validity.</p>
+              )}
               {(() => {
                 try {
-                  const requirements = tender?.requiredDocuments ? JSON.parse(tender.requiredDocuments) : [];
-                  // Filter out proposal documents - only show required documents
-                  const uploadedDocs = (bid.documents || []).filter(
-                    doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
-                  );
+                  const requirements = supportingRequirements ?? [];
+                  const uploadedDocs = supportingDocuments;
 
                   if (requirements.length === 0 && uploadedDocs.length === 0) {
-                    return <p className="text-center py-8 text-gray-500">No document requirements or uploads</p>;
+                    return <p className="text-center py-8 text-gray-500">No supporting files uploaded</p>;
                   }
 
                   // If no requirements defined, show all documents in a simple list
@@ -835,7 +828,7 @@ export default function BidDetailPage() {
                   // Show requirements with their uploaded files
                   return (
                     <div className="space-y-4">
-                      {requirements.map((req: any, index: number) => {
+                      {requirements.map((req, index) => {
                         const matchingDocs = uploadedDocs.filter(doc => doc.documentType === req.documentType);
 
                         return (
@@ -898,7 +891,7 @@ export default function BidDetailPage() {
                             ) : (
                               <div className="p-4 text-center text-gray-500 text-sm">
                                 <AlertCircle className="h-5 w-5 mx-auto mb-2 text-yellow-600" />
-                                No document uploaded for this requirement
+                                {req.isRequired ? 'No document uploaded for this required supporting document' : 'Optional document not supplied'}
                               </div>
                             )}
                           </div>
@@ -907,7 +900,7 @@ export default function BidDetailPage() {
 
                       {/* Show any uploaded documents that don't match requirements */}
                       {(() => {
-                        const requiredTypes = requirements.map((r: any) => r.documentType);
+                        const requiredTypes = requirements.map((r) => r.documentType);
                         const unmatchedDocs = uploadedDocs.filter(doc => !requiredTypes.includes(doc.documentType));
 
                         if (unmatchedDocs.length > 0) {

@@ -28,8 +28,12 @@ public interface IJobCandidateRepository : IGenericRepository<JobCandidate>
     /// </summary>
     Task<JobCandidate?> GetWithFullDetailsAsync(Guid id);
 
-    /// <summary>Returns all candidates currently in the active talent pool.</summary>
-    Task<IEnumerable<JobCandidate>> GetTalentPoolCandidatesAsync();
+    /// <summary>
+    /// Returns the tenant's candidates currently in the active talent pool, with segment
+    /// memberships loaded. Tenant-explicit because the DbContext's global tenant filter is inert
+    /// in this solution — the parameterless form counted and paged every tenant's pool.
+    /// </summary>
+    Task<IEnumerable<JobCandidate>> GetTalentPoolCandidatesAsync(Guid tenantId);
 
     /// <summary>Returns candidates who have applied to a specific vacancy (via their applications).</summary>
     Task<IEnumerable<JobCandidate>> GetByVacancyIdAsync(Guid vacancyId);
@@ -45,9 +49,14 @@ public interface IJobCandidateRepository : IGenericRepository<JobCandidate>
 
     // ── Talent pool — filtered queries ────────────────────────────────────────
 
-    /// <summary>Returns paged talent pool candidates matching the given filter.</summary>
+    /// <summary>
+    /// Returns paged talent pool candidates matching the given filter, scoped to the tenant.
+    /// The tenant predicate belongs INSIDE this query: filtering after paging returned a
+    /// cross-tenant TotalCount and short or empty pages.
+    /// </summary>
     Task<(List<JobCandidate> Items, int TotalCount)> GetTalentPoolFilteredAsync(
         ErpSystem.Core.DTOs.HR.TalentPoolFilterDto filter,
+        Guid tenantId,
         CancellationToken cancellationToken = default);
 
     /// <summary>Returns pool candidates whose last engagement was before the threshold date.</summary>

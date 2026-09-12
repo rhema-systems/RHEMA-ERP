@@ -1,14 +1,18 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>Catalogue taxonomy — an administrative lookup, HR only.</summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-categories")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class OrientationCategoriesController : ControllerBase
 {
     private readonly IOrientationCategoryService _service;
@@ -21,30 +25,37 @@ public class OrientationCategoriesController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationCategoryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationCategoryDto>>> GetActive()
         => Ok(await _service.GetActiveAsync());
 
     [HttpGet("root")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationCategoryDto>>> GetRoot()
         => Ok(await _service.GetRootCategoriesAsync());
 
     [HttpGet("lookup")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationCategoryLookupDto>>> GetLookup()
         => Ok(await _service.GetLookupAsync());
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<OrientationCategoryDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("{parentId:guid}/children")]
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     public async Task<ActionResult<IEnumerable<OrientationCategoryDto>>> GetChildren(Guid parentId)
         => Ok(await _service.GetByParentAsync(parentId));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationCategoryDto>> Create([FromBody] CreateOrientationCategoryDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -59,6 +70,7 @@ public class OrientationCategoriesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     public async Task<ActionResult<OrientationCategoryDto>> Update(Guid id, [FromBody] UpdateOrientationCategoryDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -71,6 +83,7 @@ public class OrientationCategoriesController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);

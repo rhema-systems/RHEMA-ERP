@@ -75,7 +75,16 @@ public sealed class ProcurementConfigurationProfilesController : ControllerBase
     [HttpPost("{id:guid}/validate")]
     [Authorize(Policy = "procurement.access.manage")]
     public Task<IActionResult> Validate(Guid id, CancellationToken cancellationToken) => ExecuteAsync(async () =>
-        Ok(await _service.ValidateProfileAsync(id, CorrelationId, cancellationToken)));
+            Ok(await _service.ValidateProfileAsync(id, CorrelationId, cancellationToken)));
+
+    [HttpPost("{id:guid}/decisions/{decisionKey}/withdraw")]
+    [Authorize(Policy = "procurement.access.manage")]
+    public Task<IActionResult> WithdrawDecision(
+        Guid id,
+        string decisionKey,
+        [FromBody] WithdrawProcurementConfigurationDecisionRequest request,
+        CancellationToken cancellationToken) => ExecuteAsync(async () =>
+            Ok(await _service.WithdrawDecisionAsync(id, decisionKey, request, CorrelationId, cancellationToken)));
 
     [HttpPost("{id:guid}/publish")]
     [Authorize(Policy = "procurement.access.manage")]

@@ -39,6 +39,8 @@ export const organizationUnitSchema = z.object({
   headEmployeeId: z.string().optional().or(z.literal('')),
   sequence: z.coerce.number().int('Must be a whole number').min(1, 'Must be at least 1'),
   isActive: z.boolean(),
+  // Max 500 to match OrganizationUnitHistory.ChangeReason; the server trims and stores null for blank.
+  changeReason: z.string().max(500, 'Keep the reason under 500 characters').optional().or(z.literal('')),
 });
 
 export type OrganizationUnitFormValues = z.infer<typeof organizationUnitSchema>;
@@ -53,6 +55,7 @@ export const emptyOrganizationUnit: OrganizationUnitFormValues = {
   headEmployeeId: '',
   sequence: 1,
   isActive: true,
+  changeReason: '',
 };
 
 interface OrganizationUnitFormProps {
@@ -92,6 +95,15 @@ export function OrganizationUnitForm({
 
   const selectedLevel = levels.find((l) => l.id === selectedLevelId);
   const levelRequiresHead = selectedLevel?.requiresHead ?? false;
+
+  // The two edits the change log exists to record. Comparing against the values the form loaded with
+  // is what keeps the reason box from appearing on a plain rename — the server writes no history row
+  // for one, so asking for a reason would be asking for something nothing will keep.
+  const parentChanged =
+    Boolean(isEdit) && (form.watch('parentUnitId') || '') !== (defaultValues.parentUnitId || '');
+  const headChanged =
+    Boolean(isEdit) && (form.watch('headEmployeeId') || '') !== (defaultValues.headEmployeeId || '');
+  const recordsHistory = parentChanged || headChanged;
 
   return (
     <Card>
@@ -172,8 +184,15 @@ export function OrganizationUnitForm({
                   ))}
                 </SelectContent>
               </Select>
+              {/*
+                ⚠ This used to read "Must be exactly one level above this unit." That rule was
+                abandoned server-side — TDC's structure skips levels in places, so slice 3
+                reconciled both write paths onto the permissive one: the parent must sit at a higher
+                tier, and skipping is allowed. The screen was still telling people otherwise.
+              */}
               <p className="text-xs text-muted-foreground">
-                Must be exactly one level above this unit. Leave empty for the root unit.
+                Must sit at a higher level than this unit; levels may be skipped. Leave empty for the
+                root unit.
               </p>
             </div>
           </div>
@@ -202,10 +221,33 @@ export function OrganizationUnitForm({
             />
             <p className="text-xs text-muted-foreground">
               {levelRequiresHead
-                ? 'This level is configured to have a head — optional now, assign one later once employees exist.'
+                ? 'This level is configured to have a head — optional now, assign one later once employees exist. Once one is assigned it cannot be cleared, only replaced.'
                 : 'Optional. Can be assigned later.'}
             </p>
           </div>
+
+          {recordsHistory && (
+            <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-4">
+              <Label htmlFor="changeReason">Reason for this change</Label>
+              <Textarea
+                id="changeReason"
+                placeholder="e.g. 2026 restructure — Estates moved under Operations"
+                rows={2}
+                {...form.register('changeReason')}
+              />
+              <p className="text-xs text-muted-foreground">
+                {parentChanged && headChanged
+                  ? 'This edit moves the unit and changes its head. Both are recorded on the unit change log.'
+                  : parentChanged
+                    ? 'This edit moves the unit, which is recorded on the unit change log.'
+                    : 'This edit changes who heads the unit, which is recorded on the unit change log.'}{' '}
+                Optional, but the log can record what changed and when without it — never why.
+              </p>
+              {form.formState.errors.changeReason && (
+                <p className="text-sm text-red-500">{form.formState.errors.changeReason.message}</p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>

@@ -73,6 +73,16 @@ public sealed class ProcurementEvaluationCommitteesController : ControllerBase
             Ok(await _service.ActivateAsync(
                 committeeControlId, request, CorrelationId, cancellationToken)));
 
+    [HttpPost("{committeeControlId:guid}/retire-draft")]
+    [Authorize]
+    public Task<IActionResult> RetireDraft(
+        Guid committeeControlId,
+        [FromBody] RetireProcurementEvaluationCommitteeDraftRequest request,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(async () =>
+            Ok(await _service.RetireDraftAsync(
+                committeeControlId, request, CorrelationId, cancellationToken)));
+
     [HttpPost("appointments/{appointmentId:guid}/response")]
     public Task<IActionResult> RespondToAppointment(
         Guid appointmentId,

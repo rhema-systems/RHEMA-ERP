@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Orientation;
 using ErpSystem.Core.Enums;
 
@@ -457,7 +457,10 @@ public static class OrientationMappingExtensions
 
     public static OrientationSessionDto ToDto(this OrientationSession entity)
     {
-        var enrolled = entity.Enrollments.Count;
+        // Counted through the same "occupies a seat" rule the capacity check uses. Counting the raw
+        // collection made a withdrawn participant consume a seat on the detail screen while the
+        // enrolment guard let someone take it — two subsystems disagreeing about the same fact.
+        var enrolled = entity.Enrollments.Count(e => OrientationEnrollmentStatuses.Occupying.Contains(e.EnrollmentStatus));
         return new OrientationSessionDto
         {
             Id = entity.Id,
@@ -505,7 +508,8 @@ public static class OrientationMappingExtensions
             Status = entity.Status,
             ScheduledStartAt = entity.ScheduledStartAt,
             MaxParticipants = entity.MaxParticipants,
-            EnrolledCount = entity.Enrollments.Count,
+            // Filled from a batched count in the service — list reads do not include Enrollments.
+            EnrolledCount = entity.Enrollments.Count(e => OrientationEnrollmentStatuses.Occupying.Contains(e.EnrollmentStatus)),
         };
     }
 
@@ -862,6 +866,23 @@ public static class OrientationMappingExtensions
         };
     }
 
+    /// <summary>
+    /// The participant-facing projection of a question. <paramref name="revealAnswers"/> is false while
+    /// the attempt is still open, which blanks <c>IsCorrect</c> on every option and withholds the
+    /// explanation — otherwise the client is told which option to pick before it asks.
+    /// </summary>
+    public static OrientationAssessmentQuestionDto ToParticipantDto(this OrientationAssessmentQuestion entity, bool revealAnswers)
+    {
+        var dto = entity.ToDto();
+        if (revealAnswers) return dto;
+
+        dto.Explanation = null;
+        foreach (var option in dto.Options)
+            option.IsCorrect = false;
+
+        return dto;
+    }
+
     public static OrientationAssessmentQuestion ToEntity(this CreateOrientationAssessmentQuestionDto dto, Guid tenantId, Guid userId)
     {
         return new OrientationAssessmentQuestion
@@ -998,7 +1019,7 @@ public static class OrientationMappingExtensions
             RelevanceRating = dto.RelevanceRating,
             Comments = dto.Comments,
             IsAnonymous = dto.IsAnonymous,
-            SubmittedByEmployeeId = dto.SubmittedByEmployeeId,
+            // SubmittedByEmployeeId is stamped by the service from the token, not copied from here.
             SubmittedAt = DateTime.UtcNow,
             CreatedBy = userId.ToString(),
         };

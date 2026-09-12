@@ -107,10 +107,10 @@ export function PurchaseOrderBudgetCommitment({
                 >
                   <Badge variant="outline">#{event.sequence}</Badge>
                   <div>
-                    <p className="flex flex-wrap items-center gap-2 font-medium">
+                    <div className="flex flex-wrap items-center gap-2 font-medium">
                       {event.action}
                       <Badge variant="secondary">{event.status}</Badge>
-                    </p>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {event.event} · {commitment.reference} · {event.actorName} ·{' '}
                       {format(

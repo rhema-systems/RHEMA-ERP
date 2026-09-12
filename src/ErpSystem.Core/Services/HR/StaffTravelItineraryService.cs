@@ -18,6 +18,7 @@ public class StaffTravelItineraryService : IStaffTravelItineraryService
     private readonly IStaffTravelItineraryRepository _itineraryRepository;
     private readonly IStaffTravelItineraryLegRepository _legRepository;
     private readonly IStaffTravelItineraryActivityRepository _activityRepository;
+    private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffTravelItineraryService> _logger;
@@ -26,6 +27,7 @@ public class StaffTravelItineraryService : IStaffTravelItineraryService
         IStaffTravelItineraryRepository itineraryRepository,
         IStaffTravelItineraryLegRepository legRepository,
         IStaffTravelItineraryActivityRepository activityRepository,
+        IStaffTravelRequestRepository requestRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffTravelItineraryService> logger)
@@ -33,6 +35,7 @@ public class StaffTravelItineraryService : IStaffTravelItineraryService
         _itineraryRepository = itineraryRepository;
         _legRepository = legRepository;
         _activityRepository = activityRepository;
+        _requestRepository = requestRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -55,6 +58,17 @@ public class StaffTravelItineraryService : IStaffTravelItineraryService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
         return current;
+    }
+
+    /// <summary>
+    /// Confirms the travel request exists in the caller's tenant. The itinerary create took
+    /// StaffTravelRequestId straight from the payload and never checked it.
+    /// </summary>
+    private async Task RequireOwnedRequestAsync(Guid requestId)
+    {
+        var request = await _requestRepository.GetByIdAsync(requestId);
+        if (request == null || request.TenantId != GetTenantId())
+            throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
     }
 
     private async Task<StaffTravelItinerary> GetOwnedItineraryAsync(Guid id)
@@ -113,6 +127,8 @@ public class StaffTravelItineraryService : IStaffTravelItineraryService
     public async Task<StaffTravelItineraryDto> CreateAsync(CreateStaffTravelItineraryDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.VersionNumber = await GetNextVersionNumberAsync(createDto.StaffTravelRequestId, tenantId);
 
@@ -180,7 +196,8 @@ public class StaffTravelItineraryService : IStaffTravelItineraryService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _legRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _legRepository.GetWithActivitiesAsync(entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<StaffTravelItineraryLegDto>> GetLegsAsync(Guid itineraryId, CancellationToken cancellationToken = default)
@@ -208,7 +225,8 @@ public class StaffTravelItineraryService : IStaffTravelItineraryService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _legRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var reloaded = await _legRepository.GetWithActivitiesAsync(entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteLegAsync(Guid legId, CancellationToken cancellationToken = default)

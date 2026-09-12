@@ -99,6 +99,39 @@ if (args.Length > 0 && args[0] == "seed-civil-e2e")
     return;
 }
 
+// Create role-separated actors and prerequisite reference/source data used by the
+// disposable tender browser acceptance harness. Governed lifecycle transitions are
+// still performed by the real APIs so each browser transition remains verifiable.
+if (args.Length > 0 && args[0] == "seed-tender-e2e")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+    tempBuilder.Services.AddScoped<ErpSystem.Api.Services.TenderLifecycleE2ETestSeeder>();
+
+    var tempApp = tempBuilder.Build();
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Database.EnsureCreatedAsync();
+        await StampCurrentModelMigrationsAsAppliedAsync(
+            db,
+            scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedTestUsersAsync();
+        await scope.ServiceProvider.GetRequiredService<ProcurementAccessControlSeeder>()
+            .SeedAsync();
+        await scope.ServiceProvider.GetRequiredService<ErpSystem.Api.Services.TenderLifecycleE2ETestSeeder>()
+            .SeedAsync();
+    }
+
+    Console.WriteLine("Tender disposable browser prerequisite fixture seeded successfully.");
+    return;
+}
+
 // Check for maintenance workflow seeding command
 if (args.Length > 0 && args[0] == "seed-maintenance")
 {
@@ -208,6 +241,111 @@ if (args.Length > 0 && args[0] == "seed-hr-all")
     }
 
     Console.WriteLine("✅ HR seeding completed!");
+    return;
+}
+
+// Gives the organisation an authority hierarchy — a head on every unit and a line manager on every
+// employee — so the rules that read reporting lines (FR-HR-080's issuing authority, FR-HR-181's
+// grievance ladder, FR-HR-084's responder matrix) have something to resolve against.
+//
+// ⚠ SEPARATE FROM 'seed-hr-all' ON PURPOSE. That command seeds TDC's REAL organisation structure;
+// who heads which unit is fact of the same kind and TDC has not supplied it, so inventing it there
+// would put fabricated management lines behind a command that is otherwise trustworthy. This one
+// never overwrites an existing head or manager, so running it where the real hierarchy has been
+// entered does nothing.
+if (args.Length > 0 && args[0] == "seed-hr-org-authority")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        var tenant = await context.Set<ErpSystem.Core.Entities.Tenant>()
+            .FirstOrDefaultAsync(t => t.Code == "DEFAULT");
+        if (tenant is null)
+        {
+            Console.WriteLine("❌ DEFAULT tenant not found. Run 'rebuild-db', then 'seed', then 'seed-hr-all'.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var seeder = new ErpSystem.Data.Seeders.HrOrgAuthoritySeeder(
+            context, loggerFactory.CreateLogger<ErpSystem.Data.Seeders.HrOrgAuthoritySeeder>());
+
+        // ⚠ Deliberately NOT short-circuited on "every unit has a head". Heads and managers are two
+        // passes, and gating the whole command on the first one means a re-run skips the second —
+        // which is how a cycle in the manager graph survived its first correction. The seeder is
+        // idempotent by never-overwriting, so running it always is safe and reports what it kept.
+        await seeder.SeedAsync(tenant.Id);
+    }
+
+    Console.WriteLine("✅ Org authority seeded (TEST data — see the warning in the log).");
+    return;
+}
+
+// Loads a demonstrable HR/SHE dataset: a workforce staffing the establishment, the leave vocabulary
+// and holiday calendar, and the nine area seeders that were ported and then deferred.
+//
+// ⚠ FOR DEMONSTRATION DATABASES ONLY, and separate from 'seed-hr-all' for that reason. That command
+// seeds facts — the real organogram, the real positions. Everything this one writes is invented, and
+// putting fabricated employees behind the trustworthy command would leave no way to build a clean
+// database for anything but a demo.
+//
+// Prerequisites: 'rebuild-db', 'seed', then 'seed-hr-all' — this populates an establishment, it does
+// not create one.
+if (args.Length > 0 && args[0] == "seed-hr-demo")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+
+    // Identity is needed for the persona logins (password hashing, role membership) — the same
+    // registration the plain 'seed' command uses to create the admin user.
+    tempBuilder.Services.AddErpSystemIdentity();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+
+        // The seed host builds a reduced service graph, so the email-event catalogues may not be
+        // registered. GetServices returns an empty sequence rather than throwing, and the
+        // orchestrator treats "no catalogues" as nothing to seed rather than as a failure.
+        var emailCatalogs = scope.ServiceProvider
+            .GetServices<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog>();
+
+        var orchestrator = new ErpSystem.Data.Seeders.HrDemoSeedOrchestrator(
+            context, loggerFactory, emailCatalogs);
+
+        if (!await orchestrator.SeedAsync())
+        {
+            Console.WriteLine("❌ HR demo seeding could not start — see the log above.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        // The logins come AFTER the data: each persona is resolved to a seeded employee by position
+        // title, so the workforce has to exist first.
+        var personaSeeder = new ErpSystem.Api.Services.TdcDemoPersonaSeeder(
+            context,
+            scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<ErpSystem.Core.Entities.ApplicationUser>>(),
+            scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<ErpSystem.Core.Entities.ApplicationRole>>(),
+            loggerFactory.CreateLogger<ErpSystem.Api.Services.TdcDemoPersonaSeeder>());
+
+        await personaSeeder.SeedAsync();
+    }
+
+    Console.WriteLine("✅ HR demo data seeded. Check the log for any step reported as FAILED.");
     return;
 }
 
@@ -327,7 +465,10 @@ if (args.Length > 0 && args[0] == "post-finance-grv")
 if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
 {
     Console.Error.WriteLine(
-        $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, seed-supplier-onboarding-e2e, rebuild-db, repair-finance-po-schema.");
+        $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, "
+        + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-workflows, "
+        + "seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, seed-hr-demo, "
+        + "rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -604,6 +745,14 @@ app.UseRateLimiter();
 app.UseMiddleware<SupplierApplicantAccessMiddleware>();
 app.UseMiddleware<TemporaryPasswordChangeMiddleware>();
 app.UseMiddleware<ExternalUserAccessMiddleware>();
+// Candidates (self-registered careers accounts on the main scheme) get their own, narrower
+// fence — deliberately not folded into the ExternalUser one, whose allowlist carries the
+// procurement/projects/estate portals a candidate must never inherit.
+app.UseMiddleware<CandidateAccessMiddleware>();
+// Consultant-client contacts (invite-only accounts on the main scheme since 2026-08-31) get the
+// same treatment: their own sibling fence, narrower still — auth, profile, notifications and the
+// client-portal timesheet surface only.
+app.UseMiddleware<ConsultantClientAccessMiddleware>();
 app.UseAuthorization();
 
 // Keep aggregate diagnostics available to operators, but separate readiness from liveness.
@@ -667,6 +816,9 @@ if (!skipStartupInitialization)
     try
     {
         await InitializeDatabaseAsync(app, databaseConnectionTimeout, migrationTimeout);
+        app.Logger.LogInformation("Starting TDC procurement security-baseline reconciliation...");
+        await ReconcileProcurementSecurityBaselineAsync(app);
+        app.Logger.LogInformation("TDC procurement security-baseline reconciliation completed");
         databaseInitializationSucceeded = true;
         app.Logger.LogInformation("Database initialization completed");
     }
@@ -872,6 +1024,13 @@ async Task SeedFinanceCloseTemplateBaselineAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seeder = scope.ServiceProvider.GetRequiredService<FinanceCloseTemplateBaselineSeeder>();
     await seeder.SeedAllActiveTenantsAsync();
+}
+
+async Task ReconcileProcurementSecurityBaselineAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<ProcurementAccessControlSeeder>();
+    await seeder.ReconcileIdentityAccessBaselineAsync();
 }
 
 static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(

@@ -62,6 +62,7 @@ import {
   procurementAppSubmissionActions,
   procurementAppSubmissionStatusTone,
   readProcurementAppExportFile,
+  toProcurementAppEventInputValue,
   validateProcurementAppExport,
 } from '@/lib/procurement-app-submission';
 import { procurementAppSubmissionService } from '@/services/procurement-app-submission.service';
@@ -92,12 +93,6 @@ const statusOptions: ProcurementAppSubmissionStatus[] = [
   'Rejected',
 ];
 
-const nowForInput = () => {
-  const value = new Date();
-  value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
-  return value.toISOString().slice(0, 16);
-};
-
 const newExport = (): RecordProcurementAppExport => ({
   procurementPlanId: '',
   exportFormat: 'CSV',
@@ -105,10 +100,10 @@ const newExport = (): RecordProcurementAppExport => ({
   evidence: [],
 });
 
-const newLifecycle = (): LifecycleForm => ({
+const newLifecycle = (minimumAtUtc?: string): LifecycleForm => ({
   reference: '',
   reason: '',
-  eventAt: nowForInput(),
+  eventAt: toProcurementAppEventInputValue(minimumAtUtc),
   exportFormat: 'CSV',
   notes: '',
 });
@@ -347,9 +342,15 @@ export default function ProcurementAppSubmissionsPage() {
     nextAction: LifecycleAction,
     item: ProcurementAppSubmission
   ) => {
+    const minimumAtUtc =
+      nextAction === 'submit'
+        ? item.exportedAtUtc
+        : nextAction === 'acknowledge' || nextAction === 'reject'
+          ? item.submittedAtUtc
+          : undefined;
     setAction(nextAction);
     setActionTarget(item);
-    setLifecycleForm(newLifecycle());
+    setLifecycleForm(newLifecycle(minimumAtUtc));
     resetEvidence();
   };
 
@@ -1021,6 +1022,7 @@ export default function ProcurementAppSubmissionsPage() {
                   <Label>External event date and time</Label>
                   <Input
                     type="datetime-local"
+                    step={1}
                     value={lifecycleForm.eventAt}
                     onChange={(event) =>
                       setLifecycleForm((current) => ({

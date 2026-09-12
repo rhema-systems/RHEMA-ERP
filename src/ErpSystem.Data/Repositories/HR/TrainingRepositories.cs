@@ -15,41 +15,55 @@ public class TrainingVendorRepository : GenericRepository<TrainingVendor>, ITrai
 {
     public TrainingVendorRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingVendorSummaryDto derives TotalTrainersCount from the Trainers collection. An
+    // un-included collection is empty rather than null, so the list's "Trainers" column silently
+    // read 0 on every row instead of failing. Centralised so the reads cannot drift apart again.
+    private IQueryable<TrainingVendor> WithSummaryNavigations()
+        => _dbSet
+            .Include(v => v.Trainers)
+            .Where(v => !v.IsDeleted);
+
+    public override async Task<IEnumerable<TrainingVendor>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderBy(v => v.Name)
+            .ToListAsync();
+    }
+
     public async Task<TrainingVendor?> GetByVendorCodeAsync(string vendorCode)
     {
-        return await _dbSet
-            .Include(v => v.Trainers)
-            .FirstOrDefaultAsync(v => v.VendorCode == vendorCode && !v.IsDeleted);
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(v => v.VendorCode == vendorCode);
     }
 
     public async Task<IEnumerable<TrainingVendor>> GetByVendorTypeAsync(TrainingVendorType type)
     {
-        return await _dbSet
-            .Where(v => v.VendorType == type && !v.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(v => v.VendorType == type)
             .OrderBy(v => v.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingVendor>> GetActiveVendorsAsync()
     {
-        return await _dbSet
-            .Where(v => v.IsActive && !v.IsBlacklisted && !v.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(v => v.IsActive && !v.IsBlacklisted)
             .OrderBy(v => v.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingVendor>> GetPreferredVendorsAsync()
     {
-        return await _dbSet
-            .Where(v => v.IsPreferred && v.IsActive && !v.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(v => v.IsPreferred && v.IsActive)
             .OrderBy(v => v.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingVendor>> GetBlacklistedVendorsAsync()
     {
-        return await _dbSet
-            .Where(v => v.IsBlacklisted && !v.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(v => v.IsBlacklisted)
             .OrderBy(v => v.Name)
             .ToListAsync();
     }
@@ -57,8 +71,8 @@ public class TrainingVendorRepository : GenericRepository<TrainingVendor>, ITrai
     public async Task<IEnumerable<TrainingVendor>> GetWithExpiredAccreditationAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Where(v => !v.IsDeleted && v.AccreditationExpiryDate != null && v.AccreditationExpiryDate < now)
+        return await WithSummaryNavigations()
+            .Where(v => v.AccreditationExpiryDate != null && v.AccreditationExpiryDate < now)
             .OrderBy(v => v.AccreditationExpiryDate)
             .ToListAsync();
     }
@@ -67,9 +81,8 @@ public class TrainingVendorRepository : GenericRepository<TrainingVendor>, ITrai
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet
-            .Where(v => !v.IsDeleted
-                     && v.AccreditationExpiryDate != null
+        return await WithSummaryNavigations()
+            .Where(v => v.AccreditationExpiryDate != null
                      && v.AccreditationExpiryDate >= now
                      && v.AccreditationExpiryDate <= cutoff)
             .OrderBy(v => v.AccreditationExpiryDate)
@@ -93,26 +106,41 @@ public class TrainerProfileRepository : GenericRepository<TrainerProfile>, ITrai
 {
     public TrainerProfileRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainerProfileSummaryDto renders EmployeeName and VendorName, so every read that feeds it must
+    // carry both navigations. Centralised here so the reads cannot drift apart again — the list
+    // screen's "Source" column was blank on every row because GetAllAsync/GetActiveTrainersAsync
+    // loaded neither, while the detail screen beside it showed the name correctly.
+    private IQueryable<TrainerProfile> WithSummaryNavigations()
+        => _dbSet
+            .Include(t => t.Employee)
+            .Include(t => t.Vendor)
+            .Where(t => !t.IsDeleted);
+
+    public override async Task<IEnumerable<TrainerProfile>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderBy(t => t.Name)
+            .ToListAsync();
+    }
+
     public async Task<TrainerProfile?> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(t => t.Employee)
-            .FirstOrDefaultAsync(t => t.EmployeeId == employeeId && !t.IsDeleted);
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(t => t.EmployeeId == employeeId);
     }
 
     public async Task<IEnumerable<TrainerProfile>> GetByVendorIdAsync(Guid vendorId)
     {
-        return await _dbSet
-            .Include(t => t.Vendor)
-            .Where(t => t.VendorId == vendorId && !t.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(t => t.VendorId == vendorId)
             .OrderBy(t => t.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainerProfile>> GetActiveTrainersAsync()
     {
-        return await _dbSet
-            .Where(t => t.IsActive && !t.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(t => t.IsActive)
             .OrderBy(t => t.Name)
             .ToListAsync();
     }
@@ -129,9 +157,9 @@ public class TrainerProfileRepository : GenericRepository<TrainerProfile>, ITrai
 
     public async Task<IEnumerable<TrainerProfile>> GetAvailableForDateRangeAsync(DateTime from, DateTime to)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Include(t => t.Availability)
-            .Where(t => t.IsActive && !t.IsDeleted
+            .Where(t => t.IsActive
                      && t.Availability.Any(a => a.IsAvailable
                                              && a.FromDate <= from
                                              && a.ToDate >= to))
@@ -364,28 +392,44 @@ public class TrainingScheduleRepository : GenericRepository<TrainingSchedule>, I
 {
     public TrainingScheduleRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingScheduleSummaryDto reads ProgramCode/ProgramName, TrainerName, VendorName and derives
+    // ConfirmedParticipantsCount from the Nominations collection. Every read below fed that summary
+    // with a different subset — most carried Program alone, so the Trainer/Vendor columns were blank
+    // and the confirmed-seat count read 0 on every list except the paged one. Centralised so the
+    // reads cannot drift apart again.
+    private IQueryable<TrainingSchedule> WithSummaryNavigations()
+        => _dbSet
+            .Include(s => s.Program)
+            .Include(s => s.TrainerProfile)
+            .Include(s => s.Vendor)
+            .Include(s => s.Nominations)
+            .Where(s => !s.IsDeleted);
+
+    public override async Task<IEnumerable<TrainingSchedule>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderByDescending(s => s.StartDate)
+            .ToListAsync();
+    }
+
     public async Task<TrainingSchedule?> GetByScheduleNumberAsync(string scheduleNumber)
     {
-        return await _dbSet
-            .Include(s => s.Program)
-            .FirstOrDefaultAsync(s => s.ScheduleNumber == scheduleNumber && !s.IsDeleted);
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(s => s.ScheduleNumber == scheduleNumber);
     }
 
     public async Task<IEnumerable<TrainingSchedule>> GetByProgramIdAsync(Guid programId)
     {
-        return await _dbSet
-            .Include(s => s.TrainerProfile)
-            .Include(s => s.Vendor)
-            .Where(s => s.ProgramId == programId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.ProgramId == programId)
             .OrderByDescending(s => s.StartDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingSchedule>> GetByStatusAsync(ScheduleStatus status)
     {
-        return await _dbSet
-            .Include(s => s.Program)
-            .Where(s => s.Status == status && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.Status == status)
             .OrderBy(s => s.StartDate)
             .ToListAsync();
     }
@@ -394,11 +438,8 @@ public class TrainingScheduleRepository : GenericRepository<TrainingSchedule>, I
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet
-            .Include(s => s.Program)
-            .Include(s => s.TrainerProfile)
-            .Where(s => !s.IsDeleted
-                     && s.StartDate >= now
+        return await WithSummaryNavigations()
+            .Where(s => s.StartDate >= now
                      && s.StartDate <= cutoff
                      && (s.Status == ScheduleStatus.Planned || s.Status == ScheduleStatus.RegistrationOpen))
             .OrderBy(s => s.StartDate)
@@ -408,11 +449,8 @@ public class TrainingScheduleRepository : GenericRepository<TrainingSchedule>, I
     public async Task<IEnumerable<TrainingSchedule>> GetCurrentlyRunningAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(s => s.Program)
-            .Include(s => s.TrainerProfile)
-            .Where(s => !s.IsDeleted
-                     && s.StartDate <= now
+        return await WithSummaryNavigations()
+            .Where(s => s.StartDate <= now
                      && s.EndDate >= now
                      && s.Status == ScheduleStatus.InProgress)
             .OrderBy(s => s.StartDate)
@@ -421,36 +459,32 @@ public class TrainingScheduleRepository : GenericRepository<TrainingSchedule>, I
 
     public async Task<IEnumerable<TrainingSchedule>> GetByTrainerProfileIdAsync(Guid trainerProfileId)
     {
-        return await _dbSet
-            .Include(s => s.Program)
-            .Where(s => s.TrainerProfileId == trainerProfileId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.TrainerProfileId == trainerProfileId)
             .OrderByDescending(s => s.StartDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingSchedule>> GetByVendorIdAsync(Guid vendorId)
     {
-        return await _dbSet
-            .Include(s => s.Program)
-            .Where(s => s.VendorId == vendorId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.VendorId == vendorId)
             .OrderByDescending(s => s.StartDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingSchedule>> GetByBudgetIdAsync(Guid budgetId)
     {
-        return await _dbSet
-            .Include(s => s.Program)
-            .Where(s => s.TrainingBudgetId == budgetId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.TrainingBudgetId == budgetId)
             .OrderByDescending(s => s.StartDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingSchedule>> GetPendingApprovalAsync()
     {
-        return await _dbSet
-            .Include(s => s.Program)
-            .Where(s => s.Status == ScheduleStatus.Planned && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.Status == ScheduleStatus.Planned)
             .OrderBy(s => s.StartDate)
             .ToListAsync();
     }
@@ -458,10 +492,8 @@ public class TrainingScheduleRepository : GenericRepository<TrainingSchedule>, I
     public async Task<IEnumerable<TrainingSchedule>> GetWithRegistrationOpenAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(s => s.Program)
-            .Where(s => !s.IsDeleted
-                     && s.RegistrationOpenDate <= now
+        return await WithSummaryNavigations()
+            .Where(s => s.RegistrationOpenDate <= now
                      && s.RegistrationCloseDate >= now)
             .OrderBy(s => s.StartDate)
             .ToListAsync();
@@ -470,11 +502,8 @@ public class TrainingScheduleRepository : GenericRepository<TrainingSchedule>, I
     public async Task<IEnumerable<TrainingSchedule>> GetWithAvailableSlotsAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(s => s.Program)
-            .Include(s => s.Nominations)
-            .Where(s => !s.IsDeleted
-                     && s.RegistrationOpenDate <= now
+        return await WithSummaryNavigations()
+            .Where(s => s.RegistrationOpenDate <= now
                      && s.RegistrationCloseDate >= now
                      && s.Nominations.Count(n => n.Status == NominationStatus.Confirmed && !n.IsDeleted) < s.MaxParticipants)
             .OrderBy(s => s.StartDate)
@@ -505,19 +534,24 @@ public class TrainingSessionRepository : GenericRepository<TrainingSession>, ITr
 {
     public TrainingSessionRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingSessionDto reads Schedule.ScheduleNumber, which the by-schedule read did not load.
+    private IQueryable<TrainingSession> WithSummaryNavigations()
+        => _dbSet
+            .Include(s => s.Schedule).ThenInclude(sc => sc.Program)
+            .Where(s => !s.IsDeleted);
+
     public async Task<IEnumerable<TrainingSession>> GetByScheduleIdAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Where(s => s.ScheduleId == scheduleId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.ScheduleId == scheduleId)
             .OrderBy(s => s.Date)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingSession>> GetByDateAsync(DateTime date)
     {
-        return await _dbSet
-            .Include(s => s.Schedule).ThenInclude(sc => sc.Program)
-            .Where(s => !s.IsDeleted && s.Date.Date == date.Date)
+        return await WithSummaryNavigations()
+            .Where(s => s.Date.Date == date.Date)
             .OrderBy(s => s.Date)
             .ToListAsync();
     }
@@ -535,19 +569,33 @@ public class TrainingNominationRepository : GenericRepository<TrainingNomination
 {
     public TrainingNominationRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TrainingNomination?> GetByNominationNumberAsync(string nominationNumber)
-    {
-        return await _dbSet
+    // TrainingNominationSummaryDto reads Schedule.Program.ProgramName, Schedule.StartDate and the
+    // employee's name/number. The by-schedule reads carried Employee only, so ProgramName and
+    // TrainingStartDate were blank on a schedule's own nominee list — the screen where they matter
+    // most. Centralised so the reads cannot drift apart again.
+    private IQueryable<TrainingNomination> WithSummaryNavigations()
+        => _dbSet
             .Include(n => n.Employee)
             .Include(n => n.Schedule).ThenInclude(s => s.Program)
-            .FirstOrDefaultAsync(n => n.NominationNumber == nominationNumber && !n.IsDeleted);
+            .Where(n => !n.IsDeleted);
+
+    public override async Task<IEnumerable<TrainingNomination>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderByDescending(n => n.NominationDate)
+            .ToListAsync();
+    }
+
+    public async Task<TrainingNomination?> GetByNominationNumberAsync(string nominationNumber)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(n => n.NominationNumber == nominationNumber);
     }
 
     public async Task<IEnumerable<TrainingNomination>> GetByScheduleIdAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(n => n.Employee)
-            .Where(n => n.ScheduleId == scheduleId && !n.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(n => n.ScheduleId == scheduleId)
             .OrderBy(n => n.Employee.LastName)
             .ThenBy(n => n.Employee.FirstName)
             .ToListAsync();
@@ -555,50 +603,41 @@ public class TrainingNominationRepository : GenericRepository<TrainingNomination
 
     public async Task<IEnumerable<TrainingNomination>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(n => n.EmployeeId == employeeId && !n.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(n => n.EmployeeId == employeeId)
             .OrderByDescending(n => n.Schedule.StartDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingNomination>> GetByStatusAsync(NominationStatus status)
     {
-        return await _dbSet
-            .Include(n => n.Employee)
-            .Include(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(n => n.Status == status && !n.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(n => n.Status == status)
             .OrderBy(n => n.Schedule.StartDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingNomination>> GetPendingSupervisorApprovalAsync()
     {
-        return await _dbSet
-            .Include(n => n.Employee)
-            .Include(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(n => n.Status == NominationStatus.SupervisorReview && !n.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(n => n.Status == NominationStatus.SupervisorReview)
             .OrderBy(n => n.NominationDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingNomination>> GetPendingHrApprovalAsync()
     {
-        return await _dbSet
-            .Include(n => n.Employee)
-            .Include(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(n => n.Status == NominationStatus.HrReview && !n.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(n => n.Status == NominationStatus.HrReview)
             .OrderBy(n => n.NominationDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingNomination>> GetConfirmedForScheduleAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(n => n.Employee)
+        return await WithSummaryNavigations()
             .Where(n => n.ScheduleId == scheduleId
-                     && n.Status == NominationStatus.Confirmed
-                     && !n.IsDeleted)
+                     && n.Status == NominationStatus.Confirmed)
             .OrderBy(n => n.Employee.LastName)
             .ThenBy(n => n.Employee.FirstName)
             .ToListAsync();
@@ -606,10 +645,8 @@ public class TrainingNominationRepository : GenericRepository<TrainingNomination
 
     public async Task<IEnumerable<TrainingNomination>> GetByNeedsAssessmentIdAsync(Guid assessmentId)
     {
-        return await _dbSet
-            .Include(n => n.Employee)
-            .Include(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(n => n.TrainingNeedsAssessmentId == assessmentId && !n.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(n => n.TrainingNeedsAssessmentId == assessmentId)
             .OrderBy(n => n.NominationDate)
             .ToListAsync();
     }
@@ -635,39 +672,49 @@ public class TrainingCompletionRepository : GenericRepository<TrainingCompletion
 {
     public TrainingCompletionRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingCompletionDto reads NominationNumber, the employee's name/number and
+    // Nomination.Schedule.Program.ProgramName. Each read below carried a different half of that
+    // chain — by-nomination had no Nomination at all, by-employee had no Employee, and two stopped
+    // at Schedule so ProgramName was blank. Centralised so the reads cannot drift apart again.
+    private IQueryable<TrainingCompletion> WithSummaryNavigations()
+        => _dbSet
+            .Include(c => c.Employee)
+            .Include(c => c.Nomination).ThenInclude(n => n.Schedule).ThenInclude(s => s.Program)
+            .Where(c => !c.IsDeleted);
+
+    // GetOwnedCompletionAsync routed through the generic GetByIdAsync, so the by-id read and every
+    // write response returned a blank nomination number, employee and programme.
+    public override async Task<TrainingCompletion?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(c => c.Id == id);
+    }
+
     public async Task<TrainingCompletion?> GetByNominationIdAsync(Guid nominationId)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .FirstOrDefaultAsync(c => c.NominationId == nominationId && !c.IsDeleted);
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(c => c.NominationId == nominationId);
     }
 
     public async Task<IEnumerable<TrainingCompletion>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(c => c.Nomination).ThenInclude(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(c => c.EmployeeId == employeeId && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.EmployeeId == employeeId)
             .OrderByDescending(c => c.CompletionDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingCompletion>> GetByStatusAsync(TrainingCompletionStatus status)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Nomination).ThenInclude(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(c => c.Status == status && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.Status == status)
             .OrderByDescending(c => c.CompletionDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingCompletion>> GetPassedCompletionsForProgramAsync(Guid programId)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Nomination).ThenInclude(n => n.Schedule)
-            .Where(c => !c.IsDeleted
-                     && c.IsPassed
+        return await WithSummaryNavigations()
+            .Where(c => c.IsPassed
                      && c.Nomination.Schedule.ProgramId == programId)
             .OrderByDescending(c => c.CompletionDate)
             .ToListAsync();
@@ -675,20 +722,16 @@ public class TrainingCompletionRepository : GenericRepository<TrainingCompletion
 
     public async Task<IEnumerable<TrainingCompletion>> GetPendingManagerVerificationAsync()
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Nomination).ThenInclude(n => n.Schedule).ThenInclude(s => s.Program)
-            .Where(c => !c.IsDeleted && !c.IsVerifiedByManager)
+        return await WithSummaryNavigations()
+            .Where(c => !c.IsVerifiedByManager)
             .OrderBy(c => c.CompletionDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingCompletion>> GetByScheduleIdAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Nomination)
-            .Where(c => !c.IsDeleted && c.Nomination.ScheduleId == scheduleId)
+        return await WithSummaryNavigations()
+            .Where(c => c.Nomination.ScheduleId == scheduleId)
             .OrderBy(c => c.Employee.LastName)
             .ThenBy(c => c.Employee.FirstName)
             .ToListAsync();
@@ -703,11 +746,28 @@ public class TrainingAttendanceRepository : GenericRepository<TrainingAttendance
 {
     public TrainingAttendanceRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingAttendanceDto reads ScheduleNumber, ProgramName, the employee's name/number,
+    // NominationNumber and MarkedByName. No read below carried more than half of those — the
+    // register screen showed blank schedule/programme and never showed who marked the row.
+    private IQueryable<TrainingAttendance> WithSummaryNavigations()
+        => _dbSet
+            .Include(a => a.Employee)
+            .Include(a => a.Schedule).ThenInclude(s => s.Program)
+            .Include(a => a.Nomination)
+            .Include(a => a.MarkedBy)
+            .Where(a => !a.IsDeleted);
+
+
+    // Untracked: a tracked re-read returns the identity-map instance with its stale navigations.
+    public async Task<TrainingAttendance?> GetByIdWithNavigationsAsync(Guid id)
+    {
+        return await WithSummaryNavigations().AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+    }
+
     public async Task<IEnumerable<TrainingAttendance>> GetByScheduleIdAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Where(a => a.ScheduleId == scheduleId && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => a.ScheduleId == scheduleId)
             .OrderBy(a => a.AttendanceDate)
             .ThenBy(a => a.Employee.LastName)
             .ToListAsync();
@@ -715,20 +775,17 @@ public class TrainingAttendanceRepository : GenericRepository<TrainingAttendance
 
     public async Task<IEnumerable<TrainingAttendance>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(a => a.Schedule).ThenInclude(s => s.Program)
-            .Where(a => a.EmployeeId == employeeId && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => a.EmployeeId == employeeId)
             .OrderByDescending(a => a.AttendanceDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingAttendance>> GetByScheduleAndDateAsync(Guid scheduleId, DateTime date)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
+        return await WithSummaryNavigations()
             .Where(a => a.ScheduleId == scheduleId
-                     && a.AttendanceDate.Date == date.Date
-                     && !a.IsDeleted)
+                     && a.AttendanceDate.Date == date.Date)
             .OrderBy(a => a.Employee.LastName)
             .ThenBy(a => a.Employee.FirstName)
             .ToListAsync();
@@ -736,9 +793,8 @@ public class TrainingAttendanceRepository : GenericRepository<TrainingAttendance
 
     public async Task<IEnumerable<TrainingAttendance>> GetAbsenteesForScheduleAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Where(a => a.ScheduleId == scheduleId && !a.IsPresent && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => a.ScheduleId == scheduleId && !a.IsPresent)
             .OrderBy(a => a.AttendanceDate)
             .ThenBy(a => a.Employee.LastName)
             .ToListAsync();
@@ -753,11 +809,25 @@ public class TrainingFeedbackRepository : GenericRepository<TrainingFeedback>, I
 {
     public TrainingFeedbackRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingFeedbackDto reads ScheduleNumber, ProgramName and the respondent's name — the
+    // by-schedule read carried Employee alone and the by-employee read carried Schedule alone.
+    private IQueryable<TrainingFeedback> WithSummaryNavigations()
+        => _dbSet
+            .Include(f => f.Employee)
+            .Include(f => f.Schedule).ThenInclude(s => s.Program)
+            .Where(f => !f.IsDeleted);
+
+
+    // Untracked: a tracked re-read returns the identity-map instance with its stale navigations.
+    public async Task<TrainingFeedback?> GetByIdWithNavigationsAsync(Guid id)
+    {
+        return await WithSummaryNavigations().AsNoTracking().FirstOrDefaultAsync(f => f.Id == id);
+    }
+
     public async Task<IEnumerable<TrainingFeedback>> GetByScheduleIdAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(f => f.Employee)
-            .Where(f => f.ScheduleId == scheduleId && !f.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(f => f.ScheduleId == scheduleId)
             .OrderBy(f => f.Employee.LastName)
             .ThenBy(f => f.Employee.FirstName)
             .ToListAsync();
@@ -765,9 +835,8 @@ public class TrainingFeedbackRepository : GenericRepository<TrainingFeedback>, I
 
     public async Task<IEnumerable<TrainingFeedback>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(f => f.Schedule).ThenInclude(s => s.Program)
-            .Where(f => f.EmployeeId == employeeId && !f.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(f => f.EmployeeId == employeeId)
             .OrderByDescending(f => f.FeedbackDate)
             .ToListAsync();
     }
@@ -781,11 +850,28 @@ public class TrainingFollowUpAssessmentRepository : GenericRepository<TrainingFo
 {
     public TrainingFollowUpAssessmentRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingFollowUpAssessmentDto reads ScheduleNumber, ProgramName, the employee's name and
+    // ManagerName. Only GetPendingManagerObservationAsync carried the full set; the other three
+    // each dropped something. This is the shape that read correctly on one screen and blank on the
+    // next, which is what makes it hard to spot.
+    private IQueryable<TrainingFollowUpAssessment> WithSummaryNavigations()
+        => _dbSet
+            .Include(a => a.Employee)
+            .Include(a => a.Schedule).ThenInclude(s => s.Program)
+            .Include(a => a.Manager)
+            .Where(a => !a.IsDeleted);
+
+
+    // Untracked: a tracked re-read returns the identity-map instance with its stale navigations.
+    public async Task<TrainingFollowUpAssessment?> GetByIdWithNavigationsAsync(Guid id)
+    {
+        return await WithSummaryNavigations().AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+    }
+
     public async Task<IEnumerable<TrainingFollowUpAssessment>> GetByScheduleIdAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Where(a => a.ScheduleId == scheduleId && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => a.ScheduleId == scheduleId)
             .OrderBy(a => a.AssessmentType)
             .ThenBy(a => a.Employee.LastName)
             .ToListAsync();
@@ -793,20 +879,17 @@ public class TrainingFollowUpAssessmentRepository : GenericRepository<TrainingFo
 
     public async Task<IEnumerable<TrainingFollowUpAssessment>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(a => a.Schedule).ThenInclude(s => s.Program)
-            .Where(a => a.EmployeeId == employeeId && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => a.EmployeeId == employeeId)
             .OrderByDescending(a => a.AssessmentDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingFollowUpAssessment>> GetByAssessmentTypeAsync(Guid scheduleId, TrainingAssessmentType assessmentType)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
+        return await WithSummaryNavigations()
             .Where(a => a.ScheduleId == scheduleId
-                     && a.AssessmentType == assessmentType
-                     && !a.IsDeleted)
+                     && a.AssessmentType == assessmentType)
             .OrderBy(a => a.Employee.LastName)
             .ThenBy(a => a.Employee.FirstName)
             .ToListAsync();
@@ -814,11 +897,8 @@ public class TrainingFollowUpAssessmentRepository : GenericRepository<TrainingFo
 
     public async Task<IEnumerable<TrainingFollowUpAssessment>> GetPendingManagerObservationAsync()
     {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Include(a => a.Schedule).ThenInclude(s => s.Program)
-            .Include(a => a.Manager)
-            .Where(a => !a.IsDeleted && a.ManagerSubmittedDate == null)
+        return await WithSummaryNavigations()
+            .Where(a => a.ManagerSubmittedDate == null)
             .OrderBy(a => a.AssessmentDate)
             .ToListAsync();
     }
@@ -836,48 +916,67 @@ public class TrainingCertificateRepository : GenericRepository<TrainingCertifica
 {
     public TrainingCertificateRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<TrainingCertificate?> GetByCertificateNumberAsync(string certificateNumber)
-    {
-        return await _dbSet
+    // TrainingCertificateDto reads the nomination number, the employee's name/number, the programme
+    // name, the superseded certificate's number and who issued it. Every read below carried a
+    // different subset — the by-employee one had no Employee at all, so "my certificates" showed a
+    // blank holder. Centralised so the reads cannot drift apart again.
+    private IQueryable<TrainingCertificate> WithSummaryNavigations()
+        => _dbSet
             .Include(c => c.Employee)
             .Include(c => c.Program)
-            .FirstOrDefaultAsync(c => c.CertificateNumber == certificateNumber && !c.IsDeleted);
+            .Include(c => c.Nomination)
+            .Include(c => c.PreviousCertificate)
+            .Include(c => c.IssuedBy)
+            .Where(c => !c.IsDeleted);
+
+    // The service's owned-entity fetch used the generic GetByIdAsync, which loads nothing — blanking
+    // the by-id read and every write response that re-reads through it.
+    public override async Task<TrainingCertificate?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(c => c.Id == id);
+    }
+
+    public override async Task<IEnumerable<TrainingCertificate>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderByDescending(c => c.IssuedDate)
+            .ToListAsync();
+    }
+
+    public async Task<TrainingCertificate?> GetByCertificateNumberAsync(string certificateNumber)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(c => c.CertificateNumber == certificateNumber);
     }
 
     public async Task<IEnumerable<TrainingCertificate>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(c => c.Program)
-            .Where(c => c.EmployeeId == employeeId && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.EmployeeId == employeeId)
             .OrderByDescending(c => c.IssuedDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingCertificate>> GetByProgramIdAsync(Guid programId)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Where(c => c.ProgramId == programId && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.ProgramId == programId)
             .OrderByDescending(c => c.IssuedDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingCertificate>> GetByStatusAsync(CertificateStatus status)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Program)
-            .Where(c => c.Status == status && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.Status == status)
             .OrderByDescending(c => c.IssuedDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingCertificate>> GetActiveAsync()
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Program)
-            .Where(c => c.Status == CertificateStatus.Active && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.Status == CertificateStatus.Active)
             .OrderByDescending(c => c.IssuedDate)
             .ToListAsync();
     }
@@ -885,10 +984,8 @@ public class TrainingCertificateRepository : GenericRepository<TrainingCertifica
     public async Task<IEnumerable<TrainingCertificate>> GetExpiredAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Program)
-            .Where(c => !c.IsDeleted && c.ExpiryDate != null && c.ExpiryDate < now)
+        return await WithSummaryNavigations()
+            .Where(c => c.ExpiryDate != null && c.ExpiryDate < now)
             .OrderBy(c => c.ExpiryDate)
             .ToListAsync();
     }
@@ -897,11 +994,8 @@ public class TrainingCertificateRepository : GenericRepository<TrainingCertifica
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Program)
-            .Where(c => !c.IsDeleted
-                     && c.ExpiryDate != null
+        return await WithSummaryNavigations()
+            .Where(c => c.ExpiryDate != null
                      && c.ExpiryDate >= now
                      && c.ExpiryDate <= cutoff)
             .OrderBy(c => c.ExpiryDate)
@@ -910,10 +1004,8 @@ public class TrainingCertificateRepository : GenericRepository<TrainingCertifica
 
     public async Task<IEnumerable<TrainingCertificate>> GetRenewalsForCertificateAsync(Guid previousCertificateId)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Include(c => c.Program)
-            .Where(c => c.PreviousCertificateId == previousCertificateId && c.IsRenewal && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.PreviousCertificateId == previousCertificateId && c.IsRenewal)
             .OrderByDescending(c => c.IssuedDate)
             .ToListAsync();
     }
@@ -927,20 +1019,47 @@ public class EmployeeCertificateRepository : GenericRepository<EmployeeCertifica
 {
     public EmployeeCertificateRepository(ApplicationDbContext context) : base(context) { }
 
+    // EmployeeCertificateDto reads the holder's name/number and who verified it. The reads split
+    // those between them — by-employee carried VerifiedBy but no Employee, the rest the other way
+    // round — so each list blanked whichever half it was missing.
+    private IQueryable<EmployeeCertificate> WithSummaryNavigations()
+        => _dbSet
+            .Include(c => c.Employee)
+            .Include(c => c.VerifiedBy)
+            .Where(c => !c.IsDeleted);
+
+    // GetOwnedAsync used the generic GetByIdAsync, so the by-id read and every write response
+    // (create, update, verify) came back with a blank holder and verifier.
+    public override async Task<EmployeeCertificate?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(c => c.Id == id);
+    }
+
+    public override async Task<IEnumerable<EmployeeCertificate>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderByDescending(c => c.IssuedDate)
+            .ToListAsync();
+    }
+
+    // Untracked: a tracked re-read returns the identity-map instance with its stale navigations.
+    public async Task<EmployeeCertificate?> GetByIdWithNavigationsAsync(Guid id)
+    {
+        return await WithSummaryNavigations().AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
+    }
+
     public async Task<IEnumerable<EmployeeCertificate>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(c => c.VerifiedBy)
-            .Where(c => c.EmployeeId == employeeId && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.EmployeeId == employeeId)
             .OrderByDescending(c => c.IssuedDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<EmployeeCertificate>> GetUnverifiedAsync()
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Where(c => !c.IsVerified && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => !c.IsVerified)
             .OrderBy(c => c.CreatedAt)
             .ToListAsync();
     }
@@ -948,9 +1067,8 @@ public class EmployeeCertificateRepository : GenericRepository<EmployeeCertifica
     public async Task<IEnumerable<EmployeeCertificate>> GetExpiredAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Where(c => !c.IsDeleted && c.ExpiryDate != null && c.ExpiryDate < now)
+        return await WithSummaryNavigations()
+            .Where(c => c.ExpiryDate != null && c.ExpiryDate < now)
             .OrderBy(c => c.ExpiryDate)
             .ToListAsync();
     }
@@ -959,10 +1077,8 @@ public class EmployeeCertificateRepository : GenericRepository<EmployeeCertifica
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Where(c => !c.IsDeleted
-                     && c.ExpiryDate != null
+        return await WithSummaryNavigations()
+            .Where(c => c.ExpiryDate != null
                      && c.ExpiryDate >= now
                      && c.ExpiryDate <= cutoff)
             .OrderBy(c => c.ExpiryDate)
@@ -971,9 +1087,8 @@ public class EmployeeCertificateRepository : GenericRepository<EmployeeCertifica
 
     public async Task<IEnumerable<EmployeeCertificate>> GetByStatusAsync(CertificateStatus status)
     {
-        return await _dbSet
-            .Include(c => c.Employee)
-            .Where(c => c.Status == status && !c.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(c => c.Status == status)
             .OrderByDescending(c => c.IssuedDate)
             .ToListAsync();
     }
@@ -991,20 +1106,44 @@ public class ComplianceTrainingRequirementRepository : GenericRepository<Complia
 {
     public ComplianceTrainingRequirementRepository(ApplicationDbContext context) : base(context) { }
 
+    // The requirement summary derives TotalAssignedEmployees and ComplianceRate from the
+    // EmployeeRecords collection, and names the programme and the scope (level / unit / position).
+    // Nothing loaded EmployeeRecords except GetWithFullDetailsAsync, so the compliance rate — the
+    // one number this screen exists for — read 0% on every row of every list.
+    private IQueryable<ComplianceTrainingRequirement> WithSummaryNavigations()
+        => _dbSet
+            .Include(r => r.Program)
+            .Include(r => r.OrganizationLevel)
+            .Include(r => r.OrganizationUnit)
+            .Include(r => r.Position)
+            .Include(r => r.EmployeeRecords)
+            .Where(r => !r.IsDeleted);
+
+    // GetOwnedRequirementAsync used the generic GetByIdAsync, blanking the by-id read and every
+    // write response that re-reads through it.
+    public override async Task<ComplianceTrainingRequirement?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(r => r.Id == id);
+    }
+
+    public override async Task<IEnumerable<ComplianceTrainingRequirement>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderBy(r => r.RequirementName)
+            .ToListAsync();
+    }
+
     public async Task<ComplianceTrainingRequirement?> GetByRequirementCodeAsync(string requirementCode)
     {
-        return await _dbSet
-            .Include(r => r.Program)
-            .FirstOrDefaultAsync(r => r.RequirementCode == requirementCode && !r.IsDeleted);
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(r => r.RequirementCode == requirementCode);
     }
 
     public async Task<IEnumerable<ComplianceTrainingRequirement>> GetActiveAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(r => r.Program)
+        return await WithSummaryNavigations()
             .Where(r => r.IsActive
-                     && !r.IsDeleted
                      && r.EffectiveDate <= now
                      && (r.ExpiryDate == null || r.ExpiryDate > now))
             .OrderBy(r => r.RequirementName)
@@ -1013,35 +1152,32 @@ public class ComplianceTrainingRequirementRepository : GenericRepository<Complia
 
     public async Task<IEnumerable<ComplianceTrainingRequirement>> GetByProgramIdAsync(Guid programId)
     {
-        return await _dbSet
-            .Where(r => r.ProgramId == programId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.ProgramId == programId)
             .OrderBy(r => r.RequirementName)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<ComplianceTrainingRequirement>> GetByOrganizationLevelAsync(Guid orgLevelId)
     {
-        return await _dbSet
-            .Include(r => r.Program)
-            .Where(r => r.OrganizationLevelId == orgLevelId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.OrganizationLevelId == orgLevelId)
             .OrderBy(r => r.RequirementName)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<ComplianceTrainingRequirement>> GetByOrganizationUnitAsync(Guid orgUnitId)
     {
-        return await _dbSet
-            .Include(r => r.Program)
-            .Where(r => r.OrganizationUnitId == orgUnitId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.OrganizationUnitId == orgUnitId)
             .OrderBy(r => r.RequirementName)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<ComplianceTrainingRequirement>> GetByPositionAsync(Guid positionId)
     {
-        return await _dbSet
-            .Include(r => r.Program)
-            .Where(r => r.PositionId == positionId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.PositionId == positionId)
             .OrderBy(r => r.RequirementName)
             .ToListAsync();
     }
@@ -1066,20 +1202,52 @@ public class EmployeeComplianceRecordRepository : GenericRepository<EmployeeComp
 {
     public EmployeeComplianceRecordRepository(ApplicationDbContext context) : base(context) { }
 
+    // EmployeeComplianceRecordDto reads the employee's name/number, the requirement's code/name, the
+    // programme behind it, the nomination that fulfilled it and who granted an exemption. The reads
+    // each carried a fragment: by-employee had no Employee, by-requirement had no Requirement, and
+    // none stopped at Requirement without .ThenInclude(Program) so ProgramName was blank.
+    // ⚠ GetExemptAsync did not load ExemptedBy — on the one list whose entire purpose is showing who
+    // granted the exemption.
+    private IQueryable<EmployeeComplianceRecord> WithSummaryNavigations()
+        => _dbSet
+            .Include(r => r.Employee)
+            .Include(r => r.Requirement).ThenInclude(req => req.Program)
+            .Include(r => r.FulfillingNomination)
+            .Include(r => r.ExemptedBy)
+            .Where(r => !r.IsDeleted);
+
+    // GetOwnedRecordAsync used the generic GetByIdAsync, blanking the by-id read and the write
+    // responses that re-read through it.
+    public override async Task<EmployeeComplianceRecord?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(r => r.Id == id);
+    }
+
+    public override async Task<IEnumerable<EmployeeComplianceRecord>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderBy(r => r.NextDueDate)
+            .ToListAsync();
+    }
+
+    // Untracked: exemption sets ExemptedById, so a tracked re-read still maps a null exempter.
+    public async Task<EmployeeComplianceRecord?> GetByIdWithNavigationsAsync(Guid id)
+    {
+        return await WithSummaryNavigations().AsNoTracking().FirstOrDefaultAsync(r => r.Id == id);
+    }
+
     public async Task<IEnumerable<EmployeeComplianceRecord>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(r => r.Requirement).ThenInclude(req => req.Program)
-            .Where(r => r.EmployeeId == employeeId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.EmployeeId == employeeId)
             .OrderBy(r => r.Requirement.RequirementName)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<EmployeeComplianceRecord>> GetByRequirementIdAsync(Guid requirementId)
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Where(r => r.RequirementId == requirementId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.RequirementId == requirementId)
             .OrderBy(r => r.Employee.LastName)
             .ThenBy(r => r.Employee.FirstName)
             .ToListAsync();
@@ -1087,10 +1255,8 @@ public class EmployeeComplianceRecordRepository : GenericRepository<EmployeeComp
 
     public async Task<IEnumerable<EmployeeComplianceRecord>> GetByStatusAsync(ComplianceStatus status)
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.Requirement)
-            .Where(r => r.Status == status && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.Status == status)
             .OrderBy(r => r.Employee.LastName)
             .ThenBy(r => r.Employee.FirstName)
             .ToListAsync();
@@ -1098,11 +1264,8 @@ public class EmployeeComplianceRecordRepository : GenericRepository<EmployeeComp
 
     public async Task<IEnumerable<EmployeeComplianceRecord>> GetNonCompliantAsync()
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.Requirement)
-            .Where(r => !r.IsDeleted
-                     && r.Status != ComplianceStatus.Compliant
+        return await WithSummaryNavigations()
+            .Where(r => r.Status != ComplianceStatus.Compliant
                      && !r.IsExempt)
             .OrderBy(r => r.NextDueDate)
             .ToListAsync();
@@ -1111,11 +1274,8 @@ public class EmployeeComplianceRecordRepository : GenericRepository<EmployeeComp
     public async Task<IEnumerable<EmployeeComplianceRecord>> GetOverdueAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.Requirement)
-            .Where(r => !r.IsDeleted
-                     && !r.IsExempt
+        return await WithSummaryNavigations()
+            .Where(r => !r.IsExempt
                      && r.NextDueDate != null
                      && r.NextDueDate < now
                      && r.Status != ComplianceStatus.Compliant)
@@ -1127,11 +1287,8 @@ public class EmployeeComplianceRecordRepository : GenericRepository<EmployeeComp
     {
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.Requirement)
-            .Where(r => !r.IsDeleted
-                     && !r.IsExempt
+        return await WithSummaryNavigations()
+            .Where(r => !r.IsExempt
                      && r.NextDueDate != null
                      && r.NextDueDate >= now
                      && r.NextDueDate <= cutoff)
@@ -1141,10 +1298,8 @@ public class EmployeeComplianceRecordRepository : GenericRepository<EmployeeComp
 
     public async Task<IEnumerable<EmployeeComplianceRecord>> GetExemptAsync()
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.Requirement)
-            .Where(r => r.IsExempt && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.IsExempt)
             .OrderBy(r => r.Employee.LastName)
             .ThenBy(r => r.Employee.FirstName)
             .ToListAsync();
@@ -1152,13 +1307,10 @@ public class EmployeeComplianceRecordRepository : GenericRepository<EmployeeComp
 
     public async Task<EmployeeComplianceRecord?> GetEmployeeRecordAsync(Guid employeeId, Guid requirementId)
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.Requirement).ThenInclude(req => req.Program)
-            .Include(r => r.ExemptedBy)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(r => r.EmployeeId == employeeId
                                     && r.RequirementId == requirementId
-                                    && !r.IsDeleted);
+                                   );
     }
 }
 
@@ -1220,6 +1372,9 @@ public class TrainingBudgetRepository : GenericRepository<TrainingBudget>, ITrai
     public async Task<IEnumerable<TrainingBudget>> GetByOrganizationUnitAsync(Guid orgUnitId, Guid tenantId)
     {
         return await OwnedBy(tenantId)
+            // The summary DTO renders OrganizationUnitName; every sibling read here includes it and
+            // this one did not, so the unit column was blank on this filtered list alone.
+            .Include(b => b.OrganizationUnit)
             .Where(b => b.OrganizationUnitId == orgUnitId)
             .OrderByDescending(b => b.Year)
             .ThenBy(b => b.Quarter)
@@ -1281,6 +1436,8 @@ public class TrainingBudgetTransactionRepository : GenericRepository<TrainingBud
     public async Task<IEnumerable<TrainingBudgetTransaction>> GetByBudgetIdAsync(Guid budgetId, Guid tenantId)
     {
         return await OwnedBy(tenantId)
+            .Include(t => t.Budget)
+            .Include(t => t.Schedule)
             .Include(t => t.RecordedBy)
             .Where(t => t.BudgetId == budgetId)
             .OrderByDescending(t => t.TransactionDate)
@@ -1300,6 +1457,8 @@ public class TrainingBudgetTransactionRepository : GenericRepository<TrainingBud
     public async Task<IEnumerable<TrainingBudgetTransaction>> GetByDateRangeAsync(Guid budgetId, DateTime from, DateTime to, Guid tenantId)
     {
         return await OwnedBy(tenantId)
+            .Include(t => t.Budget)
+            .Include(t => t.Schedule)
             .Include(t => t.RecordedBy)
             .Where(t => t.BudgetId == budgetId
                      && t.TransactionDate >= from
@@ -1321,27 +1480,42 @@ public class TrainingPlanRepository : GenericRepository<TrainingPlan>, ITraining
 {
     public TrainingPlanRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingPlanSummaryDto renders OrganizationUnitName and derives TotalItemsCount /
+    // CompletedItemsCount from the Items collection. An un-included collection is empty, not null,
+    // so the counts read "0 / 0" and the completion percentage reads "—" on every row instead of
+    // failing loudly. Centralised so the reads cannot drift apart again.
+    private IQueryable<TrainingPlan> WithSummaryNavigations()
+        => _dbSet
+            .Include(p => p.OrganizationUnit)
+            .Include(p => p.Items)
+            .Where(p => !p.IsDeleted);
+
+    public override async Task<IEnumerable<TrainingPlan>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderByDescending(p => p.Year)
+            .ThenBy(p => p.PlanNumber)
+            .ToListAsync();
+    }
+
     public async Task<TrainingPlan?> GetByPlanNumberAsync(string planNumber)
     {
-        return await _dbSet
-            .Include(p => p.OrganizationUnit)
-            .FirstOrDefaultAsync(p => p.PlanNumber == planNumber && !p.IsDeleted);
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(p => p.PlanNumber == planNumber);
     }
 
     public async Task<IEnumerable<TrainingPlan>> GetByYearAsync(int year)
     {
-        return await _dbSet
-            .Include(p => p.OrganizationUnit)
-            .Where(p => p.Year == year && !p.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(p => p.Year == year)
             .OrderBy(p => p.OrganizationUnit!.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingPlan>> GetByStatusAsync(TrainingPlanStatus status)
     {
-        return await _dbSet
-            .Include(p => p.OrganizationUnit)
-            .Where(p => p.Status == status && !p.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(p => p.Status == status)
             .OrderByDescending(p => p.Year)
             .ThenBy(p => p.OrganizationUnit!.Name)
             .ToListAsync();
@@ -1349,18 +1523,16 @@ public class TrainingPlanRepository : GenericRepository<TrainingPlan>, ITraining
 
     public async Task<IEnumerable<TrainingPlan>> GetByOrganizationUnitAsync(Guid orgUnitId)
     {
-        return await _dbSet
-            .Include(p => p.OrganizationUnit)
-            .Where(p => p.OrganizationUnitId == orgUnitId && !p.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(p => p.OrganizationUnitId == orgUnitId)
             .OrderByDescending(p => p.Year)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingPlan>> GetPendingApprovalAsync()
     {
-        return await _dbSet
-            .Include(p => p.OrganizationUnit)
-            .Where(p => p.Status == TrainingPlanStatus.PendingApproval && !p.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(p => p.Status == TrainingPlanStatus.PendingApproval)
             .OrderBy(p => p.CreatedAt)
             .ToListAsync();
     }
@@ -1389,7 +1561,9 @@ public class TrainingPlanItemRepository : GenericRepository<TrainingPlanItem>, I
     public async Task<IEnumerable<TrainingPlanItem>> GetByPlanIdAsync(Guid planId)
     {
         return await _dbSet
+            .Include(i => i.Plan)
             .Include(i => i.Program)
+            .Include(i => i.FulfilledBySchedule)
             .Where(i => i.PlanId == planId && !i.IsDeleted)
             .OrderBy(i => i.Quarter)
             .ThenBy(i => i.PlannedStartDate)
@@ -1447,6 +1621,7 @@ public class TrainingPlanBudgetLineRepository : GenericRepository<TrainingPlanBu
     public async Task<IEnumerable<TrainingPlanBudgetLine>> GetByPlanIdAsync(Guid planId)
     {
         return await _dbSet
+            .Include(b => b.Plan)
             .Where(b => b.PlanId == planId && !b.IsDeleted)
             .OrderBy(b => b.Category)
             .ToListAsync();
@@ -1465,39 +1640,54 @@ public class TrainingNeedsAssessmentRepository : GenericRepository<TrainingNeeds
 {
     public TrainingNeedsAssessmentRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingNeedsAssessmentSummaryDto renders EmployeeName/EmployeeNumber AND counts the two child
+    // collections (RecommendedProgramsCount, SkillGapsCount). An un-included collection is an empty
+    // one, not null, so the counts silently read 0 rather than failing — every list read that feeds
+    // the summary needs all three. Centralised so they cannot drift apart again.
+    private IQueryable<TrainingNeedsAssessment> WithSummaryNavigations()
+        => _dbSet
+            .Include(a => a.Employee)
+            .Include(a => a.RecommendedPrograms)
+            .Include(a => a.SkillGaps)
+            .Where(a => !a.IsDeleted);
+
+    public override async Task<IEnumerable<TrainingNeedsAssessment>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderByDescending(a => a.Year)
+            .ThenBy(a => a.Employee!.LastName)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<TrainingNeedsAssessment>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Where(a => a.EmployeeId == employeeId && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => a.EmployeeId == employeeId)
             .OrderByDescending(a => a.Year)
             .ToListAsync();
     }
 
     public async Task<TrainingNeedsAssessment?> GetByEmployeeAndYearAsync(Guid employeeId, int year)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
+        return await WithSummaryNavigations()
             .Include(a => a.IdentifiedBy)
             .FirstOrDefaultAsync(a => a.EmployeeId == employeeId
-                                    && a.Year == year
-                                    && !a.IsDeleted);
+                                    && a.Year == year);
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessment>> GetByYearAsync(int year)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Where(a => a.Year == year && !a.IsDeleted)
-            .OrderBy(a => a.Employee.LastName)
-            .ThenBy(a => a.Employee.FirstName)
+        return await WithSummaryNavigations()
+            .Where(a => a.Year == year)
+            .OrderBy(a => a.Employee!.LastName)
+            .ThenBy(a => a.Employee!.FirstName)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingNeedsAssessment>> GetUnfulfilledAsync()
     {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Where(a => !a.TrainingProvided && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => !a.TrainingProvided)
             .OrderBy(a => a.Priority)
             .ThenBy(a => a.Year)
             .ToListAsync();
@@ -1505,11 +1695,10 @@ public class TrainingNeedsAssessmentRepository : GenericRepository<TrainingNeeds
 
     public async Task<IEnumerable<TrainingNeedsAssessment>> GetByPriorityAsync(TrainingPriority priority)
     {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Where(a => a.Priority == priority && !a.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(a => a.Priority == priority)
             .OrderByDescending(a => a.Year)
-            .ThenBy(a => a.Employee.LastName)
+            .ThenBy(a => a.Employee!.LastName)
             .ToListAsync();
     }
 
@@ -1592,51 +1781,62 @@ public class TrainingWaitlistRepository : GenericRepository<TrainingWaitlist>, I
 {
     public TrainingWaitlistRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingWaitlistDto reads ScheduleNumber, ProgramName, the employee's name/number and
+    // CreatedNominationNumber (the nomination a promoted entry produced). Nothing loaded Nomination
+    // at all, so the "promoted to" column was blank on every row even after a successful promotion.
+    private IQueryable<TrainingWaitlist> WithSummaryNavigations()
+        => _dbSet
+            .Include(w => w.Employee)
+            .Include(w => w.Schedule).ThenInclude(s => s.Program)
+            .Include(w => w.Nomination)
+            .Where(w => !w.IsDeleted);
+
+    // The service's GetOwnedAsync routed through the generic GetByIdAsync, which loads nothing — so
+    // the by-id read AND every write response that re-reads through it came back with a blank
+    // schedule, programme and employee while the list beside it was correct.
+    public override async Task<TrainingWaitlist?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(w => w.Id == id);
+    }
+
     public async Task<IEnumerable<TrainingWaitlist>> GetByScheduleIdAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(w => w.Employee)
-            .Where(w => w.ScheduleId == scheduleId && !w.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(w => w.ScheduleId == scheduleId)
             .OrderBy(w => w.Position)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingWaitlist>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(w => w.Schedule).ThenInclude(s => s.Program)
-            .Where(w => w.EmployeeId == employeeId && !w.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(w => w.EmployeeId == employeeId)
             .OrderBy(w => w.Schedule.StartDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingWaitlist>> GetActiveWaitlistAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(w => w.Employee)
+        return await WithSummaryNavigations()
             .Where(w => w.ScheduleId == scheduleId
-                     && w.Status == TrainingWaitlistStatus.Active
-                     && !w.IsDeleted)
+                     && w.Status == TrainingWaitlistStatus.Active)
             .OrderBy(w => w.Position)
             .ToListAsync();
     }
 
     public async Task<TrainingWaitlist?> GetNextInQueueAsync(Guid scheduleId)
     {
-        return await _dbSet
-            .Include(w => w.Employee)
+        return await WithSummaryNavigations()
             .Where(w => w.ScheduleId == scheduleId
-                     && w.Status == TrainingWaitlistStatus.Active
-                     && !w.IsDeleted)
+                     && w.Status == TrainingWaitlistStatus.Active)
             .OrderBy(w => w.Position)
             .FirstOrDefaultAsync();
     }
 
     public async Task<IEnumerable<TrainingWaitlist>> GetByStatusAsync(Guid scheduleId, TrainingWaitlistStatus status)
     {
-        return await _dbSet
-            .Include(w => w.Employee)
-            .Where(w => w.ScheduleId == scheduleId && w.Status == status && !w.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(w => w.ScheduleId == scheduleId && w.Status == status)
             .OrderBy(w => w.Position)
             .ToListAsync();
     }
@@ -1644,13 +1844,11 @@ public class TrainingWaitlistRepository : GenericRepository<TrainingWaitlist>, I
     public async Task<IEnumerable<TrainingWaitlist>> GetOfferedAsync(Guid scheduleId)
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(w => w.Employee)
+        return await WithSummaryNavigations()
             .Where(w => w.ScheduleId == scheduleId
                      && w.Status == TrainingWaitlistStatus.Offered
                      && w.OfferExpiryDate != null
-                     && w.OfferExpiryDate >= now
-                     && !w.IsDeleted)
+                     && w.OfferExpiryDate >= now)
             .OrderBy(w => w.OfferExpiryDate)
             .ToListAsync();
     }
@@ -1658,11 +1856,8 @@ public class TrainingWaitlistRepository : GenericRepository<TrainingWaitlist>, I
     public async Task<IEnumerable<TrainingWaitlist>> GetExpiredOffersAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(w => w.Employee)
-            .Include(w => w.Schedule).ThenInclude(s => s.Program)
-            .Where(w => !w.IsDeleted
-                     && w.Status == TrainingWaitlistStatus.Offered
+        return await WithSummaryNavigations()
+            .Where(w => w.Status == TrainingWaitlistStatus.Offered
                      && w.OfferExpiryDate != null
                      && w.OfferExpiryDate < now)
             .OrderBy(w => w.OfferExpiryDate)
@@ -1678,47 +1873,62 @@ public class TrainingRequestRepository : GenericRepository<TrainingRequest>, ITr
 {
     public TrainingRequestRepository(ApplicationDbContext context) : base(context) { }
 
+    // TrainingRequestSummaryDto reads EmployeeName and LinkedProgramName. The by-employee read
+    // dropped Employee and the approvals queue dropped LinkedProgram, so each blanked one column.
+    private IQueryable<TrainingRequest> WithSummaryNavigations()
+        => _dbSet
+            .Include(r => r.Employee)
+            .Include(r => r.LinkedProgram)
+            .Where(r => !r.IsDeleted);
+
+    // Same gap as the waitlist repository: GetOwnedAsync used the generic GetByIdAsync, blanking the
+    // detail read and every write response (submit, approve, reject, link-to-programme).
+    public override async Task<TrainingRequest?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(r => r.Id == id);
+    }
+
+    public override async Task<IEnumerable<TrainingRequest>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderByDescending(r => r.RequestDate)
+            .ToListAsync();
+    }
+
     public async Task<TrainingRequest?> GetByRequestNumberAsync(string requestNumber)
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .FirstOrDefaultAsync(r => r.RequestNumber == requestNumber && !r.IsDeleted);
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(r => r.RequestNumber == requestNumber);
     }
 
     public async Task<IEnumerable<TrainingRequest>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(r => r.LinkedProgram)
-            .Where(r => r.EmployeeId == employeeId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.EmployeeId == employeeId)
             .OrderByDescending(r => r.RequestDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingRequest>> GetByStatusAsync(TrainingRequestStatus status)
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.LinkedProgram)
-            .Where(r => r.Status == status && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.Status == status)
             .OrderBy(r => r.RequestDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingRequest>> GetPendingApprovalAsync()
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Where(r => r.Status == TrainingRequestStatus.Submitted && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.Status == TrainingRequestStatus.Submitted)
             .OrderBy(r => r.RequestDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<TrainingRequest>> GetLinkedToProgramAsync(Guid programId)
     {
-        return await _dbSet
-            .Include(r => r.Employee)
-            .Include(r => r.LinkedProgram)
-            .Where(r => r.LinkedProgramId == programId && !r.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(r => r.LinkedProgramId == programId)
             .OrderByDescending(r => r.RequestDate)
             .ToListAsync();
     }
@@ -1736,50 +1946,76 @@ public class LearningPathRepository : GenericRepository<LearningPath>, ILearning
 {
     public LearningPathRepository(ApplicationDbContext context) : base(context) { }
 
+    // LearningPathSummaryDto names the unit and position and derives TotalProgramsCount from the
+    // Programs collection. Not one list read below carried a single include, so every path showed a
+    // blank scope and "0 programmes" — on a record whose entire point is being a sequence of
+    // programmes. Centralised so the reads cannot drift apart again.
+    private IQueryable<LearningPath> WithSummaryNavigations()
+        => _dbSet
+            .Include(lp => lp.OrganizationLevel)
+            .Include(lp => lp.OrganizationUnit)
+            .Include(lp => lp.Position)
+            .Include(lp => lp.Programs)
+            .Include(lp => lp.Enrollments)
+            .Where(lp => !lp.IsDeleted);
+
+    // The service's owned-path fetch used the generic GetByIdAsync, which loads nothing.
+    public override async Task<LearningPath?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(lp => lp.Id == id);
+    }
+
+    public override async Task<IEnumerable<LearningPath>> GetAllAsync()
+    {
+        return await WithSummaryNavigations()
+            .OrderBy(lp => lp.Name)
+            .ToListAsync();
+    }
+
     public async Task<IEnumerable<LearningPath>> GetByStatusAsync(LearningPathStatus status)
     {
-        return await _dbSet
-            .Where(lp => lp.Status == status && !lp.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(lp => lp.Status == status)
             .OrderBy(lp => lp.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<LearningPath>> GetActiveAsync()
     {
-        return await _dbSet
-            .Where(lp => lp.Status == LearningPathStatus.Active && !lp.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(lp => lp.Status == LearningPathStatus.Active)
             .OrderBy(lp => lp.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<LearningPath>> GetByOrganizationLevelAsync(Guid orgLevelId)
     {
-        return await _dbSet
-            .Where(lp => lp.OrganizationLevelId == orgLevelId && !lp.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(lp => lp.OrganizationLevelId == orgLevelId)
             .OrderBy(lp => lp.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<LearningPath>> GetByOrganizationUnitAsync(Guid orgUnitId)
     {
-        return await _dbSet
-            .Where(lp => lp.OrganizationUnitId == orgUnitId && !lp.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(lp => lp.OrganizationUnitId == orgUnitId)
             .OrderBy(lp => lp.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<LearningPath>> GetByPositionAsync(Guid positionId)
     {
-        return await _dbSet
-            .Where(lp => lp.PositionId == positionId && !lp.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(lp => lp.PositionId == positionId)
             .OrderBy(lp => lp.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<LearningPath>> GetWithCertificateAsync()
     {
-        return await _dbSet
-            .Where(lp => lp.ProvidesCertificate && !lp.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(lp => lp.ProvidesCertificate)
             .OrderBy(lp => lp.Name)
             .ToListAsync();
     }
@@ -1794,7 +2030,7 @@ public class LearningPathRepository : GenericRepository<LearningPath>, ILearning
             .Include(lp => lp.Programs).ThenInclude(p => p.PrerequisitePathProgram)
             .Include(lp => lp.TargetSkills).ThenInclude(s => s.Skill)
             .Include(lp => lp.Enrollments).ThenInclude(e => e.Employee)
-            .FirstOrDefaultAsync(lp => lp.Id == id && !lp.IsDeleted);
+            .FirstOrDefaultAsync(lp => lp.Id == id);
     }
 }
 
@@ -1806,20 +2042,39 @@ public class LearningPathProgramRepository : GenericRepository<LearningPathProgr
 {
     public LearningPathProgramRepository(ApplicationDbContext context) : base(context) { }
 
+    // LearningPathProgramDto names the path, the programme, and the *prerequisite* programme —
+    // which is the whole point of a sequenced path. The by-path read carried Program alone, so the
+    // prerequisite column was blank on exactly the screen that defines the sequence.
+    private IQueryable<LearningPathProgram> WithSummaryNavigations()
+        => _dbSet
+            .Include(p => p.LearningPath)
+            .Include(p => p.Program)
+            .Include(p => p.PrerequisitePathProgram).ThenInclude(pre => pre!.Program)
+            .Where(p => !p.IsDeleted);
+
+    public override async Task<LearningPathProgram?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(p => p.Id == id);
+    }
+
+    // Untracked: a changed prerequisite leaves the identity-map instance mapping the previous one.
+    public async Task<LearningPathProgram?> GetByIdWithNavigationsAsync(Guid id)
+    {
+        return await WithSummaryNavigations().AsNoTracking().FirstOrDefaultAsync(p => p.Id == id);
+    }
+
     public async Task<IEnumerable<LearningPathProgram>> GetByLearningPathIdAsync(Guid learningPathId)
     {
-        return await _dbSet
-            .Include(p => p.Program)
-            .Where(p => p.LearningPathId == learningPathId && !p.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(p => p.LearningPathId == learningPathId)
             .OrderBy(p => p.SequenceOrder)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<LearningPathProgram>> GetByProgramIdAsync(Guid programId)
     {
-        return await _dbSet
-            .Include(p => p.LearningPath)
-            .Where(p => p.ProgramId == programId && !p.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(p => p.ProgramId == programId)
             .OrderBy(p => p.LearningPath.Name)
             .ToListAsync();
     }
@@ -1833,20 +2088,29 @@ public class LearningPathSkillRepository : GenericRepository<LearningPathSkill>,
 {
     public LearningPathSkillRepository(ApplicationDbContext context) : base(context) { }
 
+    private IQueryable<LearningPathSkill> WithSummaryNavigations()
+        => _dbSet
+            .Include(s => s.LearningPath)
+            .Include(s => s.Skill)
+            .Where(s => !s.IsDeleted);
+
+    public override async Task<LearningPathSkill?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(s => s.Id == id);
+    }
+
     public async Task<IEnumerable<LearningPathSkill>> GetByLearningPathIdAsync(Guid learningPathId)
     {
-        return await _dbSet
-            .Include(s => s.Skill)
-            .Where(s => s.LearningPathId == learningPathId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.LearningPathId == learningPathId)
             .OrderBy(s => s.Skill.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<LearningPathSkill>> GetBySkillIdAsync(Guid skillId)
     {
-        return await _dbSet
-            .Include(s => s.LearningPath)
-            .Where(s => s.SkillId == skillId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.SkillId == skillId)
             .OrderBy(s => s.LearningPath.Name)
             .ToListAsync();
     }
@@ -1860,20 +2124,34 @@ public class EmployeeLearningPathRepository : GenericRepository<EmployeeLearning
 {
     public EmployeeLearningPathRepository(ApplicationDbContext context) : base(context) { }
 
+    // EmployeeLearningPathDto names the learner, the path and who assigned it. The reads split those
+    // between them — by-employee had no Employee, by-path had no LearningPath — so each list blanked
+    // whichever half it was missing. Centralised so they cannot drift apart again.
+    private IQueryable<EmployeeLearningPath> WithSummaryNavigations()
+        => _dbSet
+            .Include(e => e.Employee)
+            .Include(e => e.LearningPath)
+            .Include(e => e.AssignedBy)
+            .Where(e => !e.IsDeleted);
+
+    // The service's owned-enrollment fetch used the generic GetByIdAsync, which loads nothing.
+    public override async Task<EmployeeLearningPath?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(e => e.Id == id);
+    }
+
     public async Task<IEnumerable<EmployeeLearningPath>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(e => e.LearningPath)
-            .Where(e => e.EmployeeId == employeeId && !e.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(e => e.EmployeeId == employeeId)
             .OrderBy(e => e.LearningPath.Name)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<EmployeeLearningPath>> GetByLearningPathIdAsync(Guid learningPathId)
     {
-        return await _dbSet
-            .Include(e => e.Employee)
-            .Where(e => e.LearningPathId == learningPathId && !e.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(e => e.LearningPathId == learningPathId)
             .OrderBy(e => e.Employee.LastName)
             .ThenBy(e => e.Employee.FirstName)
             .ToListAsync();
@@ -1881,40 +2159,33 @@ public class EmployeeLearningPathRepository : GenericRepository<EmployeeLearning
 
     public async Task<IEnumerable<EmployeeLearningPath>> GetActiveEnrollmentsAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(e => e.LearningPath)
-            .Where(e => e.EmployeeId == employeeId && !e.IsCompleted && !e.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(e => e.EmployeeId == employeeId && !e.IsCompleted)
             .OrderBy(e => e.TargetCompletionDate)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<EmployeeLearningPath>> GetCompletedAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(e => e.LearningPath)
-            .Where(e => e.EmployeeId == employeeId && e.IsCompleted && !e.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(e => e.EmployeeId == employeeId && e.IsCompleted)
             .OrderByDescending(e => e.ActualCompletionDate)
             .ToListAsync();
     }
 
     public async Task<EmployeeLearningPath?> GetEnrollmentAsync(Guid employeeId, Guid learningPathId)
     {
-        return await _dbSet
-            .Include(e => e.LearningPath)
-            .Include(e => e.AssignedBy)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(e => e.EmployeeId == employeeId
                                     && e.LearningPathId == learningPathId
-                                    && !e.IsDeleted);
+                                   );
     }
 
     public async Task<IEnumerable<EmployeeLearningPath>> GetOverdueAsync()
     {
         var now = DateTime.UtcNow;
-        return await _dbSet
-            .Include(e => e.Employee)
-            .Include(e => e.LearningPath)
-            .Where(e => !e.IsDeleted
-                     && !e.IsCompleted
+        return await WithSummaryNavigations()
+            .Where(e => !e.IsCompleted
                      && e.TargetCompletionDate != null
                      && e.TargetCompletionDate < now)
             .OrderBy(e => e.TargetCompletionDate)
@@ -1930,7 +2201,7 @@ public class EmployeeLearningPathRepository : GenericRepository<EmployeeLearning
             .Include(e => e.Steps).ThenInclude(s => s.LearningPathProgram).ThenInclude(lpp => lpp.Program)
             .Include(e => e.Steps).ThenInclude(s => s.LearningPathProgram).ThenInclude(lpp => lpp.PrerequisitePathProgram).ThenInclude(pre => pre!.Program)
             .Include(e => e.Steps).ThenInclude(s => s.Nomination)
-            .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
+            .FirstOrDefaultAsync(e => e.Id == id);
     }
 
     public async Task<IEnumerable<EmployeeLearningPath>> GetAllWithDetailsAsync()
@@ -1955,29 +2226,47 @@ public class EmployeeLearningPathStepRepository : GenericRepository<EmployeeLear
 {
     public EmployeeLearningPathStepRepository(ApplicationDbContext context) : base(context) { }
 
+    // EmployeeLearningPathStepDto names the programme, its prerequisite, and the nomination that
+    // evidences completion. The three list reads stopped at Program, so a learner's step list showed
+    // no prerequisite (the thing that says why a step is locked) and no nomination.
+    private IQueryable<EmployeeLearningPathStep> WithSummaryNavigations()
+        => _dbSet
+            .Include(s => s.LearningPathProgram).ThenInclude(lpp => lpp.Program)
+            .Include(s => s.LearningPathProgram).ThenInclude(lpp => lpp.PrerequisitePathProgram).ThenInclude(pre => pre!.Program)
+            .Include(s => s.Nomination)
+            .Where(s => !s.IsDeleted);
+
+    public override async Task<EmployeeLearningPathStep?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations().FirstOrDefaultAsync(s => s.Id == id);
+    }
+
+    // Untracked: linking a nomination leaves the identity-map instance mapping a null one.
+    public async Task<EmployeeLearningPathStep?> GetByIdWithNavigationsAsync(Guid id)
+    {
+        return await WithSummaryNavigations().AsNoTracking().FirstOrDefaultAsync(s => s.Id == id);
+    }
+
     public async Task<IEnumerable<EmployeeLearningPathStep>> GetByEmployeeLearningPathIdAsync(Guid enrollmentId)
     {
-        return await _dbSet
-            .Include(s => s.LearningPathProgram).ThenInclude(lpp => lpp.Program)
-            .Where(s => s.EmployeeLearningPathId == enrollmentId && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.EmployeeLearningPathId == enrollmentId)
             .OrderBy(s => s.LearningPathProgram.SequenceOrder)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<EmployeeLearningPathStep>> GetIncompleteStepsAsync(Guid enrollmentId)
     {
-        return await _dbSet
-            .Include(s => s.LearningPathProgram).ThenInclude(lpp => lpp.Program)
-            .Where(s => s.EmployeeLearningPathId == enrollmentId && !s.IsCompleted && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.EmployeeLearningPathId == enrollmentId && !s.IsCompleted)
             .OrderBy(s => s.LearningPathProgram.SequenceOrder)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<EmployeeLearningPathStep>> GetCompletedStepsAsync(Guid enrollmentId)
     {
-        return await _dbSet
-            .Include(s => s.LearningPathProgram).ThenInclude(lpp => lpp.Program)
-            .Where(s => s.EmployeeLearningPathId == enrollmentId && s.IsCompleted && !s.IsDeleted)
+        return await WithSummaryNavigations()
+            .Where(s => s.EmployeeLearningPathId == enrollmentId && s.IsCompleted)
             .OrderBy(s => s.LearningPathProgram.SequenceOrder)
             .ToListAsync();
     }
@@ -1996,6 +2285,9 @@ public class EmployeeLearningPathStepRepository : GenericRepository<EmployeeLear
             // Enrollment context + sibling steps for lock logic
             .Include(s => s.EmployeeLearningPath)
                 .ThenInclude(elp => elp.LearningPath)
+            // The learner, so the page can name whose step this is when it is not the caller's.
+            .Include(s => s.EmployeeLearningPath)
+                .ThenInclude(elp => elp.Employee)
             .Include(s => s.EmployeeLearningPath)
                 .ThenInclude(elp => elp.Steps)
                     .ThenInclude(sib => sib.LearningPathProgram)
@@ -2018,9 +2310,31 @@ public class MentoringProgramRepository : GenericRepository<MentoringProgram>, I
 {
     public MentoringProgramRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Everything <c>MentoringProgramSummaryDto</c> renders: the coordinator's name, and the pairs the
+    /// two count columns are derived from.
+    ///
+    /// Pairs matter as much as the coordinator here — an un-included collection is empty rather than
+    /// null, so the mapper's <c>Pairs.Count</c> produced a confident <b>0</b> on every row instead of
+    /// anything that looked broken.
+    /// </summary>
+    private IQueryable<MentoringProgram> WithSummaryNavigations()
+        => _dbSet
+            .Include(p => p.CoordinatedBy)
+            .Include(p => p.Pairs);
+
+    public override async Task<MentoringProgram?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+
+    public override async Task<IEnumerable<MentoringProgram>> GetAllAsync()
+        => await WithSummaryNavigations()
+            .Where(p => !p.IsDeleted)
+            .OrderBy(p => p.ProgramName)
+            .ToListAsync();
+
     public async Task<IEnumerable<MentoringProgram>> GetActiveAsync()
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(p => p.IsActive && !p.IsDeleted)
             .OrderBy(p => p.ProgramName)
             .ToListAsync();
@@ -2028,8 +2342,7 @@ public class MentoringProgramRepository : GenericRepository<MentoringProgram>, I
 
     public async Task<IEnumerable<MentoringProgram>> GetByCoordinatorAsync(Guid employeeId)
     {
-        return await _dbSet
-            .Include(p => p.CoordinatedBy)
+        return await WithSummaryNavigations()
             .Where(p => p.CoordinatedById == employeeId && !p.IsDeleted)
             .OrderBy(p => p.ProgramName)
             .ToListAsync();
@@ -2038,6 +2351,17 @@ public class MentoringProgramRepository : GenericRepository<MentoringProgram>, I
     public async Task<MentoringProgram?> GetWithFullDetailsAsync(Guid id)
     {
         return await _dbSet
+            .Include(p => p.CoordinatedBy)
+            .Include(p => p.Pairs).ThenInclude(pair => pair.Mentor)
+            .Include(p => p.Pairs).ThenInclude(pair => pair.Mentee)
+            .Include(p => p.Pairs).ThenInclude(pair => pair.Sessions)
+            .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+    }
+
+    public async Task<MentoringProgram?> GetWithFullDetailsUntrackedAsync(Guid id)
+    {
+        return await _dbSet
+            .AsNoTracking()
             .Include(p => p.CoordinatedBy)
             .Include(p => p.Pairs).ThenInclude(pair => pair.Mentor)
             .Include(p => p.Pairs).ThenInclude(pair => pair.Mentee)
@@ -2054,11 +2378,34 @@ public class MentoringPairRepository : GenericRepository<MentoringPair>, IMentor
 {
     public MentoringPairRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<IEnumerable<MentoringPair>> GetByProgramIdAsync(Guid programId)
-    {
-        return await _dbSet
+    /// <summary>
+    /// Everything <c>MentoringPairSummaryDto</c> renders: both names, the programme, and the sessions
+    /// behind <c>TotalSessionsCount</c>.
+    ///
+    /// Each list below previously included a different subset, so the same pair rendered differently
+    /// depending on which screen asked. The by-mentor list omitted <c>Mentor</c> and the by-mentee list
+    /// omitted <c>Mentee</c> — meaning the blank column was always the person whose list you were
+    /// looking at.
+    /// </summary>
+    private IQueryable<MentoringPair> WithSummaryNavigations()
+        => _dbSet
+            .Include(p => p.Program)
             .Include(p => p.Mentor)
             .Include(p => p.Mentee)
+            .Include(p => p.Sessions);
+
+    public override async Task<MentoringPair?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+
+    public override async Task<IEnumerable<MentoringPair>> GetAllAsync()
+        => await WithSummaryNavigations()
+            .Where(p => !p.IsDeleted)
+            .OrderByDescending(p => p.StartDate)
+            .ToListAsync();
+
+    public async Task<IEnumerable<MentoringPair>> GetByProgramIdAsync(Guid programId)
+    {
+        return await WithSummaryNavigations()
             .Where(p => p.ProgramId == programId && !p.IsDeleted)
             .OrderBy(p => p.Mentor.LastName)
             .ThenBy(p => p.Mentee.LastName)
@@ -2067,9 +2414,7 @@ public class MentoringPairRepository : GenericRepository<MentoringPair>, IMentor
 
     public async Task<IEnumerable<MentoringPair>> GetByMentorIdAsync(Guid mentorId)
     {
-        return await _dbSet
-            .Include(p => p.Mentee)
-            .Include(p => p.Program)
+        return await WithSummaryNavigations()
             .Where(p => p.MentorId == mentorId && !p.IsDeleted)
             .OrderByDescending(p => p.StartDate)
             .ToListAsync();
@@ -2077,9 +2422,7 @@ public class MentoringPairRepository : GenericRepository<MentoringPair>, IMentor
 
     public async Task<IEnumerable<MentoringPair>> GetByMenteeIdAsync(Guid menteeId)
     {
-        return await _dbSet
-            .Include(p => p.Mentor)
-            .Include(p => p.Program)
+        return await WithSummaryNavigations()
             .Where(p => p.MenteeId == menteeId && !p.IsDeleted)
             .OrderByDescending(p => p.StartDate)
             .ToListAsync();
@@ -2087,10 +2430,7 @@ public class MentoringPairRepository : GenericRepository<MentoringPair>, IMentor
 
     public async Task<IEnumerable<MentoringPair>> GetByStatusAsync(MentoringStatus status)
     {
-        return await _dbSet
-            .Include(p => p.Mentor)
-            .Include(p => p.Mentee)
-            .Include(p => p.Program)
+        return await WithSummaryNavigations()
             .Where(p => p.Status == status && !p.IsDeleted)
             .OrderBy(p => p.StartDate)
             .ToListAsync();
@@ -2098,10 +2438,7 @@ public class MentoringPairRepository : GenericRepository<MentoringPair>, IMentor
 
     public async Task<IEnumerable<MentoringPair>> GetActiveAsync()
     {
-        return await _dbSet
-            .Include(p => p.Mentor)
-            .Include(p => p.Mentee)
-            .Include(p => p.Program)
+        return await WithSummaryNavigations()
             .Where(p => p.Status == MentoringStatus.Active && !p.IsDeleted)
             .OrderBy(p => p.Mentor.LastName)
             .ThenBy(p => p.Mentee.LastName)
@@ -2122,8 +2459,21 @@ public class MentoringPairRepository : GenericRepository<MentoringPair>, IMentor
     {
         return await _dbSet
             .Include(p => p.Program)
-            .Include(p => p.Mentor)
-            .Include(p => p.Mentee)
+            // MentorPosition/MenteePosition come off Position.Title, so stopping at the employee left
+            // both position fields blank on the detail screen.
+            .Include(p => p.Mentor).ThenInclude(m => m.Position)
+            .Include(p => p.Mentee).ThenInclude(m => m.Position)
+            .Include(p => p.Sessions)
+            .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+    }
+
+    public async Task<MentoringPair?> GetWithFullDetailsUntrackedAsync(Guid id)
+    {
+        return await _dbSet
+            .AsNoTracking()
+            .Include(p => p.Program)
+            .Include(p => p.Mentor).ThenInclude(m => m.Position)
+            .Include(p => p.Mentee).ThenInclude(m => m.Position)
             .Include(p => p.Sessions)
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
     }
@@ -2137,9 +2487,29 @@ public class MentoringSessionRepository : GenericRepository<MentoringSession>, I
 {
     public MentoringSessionRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// <c>MentoringSessionDto</c> names the mentor, the mentee and the programme, and every one of
+    /// those resolves through <c>Pair</c> — which no session read loaded at all. The session log
+    /// therefore rendered three blank columns on every row, on the one screen where they are the point.
+    /// </summary>
+    private IQueryable<MentoringSession> WithSummaryNavigations()
+        => _dbSet
+            .Include(s => s.Pair).ThenInclude(p => p.Mentor)
+            .Include(s => s.Pair).ThenInclude(p => p.Mentee)
+            .Include(s => s.Pair).ThenInclude(p => p.Program);
+
+    public override async Task<MentoringSession?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
+
+    public override async Task<IEnumerable<MentoringSession>> GetAllAsync()
+        => await WithSummaryNavigations()
+            .Where(s => !s.IsDeleted)
+            .OrderByDescending(s => s.SessionDate)
+            .ToListAsync();
+
     public async Task<IEnumerable<MentoringSession>> GetByPairIdAsync(Guid pairId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(s => s.PairId == pairId && !s.IsDeleted)
             .OrderByDescending(s => s.SessionDate)
             .ToListAsync();
@@ -2147,7 +2517,7 @@ public class MentoringSessionRepository : GenericRepository<MentoringSession>, I
 
     public async Task<IEnumerable<MentoringSession>> GetByDateRangeAsync(Guid pairId, DateTime from, DateTime to)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(s => s.PairId == pairId
                      && !s.IsDeleted
                      && s.SessionDate >= from
@@ -2158,13 +2528,21 @@ public class MentoringSessionRepository : GenericRepository<MentoringSession>, I
 
     public async Task<IEnumerable<MentoringSession>> GetMissedSessionsAsync(Guid pairId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Where(s => s.PairId == pairId
                      && !s.IsDeleted
                      && (!s.AttendedByMentor || !s.AttendedByMentee))
             .OrderByDescending(s => s.SessionDate)
             .ToListAsync();
     }
+
+    public async Task<MentoringSession?> GetWithPairUntrackedAsync(Guid id)
+        => await _dbSet
+            .AsNoTracking()
+            .Include(s => s.Pair).ThenInclude(p => p.Mentor)
+            .Include(s => s.Pair).ThenInclude(p => p.Mentee)
+            .Include(s => s.Pair).ThenInclude(p => p.Program)
+            .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
 }
 
 #endregion

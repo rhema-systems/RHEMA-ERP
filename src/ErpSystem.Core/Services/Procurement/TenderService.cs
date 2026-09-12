@@ -116,7 +116,8 @@ public class TenderService : ITenderService
 
             var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
             result.SourcingMethod = await GetSourcingMethodAsync(tender);
-            return result;
+            result.UsesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
+            return await ProtectBidSummariesAsync(result);
         }
         catch (Exception ex)
         {
@@ -144,7 +145,8 @@ public class TenderService : ITenderService
 
             var result = MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
             result.SourcingMethod = await GetSourcingMethodAsync(tender);
-            return result;
+            result.UsesControlledTenderLifecycle = await _tenderControlService.IsControlledTenderMethodAsync(tender.Id);
+            return await ProtectBidSummariesAsync(result);
         }
         catch (Exception ex)
         {
@@ -206,6 +208,11 @@ public class TenderService : ITenderService
     {
         try
         {
+            ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
+            _ = ValidateBidValidityPeriod(dto.BidValidityPeriodDays);
+            await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, _currentUserProvider.TenantId,
+                dto.EvaluationTemplateId, dto.UseQCBSEvaluation, dto.TechnicalWeight,
+                dto.FinancialWeight, dto.MinimumTechnicalScore);
             if (dto.SourcePurchaseRequisitionId == Guid.Empty)
                 throw new ProcurementRequisitionSourcingValidationException(
                     "TENDER_SOURCE_REQUISITION_REQUIRED", "A tender must be created from a released purchase requisition.");
@@ -215,6 +222,27 @@ public class TenderService : ITenderService
                 dto.SourcePurchaseRequisitionId,
                 requestForQuotation ? ProcurementMethodType.RequestForQuotation : null,
                 sourceType, $"new-tender:{dto.Title}", Guid.NewGuid().ToString("N"));
+            if (gate.SelectedMethod == ProcurementMethodType.PettyPurchase)
+            {
+                if (dto.TenderType != "PettyPurchase" || dto.SubmissionDeadline.HasValue || dto.OpeningDate.HasValue ||
+                    dto.EvaluationTemplateId.HasValue || dto.UseQCBSEvaluation || dto.AllowPartialBids)
+                    throw new ProcurementRequisitionSourcingValidationException("PETTY_PREPARATION_REQUIRED",
+                        "Use Petty Purchase preparation. Public bidding dates, scoring templates and partial bids do not apply.");
+                // The client cannot substitute items or quantities on the small-purchase route.
+                var sourceItems = await _unitOfWork.Repository<PurchaseRequisitionItem>().GetQueryable(item =>
+                    item.RequisitionId == dto.SourcePurchaseRequisitionId && item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted)
+                    .Include(item => item.InventoryItem).OrderBy(item => item.Id).ToListAsync();
+                if (sourceItems.Count == 0)
+                    throw new ProcurementRequisitionSourcingValidationException("PETTY_SOURCE_ITEMS_REQUIRED", "The approved requisition has no current items.");
+                dto.Items = sourceItems.Select((item, index) => new CreateTenderItemDto
+                {
+                    LineNumber = index + 1, ItemCode = item.InventoryItem?.ItemCode,
+                    Description = item.ItemDescription, Quantity = item.Quantity, UnitOfMeasure = item.UnitOfMeasure,
+                    Specifications = item.Specifications, RequiredDeliveryDate = item.RequiredDate
+                }).ToList();
+            }
+            else if (dto.TenderType == "PettyPurchase")
+                throw new ProcurementRequisitionSourcingValidationException("PETTY_METHOD_MISMATCH", "The locked sourcing case does not select Petty Purchase.");
             if (dto.SourceProcurementPlanItemId.HasValue &&
                 gate.SourcePlanItemId != dto.SourceProcurementPlanItemId.Value)
                 throw new ProcurementRequisitionSourcingValidationException(
@@ -256,6 +284,7 @@ public class TenderService : ITenderService
                 TechnicalWeight = dto.TechnicalWeight,
                 FinancialWeight = dto.FinancialWeight,
                 TermsAndConditions = dto.TermsAndConditions,
+                BidValidityPeriodDays = ValidateBidValidityPeriod(dto.BidValidityPeriodDays),
                 RequiredDocuments = dto.RequiredDocuments,
                 RequiresAcceptanceDeclaration = dto.RequiresAcceptanceDeclaration,
                 EvaluationTemplateId = dto.EvaluationTemplateId,
@@ -350,6 +379,11 @@ public class TenderService : ITenderService
             {
                 throw new InvalidOperationException("Only draft tenders can be updated");
             }
+            ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
+            _ = ValidateBidValidityPeriod(dto.BidValidityPeriodDays);
+            await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender.TenantId,
+                dto.EvaluationTemplateId, dto.UseQCBSEvaluation, dto.TechnicalWeight,
+                dto.FinancialWeight, dto.MinimumTechnicalScore);
             if (tender.SourcePurchaseRequisitionId.HasValue)
             {
                 var requestForQuotation = IsRequestForQuotation(tender.TenderType);
@@ -387,6 +421,7 @@ public class TenderService : ITenderService
             tender.TechnicalWeight = dto.TechnicalWeight;
             tender.FinancialWeight = dto.FinancialWeight;
             tender.TermsAndConditions = dto.TermsAndConditions;
+            tender.BidValidityPeriodDays = ValidateBidValidityPeriod(dto.BidValidityPeriodDays);
             tender.RequiredDocuments = dto.RequiredDocuments;
             tender.RequiresAcceptanceDeclaration = dto.RequiresAcceptanceDeclaration;
             tender.EvaluationTemplateId = dto.EvaluationTemplateId;
@@ -417,7 +452,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return await ProtectBidSummariesAsync(MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids));
         }
         catch (Exception ex)
         {
@@ -436,7 +471,15 @@ public class TenderService : ITenderService
             throw new InvalidOperationException($"Tender must be in Draft status to submit for approval (current status: '{tender.Status}')");
         }
 
+        await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
         var workflowResult = await _workflowIntegrationService.SubmitAsync("Tender", id);
+        if (!workflowResult.ApprovalRequired)
+        {
+            throw new ProcurementTenderWorkflowValidationException(
+                "TENDER_WORKFLOW_NOT_CONFIGURED",
+                "A published Tender approval workflow with an independent approver must be configured before submission.");
+        }
+
         if (!workflowResult.ExecutionResult.Success)
         {
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
@@ -466,6 +509,7 @@ public class TenderService : ITenderService
             throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step");
         }
 
+        await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
         var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
             "Tender",
             id,
@@ -535,11 +579,23 @@ public class TenderService : ITenderService
             var tender = await _tenderRepository.GetByIdAsync(id)
                 ?? throw new InvalidOperationException($"Tender with ID {id} not found");
 
-            if (!(string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase) ||
-                  string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase)))
+            if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Tender cannot be published in current status: {tender.Status}");
             }
+            await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
+            foreach (var recipientId in (dto.InvitedBusinessPartnerIds ?? []).Where(value => value != Guid.Empty).Distinct())
+            {
+                var recipient = await _businessPartnerRepository.GetByIdAsync(recipientId);
+                if (recipient is null || recipient.IsDeleted ||
+                    recipient.TenantId != _currentUserProvider.TenantId || recipient.TenantId != tender.TenantId ||
+                    !recipient.IsActive || recipient.IsBlacklisted ||
+                    !(recipient.PartnerType is "Supplier" or "Contractor" or "Both"))
+                    throw new ProcurementRequisitionSourcingValidationException(
+                        "TENDER_PUBLICATION_RECIPIENT_INVALID",
+                        "Publication notices require an active, non-blacklisted supplier record in the current tenant.");
+            }
+            ValidateTenderSchedule(dto.SubmissionDeadline, dto.OpeningDate);
             if (!tender.SourcePurchaseRequisitionId.HasValue)
                 throw new ProcurementRequisitionSourcingValidationException(
                     "TENDER_SOURCE_REQUISITION_REQUIRED", "A tender cannot be published without a source purchase requisition and current sourcing release.");
@@ -566,13 +622,17 @@ public class TenderService : ITenderService
                 await _tenderDocumentControlService.EnsurePublicationReadyAsync(
                     ProcurementTenderDocumentSourceType.Tender, tender.Id, dto.SubmissionDeadline,
                     documentCorrelationId);
-                await _tenderDocumentControlService.EnsureDispatchReadyAsync(
-                    ProcurementTenderDocumentSourceType.Tender, tender.Id,
-                    dto.InvitedBusinessPartnerIds.Where(item => item != Guid.Empty).Distinct().ToList(),
-                    dto.ExternalRecipientEmails.Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
-                    documentCorrelationId);
+                // Tender publication is an announcement, not document issuance.
+                // Legacy RFQ publication does attach a document package, so that
+                // separate dispatch boundary must still verify recorded access.
+                if (requestForQuotation)
+                    await _tenderDocumentControlService.EnsureDispatchReadyAsync(
+                        ProcurementTenderDocumentSourceType.Tender, tender.Id,
+                        (dto.InvitedBusinessPartnerIds ?? []).Where(item => item != Guid.Empty).Distinct().ToList(),
+                        (dto.ExternalRecipientEmails ?? []).Where(item => !string.IsNullOrWhiteSpace(item)).ToList(),
+                        documentCorrelationId);
             }
-            else
+            if (!RequiresControlledPublication(gate))
             {
                 ValidateReleaseOnlyPublication(tender, dto, DateTime.UtcNow);
             }
@@ -696,7 +756,7 @@ public class TenderService : ITenderService
             var bidRepository = _unitOfWork.Repository<TenderBid>();
             var bids = await bidRepository.FindAsync(b => b.TenderId == id && !b.IsDeleted);
 
-            return MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids);
+            return await ProtectBidSummariesAsync(MapToDetailDto(tender, lots, items, documents, fees, invitations, clarifications, evaluators, bids));
         }
         catch (Exception ex)
         {
@@ -1465,6 +1525,11 @@ public class TenderService : ITenderService
                 dto.NewSubmissionDeadline.Value <= tender.SubmissionDeadline.Value)
                 throw new InvalidOperationException(
                     "A revised submission deadline must extend the current deadline.");
+            ValidateTenderSchedule(
+                dto.NewSubmissionDeadline,
+                tender.OpeningDate,
+                "TENDER_REVISION_OPENING_BEFORE_DEADLINE",
+                "The revised submission deadline cannot be later than the scheduled tender opening. Choose a deadline at or before the opening schedule.");
 
             // Get current revision number
             var revisions = await _revisionRepository.GetByTenderIdAsync(tenderId);
@@ -1622,6 +1687,7 @@ public class TenderService : ITenderService
             SourcePurchaseRequisitionId = tender.SourcePurchaseRequisitionId,
             SourcingReleaseId = tender.SourcingReleaseId,
             SourcingCaseId = tender.SourcingCaseId,
+            SourcingMethod = tender.SourcingCase?.SelectedMethod,
             BidCount = tender.Bids?.Count(b => !b.IsDeleted && b.Status != "Draft") ?? 0,
             InvitationCount = tender.Invitations?.Count(i => !i.IsDeleted) ?? 0,
             CreatedAt = tender.CreatedAt,
@@ -1662,6 +1728,7 @@ public class TenderService : ITenderService
             TechnicalWeight = tender.TechnicalWeight,
             FinancialWeight = tender.FinancialWeight,
             TermsAndConditions = tender.TermsAndConditions,
+            BidValidityPeriodDays = tender.BidValidityPeriodDays,
             RequiredDocuments = tender.RequiredDocuments,
             RequiresAcceptanceDeclaration = tender.RequiresAcceptanceDeclaration,
             AcceptanceDeclarationDocumentPath = tender.AcceptanceDeclarationDocumentPath,
@@ -1677,7 +1744,9 @@ public class TenderService : ITenderService
             Invitations = invitations.Select(MapInvitationToDto).ToList(),
             Clarifications = clarifications.Select(MapClarificationToDto).ToList(),
             Evaluators = evaluators.ToList(),
-            Bids = bids.Select(b => MapBidToSummaryDto(b, tender)).ToList()
+            Bids = bids.Select(b => MapBidToSummaryDto(b, tender)).ToList(),
+            BidCount = bids.Count(b => !string.Equals(b.Status, "Draft", StringComparison.OrdinalIgnoreCase) &&
+                                       !string.Equals(b.Status, "Withdrawn", StringComparison.OrdinalIgnoreCase))
         };
     }
 
@@ -1768,10 +1837,7 @@ public class TenderService : ITenderService
 
     internal static bool RequiresControlledPublication(ProcurementSourcingCaseEntryGateDto gate) =>
         UsesAdvancedSourcingControls(gate) &&
-        gate.SelectedMethod is (ProcurementMethodType.NationalCompetitiveTendering or
-            ProcurementMethodType.InternationalCompetitiveTendering or
-            ProcurementMethodType.QualityBasedSelection or
-            ProcurementMethodType.QualityAndCostBasedSelection);
+        ProcurementTenderRouting.RequiresControlledLifecycle(gate.SelectedMethod, gate.HasAdvancedAuthorityRoute);
 
     internal static void ValidateReleaseOnlyPublication(
         Tender tender,
@@ -1786,10 +1852,24 @@ public class TenderService : ITenderService
             throw new ProcurementRequisitionSourcingValidationException(
                 "TENDER_DEADLINE_PASSED",
                 "The tender submission deadline must be in the future when it is published.");
-        if (request.OpeningDate.HasValue && request.OpeningDate.Value < request.SubmissionDeadline)
-            throw new ProcurementRequisitionSourcingValidationException(
-                "TENDER_OPENING_BEFORE_DEADLINE",
-                "The scheduled tender opening cannot be before the submission deadline.");
+        ValidateTenderSchedule(request.SubmissionDeadline, request.OpeningDate);
+    }
+
+    private static int? ValidateBidValidityPeriod(int? days)
+    {
+        if (days.HasValue && (days.Value <= 0 || days.Value > (DateTime.MaxValue - DateTime.UtcNow).TotalDays))
+            throw new InvalidOperationException("Enter a positive bid-validity period in calendar days from the tender terms.");
+        return days;
+    }
+
+    internal static void ValidateTenderSchedule(
+        DateTime? submissionDeadline,
+        DateTime? openingDate,
+        string errorCode = "TENDER_OPENING_BEFORE_DEADLINE",
+        string errorMessage = "The scheduled tender opening cannot be before the submission deadline.")
+    {
+        if (submissionDeadline.HasValue && openingDate.HasValue && openingDate.Value < submissionDeadline.Value)
+            throw new ProcurementRequisitionSourcingValidationException(errorCode, errorMessage);
     }
 
     private static void EnsureSourceLineage(Guid? releaseId, Guid? caseId, ProcurementSourcingCaseEntryGateDto gate)
@@ -1899,9 +1979,9 @@ public class TenderService : ITenderService
         };
     }
 
-    private static TenderBidSummaryDto MapBidToSummaryDto(TenderBid bid, Tender? tender = null)
+    internal static TenderBidSummaryDto MapBidToSummaryDto(TenderBid bid, Tender? tender = null)
     {
-        return new TenderBidSummaryDto
+        var result = new TenderBidSummaryDto
         {
             Id = bid.Id,
             TenderId = bid.TenderId,
@@ -1925,6 +2005,24 @@ public class TenderService : ITenderService
             IsQualifiedTechnically = bid.IsQualifiedTechnically,
             DisqualificationReason = bid.DisqualificationReason
         };
+        return bid.OpenedDate.HasValue ? result : ProcurementBidDisclosure.Seal(result);
+    }
+
+    private async Task<TenderDetailDto> ProtectBidSummariesAsync(TenderDetailDto result)
+    {
+        foreach (var bid in result.Bids)
+        {
+            // Tender-wide views are not the supplier's own-bid access path.
+            if (bid.IsSealed || !await _tenderControlService.ShouldConcealFinancialProposalAsync(result.Id, bid.Id)) continue;
+            bid.IsFinancialProposalSealed = true;
+            bid.TotalBidAmount = 0m;
+            bid.Currency = null;
+            bid.FinancialScore = null;
+            bid.CombinedScore = null;
+            bid.TotalScore = null;
+            bid.Rank = null;
+        }
+        return result;
     }
 
     #region Tender LOT Methods
@@ -2129,7 +2227,7 @@ public class TenderService : ITenderService
     {
         if (string.Equals(tender.Status, "Draft", StringComparison.OrdinalIgnoreCase))
             return;
-        if (await _tenderControlService.IsControlledTenderMethodAsync(tender.Id))
+        if (tender.SourcingCaseId.HasValue || await _tenderControlService.IsControlledTenderMethodAsync(tender.Id))
             throw new ProcurementTenderControlConflictException(
                 "TENDER_STATUTORY_TERMS_LOCKED",
                 "NCT, ICT, QBS, and QCBS tender terms are locked after document approval. Use the controlled tender lifecycle.");

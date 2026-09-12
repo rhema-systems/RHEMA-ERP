@@ -139,20 +139,30 @@ public class PreEmploymentCheckTemplateRepository : GenericRepository<PreEmploym
 {
     public PreEmploymentCheckTemplateRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<IEnumerable<PreEmploymentCheckTemplate>> GetAllActiveAsync()
+    /// <summary>
+    /// ⚠ Both reads take an explicit <paramref name="tenantId"/>.
+    ///
+    /// <para>They previously took none, and <c>PreEmploymentCheckTemplateService</c> had no tenant
+    /// provider either — so the list read returned <b>every tenant's</b> templates and every
+    /// by-id operation (read, update, delete, add/update/remove item) acted on any tenant's row.
+    /// The <c>ApplicationDbContext</c> is registered without a tenant, so its global query filter is
+    /// inert and cannot be relied on to catch this; scoping has to be explicit, as everywhere else
+    /// in HR.</para>
+    /// </summary>
+    public async Task<IEnumerable<PreEmploymentCheckTemplate>> GetAllActiveAsync(Guid tenantId)
     {
         return await _dbSet
-            .Include(t => t.Items)
-            .Where(t => t.IsActive && !t.IsDeleted)
+            .Include(t => t.Items.Where(i => !i.IsDeleted))
+            .Where(t => t.TenantId == tenantId && t.IsActive && !t.IsDeleted)
             .OrderBy(t => t.Name)
             .ToListAsync();
     }
 
-    public async Task<PreEmploymentCheckTemplate?> GetByIdWithItemsAsync(Guid id)
+    public async Task<PreEmploymentCheckTemplate?> GetByIdWithItemsAsync(Guid id, Guid tenantId)
     {
         return await _dbSet
-            .Include(t => t.Items)
-            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted);
+            .Include(t => t.Items.Where(i => !i.IsDeleted))
+            .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId && !t.IsDeleted);
     }
 
     public async Task AddTemplateItemAsync(PreEmploymentCheckTemplateItem item)

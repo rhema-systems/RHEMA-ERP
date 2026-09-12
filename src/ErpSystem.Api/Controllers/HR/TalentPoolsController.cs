@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/talent-pools")]
-[Authorize]
+[Authorize(Policy = HrPermissions.SuccessionReadPolicy)]
 public class TalentPoolsController : ControllerBase
 {
     private readonly ITalentPoolService _service;
@@ -60,6 +61,7 @@ public class TalentPoolsController : ControllerBase
     // POOL CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<TalentPoolDto>> Create([FromBody] CreateTalentPoolDto dto)
     {
@@ -75,6 +77,7 @@ public class TalentPoolsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<TalentPoolDto>> Update(Guid id, [FromBody] UpdateTalentPoolDto dto)
     {
@@ -87,6 +90,7 @@ public class TalentPoolsController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -118,6 +122,7 @@ public class TalentPoolsController : ControllerBase
     // MEMBER CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("{id:guid}/members")]
     public async Task<ActionResult<TalentPoolMemberDto>> AddMember(Guid id, [FromBody] CreateTalentPoolMemberDto dto)
     {
@@ -130,10 +135,12 @@ public class TalentPoolsController : ControllerBase
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
 
         dto.TalentPoolId = id;
-        var created = await _service.AddMemberAsync(dto, tenantId.Value, employeeId.Value);
+        // The nominator is the signed-in user. It used to arrive on the body and was honoured.
+        var created = await _service.AddMemberAsync(dto, tenantId.Value, employeeId.Value, employeeId.Value);
         return CreatedAtAction(nameof(GetMemberById), new { memberId = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPut("members/{memberId:guid}")]
     public async Task<ActionResult<TalentPoolMemberDto>> UpdateMember(Guid memberId, [FromBody] UpdateTalentPoolMemberDto dto)
     {
@@ -146,6 +153,7 @@ public class TalentPoolsController : ControllerBase
         return Ok(await _service.UpdateMemberAsync(dto, employeeId.Value));
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("members/{memberId:guid}/remove")]
     public async Task<IActionResult> RemoveMember(Guid memberId, [FromBody] RemoveTalentPoolMemberDto dto)
     {
@@ -166,6 +174,7 @@ public class TalentPoolsController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDevelopmentActivitySummaryDto>>> GetDevelopmentActivities(Guid memberId)
         => Ok(await _service.GetDevelopmentActivitiesForMemberAsync(memberId));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("members/{memberId:guid}/development-activities")]
     public async Task<ActionResult<SuccessionDevelopmentActivityDto>> AddDevelopmentActivity(
         Guid memberId, [FromBody] CreateSuccessionDevelopmentActivityDto dto)
@@ -191,6 +200,7 @@ public class TalentPoolsController : ControllerBase
     public async Task<ActionResult<IEnumerable<SuccessionDocumentDto>>> GetDocuments(Guid memberId)
         => Ok(await _service.GetDocumentsForMemberAsync(memberId));
 
+    [Authorize(Policy = HrPermissions.SuccessionWritePolicy)]
     [HttpPost("members/{memberId:guid}/documents")]
     public async Task<ActionResult<SuccessionDocumentDto>> AddDocument(
         Guid memberId, [FromBody] CreateSuccessionDocumentDto dto)
@@ -203,11 +213,30 @@ public class TalentPoolsController : ControllerBase
         if (tenantId == null) return BadRequest("Tenant context could not be resolved.");
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
 
+
+        // D-14: a caller-supplied location let any HR user point a document row at arbitrary bytes
+        // on disk. Files arrive through the upload route, which puts them past the scanner into
+        // private storage; this route survives for the legacy migration utility and mints metadata
+        // only. Same guard, same wording, as staff-movement attachments and provider documents.
+        if (!string.IsNullOrWhiteSpace(dto.DocumentUrl) ||
+            dto.FileUploadRecordId.HasValue ||
+            dto.DocumentRecordId.HasValue ||
+            dto.DocumentVersionId.HasValue)
+        {
+            return BadRequest(new
+            {
+                message = "File locations cannot be supplied directly. " +
+                          "Use POST api/succession-documents/upload to attach a file."
+            });
+        }
+
         dto.TalentPoolMemberId = memberId;
-        var created = await _service.AddDocumentForMemberAsync(dto, tenantId.Value, employeeId.Value);
+        var created = await _service.AddDocumentForMemberAsync(
+            dto, tenantId.Value, employeeId.Value, uploadedByEmployeeId: employeeId.Value);
         return CreatedAtAction(nameof(GetDocuments), new { memberId }, created);
     }
 
+    [Authorize(Policy = HrPermissions.SuccessionAdminPolicy)]
     [HttpDelete("documents/{documentId:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid documentId)
     {

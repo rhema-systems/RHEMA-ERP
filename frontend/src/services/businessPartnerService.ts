@@ -38,6 +38,7 @@ export interface BusinessPartnerDto {
   status: string; // Active, Inactive, Suspended, Pending
   approvalStatus?: string; // Pending, Approved, Rejected
   isPreferred: boolean;
+  isActive?: boolean;
   isBlacklisted: boolean;
   currency?: string;
   paymentTermId?: string;
@@ -121,6 +122,7 @@ export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
   creditHoldDate?: string;
   // Related Data
   contacts?: BusinessPartnerContactDto[];
+  bankAccounts?: BusinessPartnerBankAccountDto[];
   licenses?: BusinessPartnerLicenseDto[];
   documents?: BusinessPartnerDocumentDto[];
   financialRecords?: BusinessPartnerFinancialDto[];
@@ -128,7 +130,22 @@ export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
   specializations?: ContractorSpecializationDto[];
 }
 
+export interface BusinessPartnerBankAccountDto {
+  id: string;
+  businessPartnerId?: string;
+  bankName: string;
+  branchName?: string;
+  accountName?: string;
+  accountNumber: string;
+  swiftCode?: string;
+  iban?: string;
+  currency?: string;
+  isPrimary: boolean;
+  isActive: boolean;
+}
+
 export interface BusinessPartnerContactDto {
+  isActive?: boolean;
   id: string;
   businessPartnerId?: string;
   partnerId?: string; // Alias

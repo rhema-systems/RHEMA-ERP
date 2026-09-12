@@ -3,8 +3,11 @@
 import { useState } from 'react';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -19,10 +22,9 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
-import { useAuth } from '@/hooks/use-auth';
 import { leavePlanService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
-import type { LeavePlan } from '@/types/hr/leave-request';
+import type { LeavePlan, LeaveRelieverClash } from '@/types/hr/leave-request';
 import { DateField, FieldRow, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
 
 const currentYear = new Date().getFullYear();
@@ -30,12 +32,15 @@ const years = [currentYear + 1, currentYear, currentYear - 1];
 
 const schema = z
   .object({
+    // Carried so an edit can exclude the plan itself from its own reliever check.
+    id: z.string().optional().or(z.literal('')),
     employeeId: z.string().min(1, 'Employee is required'),
     leaveTypeId: z.string().min(1, 'Leave type is required'),
     leaveSubTypeId: z.string().optional().or(z.literal('')),
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().min(1, 'End date is required'),
     relieverId: z.string().optional().or(z.literal('')),
+    secondRelieverId: z.string().optional().or(z.literal('')),
     notes: z.string().max(1000).optional().or(z.literal('')),
   })
   .refine((v) => v.endDate >= v.startDate, {
@@ -45,6 +50,93 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
+const fmt = (d: string) => d.slice(0, 10);
+
+function clashLine(c: LeaveRelieverClash) {
+  return `${c.relieverName || 'Reliever'} ${c.description} (${fmt(c.fromDate)} – ${fmt(c.toDate)})`;
+}
+
+/**
+ * Whether a chosen reliever is actually free over the plan's dates, asked as the form is filled in.
+ *
+ * Finish-plan lane 4: TDC's demo feedback was that reliever clashes were not visible on the plan.
+ * The server answers from three sources — the reliever's own plans, their own live leave requests,
+ * and other plans already naming them — and this is advisory: a plan with a clash can still be
+ * saved, because leave gets cancelled and dates move. What the form must never do is stay silent.
+ */
+function RelieverClashCheck({
+  label,
+  relieverId,
+  startDate,
+  endDate,
+  excludePlanId,
+}: {
+  label: string;
+  relieverId: string;
+  startDate: string;
+  endDate: string;
+  excludePlanId?: string;
+}) {
+  const ready = !!relieverId && !!startDate && !!endDate && endDate >= startDate;
+  const { data, isFetching } = useQuery({
+    queryKey: ['hr', 'leave-plans', 'reliever-clashes', relieverId, startDate, endDate, excludePlanId ?? ''],
+    queryFn: () => leavePlanService.getRelieverClashes(relieverId, startDate, endDate, excludePlanId),
+    enabled: ready,
+  });
+
+  if (!ready) return null;
+  if (isFetching && !data) {
+    return <p className="text-xs text-muted-foreground">Checking the {label.toLowerCase()}&apos;s diary…</p>;
+  }
+  const clashes = data ?? [];
+  if (clashes.length === 0) {
+    return (
+      <p className="text-xs text-emerald-700 dark:text-emerald-400">
+        {label}: nothing in their diary over these dates.
+      </p>
+    );
+  }
+  return (
+    <Alert>
+      <AlertTriangle className="h-4 w-4" />
+      <AlertTitle>
+        {label}: {clashes.length} clash{clashes.length === 1 ? '' : 'es'} over these dates
+      </AlertTitle>
+      <AlertDescription>
+        <ul className="mt-1 list-disc space-y-1 pl-4 text-sm">
+          {clashes.map((c, i) => (
+            <li key={`${c.source}-${i}`}>{clashLine(c)}</li>
+          ))}
+        </ul>
+        <p className="mt-2 text-xs text-muted-foreground">
+          You can still save the plan — this is a warning, not a rule.
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+/** The reliever cell on the register: names, and a red badge when the server found clashes. */
+function RelieverCell({ plan }: { plan: LeavePlan }) {
+  const names = [plan.relieverName, plan.secondRelieverName].filter(Boolean).join(' · ');
+  const clashes = plan.relieverClashes ?? [];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span>{names || '—'}</span>
+      {clashes.length > 0 && (
+        <Badge
+          variant="destructive"
+          className="gap-1"
+          title={clashes.map(clashLine).join('\n')}
+        >
+          <AlertTriangle className="h-3 w-3" />
+          {clashes.length} clash{clashes.length === 1 ? '' : 'es'}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 /**
  * Annual leave plans. Submit/approve/reject go through the workflow engine
  * (LeavePlanWorkflowStatusAdapter); a manager can also suggest different dates, which the
@@ -53,7 +145,6 @@ type FormValues = z.infer<typeof schema>;
 export default function LeavePlansPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { user } = useAuth();
   const [year, setYear] = useState(String(currentYear));
   const [suggestFor, setSuggestFor] = useState<LeavePlan | null>(null);
   const [rejectFor, setRejectFor] = useState<LeavePlan | null>(null);
@@ -102,14 +193,33 @@ export default function LeavePlansPage() {
   });
 
   const empty: FormValues = {
+    id: '',
     employeeId: '',
     leaveTypeId: '',
     leaveSubTypeId: '',
     startDate: '',
     endDate: '',
     relieverId: '',
+    secondRelieverId: '',
     notes: '',
   };
+
+  // Who planned it is stamped server-side from the token: PlannedBy is an Employee foreign key,
+  // and the login's user id this screen used to send was never one.
+  const toPayload = (v: FormValues) => ({
+    employeeId: v.employeeId,
+    leaveTypeId: v.leaveTypeId,
+    leaveSubTypeId: v.leaveSubTypeId || null,
+    startDate: v.startDate,
+    endDate: v.endDate,
+    relieverId: v.relieverId || null,
+    secondRelieverId: v.secondRelieverId || null,
+    notes: v.notes || null,
+    year: Number(year),
+    organizationLevelId: null,
+    organizationUnitId: null,
+    positionId: null,
+  });
 
   return (
     <div className="space-y-6 p-6">
@@ -147,40 +257,8 @@ export default function LeavePlansPage() {
         emptyDescription="No plans recorded for this year."
         getId={(p) => p.id}
         list={() => leavePlanService.getByYear(Number(year))}
-        create={(_p, v) =>
-          leavePlanService.create({
-            employeeId: v.employeeId,
-            leaveTypeId: v.leaveTypeId,
-            leaveSubTypeId: v.leaveSubTypeId || null,
-            startDate: v.startDate,
-            endDate: v.endDate,
-            relieverId: v.relieverId || null,
-            secondRelieverId: null,
-            notes: v.notes || null,
-            plannedBy: (user?.id as string) ?? '',
-            year: Number(year),
-            organizationLevelId: null,
-            organizationUnitId: null,
-            positionId: null,
-          })
-        }
-        update={(_p, id, v) =>
-          leavePlanService.update(id, {
-            employeeId: v.employeeId,
-            leaveTypeId: v.leaveTypeId,
-            leaveSubTypeId: v.leaveSubTypeId || null,
-            startDate: v.startDate,
-            endDate: v.endDate,
-            relieverId: v.relieverId || null,
-            secondRelieverId: null,
-            notes: v.notes || null,
-            plannedBy: (user?.id as string) ?? '',
-            year: Number(year),
-            organizationLevelId: null,
-            organizationUnitId: null,
-            positionId: null,
-          })
-        }
+        create={(_p, v) => leavePlanService.create(toPayload(v))}
+        update={(_p, id, v) => leavePlanService.update(id, toPayload(v))}
         actions={[
           {
             label: 'Submit for approval',
@@ -250,19 +328,21 @@ export default function LeavePlansPage() {
                 ? `${p.suggestedStartDate.slice(0, 10)} → ${p.suggestedEndDate?.slice(0, 10) ?? ''}`
                 : '—',
           },
-          { header: 'Reliever', cell: (p) => p.relieverName || '—' },
+          { header: 'Reliever', cell: (p) => <RelieverCell plan={p} /> },
           { header: 'Status', cell: (p) => <StatusBadge status={p.status} /> },
         ]}
         schema={schema}
         emptyForm={empty}
-        dialogClassName="sm:max-w-[620px]"
+        dialogClassName="sm:max-w-[680px]"
         toForm={(p) => ({
+          id: p.id,
           employeeId: p.employeeId,
           leaveTypeId: p.leaveTypeId,
           leaveSubTypeId: p.leaveSubTypeId ?? '',
           startDate: p.startDate?.slice(0, 10) ?? '',
           endDate: p.endDate?.slice(0, 10) ?? '',
           relieverId: p.relieverId ?? '',
+          secondRelieverId: p.secondRelieverId ?? '',
           notes: p.notes ?? '',
         })}
         renderFields={(form) => (
@@ -293,6 +373,27 @@ export default function LeavePlansPage() {
               <EmployeePicker
                 value={form.watch('relieverId') || null}
                 onChange={(v) => form.setValue('relieverId', v ?? '')}
+              />
+              <RelieverClashCheck
+                label="Reliever"
+                relieverId={form.watch('relieverId') || ''}
+                startDate={form.watch('startDate') || ''}
+                endDate={form.watch('endDate') || ''}
+                excludePlanId={form.watch('id') || undefined}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Second reliever</Label>
+              <EmployeePicker
+                value={form.watch('secondRelieverId') || null}
+                onChange={(v) => form.setValue('secondRelieverId', v ?? '')}
+              />
+              <RelieverClashCheck
+                label="Second reliever"
+                relieverId={form.watch('secondRelieverId') || ''}
+                startDate={form.watch('startDate') || ''}
+                endDate={form.watch('endDate') || ''}
+                excludePlanId={form.watch('id') || undefined}
               />
             </div>
             <TextareaField form={form} name="notes" label="Notes" />

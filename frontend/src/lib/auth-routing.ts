@@ -3,6 +3,8 @@ type RoleUser = {
 } | null | undefined;
 
 const EXTERNAL_PORTAL_ROLE = 'externaluser';
+const CANDIDATE_ROLE = 'candidate';
+const CONSULTANT_CLIENT_ROLE = 'consultantclient';
 const INTERNAL_ADMIN_ROLES = new Set(['superadmin', 'tenantadmin', 'admin', 'administrator']);
 
 const normalizedRoles = (user: RoleUser) =>
@@ -16,6 +18,50 @@ export const isExternalPortalUser = (user: RoleUser) => {
   );
 };
 
+/**
+ * A self-registered careers account (Candidate role). Deliberately NOT folded into
+ * isExternalPortalUser: candidates share the external-portal shell but get the candidate menu,
+ * and the server fences them far more narrowly than business partners.
+ */
+export const isCandidateUser = (user: RoleUser) => {
+  const roles = normalizedRoles(user);
+  return (
+    roles.includes(CANDIDATE_ROLE) &&
+    !roles.some((role) => INTERNAL_ADMIN_ROLES.has(role))
+  );
+};
+
+/**
+ * An HR-invited consultant-client contact (ConsultantClient role). Like
+ * candidates, deliberately NOT folded into isExternalPortalUser: contacts share the
+ * external-portal shell but get only the client-timesheets menu, and the server fences
+ * them narrower still (ConsultantClientAccessMiddleware).
+ */
+export const isConsultantClientUser = (user: RoleUser) => {
+  const roles = normalizedRoles(user);
+  return (
+    roles.includes(CONSULTANT_CLIENT_ROLE) &&
+    !roles.some((role) => INTERNAL_ADMIN_ROLES.has(role))
+  );
+};
+
+/**
+ * A user whose ONLY functional role is Employee lands in the self-service
+ * portal. Anyone with a further role (Manager, HR, admin tiers…) is a desk user who gets
+ * the two-way switcher instead.
+ */
+export const isEmployeeOnlyUser = (user: RoleUser) => {
+  const roles = normalizedRoles(user);
+  return roles.length > 0 && roles.every((role) => role === 'employee');
+};
+
+/** Desk access = internal and more than the Employee role. Gates the "Back to ERP" switcher. */
+export const hasDeskAccess = (user: RoleUser) =>
+  !isExternalPortalUser(user) &&
+  !isCandidateUser(user) &&
+  !isConsultantClientUser(user) &&
+  !isEmployeeOnlyUser(user);
+
 export const isSupportHost = (host?: string | null) => {
   const value =
     host ??
@@ -28,4 +74,12 @@ export const getExternalPortalPath = (host?: string | null) =>
   isSupportHost(host) ? '/' : '/external-portal';
 
 export const getAuthenticatedHomePath = (user: RoleUser, host?: string | null) =>
-  isExternalPortalUser(user) ? getExternalPortalPath(host) : '/dashboard';
+  isCandidateUser(user)
+    ? '/external-portal/careers'
+    : isConsultantClientUser(user)
+      ? '/external-portal/client-timesheets'
+      : isExternalPortalUser(user)
+        ? getExternalPortalPath(host)
+        : isEmployeeOnlyUser(user)
+          ? '/me'
+          : '/dashboard';

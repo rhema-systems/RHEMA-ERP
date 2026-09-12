@@ -18,6 +18,7 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly IProcurementPolicyService _policyService;
+    private readonly IRoleService _roleService;
     private readonly IProcurementControlEventService _controlEvents;
     private readonly ILogger<ProcurementSodGuardService> _logger;
 
@@ -25,12 +26,14 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
         IProcurementPolicyService policyService,
+        IRoleService roleService,
         IProcurementControlEventService controlEvents,
         ILogger<ProcurementSodGuardService> logger)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _policyService = policyService;
+        _roleService = roleService;
         _controlEvents = controlEvents;
         _logger = logger;
     }
@@ -88,6 +91,26 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
             .Where(item => item.Kind == ProcurementPolicyRuleKind.SegregationOfDuties)
             .Select(item => item.RuleCode)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingDefinitions = ProcurementSodRequiredControlRegistry.Definitions
+            .Where(definition => !existing.Contains(definition.Code))
+            .ToList();
+        var activeTenantRoleNames = (await _roleService.GetRolesForTenantAsync(
+                _currentUser.TenantId, cancellationToken))
+            .Where(role => !string.IsNullOrWhiteSpace(role.Name))
+            .Select(role => role.Name!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missingRoleNames = missingDefinitions
+            .SelectMany(definition => new[] { definition.InitiatorRole, definition.ConflictingRole })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(roleName => !activeTenantRoleNames.Contains(roleName))
+            .OrderBy(roleName => roleName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (missingRoleNames.Count > 0)
+            throw new ProcurementSodRequestValidationException(
+                "SOD_TENANT_ROLES_REQUIRED",
+                "Before applying the optional SOD templates, assign at least one active user in the current tenant to each required role: " +
+                string.Join(", ", missingRoleNames) + ". No controls were created.");
+
         var created = new List<string>();
         var retained = new List<string>();
         foreach (var definition in ProcurementSodRequiredControlRegistry.Definitions)
@@ -471,8 +494,12 @@ public sealed class ProcurementSodGuardService : IProcurementSodGuardService
     private void EnsureAdministrator()
     {
         EnsureAuthenticatedTenant();
-        // SOD policy administration is permission-gated by procurement.access.manage
-        // at the API boundary. The SOD domain must not substitute a legacy role list.
+        if (!_currentUser.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin) &&
+            !_currentUser.Roles.Any(role =>
+                ProcurementAccessControlRegistry.RoleGrantsPermission(
+                    role, "procurement.access.manage")))
+            throw new ProcurementPolicyAuthorizationException(
+                "SuperAdmin or the TDC ICT Administrator role is required to administer procurement SOD controls.");
     }
 
     private void EnsureEditor() => EnsureAdministrator();

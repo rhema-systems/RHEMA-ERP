@@ -88,6 +88,59 @@ namespace ErpSystem.Api.Services.Finance.AP
         private string UserName => _currentUser.UserName ?? "system";
         private Guid CurrentUserId => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
 
+        private static readonly VendorInvoiceStatus[] QuantityCommittedStatuses =
+        [
+            VendorInvoiceStatus.PendingApproval, VendorInvoiceStatus.Approved,
+            VendorInvoiceStatus.PartiallyPaid, VendorInvoiceStatus.Paid,
+            VendorInvoiceStatus.Overdue, VendorInvoiceStatus.OnHold
+        ];
+
+        private async Task<Dictionary<Guid, decimal>> PriorInvoicedQuantitiesAsync(
+            Guid purchaseOrderId, Guid? currentInvoiceId, CancellationToken cancellationToken)
+        {
+            var invoices = await _unitOfWork.Repository<VendorInvoice>()
+                .GetQueryable(i => i.TenantId == TenantId && i.PurchaseOrderId == purchaseOrderId &&
+                    (!currentInvoiceId.HasValue || i.Id != currentInvoiceId.Value) &&
+                    !i.IsDeleted && QuantityCommittedStatuses.Contains(i.Status))
+                .Include(i => i.LineItems).AsNoTracking().ToListAsync(cancellationToken);
+            return invoices.SelectMany(i => i.LineItems.Where(l => !l.IsDeleted && l.PurchaseOrderItemId.HasValue))
+                .GroupBy(l => l.PurchaseOrderItemId!.Value)
+                .ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
+        }
+
+        public async Task<ApGoodsInvoiceEntryDto> GetGoodsInvoiceEntryAsync(
+            Guid purchaseOrderId, Guid? currentInvoiceId = null, CancellationToken cancellationToken = default)
+        {
+            if (currentInvoiceId.HasValue)
+            {
+                var editable = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i =>
+                    i.TenantId == TenantId && i.Id == currentInvoiceId.Value && !i.IsDeleted &&
+                    (i.Status == VendorInvoiceStatus.Draft || i.Status == VendorInvoiceStatus.Rejected))
+                    .AnyAsync(cancellationToken);
+                if (!editable) throw new InvalidOperationException("The current invoice is not an editable invoice in this tenant.");
+            }
+            var accepted = await RequireAcceptedSupplyServiceAsync().ResolveAsync(
+                ProcurementAcceptedSupplyKind.GoodsReceiptInspection, purchaseOrderId,
+                purchaseOrderId, currentInvoiceId, cancellationToken);
+            return await GoodsEntryFromAcceptanceAsync(accepted, currentInvoiceId, cancellationToken);
+        }
+
+        private async Task<ApGoodsInvoiceEntryDto> GoodsEntryFromAcceptanceAsync(
+            ProcurementAcceptedSupplyResolutionDto accepted, Guid? currentInvoiceId, CancellationToken cancellationToken)
+        {
+            var previous = await PriorInvoicedQuantitiesAsync(accepted.PurchaseOrderId!.Value,
+                currentInvoiceId, cancellationToken);
+            return new ApGoodsInvoiceEntryDto
+            {
+                PurchaseOrderId = accepted.PurchaseOrderId.Value,
+                Lines = accepted.Lines.Select(l => new ApGoodsInvoiceEntryLineDto
+                {
+                    PurchaseOrderItemId = l.PurchaseOrderItemId, AcceptedQuantity = l.AcceptedQuantity,
+                    InvoicedQuantity = previous.GetValueOrDefault(l.PurchaseOrderItemId)
+                }).ToList()
+            };
+        }
+
         // ═════════════════════════════════════════════════════════════════
         //  GET
         // ═════════════════════════════════════════════════════════════════
@@ -1872,23 +1925,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             }
             result.GoodsReceiptTotal = acceptedByPoLine.Values.Sum();
 
-            var committedStatuses = new[]
-            {
-                VendorInvoiceStatus.PendingApproval, VendorInvoiceStatus.Approved,
-                VendorInvoiceStatus.PartiallyPaid, VendorInvoiceStatus.Paid,
-                VendorInvoiceStatus.Overdue, VendorInvoiceStatus.OnHold
-            };
-            var priorInvoices = await _unitOfWork.Repository<VendorInvoice>()
-                .GetQueryable(item => item.TenantId == TenantId && item.Id != invoice.Id &&
-                                      item.PurchaseOrderId == purchaseOrder.Id && !item.IsDeleted &&
-                                      committedStatuses.Contains(item.Status))
-                .Include(item => item.LineItems)
-                .AsNoTracking()
-                .ToListAsync(cancellationToken);
-            var priorByPoLine = priorInvoices.SelectMany(item => item.LineItems.Where(line => !line.IsDeleted))
-                .Where(item => item.PurchaseOrderItemId.HasValue)
-                .GroupBy(item => item.PurchaseOrderItemId!.Value)
-                .ToDictionary(group => group.Key, group => group.Sum(item => item.Quantity));
+            var priorByPoLine = await PriorInvoicedQuantitiesAsync(purchaseOrder.Id, invoice.Id, cancellationToken);
 
             foreach (var group in activeLines.GroupBy(item => item.PurchaseOrderItemId))
             {
@@ -3799,7 +3836,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             ResolveAcceptedSupplyForCreateAsync(
                 VendorInvoiceCreateDto dto,
                 Supplier supplier,
-                CancellationToken cancellationToken)
+                CancellationToken cancellationToken,
+                Guid? currentInvoiceId = null)
         {
             if (dto.IsOpeningBalance)
             {
@@ -3840,10 +3878,23 @@ namespace ErpSystem.Api.Services.Finance.AP
                     "Works invoices must originate from the approved QS payment-certificate handoff.");
             if (order.ProcurementCategory == ProcurementCategoryClass.Goods)
             {
-                if (dto.AcceptedSupplyKind.HasValue || dto.AcceptedSupplySourceId.HasValue)
+                if ((dto.AcceptedSupplyKind.HasValue && dto.AcceptedSupplyKind != ProcurementAcceptedSupplyKind.GoodsReceiptInspection) ||
+                    (dto.AcceptedSupplySourceId.HasValue && dto.AcceptedSupplySourceId != order.Id))
                     throw new InvalidOperationException(
                         "Goods acceptance is derived automatically from governed GRN inspections.");
-                return null;
+                var goods = await RequireAcceptedSupplyServiceAsync().ResolveAsync(
+                    ProcurementAcceptedSupplyKind.GoodsReceiptInspection, order.Id, order.Id,
+                    currentInvoiceId, cancellationToken);
+                await EnsureAcceptedSupplySupplierAsync(goods, supplier, cancellationToken);
+                var entry = await GoodsEntryFromAcceptanceAsync(goods, currentInvoiceId, cancellationToken);
+                foreach (var group in dto.LineItems.GroupBy(l => l.PurchaseOrderItemId))
+                {
+                    var available = entry.Lines.SingleOrDefault(l => l.PurchaseOrderItemId == group.Key);
+                    if (available == null || group.Any(l => l.Quantity <= 0m) ||
+                        group.Sum(l => l.Quantity) > available.AvailableQuantity)
+                        throw new InvalidOperationException("Invoice quantities must not exceed accepted, uninvoiced receipt quantities for each PO line.");
+                }
+                return goods;
             }
 
             if (dto.AcceptedSupplyKind != ProcurementAcceptedSupplyKind.ServiceCompletion ||
@@ -3884,13 +3935,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PurchaseOrderId = dto.PurchaseOrderId,
                 AcceptedSupplyKind = dto.AcceptedSupplyKind,
                 AcceptedSupplySourceId = dto.AcceptedSupplySourceId,
-                IsOpeningBalance = dto.IsOpeningBalance
+                IsOpeningBalance = dto.IsOpeningBalance,
+                LineItems = dto.LineItems
             };
             return await ResolveAcceptedSupplyForCreateAsync(
                 request,
                 supplier ?? throw new InvalidOperationException(
                     "The invoice supplier is unavailable."),
-                cancellationToken);
+                cancellationToken, invoice.Id);
         }
 
         private IProcurementAcceptedSupplyService RequireAcceptedSupplyServiceAsync() =>
@@ -3983,6 +4035,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (supplier != null)
             {
+                if (!supplier.IsActive || supplier.Status != "Active")
+                    throw new InvalidOperationException("The selected supplier is not active for AP invoice entry.");
                 return supplier;
             }
 
@@ -4008,17 +4062,24 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException($"Business partner '{partner.PartnerName}' is blacklisted and cannot be used for AP supplier invoices.");
             }
 
-            supplier = await supplierRepository
-                .GetQueryable(s =>
-                    s.TenantId == TenantId &&
-                    !s.IsDeleted &&
-                    (s.Id == partner.Id ||
-                     s.SupplierCode == partner.PartnerCode ||
-                     s.Name == partner.PartnerName))
-                .FirstOrDefaultAsync(cancellationToken);
+            if (!partner.IsActive || (partner.PartnerType is "Supplier" or "Vendor" or "Manufacturer" &&
+                partner.RegistrationStatus is not ("Active" or "Approved")))
+                throw new InvalidOperationException("The Procurement supplier must be active and approved before AP invoice entry.");
+
+            // Names are display values, not identity keys. Do not join distinct suppliers merely
+            // because their names happen to match, or revive an inactive/deleted Finance identity.
+            var matches = await supplierRepository.GetQueryableIncludingDeleted(s =>
+                    s.TenantId == TenantId && (s.Id == partner.Id ||
+                    (!string.IsNullOrWhiteSpace(partner.PartnerCode) && s.SupplierCode == partner.PartnerCode)))
+                .Take(2).ToListAsync(cancellationToken);
+            if (matches.Count > 1)
+                throw new InvalidOperationException("The Procurement supplier maps to multiple Finance identities. Resolve the supplier mapping before invoice entry.");
+            supplier = matches.SingleOrDefault();
 
             if (supplier != null)
             {
+                if (supplier.IsDeleted || !supplier.IsActive || supplier.Status != "Active")
+                    throw new InvalidOperationException("The linked Finance supplier is inactive or deleted. Resolve its status before invoice entry.");
                 return supplier;
             }
 

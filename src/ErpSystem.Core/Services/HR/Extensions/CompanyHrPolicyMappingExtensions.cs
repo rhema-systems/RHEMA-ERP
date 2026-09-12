@@ -25,11 +25,15 @@ public static class CompanyHrPolicyMappingExtensions
             DefaultProbationMonths         = entity.DefaultProbationMonths,
             DefaultResignationNoticeDays   = entity.DefaultResignationNoticeDays,
             DefaultTerminationNoticeDays   = entity.DefaultTerminationNoticeDays,
+            ProceduralAbsenceDays          = entity.ProceduralAbsenceDays,
 
             VacancyAlertLeadDays           = entity.VacancyAlertLeadDays,
             ReviewDueLeadDays              = entity.ReviewDueLeadDays,
             ContractExpiryLeadDays         = entity.ContractExpiryLeadDays,
             ProbationEndLeadDays           = entity.ProbationEndLeadDays,
+            GrievanceRungChaseDays         = entity.GrievanceRungChaseDays,
+            ConcernTriageChaseDays         = entity.ConcernTriageChaseDays,
+            GrievanceAgreementChaseDays    = entity.GrievanceAgreementChaseDays,
 
             RetirementCountdownLeadDays    = entity.RetirementCountdownLeadDays,
             LongServiceMilestoneYears      = entity.LongServiceMilestoneYears,
@@ -40,12 +44,26 @@ public static class CompanyHrPolicyMappingExtensions
 
             BudgetEnforcementMode          = entity.BudgetEnforcementMode,
 
+            // ⚠ This line was missing too, and on the read side it was worse than a lost value.
+            // `BudgetEnforcementMode` has no zero member (Off=1, Warn=2, Block=3), so an unassigned
+            // property left the DTO carrying `(BudgetEnforcementMode)0` — an enum value that does
+            // not exist, serialised as a bare `0` that maps to no member name. The database said
+            // Block; every reader of this endpoint was told 0.
+            EstablishmentEnforcementMode   = entity.EstablishmentEnforcementMode,
+
             FitWeightPerformance           = entity.FitWeightPerformance,
             FitWeightCompetency            = entity.FitWeightCompetency,
             FitWeightPotential             = entity.FitWeightPotential,
             FitWeightTenure                = entity.FitWeightTenure,
 
             SuccessionPlanNumberPrefix     = entity.SuccessionPlanNumberPrefix,
+
+            WrittenQueryHours                     = entity.WrittenQueryHours,
+            QueryResponseWindowHours              = entity.QueryResponseWindowHours,
+            InvestigationDays                     = entity.InvestigationDays,
+            DisciplineBacklogHorizonDays          = entity.DisciplineBacklogHorizonDays,
+            SettlementDaysPerYear                 = entity.SettlementDaysPerYear,
+            AttendanceRateIncludesApprovedLeave   = entity.AttendanceRateIncludesApprovedLeave,
         };
     }
 
@@ -61,11 +79,15 @@ public static class CompanyHrPolicyMappingExtensions
         entity.DefaultProbationMonths         = dto.DefaultProbationMonths;
         entity.DefaultResignationNoticeDays   = dto.DefaultResignationNoticeDays;
         entity.DefaultTerminationNoticeDays   = dto.DefaultTerminationNoticeDays;
+        entity.ProceduralAbsenceDays          = dto.ProceduralAbsenceDays;
 
         entity.VacancyAlertLeadDays           = dto.VacancyAlertLeadDays;
         entity.ReviewDueLeadDays              = dto.ReviewDueLeadDays;
         entity.ContractExpiryLeadDays         = dto.ContractExpiryLeadDays;
         entity.ProbationEndLeadDays           = dto.ProbationEndLeadDays;
+        entity.GrievanceRungChaseDays         = dto.GrievanceRungChaseDays;
+        entity.ConcernTriageChaseDays         = dto.ConcernTriageChaseDays;
+        entity.GrievanceAgreementChaseDays    = dto.GrievanceAgreementChaseDays;
 
         entity.RetirementCountdownLeadDays    = dto.RetirementCountdownLeadDays;
         entity.LongServiceMilestoneYears      = dto.LongServiceMilestoneYears?.Trim() ?? string.Empty;
@@ -76,11 +98,25 @@ public static class CompanyHrPolicyMappingExtensions
 
         entity.BudgetEnforcementMode          = dto.BudgetEnforcementMode;
 
+        // ⚠ This line was missing. `EstablishmentEnforcementMode` sat on BOTH DTOs and was simply
+        // never assigned, so FR-HR-136's enforcement posture accepted every value and kept none —
+        // the write succeeded, the status was 200, and the setting never moved. Area 14's signature
+        // defect, in the one place where it decides whether exceeding an authorised establishment
+        // blocks a vacancy or merely warns about it.
+        entity.EstablishmentEnforcementMode   = dto.EstablishmentEnforcementMode;
+
         entity.FitWeightPerformance           = dto.FitWeightPerformance;
         entity.FitWeightCompetency            = dto.FitWeightCompetency;
         entity.FitWeightPotential             = dto.FitWeightPotential;
         entity.FitWeightTenure                = dto.FitWeightTenure;
 
         entity.SuccessionPlanNumberPrefix     = (dto.SuccessionPlanNumberPrefix ?? "SP").Trim().ToUpperInvariant();
+
+        entity.WrittenQueryHours                   = dto.WrittenQueryHours;
+        entity.QueryResponseWindowHours            = dto.QueryResponseWindowHours;
+        entity.InvestigationDays                   = dto.InvestigationDays;
+        entity.DisciplineBacklogHorizonDays        = dto.DisciplineBacklogHorizonDays;
+        entity.SettlementDaysPerYear               = dto.SettlementDaysPerYear;
+        entity.AttendanceRateIncludesApprovedLeave = dto.AttendanceRateIncludesApprovedLeave;
     }
 }

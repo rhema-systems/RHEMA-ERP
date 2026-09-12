@@ -1,8 +1,14 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore;
+using ErpSystem.Shared;
+using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,16 +16,33 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/requests")]
-[Authorize]
-public class StaffTravelRequestsController : ControllerBase
+[StaffTravelBusinessRules]
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelRequestsController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;
-    private readonly ICurrentUserService _currentUser;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
+    private readonly ILogger<StaffTravelRequestsController> _logger;
 
-    public StaffTravelRequestsController(IStaffTravelRequestService service, ICurrentUserService currentUser)
+    public StaffTravelRequestsController(
+        IStaffTravelRequestService service,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ILogger<StaffTravelRequestsController> logger,
+        ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+        _logger = logger;
     }
 
     // =========================================================================
@@ -80,32 +103,46 @@ public class StaffTravelRequestsController : ControllerBase
     // CRUD
     // =========================================================================
 
+    /// <summary>Raise a travel request, normally on someone else's behalf.</summary>
+    /// <remarks>
+    /// <para><b><c>InitiatedById</c> on the payload is ignored.</b> It is an <c>Employee</c> FK
+    /// recording who <i>raised</i> the request, so it is the caller — not the traveller, since the
+    /// desk raises travel for other people, and not the payload, since accepting it let any caller
+    /// file travel under a colleague's name. This is the same actor hole slice 0 closed across the
+    /// area; it survived because the census counted controller parameters and this one travels
+    /// inside the DTO.</para>
+    ///
+    /// <para>An administrative account with no employee link falls back to the traveller, which
+    /// records the request as self-initiated. That is preferable to refusing the desk over a field
+    /// it was never able to supply — see <see cref="HrControllerBase"/> on unlinked accounts.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<StaffTravelRequestDto>> Create([FromBody] CreateStaffTravelRequestDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
-        var created = await _service.CreateAsync(dto, tenantId.Value, userId.Value);
+        dto.InitiatedById = CurrentUser.EmployeeId ?? dto.EmployeeId;
+
+        var created = await _service.CreateAsync(dto, tenantId, userId);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StaffTravelRequestDto>> Update(Guid id, [FromBody] UpdateStaffTravelRequestDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateAsync(dto, userId.Value));
+        return Ok(await _service.UpdateAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -117,59 +154,65 @@ public class StaffTravelRequestsController : ControllerBase
     // WORKFLOW
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/submit")]
     public async Task<IActionResult> Submit(Guid id)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        await _service.SubmitAsync(new SubmitStaffTravelRequestDto { RequestId = id, SubmittedById = userId.Value });
+        await _service.SubmitAsync(new SubmitStaffTravelRequestDto { RequestId = id, SubmittedById = userId });
         return Ok(new { message = "Travel request submitted." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveStaffTravelRequestDto dto)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
         dto.RequestId = id;
-        dto.ApprovedById = userId.Value;
+        // ApprovedById is deliberately NOT set. Slice 2 moved approval onto the workflow engine,
+        // which resolves the approver from the authenticated user against the published definition;
+        // the service no longer reads this field. It stays on the DTO for wire compatibility and is
+        // vestigial — a later cleanup should drop it rather than let it look meaningful.
         await _service.ApproveAsync(dto);
         return Ok(new { message = "Travel request approved." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/reject")]
     public async Task<IActionResult> Reject(Guid id, [FromQuery] string? reason = null)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        await _service.RejectAsync(id, userId.Value, reason);
+        await _service.RejectAsync(id, userId, reason);
         return Ok(new { message = "Travel request rejected." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid id, [FromBody] CancelStaffTravelRequestDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        // Two ids, deliberately: CancelledById is an Employee FK on the request, userId is the
+        // audit trail. Slice 0 collapsed both onto the user id and broke the FK.
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Cancelling a travel request") is { } contextError) return contextError;
 
         dto.RequestId = id;
-        dto.CancelledById = userId.Value;
-        await _service.CancelAsync(dto);
+        dto.CancelledById = employeeId;
+        await _service.CancelAsync(dto, userId);
         return Ok(new { message = "Travel request cancelled." });
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/complete")]
     public async Task<IActionResult> Complete(Guid id)
     {
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        await _service.MarkCompletedAsync(id, userId.Value);
+        await _service.MarkCompletedAsync(id, userId);
         return Ok(new { message = "Travel request marked as completed." });
     }
 
@@ -181,32 +224,34 @@ public class StaffTravelRequestsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRequestCommentDto>>> GetComments(Guid requestId)
         => Ok(await _service.GetCommentsAsync(requestId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{requestId:guid}/comments")]
     public async Task<ActionResult<StaffTravelRequestCommentDto>> AddComment(Guid requestId, [FromBody] CreateStaffTravelRequestCommentDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        // AuthorId is an Employee FK, so this is one of the few travel writes that genuinely needs
+        // the caller's employee link — the comment records who said it.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Commenting on a travel request") is { } contextError) return contextError;
 
         dto.StaffTravelRequestId = requestId;
-        return Ok(await _service.AddCommentAsync(dto, tenantId.Value, userId.Value));
+        return Ok(await _service.AddCommentAsync(dto, tenantId, userId, employeeId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("comments/{commentId:guid}")]
     public async Task<ActionResult<StaffTravelRequestCommentDto>> UpdateComment(Guid commentId, [FromBody] UpdateStaffTravelRequestCommentDto dto)
     {
         if (commentId != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateCommentAsync(dto, userId.Value));
+        return Ok(await _service.UpdateCommentAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("comments/{commentId:guid}")]
     public async Task<IActionResult> DeleteComment(Guid commentId)
     {
@@ -222,20 +267,83 @@ public class StaffTravelRequestsController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRequestAttachmentDto>>> GetAttachments(Guid requestId)
         => Ok(await _service.GetAttachmentsAsync(requestId));
 
+    /// <summary>
+    /// Attaches a document to a travel request through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// <para>Multipart, not JSON. The previous endpoint took a caller-supplied <c>FileUrl</c>,
+    /// which let anyone with travel write access point an attachment at arbitrary bytes on disk —
+    /// including another tenant's. That is the same path-injection sink medical exam documents and
+    /// claim receipts were both fixed for, and a travel attachment is a passport scan or a visa
+    /// letter, so it is squarely in scope.</para>
+    ///
+    /// <para>The file is scanned, registered in the DMS and stored outside the web root; the row
+    /// keeps the three DMS ids and an empty <c>FileUrl</c>. Read it back through
+    /// <c>attachments/{id}/download</c>.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{requestId:guid}/attachments")]
-    public async Task<ActionResult<StaffTravelRequestAttachmentDto>> AddAttachment(Guid requestId, [FromBody] CreateStaffTravelRequestAttachmentDto dto)
+    [RequestSizeLimit(50_000_000)]
+    public async Task<IActionResult> AddAttachment(
+        Guid requestId,
+        IFormFile? file,
+        [FromForm] TravelAttachmentType attachmentType = TravelAttachmentType.Other,
+        [FromForm] string? description = null,
+        CancellationToken ct = default)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out _,
+                "Attaching a document to a travel request") is { } contextError) return contextError;
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        // Establish the caller may touch the parent BEFORE storing anything — neither the gate nor
+        // the DMS performs an entitlement check.
+        await _service.GetByIdAsync(requestId, ct);
 
-        dto.StaffTravelRequestId = requestId;
-        return Ok(await _service.AddAttachmentAsync(dto, tenantId.Value, userId.Value));
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.StaffTravel.StaffTravelRequest),
+            sourceRecordId: requestId,
+            sourceLabel: "Staff travel attachment",
+            documentType: "StaffTravelAttachment",
+            description: description,
+            persist: (uploadedById, document) => _service.AddAttachmentAsync(
+                new CreateStaffTravelRequestAttachmentDto
+                {
+                    StaffTravelRequestId = requestId,
+                    FileName = document.OriginalFileName,
+                    FileSizeBytes = document.FileSize,
+                    MimeType = document.ContentType,
+                    AttachmentType = attachmentType,
+                    FileUploadRecordId = document.FileUploadRecordId,
+                    DocumentRecordId = document.DocumentRecordId,
+                    DocumentVersionId = document.DocumentVersionId,
+                },
+                tenantId, userId, uploadedById, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrStaffTravelAttachments);
     }
 
+    /// <summary>Streams a travel attachment back, byte-for-byte.</summary>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var attachment = await _db.Set<Core.Entities.HR.StaffTravel.StaffTravelRequestAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.TenantId == tenantId && !a.IsDeleted, ct);
+        if (attachment is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FileUrl,
+            attachment.FileName, fallbackContentType: attachment.MimeType,
+            inline: false, ct);
+    }
+
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("attachments/{attachmentId:guid}")]
     public async Task<IActionResult> DeleteAttachment(Guid attachmentId)
     {
@@ -259,32 +367,31 @@ public class StaffTravelRequestsController : ControllerBase
     public async Task<ActionResult<StaffGroupTravelDto>> GetGroupById(Guid id)
         => Ok(await _service.GetGroupTravelByIdAsync(id));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("groups")]
     public async Task<ActionResult<StaffGroupTravelDto>> CreateGroup([FromBody] CreateStaffGroupTravelDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } contextError) return contextError;
 
-        var created = await _service.CreateGroupTravelAsync(dto, tenantId.Value, userId.Value);
+        var created = await _service.CreateGroupTravelAsync(dto, tenantId, userId);
         return CreatedAtAction(nameof(GetGroupById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("groups/{id:guid}")]
     public async Task<ActionResult<StaffGroupTravelDto>> UpdateGroup(Guid id, [FromBody] UpdateStaffGroupTravelDto dto)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateGroupTravelAsync(dto, userId.Value));
+        return Ok(await _service.UpdateGroupTravelAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("groups/{id:guid}")]
     public async Task<IActionResult> DeleteGroup(Guid id)
     {
@@ -292,20 +399,22 @@ public class StaffTravelRequestsController : ControllerBase
         return NoContent();
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("groups/{id:guid}/participants")]
     public async Task<ActionResult<StaffGroupTravelDto>> AddGroupParticipants(Guid id, [FromBody] AddGroupTravelParticipantsDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null) return BadRequest("Tenant context could not be resolved.");
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        // Each participant's request records who initiated it — an Employee FK — so this is
+        // another of the few travel writes that genuinely needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Adding participants to a group trip") is { } contextError) return contextError;
 
         dto.GroupTravelId = id;
-        return Ok(await _service.AddGroupParticipantsAsync(dto, tenantId.Value, userId.Value));
+        return Ok(await _service.AddGroupParticipantsAsync(dto, tenantId, userId, employeeId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("groups/{groupId:guid}/participants/{requestId:guid}")]
     public async Task<IActionResult> RemoveGroupParticipant(Guid groupId, Guid requestId)
     {

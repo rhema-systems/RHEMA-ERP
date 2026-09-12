@@ -1,7 +1,9 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +11,8 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/geofence-zones")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[GeofenceBusinessRules] // polygon parse errors reach the register with their reason
 public class GeofenceZonesController : AttendanceControllerBase
 {
     private readonly IGeofenceZoneService _service;
@@ -45,6 +48,7 @@ public class GeofenceZonesController : AttendanceControllerBase
         => Ok(await _service.GetByLocationIdAsync(locationId, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<GeofenceZoneDto>> Create(
         [FromBody] CreateGeofenceZoneDto dto, CancellationToken ct = default)
     {
@@ -56,6 +60,7 @@ public class GeofenceZonesController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<GeofenceZoneDto>> Update(
         Guid id, [FromBody] UpdateGeofenceZoneDto dto, CancellationToken ct = default)
     {
@@ -67,6 +72,7 @@ public class GeofenceZonesController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Search, Package, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type ProcurementBudgetDto, type ProcurementBudgetDetailDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
@@ -33,7 +35,6 @@ const createEmptyItemForm = (): CreateProcurementPlanItemDto => ({
   requiredDate: '',
   plannedQuarter: '',
   justification: '',
-  procurementMethod: 'DirectPurchase',
   notes: '',
   itemSuppliers: [],
 });
@@ -124,6 +125,8 @@ export default function EditProcurementPlanPage() {
   const [addItemDialogOpen, setAddItemDialogOpen] = useState(false);
   const [addingItem, setAddingItem] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<ProcurementPlanItemDto | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [itemForm, setItemForm] = useState<CreateProcurementPlanItemDto>(createEmptyItemForm);
   const [newItemForm, setNewItemForm] = useState<CreateProcurementPlanItemDto>(createEmptyItemForm);
   const [pendingPlanItems, setPendingPlanItems] = useState<CreateProcurementPlanItemDto[]>([]);
@@ -398,7 +401,7 @@ export default function EditProcurementPlanPage() {
       requiredDate: item.requiredDate ? item.requiredDate.split('T')[0] : '',
       plannedQuarter: item.plannedQuarter || '',
       justification: item.justification || '',
-      procurementMethod: item.procurementMethod || 'DirectPurchase',
+      procurementMethod: item.procurementMethod || undefined,
       notes: item.notes || '',
       itemSuppliers: existingSuppliers,
     });
@@ -670,22 +673,41 @@ export default function EditProcurementPlanPage() {
     }
   };
 
-  const handleDeleteItem = async (itemId: string) => {
-    if (!confirm('Are you sure you want to delete this item?')) return;
+  const handleDeleteItem = (itemId: string) => {
+    const item = plan?.items.find((entry) => entry.id === itemId);
+    if (!item || deletingItemId) return;
+    setDeleteError(null);
+    setItemToDelete(item);
+  };
 
+  const confirmDeleteItem = async () => {
+    if (!itemToDelete || deletingItemId) return false;
+    const itemId = itemToDelete.id;
     try {
       setDeletingItemId(itemId);
+      setDeleteError(null);
       await procurementPlanService.removeItem(planId, itemId);
-      toast.success('Item deleted successfully');
-      // Refresh plan data
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete item';
+      setDeleteError(message);
+      toast.error(message);
+      setDeletingItemId(null);
+      return false;
+    }
+
+    // The deletion is committed. A refresh failure must not offer deletion again.
+    setItemToDelete(null);
+    setPlan((current) => current ? { ...current, items: current.items.filter((item) => item.id !== itemId) } : current);
+    toast.success('Item deleted successfully');
+    try {
       const updatedPlan = await procurementPlanService.getPlanById(planId);
       setPlan(updatedPlan);
-    } catch (error) {
-      console.error('Error deleting item:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to delete item');
+    } catch {
+      toast.error('Item deleted, but the plan could not be refreshed. Reload the page before continuing.');
     } finally {
       setDeletingItemId(null);
     }
+    return true;
   };
 
   const inventorySearchQuery = inventorySearchTerm.trim().toLowerCase();
@@ -1301,23 +1323,6 @@ export default function EditProcurementPlanPage() {
                         <SelectItem value="Q2">Q2</SelectItem>
                         <SelectItem value="Q3">Q3</SelectItem>
                         <SelectItem value="Q4">Q4</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="procurementMethod">Method</Label>
-                    <Select
-                      value={newItemForm.procurementMethod || 'DirectPurchase'}
-                      onValueChange={(value) => setNewItemForm({ ...newItemForm, procurementMethod: value })}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DirectPurchase">Direct Purchase</SelectItem>
-                        <SelectItem value="RFQ">RFQ</SelectItem>
-                        <SelectItem value="Tender">Tender</SelectItem>
-                        <SelectItem value="Framework">Framework</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1999,6 +2004,23 @@ export default function EditProcurementPlanPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmationDialog
+        open={itemToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingItemId) {
+            setItemToDelete(null);
+            setDeleteError(null);
+          }
+        }}
+        title="Delete procurement plan item?"
+        description={`Remove "${itemToDelete?.itemDescription || ''}" from this draft plan? Other plan items will not be changed.`}
+        confirmText="Delete item"
+        variant="destructive"
+        onConfirm={confirmDeleteItem}
+        isLoading={Boolean(deletingItemId)}
+      >
+        {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+      </ConfirmationDialog>
     </div>
   );
 }

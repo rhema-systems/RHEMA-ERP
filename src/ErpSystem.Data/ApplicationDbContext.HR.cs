@@ -1,4 +1,4 @@
-// <auto-ported> HR module — EF Core configuration.
+﻿// <auto-ported> HR module — EF Core configuration.
 //
 // This partial holds ALL HR DbSets and HR Fluent configuration for the HR module ported from the
 // standalone HRApi solution. It is deliberately kept OUT of ApplicationDbContext.cs so that the
@@ -27,9 +27,14 @@ using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.Orientation;
+using ErpSystem.Core.Entities.HR.Announcements;
+using ErpSystem.Core.Entities.HR.Letters;
+using ErpSystem.Core.Entities.HR.Policies;
+using ErpSystem.Core.Entities.HR.ProfileChanges;
 using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
+using ErpSystem.Core.Entities.HR.StaffGrievance;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
@@ -89,7 +94,7 @@ public partial class ApplicationDbContext
     public DbSet<ConsultantTimesheet> ConsultantTimesheets { get; set; } = null!;
     public DbSet<ConsultantTimesheetEntry> ConsultantTimesheetEntries { get; set; } = null!;
     public DbSet<ClientTimesheetConfirmation> ClientTimesheetConfirmations { get; set; } = null!;
-    public DbSet<ConsultantClientPortalAccount> ConsultantClientPortalAccounts { get; set; } = null!;
+    public DbSet<ConsultantClientContact> ConsultantClientContacts { get; set; } = null!;
     public DbSet<TimesheetInvoice> TimesheetInvoices { get; set; } = null!;
     public DbSet<TimesheetInvoiceLink> TimesheetInvoiceLinks { get; set; } = null!;
     public DbSet<LeaveTypeEligibility> LeaveTypeEligibilities { get; set; } = null!;
@@ -122,6 +127,7 @@ public partial class ApplicationDbContext
     public DbSet<GoalRequiredSkill> GoalRequiredSkills { get; set; } = null!;
     public DbSet<CompanyHrPolicySettings> CompanyHrPolicySettings { get; set; } = null!;
     public DbSet<CompanyProfile> CompanyProfiles { get; set; } = null!;
+    public DbSet<CompanySealAsset> CompanySealAssets { get; set; } = null!;
     public DbSet<CheckIn> CheckIns { get; set; } = null!;
     public DbSet<CheckInGoalUpdate> CheckInGoalUpdates { get; set; } = null!;
     public DbSet<CheckInObjectiveLink> CheckInObjectiveLinks { get; set; } = null!;
@@ -157,10 +163,15 @@ public partial class ApplicationDbContext
     public DbSet<AssetAssignment> AssetAssignments { get; set; } = null!;
     public DbSet<AssetMaintenance> AssetMaintenances { get; set; } = null!;
     public DbSet<AssetRequisition> AssetRequisitions { get; set; } = null!;
+    public DbSet<AssetSurcharge> AssetSurcharges { get; set; } = null!;
+    public DbSet<AssetSurchargeRecovery> AssetSurchargeRecoveries { get; set; } = null!;
     public DbSet<AwardType> AwardTypes { get; set; } = null!;
     public DbSet<AwardLevel> AwardLevels { get; set; } = null!;
     public DbSet<AwardTypeTarget> AwardTypeTargets { get; set; } = null!;
     public DbSet<AwardBudget> AwardBudgets { get; set; } = null!;
+    public DbSet<AwardCycle> AwardCycles { get; set; } = null!;
+    public DbSet<AwardVote> AwardVotes { get; set; } = null!;
+    public DbSet<LongServiceMilestone> LongServiceMilestones { get; set; } = null!;
     public DbSet<EmployeeAward> EmployeeAwards { get; set; } = null!;
     public DbSet<TeamAwardRecipient> TeamAwardRecipients { get; set; } = null!;
     public DbSet<AwardAttachment> AwardAttachments { get; set; } = null!;
@@ -234,6 +245,8 @@ public partial class ApplicationDbContext
     public DbSet<StaffMovementStatusHistory> StaffMovementStatusHistories { get; set; } = null!;
     public DbSet<StaffMovementAttachment> StaffMovementAttachments { get; set; } = null!;
     public DbSet<StaffMovementChecklistItem> StaffMovementChecklistItems { get; set; } = null!;
+    public DbSet<StaffMovementReminderRun> StaffMovementReminderRuns { get; set; } = null!;
+    public DbSet<StaffMovementReminderDispatchLog> StaffMovementReminderDispatchLogs { get; set; } = null!;
     public DbSet<StaffPromotion> StaffPromotions { get; set; } = null!;
     public DbSet<StaffTransfer> StaffTransfers { get; set; } = null!;
     public DbSet<StaffDemotion> StaffDemotions { get; set; } = null!;
@@ -250,7 +263,6 @@ public partial class ApplicationDbContext
     public DbSet<RecruitmentPipeline> RecruitmentPipelines { get; set; } = null!;
     public DbSet<RecruitmentPipelineStage> RecruitmentPipelineStages { get; set; } = null!;
     public DbSet<JobShortlistingCriteria> JobShortlistingCriterias { get; set; } = null!;
-    public DbSet<CandidatePortalAccount> CandidatePortalAccounts { get; set; } = null!;
     public DbSet<JobCandidate> JobCandidates { get; set; } = null!;
     public DbSet<JobCandidateQualification> JobCandidateQualifications { get; set; } = null!;
     public DbSet<JobCandidateWorkHistory> JobCandidateWorkHistories { get; set; } = null!;
@@ -302,6 +314,39 @@ public partial class ApplicationDbContext
     public DbSet<OnboardingTask> OnboardingTasks { get; set; } = null!;
     public DbSet<OnboardingTaskComment> OnboardingTaskComments { get; set; } = null!;
     public DbSet<OnboardingAsset> OnboardingAssets { get; set; } = null!;
+    /// <summary>
+    /// The exit register (area 9b) — one row per employee leaving, by any route. See
+    /// <see cref="EmployeeSeparation"/> for why the disciplinary route writes here too.
+    /// </summary>
+    public DbSet<EmployeeSeparation> EmployeeSeparations { get; set; } = null!;
+
+    /// <summary>Files attached to a separation, all through the controlled-upload gate.</summary>
+    public DbSet<EmployeeSeparationDocument> EmployeeSeparationDocuments { get; set; } = null!;
+
+    /// <summary>The tenant's clearance form — the catalogue every checklist is built from (FR-HR-183).</summary>
+    public DbSet<SeparationClearanceTemplate> SeparationClearanceTemplates { get; set; } = null!;
+
+    /// <summary>One line of one employee's clearance form.</summary>
+    public DbSet<SeparationClearanceItem> SeparationClearanceItems { get; set; } = null!;
+
+    /// <summary>What the leaver said on the way out. One per separation.</summary>
+    public DbSet<SeparationExitInterview> SeparationExitInterviews { get; set; } = null!;
+
+    /// <summary>One pass of the separation reminder sweep (FR-HR-111).</summary>
+    public DbSet<SeparationReminderRun> SeparationReminderRuns { get; set; } = null!;
+
+    /// <summary>Lane 3b — the identification-expiry sweep, the sixth area to carry its own pair.</summary>
+    public DbSet<IdentificationExpiryReminderRun> IdentificationExpiryReminderRuns { get; set; } = null!;
+    public DbSet<IdentificationExpiryDispatchLog> IdentificationExpiryDispatchLogs { get; set; } = null!;
+
+    /// <summary>One reminder the sweep raised, with the key that stops it repeating.</summary>
+    public DbSet<SeparationReminderDispatchLog> SeparationReminderDispatchLogs { get; set; } = null!;
+
+    /// <summary>What a leaver is owed and owes back (FR-HR-184). One per separation.</summary>
+    public DbSet<SeparationSettlement> SeparationSettlements { get; set; } = null!;
+
+    /// <summary>One line of a final settlement.</summary>
+    public DbSet<SeparationSettlementLine> SeparationSettlementLines { get; set; } = null!;
     public DbSet<ProbationPeriod> ProbationPeriods { get; set; } = null!;
     public DbSet<ProbationReview> ProbationReviews { get; set; } = null!;
     public DbSet<ProbationExtension> ProbationExtensions { get; set; } = null!;
@@ -330,6 +375,78 @@ public partial class ApplicationDbContext
     public DbSet<StaffDisciplineCorrectiveAction> StaffDisciplineCorrectiveActions { get; set; } = null!;
     public DbSet<StaffDisciplineCorrectiveActionItem> StaffDisciplineCorrectiveActionItems { get; set; } = null!;
     public DbSet<StaffDisciplineLegalReview> StaffDisciplineLegalReviews { get; set; } = null!;
+
+    // Area 9 slice 7 — FR-HR-181's grievance ladder. Deliberately separate from the disciplinary
+    // case: a grievance is raised BY an employee, a disciplinary case is raised ABOUT one, and
+    // conflating them would put the two under one set of read rules.
+    public DbSet<StaffGrievance> StaffGrievances { get; set; } = null!;
+    public DbSet<StaffGrievanceStep> StaffGrievanceSteps { get; set; } = null!;
+
+    // Area 9c slice 1 — everybody on an employee-relations case besides the primary party:
+    // respondent, representative, union official, witness, mediator. A party may be external
+    // (a union official or a lawyer), which is why it is not an Employee FK alone.
+    public DbSet<StaffGrievanceParty> StaffGrievanceParties { get; set; } = null!;
+
+    // Area 9c slice 2 — FR-HR-181 obligations 7 and 8, which had no field anywhere before:
+    // the investigation report, and the resolution decision as an artefact distinct from
+    // whatever the last responder happened to type.
+    public DbSet<StaffGrievanceInvestigation> StaffGrievanceInvestigations { get; set; } = null!;
+    public DbSet<StaffGrievanceResolution> StaffGrievanceResolutions { get; set; } = null!;
+
+    // Area 9c slice 3 — the case's paperwork, including FR-HR-181 obligation 9's final signed
+    // agreement. Everything here goes through the controlled upload gate; nothing on this table
+    // ever accepts a caller-supplied file path.
+    public DbSet<StaffGrievanceDocument> StaffGrievanceDocuments { get; set; } = null!;
+
+    // Area 9c slice 4 — case conferences, mediations and FR-HR-181 obligation 6's union
+    // consultations, and who was asked to each. One typed entity rather than three tables.
+    public DbSet<StaffGrievanceConference> StaffGrievanceConferences { get; set; } = null!;
+    public DbSet<StaffGrievanceConferenceAttendee> StaffGrievanceConferenceAttendees { get; set; } = null!;
+
+    // Area 9c slice 5 — FR-HR-084's responder matrix: who answers which rung, for which unit.
+    // Maintained by HR rather than derived from ManagerId/HeadEmployeeId, which are populated for
+    // 5.8% and 2-of-48 respectively (measured 2026-08-27).
+    public DbSet<EmployeeRelationsResponder> EmployeeRelationsResponders { get; set; } = null!;
+
+    // Area 9c slice 6 — anonymous / whistleblower intake. ⚠ The one store in the module that must
+    // not know who wrote it: no employee FK on the concern, and nothing sets CreatedBy on it or on
+    // a reporter's message.
+    public DbSet<EmployeeRelationsConcern> EmployeeRelationsConcerns { get; set; } = null!;
+    public DbSet<EmployeeRelationsConcernUpdate> EmployeeRelationsConcernUpdates { get; set; } = null!;
+
+    // Area 25 slice 12 — personal-data change requests (decision D6). The employee edits
+    // low-risk contact fields directly; identity- and payment-bearing fields arrive here for
+    // an HR officer to approve, and approval applies them.
+    public DbSet<EmployeeProfileChangeRequest> EmployeeProfileChangeRequests { get; set; } = null!;
+    public DbSet<EmployeeProfileChangeItem> EmployeeProfileChangeItems { get; set; } = null!;
+
+    // Area 25 slice 12b — letters an employee asks HR for. HR fulfils either by issuing a
+    // generated letter (frozen on the row) or by uploading a signed scan.
+    public DbSet<HrLetterRequest> HrLetterRequests { get; set; } = null!;
+
+    // Area 25 slice 12c — staff announcements and who each one is aimed at.
+    public DbSet<HrAnnouncement> HrAnnouncements { get; set; } = null!;
+    public DbSet<HrAnnouncementAudience> HrAnnouncementAudiences { get; set; } = null!;
+
+    // Area 25 slice 12d — the staff policy library and the acknowledgements it collects.
+    public DbSet<HrPolicyDocument> HrPolicyDocuments { get; set; } = null!;
+    public DbSet<HrPolicyAudience> HrPolicyAudiences { get; set; } = null!;
+    public DbSet<HrPolicyAcknowledgement> HrPolicyAcknowledgements { get; set; } = null!;
+
+    // Area 9 slice 8 — the discipline reminder sweep. Covers both halves of the area, which is why
+    // it sits with the grievance sets rather than the disciplinary ones.
+    public DbSet<DisciplineReminderRun> DisciplineReminderRuns { get; set; } = null!;
+    public DbSet<DisciplineReminderDispatchLog> DisciplineReminderDispatchLogs { get; set; } = null!;
+    public DbSet<EmployeeOathOfSecrecy> EmployeeOathsOfSecrecy { get; set; } = null!;
+
+    // Employee document file — the vocabulary, the documents themselves, and what each position
+    // requires its holder to have (finish plan, lane 3c).
+    public DbSet<EmployeeDocumentType> EmployeeDocumentTypes { get; set; } = null!;
+    public DbSet<EmployeeDocument> EmployeeDocuments { get; set; } = null!;
+    public DbSet<PositionDocumentRequirement> PositionDocumentRequirements { get; set; } = null!;
+    public DbSet<ProbationConfirmingAuthority> ProbationConfirmingAuthorities { get; set; } = null!;
+    public DbSet<ProbationReminderRun> ProbationReminderRuns { get; set; } = null!;
+    public DbSet<ProbationReminderDispatchLog> ProbationReminderDispatchLogs { get; set; } = null!;
     public DbSet<SheIncidentType> SheIncidentTypes { get; set; } = null!;
     public DbSet<SheIncidentTypeCorrectiveAction> SheIncidentTypeCorrectiveActions { get; set; } = null!;
     public DbSet<SheInjuryType> SheInjuryTypes { get; set; } = null!;
@@ -402,6 +519,22 @@ public partial class ApplicationDbContext
     public DbSet<SheReturnToWorkPlan> SheReturnToWorkPlans { get; set; } = null!;
     public DbSet<SheReturnToWorkPhase> SheReturnToWorkPhases { get; set; } = null!;
     public DbSet<SheReturnToWorkReview> SheReturnToWorkReviews { get; set; } = null!;
+    public DbSet<SheReminderRun> SheReminderRuns { get; set; } = null!;
+    public DbSet<SheReminderDispatchLog> SheReminderDispatchLogs { get; set; } = null!;
+    public DbSet<SheAudit> SheAudits { get; set; } = null!;
+    public DbSet<SheAuditTeamMember> SheAuditTeamMembers { get; set; } = null!;
+    public DbSet<SheAuditFinding> SheAuditFindings { get; set; } = null!;
+    public DbSet<SheAuditFindingAction> SheAuditFindingActions { get; set; } = null!;
+    public DbSet<SheStopWorkOrder> SheStopWorkOrders { get; set; } = null!;
+    public DbSet<SheStatutoryIncidentSubmission> SheStatutoryIncidentSubmissions { get; set; } = null!;
+    public DbSet<SheControlledDocument> SheControlledDocuments { get; set; } = null!;
+    public DbSet<SheEnvironmentalPermit> SheEnvironmentalPermits { get; set; } = null!;
+    public DbSet<SheEnvironmentalMonitoringSchedule> SheEnvironmentalMonitoringSchedules { get; set; } = null!;
+    public DbSet<SheRegulatoryUpdate> SheRegulatoryUpdates { get; set; } = null!;
+    public DbSet<SheSustainabilityInitiative> SheSustainabilityInitiatives { get; set; } = null!;
+    public DbSet<SheEnvironmentalReview> SheEnvironmentalReviews { get; set; } = null!;
+    public DbSet<SheEnvironmentalReviewAction> SheEnvironmentalReviewActions { get; set; } = null!;
+    public DbSet<SheMonthlyEnvironmentalReport> SheMonthlyEnvironmentalReports { get; set; } = null!;
     public DbSet<SuccessionPlan> SuccessionPlans { get; set; } = null!;
     public DbSet<SuccessionCompetencyRequirement> SuccessionCompetencyRequirements { get; set; } = null!;
     public DbSet<SuccessionCandidate> SuccessionCandidates { get; set; } = null!;
@@ -480,13 +613,15 @@ public partial class ApplicationDbContext
     public DbSet<StaffGroupTravel> StaffGroupTravels { get; set; } = null!;
     public DbSet<StaffTravelRequestComment> StaffTravelRequestComments { get; set; } = null!;
     public DbSet<StaffTravelRequestAttachment> StaffTravelRequestAttachments { get; set; } = null!;
+    public DbSet<StaffTravelReminderRun> StaffTravelReminderRuns { get; set; } = null!;
+    public DbSet<StaffTravelReminderDispatchLog> StaffTravelReminderDispatchLogs { get; set; } = null!;
+
+    // ---- Asset reminder engine (area 16 slice 9, AST-1) ----
+    public DbSet<AssetReminderRun> AssetReminderRuns { get; set; } = null!;
+    public DbSet<AssetReminderDispatchLog> AssetReminderDispatchLogs { get; set; } = null!;
     public DbSet<StaffTravelItinerary> StaffTravelItineraries { get; set; } = null!;
     public DbSet<StaffTravelItineraryLeg> StaffTravelItineraryLegs { get; set; } = null!;
     public DbSet<StaffTravelItineraryActivity> StaffTravelItineraryActivities { get; set; } = null!;
-    public DbSet<StaffTravelApprovalWorkflowTemplate> StaffTravelApprovalWorkflowTemplates { get; set; } = null!;
-    public DbSet<StaffTravelApprovalWorkflowStep> StaffTravelApprovalWorkflowSteps { get; set; } = null!;
-    public DbSet<StaffTravelApprovalInstance> StaffTravelApprovalInstances { get; set; } = null!;
-    public DbSet<StaffTravelApprovalDecision> StaffTravelApprovalDecisions { get; set; } = null!;
     public DbSet<StaffTravelFlightBooking> StaffTravelFlightBookings { get; set; } = null!;
     public DbSet<StaffTravelFlightSegment> StaffTravelFlightSegments { get; set; } = null!;
     public DbSet<StaffTravelHotelBooking> StaffTravelHotelBookings { get; set; } = null!;
@@ -500,7 +635,6 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelPolicy> StaffTravelPolicies { get; set; } = null!;
     public DbSet<StaffTravelPolicyRule> StaffTravelPolicyRules { get; set; } = null!;
     public DbSet<StaffTravelPolicyException> StaffTravelPolicyExceptions { get; set; } = null!;
-    public DbSet<StaffTravelVendor> StaffTravelVendors { get; set; } = null!;
     public DbSet<StaffTravelDocument> StaffTravelDocuments { get; set; } = null!;
     public DbSet<StaffTravelVisaRequirement> StaffTravelVisaRequirements { get; set; } = null!;
     public DbSet<StaffTravelVisaApplication> StaffTravelVisaApplications { get; set; } = null!;
@@ -509,8 +643,11 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelAlertNotification> StaffTravelAlertNotifications { get; set; } = null!;
     public DbSet<StaffTravelInsurancePolicy> StaffTravelInsurancePolicies { get; set; } = null!;
     public DbSet<StaffTravelHealthRequirement> StaffTravelHealthRequirements { get; set; } = null!;
-    public DbSet<StaffTravelCurrencyExchangeRate> StaffTravelCurrencyExchangeRates { get; set; } = null!;
     public DbSet<NumberSequence> NumberSequences { get; set; } = null!;
+
+    // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): the checked workbook and its rows.
+    public DbSet<EmployeeImportSession> EmployeeImportSessions { get; set; } = null!;
+    public DbSet<EmployeeImportRow> EmployeeImportRows { get; set; } = null!;
 
     #endregion
 
@@ -523,6 +660,41 @@ public partial class ApplicationDbContext
         ConfigureSuccessionPlanningEntities(builder);
         ConfigureStaffTravelEntities(builder);
         ConfigureHrDocumentIntake(builder);
+        ConfigureEmployeeImportEntities(builder);
+    }
+
+    /// <summary>The employee bulk-import session and its rows.</summary>
+    /// <remarks>
+    /// Indexes only towards the upload record and the DMS document (the same reasoning as
+    /// <see cref="ConfigureHrDocumentIntake"/>). The row → created employee link is a real FK with
+    /// Restrict, because the row is the audit trail of how that employee came to exist and must not
+    /// vanish with a session tidy-up; Session → Rows cascades, because rows mean nothing alone.
+    /// </remarks>
+    private void ConfigureEmployeeImportEntities(ModelBuilder builder)
+    {
+        builder.Entity<EmployeeImportSession>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.Reference }).IsUnique()
+                .HasDatabaseName("IX_EmployeeImportSession_Tenant_Reference");
+            entity.HasIndex(e => new { e.TenantId, e.Status });
+            entity.HasIndex(e => new { e.TenantId, e.FileHash });
+            entity.HasIndex(e => new { e.TenantId, e.SourceFileUploadRecordId });
+            entity.HasIndex(e => e.UploadedOn);
+        });
+
+        builder.Entity<EmployeeImportRow>(entity =>
+        {
+            entity.HasIndex(e => new { e.SessionId, e.RowNumber }).IsUnique()
+                .HasDatabaseName("IX_EmployeeImportRow_Session_RowNumber");
+            entity.HasIndex(e => new { e.SessionId, e.Outcome });
+            entity.HasIndex(e => e.CreatedEmployeeId);
+            entity.HasIndex(e => e.TargetEmployeeId);
+
+            entity.HasOne(e => e.Session).WithMany(s => s.Rows)
+                .HasForeignKey(e => e.SessionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.CreatedEmployee).WithMany()
+                .HasForeignKey(e => e.CreatedEmployeeId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     /// <summary>
@@ -562,6 +734,9 @@ public partial class ApplicationDbContext
             entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
 
         builder.Entity<EmployeeMedicalExamDocument>(entity =>
+            entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
+
+        builder.Entity<MedicalExpenseDocument>(entity =>
             entity.HasIndex(item => new { item.TenantId, item.FileUploadRecordId }));
 
         builder.Entity<JobOffer>(entity =>
@@ -724,8 +899,16 @@ private void ConfigureHREntities(ModelBuilder builder)
         // ============================================================================
         builder.Entity<Team>(entity =>
         {
+            // Filtered, and the filter is the whole point. `DeleteAsync` on this store is a SOFT
+            // delete, so without `WHERE IsDeleted = 0` a dissolved team keeps its code for ever:
+            // the service's own duplicate check reads through the soft-delete filter, sees nothing,
+            // approves the write, and SQL then rejects it with an opaque 500. That is exactly D-9
+            // (the reliever priority) and D-10 (the reissued associate number) from slice 0 — the
+            // same trap, third occurrence in this bundle. Whenever a store soft-deletes, every
+            // uniqueness claim over it is wrong until it is filtered.
             entity.HasIndex(e => new { e.TenantId, e.Code })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_Team_Tenant_Code");
 
             entity.HasIndex(e => e.OrganizationUnitId)
@@ -898,6 +1081,18 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(e => e.CountryId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Where this site stands, in the shared administrative-geography tree (phase 4 of
+            // docs/GEOGRAPHY-REFERENCE-DESIGN.md). Explicit .WithMany() with no inverse collection,
+            // for the same reason as Employee: GeoArea must not grow a navigation per consumer, and
+            // an unpaired navigation left to convention mints a shadow FK beside this column.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_Location_Tenant_GeoArea");
+
             // Employees collection
             entity.HasMany(e => e.Employees)
                 .WithOne(e => e.Location)
@@ -1030,8 +1225,10 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .IsUnique()
                 .HasDatabaseName("IX_Employee_Tenant_EmployeeNumber");
 
+            // Filtered since 2026-09-03: email is optional, and NULL must not count as a value.
             entity.HasIndex(e => new { e.TenantId, e.EmailAddress })
                 .IsUnique()
+                .HasFilter("[EmailAddress] IS NOT NULL")
                 .HasDatabaseName("IX_Employee_Tenant_EmailAddress");
 
             entity.HasIndex(e => e.DepartmentId);
@@ -1088,6 +1285,27 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(m => m.DirectReports)
                 .HasForeignKey(e => e.ManagerId)
                 .OnDelete(DeleteBehavior.NoAction); // Prevent cascading deletes
+
+            // Where the employee lives, in the shared administrative-geography tree (phase 2 of
+            // docs/GEOGRAPHY-REFERENCE-DESIGN.md).
+            //
+            // ⚠ Configured explicitly with .WithMany() and no inverse collection. GeoArea has no
+            // Employees navigation on purpose — every module will point at this tree, and a
+            // collection per consumer would turn a reference table into a hub — but an unpaired
+            // navigation left to convention mints a shadow FK (GeoAreaId1) beside this column.
+            //
+            // Restrict, not SetNull: deleting an area out from under the people who live in it must
+            // fail loudly. The service refuses it anyway with a message that points at end-dating;
+            // this is the backstop for anything that bypasses the service.
+            entity.HasOne(e => e.GeoArea)
+                .WithMany()
+                .HasForeignKey(e => e.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // "Everyone in the Ashanti Region" reads this, and it is the whole reporting argument
+            // for the column.
+            entity.HasIndex(e => new { e.TenantId, e.GeoAreaId })
+                .HasDatabaseName("IX_Employee_Tenant_GeoArea");
         });
 
         builder.Entity<EmployeeContact>(entity =>
@@ -1269,6 +1487,21 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(e => e.HomeCountryId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ExpatriateFamilyMember>(entity =>
+        {
+            entity.HasIndex(e => new { e.TenantId, e.ExpatriateAssignmentId });
+            // Ahead of the permit-expiry sweep that is owed: the only cross-assignment question
+            // anyone asks of this table is "whose permit lapses next".
+            entity.HasIndex(e => new { e.TenantId, e.ResidentPermitExpiryDate });
+
+            // Cascade, unlike most HR children: a family member exists only as part of a posting,
+            // and an assignment already cascades from the employee.
+            entity.HasOne(e => e.ExpatriateAssignment)
+                .WithMany(a => a.FamilyMembers)
+                .HasForeignKey(e => e.ExpatriateAssignmentId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configure Department entity
@@ -1962,6 +2195,16 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .IsUnique()
                 .HasDatabaseName("IX_EmployeeSkill_Tenant_Employee_Skill");
 
+            entity.HasIndex(e => e.CertifyingBodyId);
+
+            // ⚠ Paired EXPLICITLY with CertifyingBody.EmployeeSkills. An unpaired navigation makes
+            // EF mint a second shadow FK column (CertifyingBodyId1) beside the real one — the
+            // duplicate-shadow-FK defect this module has already had to clean out once.
+            entity.HasOne(e => e.CertifyingBodyRef)
+                .WithMany(b => b.EmployeeSkills)
+                .HasForeignKey(e => e.CertifyingBodyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(e => e.Employee)
                 .WithMany(e => e.Skills)
                 .HasForeignKey(e => e.EmployeeId)
@@ -1980,8 +2223,12 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.Property(c => c.CompetencyCategory).HasConversion<int>();
 
+            // ⚠ Filtered on IsDeleted, and it must stay that way: DeleteAsync is a soft delete,
+            // so an unfiltered unique index means a deleted competency's code can never be used
+            // again. See migration 20260819020000_FilterCompetencyUniqueIndexesOnIsDeleted.
             entity.HasIndex(c => new { c.TenantId, c.Code })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_Competency_Tenant_Code");
 
             entity.HasIndex(c => new { c.TenantId, c.Name })
@@ -2027,8 +2274,12 @@ private void ConfigureHREntities(ModelBuilder builder)
         // ============================================================================
         builder.Entity<PositionCompetency>(entity =>
         {
+            // ⚠ Filtered on IsDeleted. Beyond the general rule, BulkReplaceForPositionAsync
+            // soft-deletes the current set and inserts the new one in a single SaveChanges, which
+            // an unfiltered unique index rejects mid-transaction.
             entity.HasIndex(pc => new { pc.TenantId, pc.PositionId, pc.CompetencyId })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_PositionCompetency_Tenant_Position_Competency");
 
             entity.HasIndex(pc => pc.PositionId)
@@ -2053,8 +2304,11 @@ private void ConfigureHREntities(ModelBuilder builder)
         // ============================================================================
         builder.Entity<EmployeeCompetency>(entity =>
         {
+            // ⚠ Filtered on IsDeleted: unfiltered, deleting an assessment meant that employee
+            // could never be re-assessed on that competency.
             entity.HasIndex(ec => new { ec.TenantId, ec.EmployeeId, ec.CompetencyId })
                 .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
                 .HasDatabaseName("IX_EmployeeCompetency_Tenant_Employee_Competency");
 
             entity.HasIndex(ec => ec.EmployeeId)
@@ -2174,8 +2428,18 @@ private void ConfigureHREntities(ModelBuilder builder)
         builder.Entity<EmployeeReliever>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.EmployeeId });
-            // One reliever slot per (employee, priority).
-            entity.HasIndex(x => new { x.EmployeeId, x.Priority }).IsUnique();
+
+            // One reliever slot per (employee, priority) — among LIVE rows.
+            //
+            // ⚠ The filter is the fix for D-9, the fourth occurrence of one trap in the areas 19-23
+            // bundle. EmployeeRelievers soft-deletes, so without it a removed reliever held its
+            // priority slot for ever: EmployeeRelieverService's own duplicate check reads live rows,
+            // sees nothing, approves the write, and SQL then rejects it. Measured 2026-08-22 —
+            // deleting the priority-1 row and re-creating it answered **500**, with no body, in
+            // place of the sentence the service was written to give.
+            entity.HasIndex(x => new { x.EmployeeId, x.Priority })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
 
             entity.HasOne(x => x.Employee)
                 .WithMany()
@@ -3413,6 +3677,19 @@ private void ConfigureHREntities(ModelBuilder builder)
         // COMPANY HR POLICY SETTINGS
         // =====================================================
 
+        builder.Entity<CompanySealAsset>(entity =>
+        {
+            // Reading "the current seal" is the hot path — every generated letter does it — and it
+            // is always (tenant, kind, still open).
+            entity.HasIndex(x => new { x.TenantId, x.Kind, x.RetiredOn })
+                  .HasDatabaseName("IX_CompanySealAsset_Tenant_Kind_RetiredOn");
+
+            // ⚠ No unique index on "one open row per kind". The delete is soft, and a filtered
+            // unique index over soft-deleted rows is the defect this module has met nine times —
+            // most recently in lane 3b, where a withdrawal did not release the slot. The service
+            // closes the open row before inserting, and the suite asserts retire-then-re-add.
+        });
+
         builder.Entity<CompanyProfile>(entity =>
         {
             entity.Property(x => x.LegalName).HasMaxLength(200);
@@ -3434,6 +3711,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.CountryOfIncorporation)
                   .WithMany()
                   .HasForeignKey(x => x.CountryOfIncorporationId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            // Phase 4 of docs/GEOGRAPHY-REFERENCE-DESIGN.md — see the Location configuration for
+            // why this is spelled out rather than left to convention. No index: there is at most
+            // one profile per tenant, so nothing ever scans this column.
+            entity.HasOne(x => x.GeoArea)
+                  .WithMany()
+                  .HasForeignKey(x => x.GeoAreaId)
                   .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3463,21 +3748,60 @@ private void ConfigureHREntities(ModelBuilder builder)
                 DefaultProbationMonths         = 6,
                 DefaultResignationNoticeDays   = 30,
                 DefaultTerminationNoticeDays   = 30,
+                // FR-HR-092's only stated exception to the MD's signature. At or above this many
+                // days of unauthorised absence a termination is procedural and HR may approve it;
+                // 0 would put every termination back on the MD.
+                ProceduralAbsenceDays          = 10,
                 VacancyAlertLeadDays           = 90,
                 ReviewDueLeadDays              = 30,
                 ContractExpiryLeadDays         = 60,
                 ProbationEndLeadDays           = 30,
+                // Area 9c slice 7 — the employee-relations clocks.
+                //
+                // ⚠ These MUST be listed here. The seed is an ANONYMOUS TYPE, so EF matches it to
+                // the entity property by property: a new non-nullable property that is absent here
+                // does not silently take its C# default, it makes the whole DbContext unbuildable
+                // at design time — "the seed entity cannot be added because no value was provided
+                // for the required property". Every future non-nullable setting needs a line here.
+                //
+                // Five days is OUR assumption, not TDC's: FR-HR-181 names the escalation route and
+                // sets no time limit at any rung (open question §2, still unanswered). Three days
+                // for an untriaged concern because a whistleblower cannot chase their own report —
+                // asking about it is the act that would identify them.
+                GrievanceRungChaseDays         = 5,
+                ConcernTriageChaseDays         = 3,
+                GrievanceAgreementChaseDays    = 14,
                 RetirementCountdownLeadDays    = 365,
                 LongServiceMilestoneYears      = "5,10,15,20,25",
                 DefaultCurrencyCode            = "GHS",
                 FiscalYearStartMonth           = 1,
                 MinimumWorkingAge              = 18,
                 BudgetEnforcementMode          = ErpSystem.Core.Enums.BudgetEnforcementMode.Warn,
+                // ⚠ Stricter than the budget ladder on purpose: this only ever fires for a position
+                // whose establishment completed FR-HR-135's chain. See the entity for the reasoning.
+                EstablishmentEnforcementMode   = ErpSystem.Core.Enums.BudgetEnforcementMode.Block,
                 FitWeightPerformance           = 35,
                 FitWeightCompetency            = 30,
                 FitWeightPotential             = 20,
                 FitWeightTenure                = 15,
                 SuccessionPlanNumberPrefix     = "SP",
+                // Finish plan lane 2a — figures the code carried as constants because TDC has not
+                // answered them. Each value here is exactly what the constant was, so the seeded
+                // tenant behaves today as it did yesterday.
+                //
+                // ⚠ The warning above proved itself: omitting these made the DbContext unbuildable
+                // at design time, and `dotnet ef migrations add` failed naming the bool. Had EF
+                // instead taken the C# defaults, the seeded row would have carried
+                // WrittenQueryHours = 0 — every disciplinary case overdue the moment it was
+                // reported. The design-time failure is the cheaper outcome by far.
+                WrittenQueryHours              = 48,
+                QueryResponseWindowHours       = 72,
+                InvestigationDays              = 28,
+                DisciplineBacklogHorizonDays   = 90,
+                // ⚠ Moves money: monthly × 12 ÷ this. 365 calendar / 360 thirty-day / 264 working,
+                // a 38% spread on the same facts, and TDC has not chosen. See the entity.
+                SettlementDaysPerYear          = 365,
+                AttendanceRateIncludesApprovedLeave = true,
                 CreatedAt                      = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt                      = (DateTime?)null,
                 CreatedBy                      = "System",
@@ -4040,6 +4364,22 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.DisposalMethod).HasConversion<int>();
             entity.Property(x => x.PurchaseCost).HasColumnType("decimal(18,2)");
             entity.Property(x => x.InsuredValue).HasColumnType("decimal(18,2)");
+            // AST-9. Indexed because "what do we let to staff" is a register question in its own
+            // right, and slice 8's projection filters on it before anything else.
+            entity.Property(x => x.StandardRentalAmount).HasColumnType("decimal(18,2)");
+            entity.HasIndex(x => x.IsRentable);
+
+            // AST-11. The default matters: every asset that existed before this column did was
+            // created in HR, so HrCreated is the truthful description of it rather than a
+            // placeholder. Without the default those rows would read as source 0 — a value the
+            // enum does not define, which no screen could render and no rule could branch on.
+            entity.Property(x => x.Source).HasConversion<int>()
+                .HasDefaultValue(AssetSource.HrCreated);
+            entity.HasIndex(x => x.Source);
+
+            // AST-4. Indexed because the expiry sweep (slice 11) reads exactly this column, and an
+            // expiry date nothing ever queries is the kind of field that quietly stays null.
+            entity.HasIndex(x => x.InsuranceExpiryDate);
 
             entity.HasOne(x => x.AssetType)
                 .WithMany()
@@ -4050,6 +4390,43 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // The organisation unit an asset sits in. ⚠ This navigation existed on the entity and
+            // was mapped into CompanyAssetSummaryDto, but was configured nowhere, absent from the
+            // create and update DTOs, and absent from the read DTO — so `unitId` and `unitName` on
+            // every list row were permanently null. Defect D-i(b). Configured explicitly here so
+            // the pairing cannot fall back to a shadow FK.
+            entity.HasOne(x => x.Unit)
+                .WithMany()
+                .HasForeignKey(x => x.UnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.UnitId);
+
+            // AST-11 — the link into Finance's register. Nullable, Restrict, and paired explicitly
+            // with WithMany() so EF cannot mint a duplicate shadow FK beside it. The direction is
+            // new (HR -> Finance) but the shape is not: FixedAsset itself carries exactly this kind
+            // of nullable FK into Maintenance.
+            entity.HasOne(x => x.FixedAsset)
+                .WithMany()
+                .HasForeignKey(x => x.FixedAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Not unique, and deliberately so. A unique index would be the obvious choice — one HR
+            // entry per fixed asset — but every delete in this area is a SOFT delete, so a deleted
+            // link would hold its slot forever and re-linking the same fixed asset would fail with
+            // no way for a user to see why. The one-link rule is enforced in the service, where it
+            // can read IsDeleted and can explain itself. (Area 13 lost five faces to this exact
+            // trap.)
+            entity.HasIndex(x => x.FixedAssetId);
+
+            // Slice 9 — the link into the Maintenance module's register, deciding which engine owns
+            // this asset's servicing. Same shape as the Finance link above, paired explicitly with
+            // WithMany() for the same reason, and non-unique for the same soft-delete reason.
+            entity.HasOne(x => x.MaintenanceAsset)
+                .WithMany()
+                .HasForeignKey(x => x.MaintenanceAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.MaintenanceAssetId);
 
             entity.HasOne(x => x.CurrentAssignedTo)
                 .WithMany()
@@ -4123,6 +4500,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.Status).HasConversion<int>();
             entity.Property(x => x.RepairCost).HasColumnType("decimal(18,2)");
             entity.Property(x => x.ReplacementCost).HasColumnType("decimal(18,2)");
+            // Slice 8 — AST-10. Declared to payroll, deducted by payroll.
+            entity.Property(x => x.RentalAmount).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.BenefitInKindValue).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.RentalFrequency).HasConversion<int>();
+            entity.HasIndex(x => x.RentalEffectiveFrom);
 
             entity.HasOne(x => x.Asset)
                 .WithMany(x => x.AssignmentHistory)
@@ -4142,6 +4524,95 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.ReturnedTo)
                 .WithMany()
                 .HasForeignKey(x => x.ReturnedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // D-e. Paired explicitly with the requisition's collection so EF cannot mint a shadow
+            // FK beside it — the trap this module has already been bitten by.
+            entity.HasOne(x => x.Requisition)
+                .WithMany(x => x.FulfilledAssignments)
+                .HasForeignKey(x => x.RequisitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.RequisitionId);
+
+            // Slice 4. Configured EXPLICITLY rather than left to convention, for the same reason
+            // the requisition link above is: an unpaired navigation is how this module ended up
+            // with duplicate shadow FK columns before. `WithMany()` with no inverse is deliberate —
+            // a transfer produces at most one assignment and does not need a collection to say so.
+            entity.HasOne(x => x.Transfer)
+                .WithMany()
+                .HasForeignKey(x => x.TransferId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.TransferId);
+
+            // AST-5b. Explicit for the same reason as every other employee link on this entity.
+            entity.HasOne(x => x.TermsDocumentSentBy)
+                .WithMany()
+                .HasForeignKey(x => x.TermsDocumentSentById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Area 16 slice 7 — AST-3, the surcharge. Every employee link is configured EXPLICITLY,
+        // for the reason recorded on AssetAssignment above: an unpaired navigation is how this
+        // module ended up with duplicate shadow FK columns before.
+        builder.Entity<AssetSurcharge>(entity =>
+        {
+            entity.HasIndex(x => x.SurchargeNumber);
+            entity.HasIndex(x => x.AssignmentId);
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+
+            entity.Property(x => x.Reason).HasConversion<int>();
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.EmployeeResponse).HasConversion<int>();
+            entity.Property(x => x.RecoveryMethod).HasConversion<int>();
+            entity.Property(x => x.AssessedAmount).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.AmountRecovered).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.BasisRepairCost).HasColumnType("decimal(18,2)");
+            entity.Property(x => x.BasisReplacementCost).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(x => x.Assignment)
+                .WithMany()
+                .HasForeignKey(x => x.AssignmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RaisedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RaisedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ApprovedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.WaivedBy)
+                .WithMany()
+                .HasForeignKey(x => x.WaivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AssetSurchargeRecovery>(entity =>
+        {
+            entity.HasIndex(x => x.SurchargeId);
+            entity.HasIndex(x => x.RecoveredOn);
+
+            entity.Property(x => x.Method).HasConversion<int>();
+            entity.Property(x => x.Amount).HasColumnType("decimal(18,2)");
+
+            // Paired with the collection on purpose, so EF cannot mint a shadow FK beside it.
+            entity.HasOne(x => x.Surcharge)
+                .WithMany(x => x.Recoveries)
+                .HasForeignKey(x => x.SurchargeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -4208,10 +4679,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.FulfilledById)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            entity.HasOne(x => x.AssignedAsset)
+            // AST-6b. Indexed because "what has been requested for this employee" is a question the
+            // employee's own screen asks, and it is not the same question as "what did they raise".
+            entity.HasOne(x => x.BeneficiaryEmployee)
                 .WithMany()
-                .HasForeignKey(x => x.AssignedAssetId)
+                .HasForeignKey(x => x.BeneficiaryEmployeeId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.BeneficiaryEmployeeId);
         });
 
         builder.Entity<AssetTransfer>(entity =>
@@ -4276,6 +4750,26 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.MinMonetaryAmount).HasColumnType("decimal(18,2)");
             entity.Property(x => x.MaxMonetaryAmount).HasColumnType("decimal(18,2)");
 
+            // How a winner is arrived at (area 14, decision D-3). Defaults chosen so that a row
+            // written before these columns existed reads as the safest description of itself:
+            // open nomination decided by the committee — not a staff vote, which would imply a
+            // ballot that never happened.
+            entity.Property(x => x.NominationSource).HasConversion<int>()
+                .HasDefaultValue(AwardNominationSource.OpenNomination);
+            entity.Property(x => x.WinnerDecision).HasConversion<int>()
+                .HasDefaultValue(AwardWinnerDecision.CommitteeScore);
+
+            entity.HasIndex(x => x.NominationSource);
+            entity.HasIndex(x => x.WinnerDecision);
+
+            // False is both the CLR default and the intended value for every existing row: an award
+            // nobody classified should not silently permit self-nomination.
+            entity.Property(x => x.AllowSelfNomination).HasDefaultValue(false);
+            entity.Property(x => x.DisqualifyOnDisciplinaryRecord).HasDefaultValue(false);
+
+            // A score out of 100 to two places - the same shape the appraisal module stores.
+            entity.Property(x => x.MinPerformanceScore).HasColumnType("decimal(5,2)");
+
             entity.HasMany(x => x.Awards)
                 .WithOne(x => x.AwardType)
                 .HasForeignKey(x => x.AwardTypeId)
@@ -4299,6 +4793,82 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasMany(x => x.Nominations)
                 .WithOne(x => x.AwardType)
                 .HasForeignKey(x => x.AwardTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AwardCycle>(entity =>
+        {
+            entity.HasIndex(x => x.AwardTypeId);
+            entity.HasIndex(x => x.CycleCode);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => new { x.AwardTypeId, x.Year, x.Quarter, x.Month });
+
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.AwardType)
+                .WithMany()
+                .HasForeignKey(x => x.AwardTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Nominations)
+                .WithOne(x => x.AwardCycle)
+                .HasForeignKey(x => x.AwardCycleId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<LongServiceMilestone>(entity =>
+        {
+            entity.HasIndex(x => x.AwardTypeId);
+
+            // One rung per number of years per award. Two rows both claiming "20 years" would make
+            // the sweep's choice of which to grant arbitrary.
+            entity.HasIndex(x => new { x.AwardTypeId, x.Years })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            entity.Property(x => x.MonetaryAmount).HasColumnType("decimal(18,2)");
+
+            entity.HasOne(x => x.AwardType)
+                .WithMany()
+                .HasForeignKey(x => x.AwardTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeAward>(entity =>
+        {
+            entity.HasIndex(x => x.AwardCycleId);
+
+            entity.HasOne(x => x.AwardCycle)
+                .WithMany()
+                .HasForeignKey(x => x.AwardCycleId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AwardVote>(entity =>
+        {
+            entity.HasIndex(x => x.AwardCycleId);
+            entity.HasIndex(x => x.AwardNominationId);
+
+            // One ballot per voter per cycle, enforced by the database rather than by a check the
+            // service could be refactored past. Filtered so a withdrawn ballot does not block a
+            // replacement.
+            entity.HasIndex(x => new { x.AwardCycleId, x.VoterId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            entity.HasOne(x => x.AwardCycle)
+                .WithMany()
+                .HasForeignKey(x => x.AwardCycleId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.AwardNomination)
+                .WithMany()
+                .HasForeignKey(x => x.AwardNominationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Voter)
+                .WithMany()
+                .HasForeignKey(x => x.VoterId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -4332,8 +4902,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.AwardTypeId);
             entity.HasIndex(x => x.TargetType);
             entity.HasIndex(x => x.TargetId);
+            entity.HasIndex(x => new { x.AwardTypeId, x.Purpose });
 
             entity.Property(x => x.TargetType).HasConversion<int>();
+
+            // Eligibility is the default so every target written before voting existed keeps the
+            // meaning it had: it scoped who could win, not who could vote.
+            entity.Property(x => x.Purpose).HasConversion<int>()
+                .HasDefaultValue(AwardTargetPurpose.Eligibility);
 
             entity.HasOne(x => x.AwardType)
                 .WithMany(x => x.Targets)
@@ -4633,9 +5209,9 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.BudgetAmount).HasColumnType("decimal(18,2)");
             entity.Property(x => x.ActualCost).HasColumnType("decimal(18,2)");
 
-            entity.HasOne(x => x.Station)
+            entity.HasOne(x => x.SiteLocation)
                 .WithMany()
-                .HasForeignKey(x => x.StationId)
+                .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.Organizer)
@@ -4752,14 +5328,14 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.RoomCode);
             entity.HasIndex(x => x.RoomName);
-            entity.HasIndex(x => x.StationId);
+            entity.HasIndex(x => x.LocationId);
             entity.HasIndex(x => x.IsActive);
 
             entity.Property(x => x.Type).HasConversion<int>();
 
-            entity.HasOne(x => x.Station)
+            entity.HasOne(x => x.SiteLocation)
                 .WithMany()
-                .HasForeignKey(x => x.StationId)
+                .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(x => x.Bookings)
@@ -4814,14 +5390,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.StartDate);
             entity.HasIndex(x => x.EndDate);
             entity.HasIndex(x => x.Type);
-            entity.HasIndex(x => x.StationId);
+            entity.HasIndex(x => x.LocationId);
             entity.HasIndex(x => x.DepartmentId);
 
             entity.Property(x => x.Type).HasConversion<int>();
 
-            entity.HasOne(x => x.Station)
+            entity.HasOne(x => x.SiteLocation)
                 .WithMany()
-                .HasForeignKey(x => x.StationId)
+                .HasForeignKey(x => x.LocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.Department)
@@ -5293,6 +5869,16 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(x => x.CountryId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Phase 4 of docs/GEOGRAPHY-REFERENCE-DESIGN.md — see the Location configuration for
+            // why this is spelled out rather than left to convention.
+            entity.HasOne(x => x.GeoArea)
+                .WithMany()
+                .HasForeignKey(x => x.GeoAreaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => new { x.TenantId, x.GeoAreaId })
+                .HasDatabaseName("IX_HealthcareFacility_Tenant_GeoArea");
 
             entity.HasOne(x => x.Bank)
                 .WithMany()
@@ -6812,6 +7398,19 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.CountryId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // One careers account owns at most one LIVE candidate profile. The filter carries
+            // IsDeleted = 0 deliberately — an unfiltered unique index over a soft delete is the
+            // defect this programme has now fixed eight times (a removed row keeps the slot and
+            // the re-link 500s naming nothing).
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.UserId)
+                .IsUnique()
+                .HasFilter("[UserId] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("IX_JobCandidate_UserId");
+
             entity.HasMany(x => x.Qualifications)
                 .WithOne(x => x.JobCandidate)
                 .HasForeignKey(x => x.JobCandidateId)
@@ -6996,9 +7595,23 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.ApplicationDate).HasDatabaseName("IX_JobApplication_Date");
             entity.HasIndex(x => new { x.TenantId, x.ApplicationNumber })
                 .IsUnique().HasDatabaseName("IX_JobApplication_Tenant_Number");
-            // One application per candidate per vacancy
+            // One LIVE application per candidate per vacancy.
+            //
+            // The filter is load-bearing (area 25 slice 13b). Unfiltered, this index said "one
+            // application ever", which contradicted the service: InternalApplyAsync's duplicate
+            // guard deliberately excludes Withdrawn, so re-applying after withdrawing was intended
+            // and was unreachable — the insert died on this index with a 2601 before the guard's
+            // intent could matter, surfacing as a 500. The same trap the succession area hit from
+            // the other direction: a soft delete does not release a unique index either, so
+            // IsDeleted is excluded here too.
+            //
+            // Withdrawn (13) is the only terminal state released. Rejected and Hired are NOT: a
+            // candidate the organisation turned down should not be able to re-apply to the same
+            // vacancy by pressing the button again, and a hired one has nothing left to apply for.
             entity.HasIndex(x => new { x.JobVacancyId, x.JobCandidateId })
-                .IsUnique().HasDatabaseName("IX_JobApplication_Vacancy_Candidate");
+                .IsUnique()
+                .HasFilter("[Status] <> 13 AND [IsDeleted] = 0")
+                .HasDatabaseName("IX_JobApplication_Vacancy_Candidate");
 
             entity.Property(x => x.Status).HasConversion<int>();
             entity.Property(x => x.Source).HasConversion<int>();
@@ -7856,6 +8469,270 @@ private void ConfigureHREntities(ModelBuilder builder)
         });
 
         // =====================================================
+        // HR SEPARATION, CLEARANCE & EXIT CONFIGURATION (area 9b)
+        // =====================================================
+
+        builder.Entity<EmployeeSeparation>(entity =>
+        {
+            // The number is unique per tenant, and the filter is not optional: DeleteAsync here is
+            // a soft delete, and a soft-deleted row still occupies an unfiltered unique index — the
+            // area-13 lesson, which cost five faces there before it was understood.
+            entity.HasIndex(x => new { x.TenantId, x.SeparationNumber })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_EmployeeSeparation_Tenant_Number");
+
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_EmployeeSeparation_EmployeeId");
+            entity.HasIndex(x => x.Status).HasDatabaseName("IX_EmployeeSeparation_Status");
+            entity.HasIndex(x => x.SeparationType).HasDatabaseName("IX_EmployeeSeparation_Type");
+            entity.HasIndex(x => x.EffectiveDate).HasDatabaseName("IX_EmployeeSeparation_EffectiveDate");
+            entity.HasIndex(x => x.DisciplinaryActionId).HasDatabaseName("IX_EmployeeSeparation_DisciplinaryActionId");
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.SeparationType).HasConversion<int>();
+            entity.Property(x => x.ReasonCategory).HasConversion<int>();
+
+            // All four employee navigations are configured explicitly. An unpaired navigation left
+            // to convention mints a duplicate shadow FK column (EmployeeId1, EmployeeId2, …) —
+            // see the HR sweep that removed a batch of those in 2026-08.
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.InitiatedBy)
+                .WithMany()
+                .HasForeignKey(x => x.InitiatedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ApprovedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ApprovedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.CancelledBy)
+                .WithMany()
+                .HasForeignKey(x => x.CancelledById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.SubmittedBy)
+                .WithMany()
+                .HasForeignKey(x => x.SubmittedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RejectedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RejectedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.NoticeDecidedBy)
+                .WithMany()
+                .HasForeignKey(x => x.NoticeDecidedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Documents)
+                .WithOne(x => x.Separation)
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationExitInterview>(entity =>
+        {
+            // One interview per separation. Filtered so a soft-deleted record does not block a
+            // replacement being taken.
+            entity.HasIndex(x => x.SeparationId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SeparationExitInterview_SeparationId");
+
+            entity.HasIndex(x => x.PrimaryReason).HasDatabaseName("IX_SeparationExitInterview_PrimaryReason");
+            entity.Property(x => x.PrimaryReason).HasConversion<int>();
+
+            entity.HasOne(x => x.Separation)
+                .WithMany()
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ConductedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ConductedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationReminderRun>(entity =>
+        {
+            entity.HasIndex(x => x.StartedAt).HasDatabaseName("IX_SeparationReminderRun_StartedAt");
+            entity.Property(x => x.Trigger).HasMaxLength(30);
+
+            entity.HasMany(x => x.DispatchLogs)
+                .WithOne(x => x.Run)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationReminderDispatchLog>(entity =>
+        {
+            entity.HasIndex(x => x.RunId).HasDatabaseName("IX_SeparationReminderDispatch_RunId");
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_SeparationReminderDispatch_EmployeeId");
+            entity.HasIndex(x => x.Kind).HasDatabaseName("IX_SeparationReminderDispatch_Kind");
+
+            // The dedupe key is looked up on every sweep, for every candidate — the one index that
+            // decides whether a daily pass over a whole workforce is cheap or not.
+            entity.HasIndex(x => new { x.TenantId, x.DedupeKey })
+                .HasDatabaseName("IX_SeparationReminderDispatch_Tenant_DedupeKey");
+
+            entity.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<IdentificationExpiryReminderRun>(entity =>
+        {
+            entity.HasIndex(x => x.StartedAt).HasDatabaseName("IX_IdentificationExpiryRun_StartedAt");
+            entity.HasIndex(x => new { x.TenantId, x.StartedAt })
+                .HasDatabaseName("IX_IdentificationExpiryRun_Tenant_StartedAt");
+        });
+
+        builder.Entity<IdentificationExpiryDispatchLog>(entity =>
+        {
+            entity.HasIndex(x => x.RunId).HasDatabaseName("IX_IdentificationExpiryDispatch_RunId");
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_IdentificationExpiryDispatch_EmployeeId");
+            entity.HasIndex(x => x.Kind).HasDatabaseName("IX_IdentificationExpiryDispatch_Kind");
+
+            // Looked up on every sweep for every candidate — the one index that decides whether a
+            // daily pass over a whole workforce is cheap.
+            entity.HasIndex(x => new { x.TenantId, x.DedupeKey })
+                .HasDatabaseName("IX_IdentificationExpiryDispatch_Tenant_DedupeKey");
+
+            entity.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationSettlement>(entity =>
+        {
+            // One settlement per separation. Filtered, so a soft-deleted draft does not block a
+            // replacement being prepared.
+            entity.HasIndex(x => x.SeparationId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SeparationSettlement_SeparationId");
+
+            entity.Property(x => x.CurrencyCode).HasMaxLength(3);
+
+            entity.HasOne(x => x.Separation)
+                .WithMany()
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.PreparedBy)
+                .WithMany()
+                .HasForeignKey(x => x.PreparedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.FinalisedBy)
+                .WithMany()
+                .HasForeignKey(x => x.FinalisedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.Property(x => x.ReviewOutcome).HasConversion<int>();
+
+            entity.HasOne(x => x.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ReviewedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany(x => x.Lines)
+                .WithOne(x => x.Settlement)
+                .HasForeignKey(x => x.SettlementId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationSettlementLine>(entity =>
+        {
+            entity.HasIndex(x => x.SettlementId).HasDatabaseName("IX_SeparationSettlementLine_SettlementId");
+            entity.HasIndex(x => x.Category).HasDatabaseName("IX_SeparationSettlementLine_Category");
+
+            entity.Property(x => x.Category).HasConversion<int>();
+            entity.Property(x => x.Computation).HasConversion<int>();
+
+            entity.HasOne(x => x.Settlement)
+                .WithMany(x => x.Lines)
+                .HasForeignKey(x => x.SettlementId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationClearanceTemplate>(entity =>
+        {
+            // One catalogue line per name per tenant. Filtered, because a soft-deleted row still
+            // occupies an unfiltered unique index.
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_SeparationClearanceTemplate_Tenant_Name");
+
+            entity.HasIndex(x => x.Kind).HasDatabaseName("IX_SeparationClearanceTemplate_Kind");
+            entity.HasIndex(x => x.IsActive).HasDatabaseName("IX_SeparationClearanceTemplate_IsActive");
+
+            entity.Property(x => x.Kind).HasConversion<int>();
+
+            entity.HasOne(x => x.OwningOrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OwningOrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<SeparationClearanceItem>(entity =>
+        {
+            entity.HasIndex(x => x.SeparationId).HasDatabaseName("IX_SeparationClearanceItem_SeparationId");
+            entity.HasIndex(x => x.Status).HasDatabaseName("IX_SeparationClearanceItem_Status");
+            entity.HasIndex(x => x.TemplateId).HasDatabaseName("IX_SeparationClearanceItem_TemplateId");
+
+            entity.Property(x => x.Kind).HasConversion<int>();
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.Separation)
+                .WithMany(x => x.ClearanceItems)
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OwningOrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OwningOrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeSeparationDocument>(entity =>
+        {
+            entity.HasIndex(x => x.SeparationId).HasDatabaseName("IX_EmployeeSeparationDocument_SeparationId");
+            entity.HasIndex(x => x.Category).HasDatabaseName("IX_EmployeeSeparationDocument_Category");
+
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            entity.HasOne(x => x.Separation)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.SeparationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // =====================================================
         // HR STAFF REQUISITION CONFIGURATION
         // =====================================================
 
@@ -8437,6 +9314,705 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        // ---- EmployeeProfileChangeRequest (area 25 slice 12, D6) ----
+        builder.Entity<EmployeeProfileChangeRequest>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.RequestNumber }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ReviewedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ReviewedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The targeted account may be replaced or retired later; the request must survive
+            // it, because the audit question is what was asked for at the time.
+            entity.HasOne(x => x.BankDetail)
+                .WithMany()
+                .HasForeignKey(x => x.BankDetailId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeProfileChangeItem ----
+        builder.Entity<EmployeeProfileChangeItem>(entity =>
+        {
+            entity.HasIndex(x => x.RequestId);
+            entity.HasIndex(x => x.Field);
+
+            entity.Property(x => x.Field).HasConversion<int>();
+
+            // Cascade: an item has no meaning apart from its request (the grievance-step rule).
+            entity.HasOne(x => x.Request)
+                .WithMany(x => x.Items)
+                .HasForeignKey(x => x.RequestId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- HrPolicyDocument (area 25 slice 12d, D7) ----
+        builder.Entity<HrPolicyDocument>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PolicyNumber }).IsUnique();
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.Category);
+            entity.HasIndex(x => new { x.TenantId, x.Status, x.EffectiveFrom });
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            entity.HasOne(x => x.PublishedBy)
+                .WithMany()
+                .HasForeignKey(x => x.PublishedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ArchivedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ArchivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // The version chain. Restrict, not cascade: deleting a superseded policy must not
+            // take its replacement — or its signatures — with it.
+            entity.HasOne(x => x.Supersedes)
+                .WithMany()
+                .HasForeignKey(x => x.SupersedesPolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- HrPolicyAudience ----
+        builder.Entity<HrPolicyAudience>(entity =>
+        {
+            entity.HasIndex(x => x.PolicyId);
+            entity.HasIndex(x => new { x.TargetType, x.TargetId });
+
+            entity.Property(x => x.TargetType).HasConversion<int>();
+
+            entity.HasOne(x => x.Policy)
+                .WithMany(x => x.Audiences)
+                .HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ No FK on TargetId — it points at one of five tables by TargetType. Same
+            // deliberate absence as the announcement audience.
+        });
+
+        // ---- HrPolicyAcknowledgement ----
+        builder.Entity<HrPolicyAcknowledgement>(entity =>
+        {
+            // One answer per person per policy. The unique index is the guard that makes a
+            // double-submit a database error rather than two contradictory signatures.
+            entity.HasIndex(x => new { x.TenantId, x.PolicyId, x.EmployeeId }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Outcome);
+
+            entity.Property(x => x.Outcome).HasConversion<int>();
+
+            // Cascade from the policy: an acknowledgement of a policy that no longer exists is
+            // not evidence of anything. (Which is also why a PUBLISHED policy is never deleted —
+            // the service refuses it; only an unsigned draft can go.)
+            entity.HasOne(x => x.Policy)
+                .WithMany(x => x.Acknowledgements)
+                .HasForeignKey(x => x.PolicyId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- HrAnnouncement (area 25 slice 12c, D7) ----
+        builder.Entity<HrAnnouncement>(entity =>
+        {
+            entity.HasIndex(x => x.TenantId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.Category);
+            // The portal's read filters on status and the date window together.
+            entity.HasIndex(x => new { x.TenantId, x.Status, x.ExpiresOn });
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            // Plain text, and unbounded: a staff notice is prose, and a MaxLength here would
+            // truncate the middle of something everyone is about to read.
+            entity.Property(x => x.Body).HasColumnType("nvarchar(max)");
+
+            entity.HasOne(x => x.PublishedBy)
+                .WithMany()
+                .HasForeignKey(x => x.PublishedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ArchivedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ArchivedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- HrAnnouncementAudience ----
+        builder.Entity<HrAnnouncementAudience>(entity =>
+        {
+            entity.HasIndex(x => x.AnnouncementId);
+            entity.HasIndex(x => new { x.TargetType, x.TargetId });
+
+            entity.Property(x => x.TargetType).HasConversion<int>();
+
+            // Cascade: an audience rule has no meaning apart from its announcement (the
+            // grievance-step rule).
+            entity.HasOne(x => x.Announcement)
+                .WithMany(x => x.Audiences)
+                .HasForeignKey(x => x.AnnouncementId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ No FK on TargetId, deliberately: it points at one of SIX different tables
+            // depending on TargetType, so there is no single relationship to declare. The
+            // service resolves and validates it; an orphaned target simply matches nobody,
+            // which is the safe failure for a broadcast.
+        });
+
+        // ---- HrLetterRequest (area 25 slice 12b, D7) ----
+        builder.Entity<HrLetterRequest>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.RequestNumber }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.LetterType);
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.LetterType).HasConversion<int>();
+
+            // The frozen letter: unbounded, because a letter body is prose and a MaxLength here
+            // would silently truncate the document somebody is about to hand to a bank.
+            entity.Property(x => x.IssuedDocumentHtml).HasColumnType("nvarchar(max)");
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.IssuedBy)
+                .WithMany()
+                .HasForeignKey(x => x.IssuedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievance (FR-HR-181) ----
+        builder.Entity<StaffGrievance>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.GrievanceNumber }).IsUnique();
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.CurrentLevel);
+            // Area 9c slice 1: the register's first filter, and the one every non-grievance case
+            // type is read through.
+            entity.HasIndex(x => new { x.TenantId, x.CaseType });
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.CurrentLevel).HasConversion<int>();
+            entity.Property(x => x.CaseType).HasConversion<int>()
+                .HasDefaultValue(EmployeeRelationsCaseType.Grievance);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 2 — the two attribution legs on the case itself.
+            entity.HasOne(x => x.HrInterpretationBy)
+                .WithMany()
+                .HasForeignKey(x => x.HrInterpretationById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ClosedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ClosedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 9 — cross-links to the records a case arose from.
+            //
+            // ⚠ Restrict on all three, and it is the point rather than a default: a case must not
+            // be deleted because the SHE desk retired an incident, and it must not silently lose
+            // its provenance either. Deleting a linked source is refused at the database, which is
+            // the only place that refusal cannot be forgotten.
+            //
+            // The indexes are FILTERED to non-null. Almost every case links to nothing, so an
+            // unfiltered index would be three index rows per case to serve a lookup that only ever
+            // asks for the rows that DO link.
+            entity.HasIndex(x => x.SafetyIncidentId).HasFilter("[SafetyIncidentId] IS NOT NULL");
+            entity.HasIndex(x => x.PerformanceImprovementPlanId).HasFilter("[PerformanceImprovementPlanId] IS NOT NULL");
+            entity.HasIndex(x => x.StaffDisciplinaryActionId).HasFilter("[StaffDisciplinaryActionId] IS NOT NULL");
+
+            entity.HasOne(x => x.SafetyIncident)
+                .WithMany()
+                .HasForeignKey(x => x.SafetyIncidentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.PerformanceImprovementPlan)
+                .WithMany()
+                .HasForeignKey(x => x.PerformanceImprovementPlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.StaffDisciplinaryAction)
+                .WithMany()
+                .HasForeignKey(x => x.StaffDisciplinaryActionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceInvestigation (area 9c slice 2, FR-HR-181 obligation 7) ----
+        builder.Entity<StaffGrievanceInvestigation>(entity =>
+        {
+            // One per case. Filtered on the soft delete so that removing one and opening another
+            // is possible later without the index refusing it — the area-13 lesson, where a soft
+            // delete did not release a unique index and five faces broke.
+            entity.HasIndex(x => x.GrievanceId).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(x => x.InvestigatorId);
+
+            entity.HasOne(x => x.Grievance)
+                .WithOne(x => x.Investigation!)
+                .HasForeignKey<StaffGrievanceInvestigation>(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Investigator)
+                .WithMany()
+                .HasForeignKey(x => x.InvestigatorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OpenedBy)
+                .WithMany()
+                .HasForeignKey(x => x.OpenedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceResolution (area 9c slice 2, FR-HR-181 obligation 8) ----
+        builder.Entity<StaffGrievanceResolution>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(x => x.Outcome);
+
+            entity.Property(x => x.Outcome).HasConversion<int>();
+            entity.Property(x => x.DecidedAtLevel).HasConversion<int>();
+
+            entity.HasOne(x => x.Grievance)
+                .WithOne(x => x.Resolution!)
+                .HasForeignKey<StaffGrievanceResolution>(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.DecidedBy)
+                .WithMany()
+                .HasForeignKey(x => x.DecidedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OutcomeRecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.OutcomeRecordedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 3 — who accepted the signed agreement.
+            entity.HasOne(x => x.AgreementAcceptedBy)
+                .WithMany()
+                .HasForeignKey(x => x.AgreementAcceptedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeRelationsConcern (area 9c slice 6, anonymous intake) ----
+        builder.Entity<EmployeeRelationsConcern>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ConcernNumber }).IsUnique();
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.Category);
+
+            entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.Category).HasConversion<int>();
+
+            // ⚠ There is deliberately NO employee foreign key on this entity, and none may be
+            // added. The reporter is not recorded anywhere — that is the feature, not an omission.
+            // The two legs below are HR's, because only the reporter is anonymous.
+            entity.HasOne(x => x.TriagedBy)
+                .WithMany()
+                .HasForeignKey(x => x.TriagedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ClosedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ClosedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ConvertedCase)
+                .WithMany()
+                .HasForeignKey(x => x.ConvertedCaseId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeRelationsConcernUpdate (area 9c slice 6) ----
+        builder.Entity<EmployeeRelationsConcernUpdate>(entity =>
+        {
+            entity.HasIndex(x => x.ConcernId);
+
+            entity.HasOne(x => x.Concern)
+                .WithMany(x => x.Updates)
+                .HasForeignKey(x => x.ConcernId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ Nullable, and null on every reporter message. IsFromReporter is the discriminator;
+            // the absence of an author must never be what identifies one.
+            entity.HasOne(x => x.Author)
+                .WithMany()
+                .HasForeignKey(x => x.AuthorEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- EmployeeRelationsResponder (area 9c slice 5, FR-HR-084) ----
+        builder.Entity<EmployeeRelationsResponder>(entity =>
+        {
+            // The resolution lookup's index: level + scope, which is exactly what ResolveAsync
+            // filters on.
+            entity.HasIndex(x => new { x.TenantId, x.Level, x.OrganizationUnitId });
+            entity.HasIndex(x => x.ResponderEmployeeId);
+
+            entity.Property(x => x.Level).HasConversion<int>();
+
+            // ⚠ NO unique index on (unit, level). A slot legitimately holds several rows over time
+            // — an acting arrangement while the usual responder is on leave is the case this table
+            // exists for. What must be refused is two rows in force on the SAME DAY, which is a
+            // temporal overlap no unique index can express; the service enforces it. Adding a
+            // unique index here would break acting cover, which is the feature.
+            entity.HasOne(x => x.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ResponderEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.ResponderEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceConference (area 9c slice 4, FR-HR-181 obligation 6) ----
+        builder.Entity<StaffGrievanceConference>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.ConferenceType);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.ScheduledFor);
+
+            entity.Property(x => x.ConferenceType).HasConversion<int>();
+            entity.Property(x => x.Status).HasConversion<int>();
+
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Conferences)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Chair)
+                .WithMany()
+                .HasForeignKey(x => x.ChairId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ConvenedBy)
+                .WithMany()
+                .HasForeignKey(x => x.ConvenedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Union)
+                .WithMany()
+                .HasForeignKey(x => x.UnionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceConferenceAttendee (area 9c slice 4) ----
+        builder.Entity<StaffGrievanceConferenceAttendee>(entity =>
+        {
+            entity.HasIndex(x => x.ConferenceId);
+            entity.HasIndex(x => x.EmployeeId);
+
+            entity.HasOne(x => x.Conference)
+                .WithMany(x => x.Attendees)
+                .HasForeignKey(x => x.ConferenceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceDocument (area 9c slice 3, FR-HR-181 obligation 9) ----
+        builder.Entity<StaffGrievanceDocument>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.Scope);
+            entity.HasIndex(x => x.StepId);
+            entity.HasIndex(x => x.ConferenceId);
+
+            entity.Property(x => x.Scope).HasConversion<int>();
+
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ⚠ Restrict, not Cascade, even though the step cascades from the case. Two cascade
+            // paths from StaffGrievances into this table — one direct, one through the step — is
+            // exactly what SQL Server refuses. Deleting a case still removes its documents by the
+            // direct leg.
+            entity.HasOne(x => x.Step)
+                .WithMany()
+                .HasForeignKey(x => x.StepId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Area 9c slice 4 — Restrict for the same reason as the step leg above: the conference
+            // already cascades from the case, so cascading here too would be a second path.
+            entity.HasOne(x => x.Conference)
+                .WithMany()
+                .HasForeignKey(x => x.ConferenceId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceParty (area 9c slice 1) ----
+        builder.Entity<StaffGrievanceParty>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.EmployeeId);
+            entity.HasIndex(x => x.Role);
+
+            entity.Property(x => x.Role).HasConversion<int>();
+
+            // Cascade from the case, as the step does: a party has no meaning apart from the case
+            // it is a party TO.
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Parties)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Restrict on every Employee leg — an employee is never deleted out from under a case
+            // file, and three separate legs to the same table mean cascade paths SQL Server refuses.
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RepresentsEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.RepresentsEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.AddedBy)
+                .WithMany()
+                .HasForeignKey(x => x.AddedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Union)
+                .WithMany()
+                .HasForeignKey(x => x.UnionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- StaffGrievanceStep ----
+        builder.Entity<StaffGrievanceStep>(entity =>
+        {
+            entity.HasIndex(x => x.GrievanceId);
+            entity.HasIndex(x => x.AssignedToId);
+            entity.HasIndex(x => x.Outcome);
+
+            entity.Property(x => x.Level).HasConversion<int>();
+            entity.Property(x => x.Outcome).HasConversion<int>();
+
+            // Cascade from the grievance is deliberate here, unlike the Restrict used across the
+            // disciplinary case: a step has no meaning apart from its grievance, whereas a
+            // disciplinary sub-entity is a record in its own right that must survive.
+            entity.HasOne(x => x.Grievance)
+                .WithMany(x => x.Steps)
+                .HasForeignKey(x => x.GrievanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.AssignedTo)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.RespondedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RespondedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- Discipline reminder engine (area 9 slice 8) ----
+        builder.Entity<DisciplineReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<DisciplineReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Oath of secrecy (area 15b slice 9, FR-HR-030) ----
+        builder.Entity<EmployeeDocumentType>(e =>
+        {
+            // One name per tenant, filtered so a retired type's name can be reused.
+            e.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_EmployeeDocumentTypes_Tenant_Name");
+        });
+
+        builder.Entity<EmployeeDocument>(e =>
+        {
+            // The two reads this table serves: an employee's file, and "who holds this type".
+            e.HasIndex(x => new { x.TenantId, x.EmployeeId, x.DocumentTypeId });
+            // The expiry sweep's index, ahead of the sweep — a chase list ordered by expiry is the
+            // only way this table is ever scanned across employees.
+            e.HasIndex(x => new { x.TenantId, x.ExpiresOn });
+
+            e.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.DocumentType)
+                .WithMany(t => t.Documents)
+                .HasForeignKey(x => x.DocumentTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ⚠ Paired explicitly. An unpaired navigation mints a duplicate shadow FK (Id1) —
+            // the shape this module fixed across HR in 2026-08.
+            e.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<PositionDocumentRequirement>(e =>
+        {
+            // ⚠ FILTERED unique index, and the service revives rather than re-inserts. A soft
+            // delete does not release a unique index — met nine times in this module — so an
+            // unfiltered one would make a removed requirement permanently un-re-addable.
+            e.HasIndex(x => new { x.TenantId, x.PositionId, x.DocumentTypeId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_PositionDocumentRequirements_Position_Type");
+
+            e.HasOne(x => x.Position)
+                .WithMany()
+                .HasForeignKey(x => x.PositionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.DocumentType)
+                .WithMany()
+                .HasForeignKey(x => x.DocumentTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<EmployeeOathOfSecrecy>(e =>
+        {
+            // No unique index on the employee: a rehire swears again, so several per employee is
+            // normal and the current one is the latest by SwornOn.
+            e.HasIndex(x => new { x.TenantId, x.EmployeeId, x.SwornOn });
+
+            e.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.WitnessedBy)
+                .WithMany()
+                .HasForeignKey(x => x.WitnessedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.RecordedBy)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- Probation confirming authority (area 15b slice 8a, decision D-2) ----
+        builder.Entity<ProbationConfirmingAuthority>(e =>
+        {
+            // One rule per (unit, level) slot. ⚠ The filter MUST include IsDeleted: a soft delete
+            // does not release a unique index, so without it one deleted rule would hold a slot no
+            // live rule could ever occupy — the defect that cost area 13 five separate faces.
+            e.HasIndex(x => new { x.TenantId, x.OrganizationUnitId, x.StaffLevelId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            e.HasOne(x => x.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.StaffLevel)
+                .WithMany()
+                .HasForeignKey(x => x.StaffLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.AuthorityEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.AuthorityEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- Probation reminder engine (area 15b slice 7) ----
+        builder.Entity<ProbationReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<ProbationReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.HasIndex(x => x.ProbationPeriodId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Asset reminder engine (area 16 slice 9) ----
+        builder.Entity<AssetReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<AssetReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+            e.HasIndex(x => new { x.TenantId, x.AssetId });
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- Staff travel reminder engine (area 12 slice 5a) ----
+        builder.Entity<StaffTravelReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<StaffTravelReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            e.HasIndex(x => x.RunId);
+
+            e.HasOne(x => x.Run)
+                .WithMany(x => x.DispatchLogs)
+                .HasForeignKey(x => x.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // ---- StaffDisciplineTermination ----
         builder.Entity<StaffDisciplineTermination>(entity =>
         {
@@ -8640,6 +10216,102 @@ private void ConfigureHREntities(ModelBuilder builder)
             e.HasIndex(x => x.Status);
         });
 
+        // Staff movement reminder engine (area 8 slice 5) ─────────────
+        builder.Entity<StaffMovementReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<StaffMovementReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — a sweep claims a key before it publishes.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+        });
+
+        // S. SHE reminder engine ──────────────────────────────────────
+        builder.Entity<SheReminderRun>(e => e.HasIndex(x => new { x.TenantId, x.StartedAt }));
+        builder.Entity<SheReminderDispatchLog>(e =>
+        {
+            // The engine's send-once guarantee — sweeps claim a key before publishing.
+            e.HasIndex(x => new { x.TenantId, x.DedupeKey }).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.CreatedAt });
+        });
+
+        // T. SHE audit management ─────────────────────────────────────
+        builder.Entity<SheAudit>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.AuditNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+        });
+        builder.Entity<SheAuditFinding>(e => e.HasIndex(x => new { x.AuditId, x.FindingNumber }));
+
+        // U. Stop-work authority ──────────────────────────────────────
+        builder.Entity<SheStopWorkOrder>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.OrderNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+        });
+
+        // V. Statutory incident submissions ───────────────────────────
+        builder.Entity<SheStatutoryIncidentSubmission>(e => e.HasIndex(x => x.IncidentId));
+
+        // W. SHE controlled document register ─────────────────────────
+        builder.Entity<SheControlledDocument>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.DocumentNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            // The review sweep's scan: Active documents by review date.
+            e.HasIndex(x => new { x.TenantId, x.NextReviewDate });
+        });
+
+        // X. Environmental permit & licence register ──────────────────
+        builder.Entity<SheEnvironmentalPermit>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.RegisterNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            // The renewal sweep's scan (FR-ENV-018): live permits by expiry date.
+            e.HasIndex(x => new { x.TenantId, x.ExpiryDate });
+        });
+
+        // Y. Environmental monitoring schedules ───────────────────────
+        builder.Entity<SheEnvironmentalMonitoringSchedule>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ScheduleNumber }).IsUnique();
+            // The monitoring sweep's scan (FR-ENV-024): active schedules by due date.
+            e.HasIndex(x => new { x.TenantId, x.NextDueDate });
+        });
+
+        // Z. Regulatory updates register ──────────────────────────────
+        builder.Entity<SheRegulatoryUpdate>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.UpdateNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.Domain);
+        });
+
+        // AA. Sustainability initiatives ──────────────────────────────
+        builder.Entity<SheSustainabilityInitiative>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.InitiativeNumber }).IsUnique();
+            e.HasIndex(x => x.Category);
+            e.HasIndex(x => x.Status);
+        });
+
+        // AB. Environmental compliance reviews ────────────────────────
+        builder.Entity<SheEnvironmentalReview>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ReviewNumber }).IsUnique();
+            e.HasIndex(x => x.Status);
+            // The project-notification sweep's scan (FR-ENV-014).
+            e.HasIndex(x => new { x.TenantId, x.PlannedStartDate });
+        });
+        builder.Entity<SheEnvironmentalReviewAction>(e => e.HasIndex(x => x.ReviewId));
+
+        // AC. Monthly environmental reports ───────────────────────────
+        builder.Entity<SheMonthlyEnvironmentalReport>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ReportNumber }).IsUnique();
+            // One report per period — regeneration reuses the row.
+            e.HasIndex(x => new { x.TenantId, x.Year, x.Month }).IsUnique();
+        });
+
         // ── Force every relationship declared on a HR.Safety entity to Restrict ──
         // Prevents multiple-cascade-path errors (many SHE FKs target Employee). Scoped
         // to the Safety namespace so existing modules' delete behaviour is untouched.
@@ -8660,8 +10332,64 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.ShortCode);
             entity.HasIndex(x => x.Type);
             entity.HasIndex(x => x.IsActive);
+            entity.HasIndex(x => x.QualificationLevelId);
 
             entity.Property(x => x.Type).HasConversion<int>();
+
+            // Restrict, not Cascade: retiring a level must not silently delete every qualification
+            // sitting on it. The level is a label on the qualification, not its owner.
+            entity.HasOne(x => x.QualificationLevel)
+                .WithMany(l => l.Qualifications)
+                .HasForeignKey(x => x.QualificationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<QualificationLevel>(entity =>
+        {
+            entity.HasIndex(x => x.Name);
+            entity.HasIndex(x => x.IsActive);
+
+            // Rank is what makes the ladder comparable, so it is indexed and ordered on.
+            entity.HasIndex(x => new { x.TenantId, x.Rank });
+
+            // ⚠ Filtered on IsDeleted. An unfiltered unique index would keep a retired level's name
+            // reserved for ever — the soft-delete/unique-index shape this module has met nine times.
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+        });
+
+        builder.Entity<StaffNumberFormat>(entity =>
+        {
+            entity.Property(x => x.AppliesToEmploymentType).HasConversion<int?>();
+
+            entity.HasIndex(x => x.IsActive);
+
+            // ⚠ Filtered on IsDeleted, and on IsActive too: a RETIRED rule must not keep its
+            // register reserved. Without the IsActive leg, switching a tenant from one contract-staff
+            // format to another would need the old rule hard-deleted, and a soft delete would not
+            // release it — the shape this module has met nine times.
+            entity.HasIndex(x => new { x.TenantId, x.AppliesToEmploymentType })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [IsActive] = 1");
+
+            entity.HasIndex(x => new { x.TenantId, x.SequenceKey });
+        });
+
+        builder.Entity<CertifyingBody>(entity =>
+        {
+            entity.HasIndex(x => x.Name);
+            entity.HasIndex(x => x.IsActive);
+            entity.HasIndex(x => x.CountryId);
+
+            entity.HasIndex(x => new { x.TenantId, x.Name })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+
+            entity.HasOne(x => x.Country)
+                .WithMany()
+                .HasForeignKey(x => x.CountryId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<OrganizationChartNode>(entity =>
@@ -8689,6 +10417,20 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         builder.Entity<ExternalAssociate>(entity =>
         {
+            // ⚠ D-10, and the THIRD migration in this bundle for one trap: a uniqueness claim over a
+            // soft-deleting store. `AssociateNumber` was indexed but NOT unique, and the generator
+            // read the highest EXT-nnnn through the soft-delete filter, so a removed associate's
+            // number was invisible and was minted again — 38 rows on DEFAULT carried EXT-0008, every
+            // one of them deleted, and `GET number/{n}` resolved with a FirstOrDefault.
+            //
+            // The filter is `IsDeleted = 0` rather than none at all, for a reason the data settles:
+            // those 38 duplicates are real rows and a full unique index cannot be built over them.
+            // Uniqueness among LIVE rows is the claim the register actually makes; the generator not
+            // reissuing is what keeps a dead number out of circulation.
+            entity.HasIndex(x => new { x.TenantId, x.AssociateNumber })
+                  .HasDatabaseName("IX_ExternalAssociates_Tenant_Number")
+                  .IsUnique()
+                  .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(x => x.AssociateNumber);
             entity.HasIndex(x => x.Email);
             entity.HasIndex(x => x.IsActive);
@@ -11176,14 +12918,31 @@ private void ConfigureSuccessionPlanningEntities(ModelBuilder builder)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
-        builder.Entity<ConsultantClientPortalAccount>(entity =>
+        builder.Entity<ConsultantClientContact>(entity =>
         {
-            entity.HasIndex(e => new { e.TenantId, e.Email }).IsUnique();
-            entity.HasIndex(e => e.ConsultantClientId);
+            // One live contact row per (client, account). The filter carries IsDeleted = 0
+            // deliberately — an unfiltered unique index over a soft delete is the defect this
+            // programme has now fixed eight times (a removed row keeps the slot and the
+            // re-invite 500s naming nothing).
+            entity.HasIndex(e => new { e.TenantId, e.ConsultantClientId, e.UserId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_ConsultantClientContact_Tenant_Client_User");
+            entity.HasIndex(e => e.UserId);
 
             entity.HasOne(e => e.ConsultantClient)
-                .WithMany(c => c.PortalAccounts)
+                .WithMany(c => c.Contacts)
                 .HasForeignKey(e => e.ConsultantClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.InvitedBy)
+                .WithMany()
+                .HasForeignKey(e => e.InvitedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -11349,13 +13108,6 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
             entity.HasIndex(x => new { x.TenantId, x.PolicyId, x.RuleCode }).IsUnique();
         });
 
-        builder.Entity<StaffTravelVendor>(entity =>
-        {
-            entity.HasIndex(x => new { x.TenantId, x.VendorCode }).IsUnique();
-            entity.HasIndex(x => x.VendorType);
-            entity.HasIndex(x => x.IsActive);
-        });
-
         builder.Entity<StaffTravelVisaRequirement>(entity =>
         {
             entity.HasIndex(x => new { x.PassportCountryId, x.DestinationCountryId });
@@ -11370,12 +13122,6 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
         builder.Entity<StaffTravelHealthRequirement>(entity =>
         {
             entity.HasIndex(x => x.IsActive);
-        });
-
-        builder.Entity<StaffTravelCurrencyExchangeRate>(entity =>
-        {
-            entity.Property(x => x.Rate).HasColumnType("decimal(18,8)");
-            entity.HasIndex(x => new { x.TenantId, x.FromCurrency, x.ToCurrency, x.RateDate }).IsUnique();
         });
 
         // --- Delete behaviour ----------------------------------------------------

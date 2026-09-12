@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import {
   CheckCircle2,
   Clock3,
@@ -46,14 +47,18 @@ import {
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { getAuthenticatedHomePath } from '@/lib/auth-routing';
+import { authService } from '@/services/auth';
 import { supplierApplicantAccessService as service } from '@/services/procurement-supplier-applicant-access.service';
 
 const dateTime = (value?: string) =>
   value ? new Date(value).toLocaleString() : '—';
 
 export default function SupplierApplicantAccessAdministrationPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
-  const { hasPermission } = useAuth();
+  const { hasPermission, isLoading: authLoading } = useAuth();
+  const canView = hasPermission('procurement.supplier.review');
   const canRecover = hasPermission('procurement.supplier.approve');
   const [busyId, setBusyId] = useState<string>();
   const correctionConfirmInFlight = useRef(false);
@@ -69,13 +74,22 @@ export default function SupplierApplicantAccessAdministrationPage() {
     maskedContact?: string;
     challengeSent: boolean;
   }>();
+
+  useEffect(() => {
+    if (!authLoading && !canView) {
+      router.replace(getAuthenticatedHomePath(authService.getStoredUser()));
+    }
+  }, [authLoading, canView, router]);
+
   const summary = useQuery({
     queryKey: ['supplier-applicant-access-summary'],
     queryFn: service.adminSummary,
+    enabled: !authLoading && canView,
   });
   const history = useQuery({
     queryKey: ['supplier-applicant-access-history'],
     queryFn: service.adminHistory,
+    enabled: !authLoading && canView,
   });
 
   const refresh = async () => {
@@ -209,6 +223,14 @@ export default function SupplierApplicantAccessAdministrationPage() {
     ['Activated', summary.data?.activated ?? 0, CheckCircle2],
     ['Activation failed', summary.data?.activationFailed ?? 0, ShieldAlert],
   ] as const;
+
+  if (authLoading || !canView) {
+    return (
+      <div className="flex min-h-64 items-center justify-center p-6 text-sm text-muted-foreground">
+        {authLoading ? 'Checking access…' : 'Redirecting to your workspace…'}
+      </div>
+    );
+  }
 
   return (
     <div

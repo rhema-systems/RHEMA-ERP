@@ -659,11 +659,21 @@ public sealed class ProcurementContractActivationService :
         Guid workflowDefinitionId;
         if (authorityReady)
         {
-            workflowDefinitionId = authority.Workflow!.WorkflowDefinitionId;
+            var authorityWorkflow = authority.Workflow!;
+            if (!HasValidAuthorityWorkflowMetadata(authorityWorkflow))
+                throw Validation("CONTRACT_ACTIVATION_AUTHORITY_WORKFLOW_INVALID",
+                    "The selected authority route has incomplete workflow metadata.");
+
+            var executionWorkflow = IsContractWorkflowEntityType(authorityWorkflow)
+                ? null
+                : await ResolveContractWorkflowAsync(cancellationToken);
+            workflowDefinitionId = executionWorkflow?.Id ?? authorityWorkflow.WorkflowDefinitionId;
             checks.Add(Passed("authority", "Configured policy authority",
                 authority.DecisionCode, authority.Message,
                 authority.Steps.First().RuleId,
-                $"{authority.Steps.First().AuthorityName} / {authority.Workflow.Name} v{authority.Workflow.Version}"));
+                executionWorkflow is null
+                    ? $"{authority.Steps.First().AuthorityName} / {authorityWorkflow.Name} v{authorityWorkflow.Version}"
+                    : $"{authority.Steps.First().AuthorityName} / authority route {authorityWorkflow.Name} v{authorityWorkflow.Version}; contract approval {executionWorkflow.Name} v{executionWorkflow.Version}"));
         }
         else if (AuthorityMetadataIsAbsent(authority.DecisionCode))
         {
@@ -844,6 +854,33 @@ public sealed class ProcurementContractActivationService :
         string.Equals(decisionCode, "PR_AUTHORITY_NOT_CONFIGURED",
             StringComparison.OrdinalIgnoreCase);
 
+    internal static bool HasValidAuthorityWorkflowMetadata(
+        ProcurementAuthorityWorkflowSelectionDto workflow) =>
+        workflow.WorkflowDefinitionId != Guid.Empty &&
+        workflow.DefinitionKey != Guid.Empty &&
+        workflow.Version > 0 &&
+        !string.IsNullOrWhiteSpace(workflow.Name) &&
+        workflow.PublishedAt.HasValue &&
+        (!string.IsNullOrWhiteSpace(workflow.EntityTypeCode) ||
+         !string.IsNullOrWhiteSpace(workflow.EntityTypeName));
+
+    internal static bool IsContractWorkflowEntityType(
+        ProcurementAuthorityWorkflowSelectionDto workflow) =>
+        EqualsNormalized(workflow.EntityTypeCode, WorkflowEntityType) ||
+        EqualsNormalized(workflow.EntityTypeCode, "ProcurementContract") ||
+        EqualsNormalized(workflow.EntityTypeName, "Procurement Contract") ||
+        EqualsNormalized(workflow.EntityTypeName, "ProcurementContract");
+
+    private static bool EqualsNormalized(string? value, string expected) =>
+        string.Equals(NormalizeCode(value), NormalizeCode(expected),
+            StringComparison.Ordinal);
+
+    private static string NormalizeCode(string? value) =>
+        new((value ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+
     private async Task<ProcurementContractActivationCheckDto> EvaluateQuantitySurveyCommercialTermsAsync(
         Contract contract, CancellationToken cancellationToken)
     {
@@ -988,11 +1025,21 @@ public sealed class ProcurementContractActivationService :
                 "The contract source has no current requisition sourcing release.");
         }
 
+        ProcurementSupplyContractCoverage.Coverage? coverage;
+        try
+        {
+            coverage = await ProcurementSupplyContractCoverage.ResolveAsync(
+                _unitOfWork, _currentUser.TenantId, contract, release.PurchaseRequisitionId, cancellationToken);
+        }
+        catch (ProcurementBudgetCommitmentLifecycleException exception)
+        {
+            return Failed("commitment", "Budget availability", exception.Code, exception.Message);
+        }
         var committedExposure = await GetNetCommittedExposureAsync(
             release.PurchaseRequisitionId,
             cancellationToken);
         var requiredExposure = decimal.Round(
-            committedExposure + contract.ContractValue,
+            committedExposure + (coverage is null ? contract.ContractValue : 0m),
             2,
             MidpointRounding.AwayFromZero);
 
@@ -1016,6 +1063,10 @@ public sealed class ProcurementContractActivationService :
                 exception.Code, exception.Message);
         }
 
+        if (readiness.IsCompliant && coverage is not null)
+            return Passed("commitment", "Budget availability", "CONTRACT_COVERED_BY_APPROVED_PO",
+                $"{coverage.PurchaseOrder.OrderNumber} already commits {contract.ContractValue:N2} {contract.Currency} for this exact award. Activation reuses that commitment; receipts remain owned by the PO.",
+                coverage.FormalEntry.Id, $"po:{coverage.PurchaseOrder.Id:N}/commitment:{coverage.FormalEntry.Id:N}/{coverage.PurchaseOrder.SourceIntegrityHash}");
         return readiness.IsCompliant
             ? Passed("commitment", "Budget availability",
                 readiness.DecisionCode, readiness.Message,
@@ -1128,7 +1179,8 @@ public sealed class ProcurementContractActivationService :
                 !item.IsDeleted)
             .ToListAsync(cancellationToken);
         if (entries.Count == 0)
-            return false;
+            return await ProcurementSupplyContractCoverage.ResolveAsync(
+                _unitOfWork, _currentUser.TenantId, contract, purchaseRequisitionId, cancellationToken) is not null;
         if (entries.Count != 1)
             throw Conflict(
                 "CONTRACT_ACTIVATION_BUDGET_IDEMPOTENCY_CONFLICT",

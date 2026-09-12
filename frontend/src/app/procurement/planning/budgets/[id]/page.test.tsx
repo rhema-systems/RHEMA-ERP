@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ProcurementBudgetDetailPage from './page';
+import { toast } from 'sonner';
 
 const routerMock = vi.hoisted(() => ({
   back: vi.fn(),
@@ -164,5 +165,26 @@ describe('Procurement budget workflow details', () => {
         reason: 'Additional approved scope',
       });
     });
+    expect(toast.success).toHaveBeenCalledWith('Budget revision submitted for independent approval');
+  });
+
+  it('keeps the revision input and approved amount when its required workflow is missing', async () => {
+    budgetServiceMock.getBudgetById.mockResolvedValue({ ...submittedBudget, status: 'Approved' });
+    const failure = 'Budget revisions require a published approval workflow with an independent approver. The approved budget has not changed.';
+    budgetServiceMock.createRevision.mockRejectedValue(new Error(failure));
+
+    render(<ProcurementBudgetDetailPage />);
+    await screen.findByText('PB-2026-0002');
+    fireEvent.click(screen.getByRole('button', { name: /revise budget/i }));
+    fireEvent.change(screen.getByLabelText(/new approved amount/i), { target: { value: '125000' } });
+    fireEvent.change(screen.getByLabelText(/^reason$/i), { target: { value: 'Additional approved scope' } });
+    fireEvent.click(screen.getByRole('button', { name: /submit revision/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(failure));
+    expect(screen.getByRole('dialog', { name: /revise approved budget/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/new approved amount/i)).toHaveValue(125000);
+    expect(screen.getByLabelText(/^reason$/i)).toHaveValue('Additional approved scope');
+    expect(budgetServiceMock.getBudgetById).toHaveBeenCalledTimes(1);
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

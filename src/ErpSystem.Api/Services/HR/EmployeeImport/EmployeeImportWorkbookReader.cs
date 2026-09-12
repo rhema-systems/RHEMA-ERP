@@ -1,0 +1,1264 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+using ClosedXML.Excel;
+using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
+
+namespace ErpSystem.Api.Services.HR.EmployeeImport;
+
+/// <summary>One data row as read: the cells by column key, plus anything the reading itself noticed.</summary>
+public sealed class EmployeeImportRawRow
+{
+    public int RowNumber { get; init; }
+    public Dictionary<string, string?> Values { get; } = new();
+    public List<EmployeeImportFindingDto> ReadFindings { get; } = new();
+}
+
+/// <summary>The workbook after the first pass: file-level verdicts, the header map, the raw rows.</summary>
+public sealed class EmployeeImportRawWorkbook
+{
+    public int TemplateVersion { get; set; }
+    public List<EmployeeImportFindingDto> FileFindings { get; } = new();
+    public Dictionary<string, int> ColumnIndex { get; } = new();
+    public List<EmployeeImportRawRow> Rows { get; } = new();
+    public bool FileRejected => FileFindings.Any(f => f.Severity == EmployeeImportFindingSeverity.Error);
+
+    /// <summary>Every non-blank staff number in the file, as typed — what the snapshot loader needs.</summary>
+    public IEnumerable<string> StaffNumbers => Rows
+        .Select(r => r.Values.GetValueOrDefault(EmployeeImportColumns.StaffNumber))
+        .Where(s => !string.IsNullOrWhiteSpace(s))
+        .Select(s => s!.Trim());
+}
+
+public sealed class EmployeeImportParsedRow
+{
+    public int RowNumber { get; init; }
+    public Dictionary<string, string?> Raw { get; } = new();
+    public List<EmployeeImportFindingDto> Findings { get; } = new();
+    public EmployeeImportResolvedRow? Resolved { get; set; }
+    public EmployeeImportRowAction Action { get; set; } = EmployeeImportRowAction.Create;
+    public Guid? TargetEmployeeId { get; set; }
+    public string? StaffNumber { get; set; }
+    public string? DisplayName { get; set; }
+    public EmploymentType? EmploymentType { get; set; }
+    public int? ManagerRowNumber { get; set; }
+
+    public int ErrorCount => Findings.Count(f => f.Severity == EmployeeImportFindingSeverity.Error);
+    public int WarningCount => Findings.Count(f => f.Severity == EmployeeImportFindingSeverity.Warning);
+
+    public EmployeeImportRowOutcome Outcome =>
+        ErrorCount > 0 ? EmployeeImportRowOutcome.Error
+        : WarningCount > 0 ? EmployeeImportRowOutcome.Warning
+        : EmployeeImportRowOutcome.Ready;
+}
+
+public sealed class EmployeeImportParseResult
+{
+    public int TemplateVersion { get; set; }
+    public List<EmployeeImportFindingDto> FileFindings { get; } = new();
+    public List<EmployeeImportParsedRow> Rows { get; } = new();
+    public bool FileRejected => FileFindings.Any(f => f.Severity == EmployeeImportFindingSeverity.Error);
+}
+
+/// <summary>
+/// Reads an uploaded template and turns every data row into the payload it would become, with a
+/// finding for everything that is wrong or worth a look. Two passes, because an update needs the
+/// register's current values for exactly the staff numbers in the file: <see cref="ReadRaw"/>
+/// closes the workbook with the cells in hand; the service loads snapshots; <see cref="Resolve"/>
+/// decides each row. Nothing here touches the database.
+/// </summary>
+/// <remarks>
+/// The rules are the ones in <c>docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md</c> §5 (create) and §9
+/// (update). Error means the row will not be written; Warning means it will, and the person is
+/// listed for follow-up. In an update, a blank cell means "leave it" — never "clear it".
+/// </remarks>
+public static class EmployeeImportWorkbookReader
+{
+    private static readonly Regex EmailRegex = new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex PhoneRegex = new(@"^\+?[0-9][0-9\s\-()]{5,}$", RegexOptions.Compiled);
+
+    // ── Pass 1: the workbook ─────────────────────────────────────────────────────────────────
+
+    public static EmployeeImportRawWorkbook ReadRaw(
+        Stream stream, IReadOnlyList<EmployeeImportColumn> columns, IReadOnlyList<IdentificationTypeRef> identificationTypes)
+    {
+        var result = new EmployeeImportRawWorkbook();
+
+        XLWorkbook workbook;
+        try
+        {
+            workbook = new XLWorkbook(stream);
+        }
+        catch (Exception ex)
+        {
+            result.FileFindings.Add(Error(null, null,
+                "The file is not a readable .xlsx workbook. Save it from Excel as 'Excel Workbook (*.xlsx)' and try again. " + ex.Message));
+            return result;
+        }
+
+        using (workbook)
+        {
+            // ── the stamp ──
+            var idBindings = new Dictionary<string, (Guid TypeId, bool IsExpiry)>();
+            if (!workbook.Worksheets.TryGetWorksheet(EmployeeImportColumns.MetaSheet, out var meta))
+            {
+                result.FileFindings.Add(Error(null, null,
+                    "This workbook was not generated by the system (the hidden _meta sheet is missing). Download the template from HR → Employees → Import and enter the data there."));
+                return result;
+            }
+
+            var lastMetaRow = meta.LastRowUsed()?.RowNumber() ?? 0;
+            for (var r = 1; r <= lastMetaRow; r++)
+            {
+                var key = ReadText(meta.Cell(r, 1));
+                if (key == null) continue;
+                switch (key)
+                {
+                    case "TemplateVersion":
+                        result.TemplateVersion = int.TryParse(ReadText(meta.Cell(r, 2)), out var v) ? v : 0;
+                        break;
+                    case "IdColumn":
+                        var header = EmployeeImportColumns.NormalizeHeader(ReadText(meta.Cell(r, 2)));
+                        var isExpiry = string.Equals(ReadText(meta.Cell(r, 4)), "Expiry", StringComparison.OrdinalIgnoreCase);
+                        if (header.Length > 0 && Guid.TryParseExact(ReadText(meta.Cell(r, 3)), "N", out var typeId))
+                            idBindings[header] = (typeId, isExpiry);
+                        break;
+                }
+            }
+
+            if (result.TemplateVersion != EmployeeImportColumns.TemplateVersion)
+            {
+                result.FileFindings.Add(Error(null, null,
+                    $"This template is version {result.TemplateVersion}; the system expects version {EmployeeImportColumns.TemplateVersion}. Download a fresh template and move the data across."));
+                return result;
+            }
+
+            // ── the sheet and its header row ──
+            if (!workbook.Worksheets.TryGetWorksheet(EmployeeImportColumns.EmployeesSheet, out var sheet))
+            {
+                result.FileFindings.Add(Error(null, null, $"The workbook has no '{EmployeeImportColumns.EmployeesSheet}' sheet."));
+                return result;
+            }
+
+            var lastColumn = sheet.LastColumnUsed()?.ColumnNumber() ?? 0;
+            var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
+            var byHeader = columns.ToDictionary(c => EmployeeImportColumns.NormalizeHeader(c.Header), c => c);
+            var knownTypeIds = identificationTypes.ToDictionary(t => t.Id);
+            var ignoredHeaders = new List<string>();
+
+            for (var c = 1; c <= lastColumn; c++)
+            {
+                var raw = ReadText(sheet.Cell(1, c));
+                var header = EmployeeImportColumns.NormalizeHeader(raw);
+                if (header.Length == 0) continue;
+
+                if (byHeader.TryGetValue(header, out var column))
+                {
+                    result.ColumnIndex.TryAdd(column.Key, c);
+                    continue;
+                }
+
+                if (idBindings.TryGetValue(header, out var binding))
+                {
+                    if (!knownTypeIds.ContainsKey(binding.TypeId))
+                    {
+                        result.FileFindings.Add(Warning(null, EmployeeImportColumns.CellAddress(c, 1),
+                            $"Column '{raw}' refers to an identification type that no longer exists in the system; it is ignored."));
+                        continue;
+                    }
+                    result.ColumnIndex.TryAdd(binding.IsExpiry
+                        ? EmployeeImportColumns.IdExpiryKey(binding.TypeId)
+                        : EmployeeImportColumns.IdNumberKey(binding.TypeId), c);
+                    continue;
+                }
+
+                if (header is "RESULT" or "FINDINGS") continue;
+                ignoredHeaders.Add(raw!.Trim());
+            }
+
+            if (ignoredHeaders.Count > 0)
+                result.FileFindings.Add(Warning(null, null,
+                    $"Columns not in the template are ignored: {string.Join(", ", ignoredHeaders)}."));
+
+            // Only Staff Number is required on the SHEET: in an update the other required fields
+            // may be blank ("leave it"). What a create needs is checked per row, in Resolve.
+            if (!result.ColumnIndex.ContainsKey(EmployeeImportColumns.StaffNumber))
+            {
+                result.FileFindings.Add(Error(null, null,
+                    "The Staff Number column is missing from the Employees sheet. Do not rename or delete template columns."));
+                return result;
+            }
+
+            var missing = columns.Where(c => !result.ColumnIndex.ContainsKey(c.Key)).Select(c => c.Header).ToList();
+            if (missing.Count > 0)
+                result.FileFindings.Add(Warning(null, null,
+                    $"Columns missing from the sheet are treated as blank: {string.Join(", ", missing)}."));
+
+            // ── rows ──
+            if (lastRow < 2)
+            {
+                result.FileFindings.Add(Error(null, null, "The Employees sheet has no data rows."));
+                return result;
+            }
+            if (lastRow - 1 > EmployeeImportColumns.MaxDataRows)
+            {
+                result.FileFindings.Add(Error(null, null,
+                    $"The sheet has {lastRow - 1:N0} rows; one import takes at most {EmployeeImportColumns.MaxDataRows:N0}. Split the file."));
+                return result;
+            }
+
+            var skippedExample = false;
+            for (var r = 2; r <= lastRow; r++)
+            {
+                var row = new EmployeeImportRawRow { RowNumber = r };
+                var anyValue = false;
+                foreach (var column in columns)
+                {
+                    if (!result.ColumnIndex.TryGetValue(column.Key, out var c)) { row.Values[column.Key] = null; continue; }
+                    var text = ReadCell(sheet.Cell(r, c), column, row);
+                    row.Values[column.Key] = text;
+                    anyValue |= text != null;
+                }
+                if (!anyValue) continue;
+
+                if (string.Equals(row.Values.GetValueOrDefault(EmployeeImportColumns.StaffNumber), EmployeeImportColumns.ExampleStaffNumber, StringComparison.OrdinalIgnoreCase))
+                {
+                    skippedExample = true;
+                    continue;
+                }
+                result.Rows.Add(row);
+            }
+
+            if (skippedExample)
+                result.FileFindings.Add(Warning(null, null, "The example row (EXAMPLE-001) was ignored."));
+
+            if (result.Rows.Count == 0)
+                result.FileFindings.Add(Error(null, null, "The Employees sheet has no data rows (only the header and the example)."));
+        }
+
+        return result;
+    }
+
+    // ── Pass 2: the rows ─────────────────────────────────────────────────────────────────────
+
+    public static EmployeeImportParseResult Resolve(
+        EmployeeImportRawWorkbook raw, EmployeeImportReferenceData refs, IReadOnlyList<EmployeeImportColumn> columns, EmployeeImportMode mode)
+    {
+        var result = new EmployeeImportParseResult { TemplateVersion = raw.TemplateVersion };
+        result.FileFindings.AddRange(raw.FileFindings);
+        if (raw.FileRejected) return result;
+
+        var names = new DisplayNames(refs);
+
+        foreach (var rawRow in raw.Rows)
+        {
+            var row = new EmployeeImportParsedRow { RowNumber = rawRow.RowNumber };
+            foreach (var (k, v) in rawRow.Values) row.Raw[k] = v;
+            row.Findings.AddRange(rawRow.ReadFindings);
+
+            string? CellOf(string key) => raw.ColumnIndex.TryGetValue(key, out var c) ? EmployeeImportColumns.CellAddress(c, rawRow.RowNumber) : null;
+
+            var staffNumber = row.Raw.GetValueOrDefault(EmployeeImportColumns.StaffNumber)?.Trim();
+            var key = EmployeeImportColumns.NormalizeKey(staffNumber);
+            var snapshot = key.Length > 0 && refs.Snapshots.TryGetValue(key, out var s) ? s : null;
+            var existingId = Guid.Empty;
+            var known = key.Length > 0 && refs.ExistingEmployeeNumbers.TryGetValue(key, out existingId);
+            var formerEmployee = known && existingId == Guid.Empty;
+
+            if (formerEmployee)
+            {
+                row.StaffNumber = staffNumber;
+                row.Findings.Add(Error(EmployeeImportColumns.StaffNumber, CellOf(EmployeeImportColumns.StaffNumber),
+                    $"Staff Number '{staffNumber}' belongs to a former employee. Numbers are not reused, and a leaver is not updated by import."));
+            }
+            else if (known && mode == EmployeeImportMode.CreateOnly)
+            {
+                ResolveCreateRow(row, refs, CellOf);
+                row.Findings.Add(Error(EmployeeImportColumns.StaffNumber, CellOf(EmployeeImportColumns.StaffNumber),
+                    $"Staff Number '{staffNumber}' already exists in the system. Choose 'Update existing' or 'Create or update' to change that employee."));
+            }
+            else if (known)
+            {
+                if (snapshot == null)
+                {
+                    // Known to the register but not loaded — the loader and the number set disagree.
+                    row.StaffNumber = staffNumber;
+                    row.Findings.Add(Error(EmployeeImportColumns.StaffNumber, CellOf(EmployeeImportColumns.StaffNumber),
+                        $"Staff Number '{staffNumber}' exists but its record could not be loaded for update. Upload again; if it persists, open the profile directly."));
+                }
+                else
+                {
+                    row.Action = EmployeeImportRowAction.Update;
+                    row.TargetEmployeeId = snapshot.Id;
+                    ResolveUpdateRow(row, snapshot, refs, names, CellOf);
+                }
+            }
+            else if (mode == EmployeeImportMode.UpdateOnly)
+            {
+                row.StaffNumber = staffNumber;
+                row.DisplayName = string.Join(" ", new[] { row.Raw.GetValueOrDefault(EmployeeImportColumns.FirstName), row.Raw.GetValueOrDefault(EmployeeImportColumns.Surname) }.Where(x => !string.IsNullOrWhiteSpace(x)));
+                row.Findings.Add(Error(EmployeeImportColumns.StaffNumber, CellOf(EmployeeImportColumns.StaffNumber),
+                    string.IsNullOrWhiteSpace(staffNumber)
+                        ? "Staff Number is required."
+                        : $"Staff Number '{staffNumber}' is not in the register. This import updates existing employees only; choose 'Create or update' to add new ones."));
+            }
+            else
+            {
+                ResolveCreateRow(row, refs, CellOf);
+            }
+
+            result.Rows.Add(row);
+        }
+
+        CheckInFileDuplicates(result.Rows, raw.ColumnIndex);
+        ResolveManagers(result.Rows, refs, raw.ColumnIndex);
+        return result;
+    }
+
+    // ── Create ───────────────────────────────────────────────────────────────────────────────
+
+    private static void ResolveCreateRow(EmployeeImportParsedRow row, EmployeeImportReferenceData refs, Func<string, string?> cellOf)
+    {
+        var raw = row.Raw;
+        string? Get(string key) => raw.GetValueOrDefault(key);
+        void Err(string key, string message, List<string>? suggestions = null) =>
+            row.Findings.Add(Error(key, cellOf(key), message, suggestions));
+        void Warn(string key, string message, List<string>? suggestions = null) =>
+            row.Findings.Add(Warning(key, cellOf(key), message, suggestions));
+
+        var resolved = new EmployeeImportResolvedRow { Action = EmployeeImportRowAction.Create };
+        var dto = resolved.Employee;
+
+        // Identity
+        var staffNumber = Get(EmployeeImportColumns.StaffNumber)?.Trim();
+        if (string.IsNullOrWhiteSpace(staffNumber)) Err(EmployeeImportColumns.StaffNumber, "Staff Number is required.");
+        else if (staffNumber.Length > 50) Err(EmployeeImportColumns.StaffNumber, "Staff Number is longer than 50 characters.");
+        else
+        {
+            dto.EmployeeNumber = staffNumber;
+            row.StaffNumber = staffNumber;
+        }
+
+        dto.Title = Text(Get(EmployeeImportColumns.Title), 100, EmployeeImportColumns.Title, Err);
+        dto.FirstName = Text(Get(EmployeeImportColumns.FirstName), 100, EmployeeImportColumns.FirstName, Err) ?? string.Empty;
+        if (dto.FirstName.Length == 0) Err(EmployeeImportColumns.FirstName, "First Name is required.");
+        dto.MiddleName = Text(Get(EmployeeImportColumns.MiddleName), 100, EmployeeImportColumns.MiddleName, Err);
+        dto.LastName = Text(Get(EmployeeImportColumns.Surname), 100, EmployeeImportColumns.Surname, Err) ?? string.Empty;
+        if (dto.LastName.Length == 0) Err(EmployeeImportColumns.Surname, "Surname is required.");
+        row.DisplayName = string.Join(" ", new[] { dto.FirstName, dto.LastName }.Where(s => s.Length > 0));
+
+        // Gender / marital status
+        var gender = Get(EmployeeImportColumns.Gender);
+        if (string.IsNullOrWhiteSpace(gender)) Err(EmployeeImportColumns.Gender, "Gender is required.");
+        else if (EmployeeImportValues.TryParseEnum<Gender>(gender, out var g)) dto.Gender = g;
+        else Err(EmployeeImportColumns.Gender, $"Gender '{gender}' is not one of: {string.Join(", ", Enum.GetNames<Gender>())}.");
+
+        var marital = Get(EmployeeImportColumns.MaritalStatus);
+        if (!string.IsNullOrWhiteSpace(marital))
+        {
+            if (EmployeeImportValues.TryParseEnum<MaritalStatus>(marital, out var m)) dto.MaritalStatus = m;
+            else Err(EmployeeImportColumns.MaritalStatus, $"Marital Status '{marital}' is not one of: {string.Join(", ", Enum.GetNames<MaritalStatus>())}.");
+        }
+
+        // Employment type and dates
+        var typeText = Get(EmployeeImportColumns.EmploymentType);
+        EmploymentType? employmentType = null;
+        if (string.IsNullOrWhiteSpace(typeText)) Err(EmployeeImportColumns.EmploymentType, "Employment Type is required.");
+        else if (EmployeeImportValues.TryParseEnum<EmploymentType>(typeText, out var et)) { employmentType = et; dto.EmploymentType = et; }
+        else Err(EmployeeImportColumns.EmploymentType, $"Employment Type '{typeText}' is not one of: {string.Join(", ", Enum.GetNames<EmploymentType>())}.");
+        row.EmploymentType = employmentType;
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dateEmployed = Date(Get(EmployeeImportColumns.DateEmployed), EmployeeImportColumns.DateEmployed, "Date Employed", Err);
+        if (dateEmployed == null && !row.Findings.Any(f => f.Column == EmployeeImportColumns.DateEmployed))
+            Err(EmployeeImportColumns.DateEmployed, "Date Employed is required.");
+        else if (dateEmployed > today) Err(EmployeeImportColumns.DateEmployed, $"Date Employed {EmployeeImportValues.FormatDate(dateEmployed!.Value)} is in the future.");
+        dto.DateEmployed = dateEmployed;
+
+        var dob = Date(Get(EmployeeImportColumns.DateOfBirth), EmployeeImportColumns.DateOfBirth, "Date of Birth", Err);
+        if (dob == null && string.IsNullOrWhiteSpace(Get(EmployeeImportColumns.DateOfBirth)))
+            Warn(EmployeeImportColumns.DateOfBirth, "Date of Birth is blank.");
+        CheckAges(dob, dateEmployed, Err, Warn);
+        dto.DateOfBirth = dob;
+
+        var endDate = Date(Get(EmployeeImportColumns.ContractEndDate), EmployeeImportColumns.ContractEndDate, "Contract End Date", Err);
+        var fixedTerm = employmentType is EmploymentType.Contract or EmploymentType.FixedTerm;
+        if (fixedTerm && endDate == null && string.IsNullOrWhiteSpace(Get(EmployeeImportColumns.ContractEndDate)))
+            Err(EmployeeImportColumns.ContractEndDate, $"Contract End Date is required for {employmentType} staff.");
+        if (endDate != null && dateEmployed != null && endDate <= dateEmployed)
+            Err(EmployeeImportColumns.ContractEndDate, "Contract End Date is not after Date Employed.");
+        if (endDate != null && employmentType == EmploymentType.Permanent)
+        {
+            Warn(EmployeeImportColumns.ContractEndDate, "A Contract End Date on a Permanent employee is ignored.");
+            endDate = null;
+        }
+
+        // Organisation
+        var departmentText = Get(EmployeeImportColumns.Department);
+        DepartmentRef? department = null;
+        if (string.IsNullOrWhiteSpace(departmentText)) Err(EmployeeImportColumns.Department, "Department is required.");
+        else if (refs.Departments.TryResolve(departmentText, out var d)) { department = d; dto.DepartmentId = d.Id; }
+        else Err(EmployeeImportColumns.Department, $"Department '{departmentText}' is not on the Departments sheet.", refs.Departments.Suggest(departmentText));
+
+        var section = ResolveSection(Get(EmployeeImportColumns.Section), department?.Id, department?.Name, refs, Err, Warn);
+        if (section != null) dto.SectionId = section.Id;
+
+        var positionText = Get(EmployeeImportColumns.Position);
+        if (string.IsNullOrWhiteSpace(positionText)) Err(EmployeeImportColumns.Position, "Position is required.");
+        else if (refs.Positions.TryResolve(positionText, out var p))
+        {
+            dto.PositionId = p.Id;
+            dto.OrganizationUnitId = p.OrganizationUnitId;
+        }
+        else Err(EmployeeImportColumns.Position, $"Position '{positionText}' is not on the Positions sheet.", refs.Positions.Suggest(positionText));
+
+        var locationText = Get(EmployeeImportColumns.Location);
+        if (string.IsNullOrWhiteSpace(locationText)) Err(EmployeeImportColumns.Location, "Location is required: every employee is placed somewhere.");
+        else if (refs.Locations.TryResolve(locationText, out var l)) dto.LocationId = l.Id;
+        else Err(EmployeeImportColumns.Location, $"Location '{locationText}' is not on the Locations sheet.", refs.Locations.Suggest(locationText));
+
+        // Payroll membership, salary structure
+        var onPayroll = true;
+        var onPayrollText = Get(EmployeeImportColumns.OnPayroll);
+        if (!string.IsNullOrWhiteSpace(onPayrollText))
+        {
+            if (EmployeeImportValues.TryParseYesNo(onPayrollText, out var yes)) onPayroll = yes;
+            else Err(EmployeeImportColumns.OnPayroll, $"On Payroll must be Yes or No, not '{onPayrollText}'.");
+        }
+        dto.IsOnPayroll = onPayroll;
+
+        var reasonText = Get(EmployeeImportColumns.OffPayrollReason);
+        if (!onPayroll)
+        {
+            if (string.IsNullOrWhiteSpace(reasonText))
+                Err(EmployeeImportColumns.OffPayrollReason, "An employee who is not on payroll needs an Off-Payroll Reason.");
+            else if (EmployeeImportValues.TryParseEnum<OffPayrollReason>(reasonText, out var reason)) dto.OffPayrollReason = reason;
+            else Err(EmployeeImportColumns.OffPayrollReason, $"Off-Payroll Reason '{reasonText}' is not one of: {string.Join(", ", Enum.GetNames<OffPayrollReason>())}.");
+            dto.OffPayrollNote = "Imported from the employee register.";
+        }
+        else if (!string.IsNullOrWhiteSpace(reasonText))
+            Warn(EmployeeImportColumns.OffPayrollReason, "Off-Payroll Reason is ignored because On Payroll is Yes.");
+
+        var salary = Money(Get(EmployeeImportColumns.MonthlyBasicSalary), EmployeeImportColumns.MonthlyBasicSalary, "Monthly Basic Salary", Err);
+        if (salary is < 0) Err(EmployeeImportColumns.MonthlyBasicSalary, "Monthly Basic Salary cannot be negative.");
+        if (salary is > 0 && !onPayroll) Err(EmployeeImportColumns.MonthlyBasicSalary, "A salary cannot be recorded for somebody who is not on payroll. Leave it blank or set On Payroll to Yes.");
+        if (onPayroll) dto.Salary = salary;
+
+        resolved.Salary = ResolveSalaryLevel(Get(EmployeeImportColumns.SalaryLevel), Get(EmployeeImportColumns.Notch), salary, onPayroll, refs, Err, Warn);
+
+        // Staff-number register shape (warning only: TDC open question 4 — accept is the default)
+        CheckNumberShape(row.StaffNumber, employmentType, dateEmployed, refs, Warn);
+
+        // Contact
+        var email = Get(EmployeeImportColumns.Email);
+        if (string.IsNullOrWhiteSpace(email)) Warn(EmployeeImportColumns.Email, "No email address.");
+        else if (!EmailRegex.IsMatch(email.Trim()) || email.Trim().Length > 200) Err(EmployeeImportColumns.Email, $"'{email}' is not a valid email address.");
+        else
+        {
+            var normalized = email.Trim().ToLowerInvariant();
+            if (refs.ExistingEmails.Contains(normalized)) Err(EmployeeImportColumns.Email, $"Email '{normalized}' already belongs to another employee.");
+            else dto.EmailAddress = normalized;
+        }
+
+        dto.MobileNumber = Phone(Get(EmployeeImportColumns.MobileNumber), EmployeeImportColumns.MobileNumber, "Mobile Number", Warn);
+        if (dto.MobileNumber == null && string.IsNullOrWhiteSpace(Get(EmployeeImportColumns.MobileNumber))) Warn(EmployeeImportColumns.MobileNumber, "No mobile number.");
+        dto.TelephoneNumber = Phone(Get(EmployeeImportColumns.Telephone), EmployeeImportColumns.Telephone, "Telephone", Warn);
+
+        var ssnit = Text(Get(EmployeeImportColumns.SsnitNumber), 50, EmployeeImportColumns.SsnitNumber, Err);
+        if (ssnit != null)
+        {
+            if (refs.ExistingSsnitNumbers.Contains(EmployeeImportColumns.NormalizeKey(ssnit))) Err(EmployeeImportColumns.SsnitNumber, "SSNIT Number already belongs to another employee.");
+            else dto.SocialSecurityNumber = ssnit;
+        }
+        var tin = Text(Get(EmployeeImportColumns.Tin), 50, EmployeeImportColumns.Tin, Err);
+        if (tin != null)
+        {
+            if (refs.ExistingTinNumbers.Contains(EmployeeImportColumns.NormalizeKey(tin))) Err(EmployeeImportColumns.Tin, "TIN already belongs to another employee.");
+            else dto.TINNumber = tin;
+        }
+
+        dto.DigitalAddress = Text(Get(EmployeeImportColumns.DigitalAddress), 50, EmployeeImportColumns.DigitalAddress, Err);
+        dto.Address = Text(Get(EmployeeImportColumns.ResidentialAddress), 500, EmployeeImportColumns.ResidentialAddress, Err);
+        dto.City = Text(Get(EmployeeImportColumns.City), 100, EmployeeImportColumns.City, Err);
+        dto.State = Text(Get(EmployeeImportColumns.Region), 50, EmployeeImportColumns.Region, Err);
+        // Place the address on the geography tree where it can be placed. The text above is kept
+        // regardless — and where this resolves, EmployeeService rewrites it from the tree so the
+        // two cannot disagree.
+        dto.GeoAreaId = ResolveGeoArea(refs, dto.State, dto.City, Warn)?.Id;
+        dto.Hometown = Text(Get(EmployeeImportColumns.Hometown), 150, EmployeeImportColumns.Hometown, Err);
+        dto.Religion = Text(Get(EmployeeImportColumns.Religion), 50, EmployeeImportColumns.Religion, Err);
+        dto.Notes = Get(EmployeeImportColumns.Notes)?.Trim();
+        dto.IsFullTime = employmentType != EmploymentType.PartTime;
+        dto.StaffStatus = StaffStatus.Active;
+
+        // Identification documents and qualifications
+        ResolveIdentifications(row, refs, null, resolved, Err, Warn);
+        ResolveQualifications(row, refs, null, resolved, Err, Warn);
+
+        // Children that need the whole row to be sound
+        if (endDate != null && dateEmployed != null && row.StaffNumber != null)
+            resolved.Contract = new EmployeeImportResolvedContract
+            {
+                ContractNumber = $"{row.StaffNumber}/{dateEmployed:yyyyMM}",
+                StartDate = dateEmployed.Value,
+                EndDate = endDate.Value,
+                MonthlySalary = onPayroll ? salary ?? 0m : 0m,
+            };
+
+        row.Resolved = resolved;
+    }
+
+    // ── Update ───────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// An update carries only what the sheet filled in. Every supplied cell is checked as it would
+    /// be on create, compared with the register, and recorded as a change when it differs; the
+    /// register's own values are never compared against blanks.
+    /// </summary>
+    private static void ResolveUpdateRow(
+        EmployeeImportParsedRow row, EmployeeSnapshot snap, EmployeeImportReferenceData refs, DisplayNames names, Func<string, string?> cellOf)
+    {
+        var raw = row.Raw;
+        string? Get(string key) => raw.GetValueOrDefault(key);
+        void Err(string key, string message, List<string>? suggestions = null) =>
+            row.Findings.Add(Error(key, cellOf(key), message, suggestions));
+        void Warn(string key, string message, List<string>? suggestions = null) =>
+            row.Findings.Add(Warning(key, cellOf(key), message, suggestions));
+
+        var resolved = new EmployeeImportResolvedRow { Action = EmployeeImportRowAction.Update, TargetEmployeeId = snap.Id };
+        // ⚠ The update mapping writes HasDisability and IsFullTime unconditionally (EmployeeMappingExtensions.Apply);
+        // send the current values back or an import would reset them to false.
+        var dto = new UpdateEmployeeDto { HasDisability = snap.HasDisability, IsFullTime = snap.IsFullTime };
+        resolved.Update = dto;
+        var changes = resolved.Changes;
+
+        void Change(string field, string? from, string? to) => changes.Add(new EmployeeImportChangeDto { Field = field, From = from, To = to });
+        bool Differs(string? a, string? b) => !string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.Ordinal);
+
+        row.StaffNumber = snap.EmployeeNumber;
+
+        // Text fields — supplied and different → change
+        string? TextChange(string key, string label, int max, string? current, Action<string> apply)
+        {
+            var value = Text(Get(key), max, key, Err);
+            if (value == null) return null;
+            if (Differs(value, current)) { Change(label, current, value); apply(value); }
+            return value;
+        }
+
+        var firstName = TextChange(EmployeeImportColumns.FirstName, "First Name", 100, snap.FirstName, v => dto.FirstName = v);
+        TextChange(EmployeeImportColumns.MiddleName, "Middle Name(s)", 100, snap.MiddleName, v => dto.MiddleName = v);
+        var lastName = TextChange(EmployeeImportColumns.Surname, "Surname", 100, snap.LastName, v => dto.LastName = v);
+        TextChange(EmployeeImportColumns.Title, "Title", 100, snap.Title, v => dto.Title = v);
+        TextChange(EmployeeImportColumns.Religion, "Religion", 50, snap.Religion, v => dto.Religion = v);
+        TextChange(EmployeeImportColumns.Hometown, "Hometown", 150, snap.Hometown, v => dto.Hometown = v);
+        TextChange(EmployeeImportColumns.DigitalAddress, "Digital Address", 50, snap.DigitalAddress, v => dto.DigitalAddress = v);
+        TextChange(EmployeeImportColumns.ResidentialAddress, "Residential Address", 500, snap.Address, v => dto.Address = v);
+        var cityText = TextChange(EmployeeImportColumns.City, "City/Town", 100, snap.City, v => dto.City = v);
+        var regionText = TextChange(EmployeeImportColumns.Region, "Region", 50, snap.State, v => dto.State = v);
+
+        // ⚠ Resolved from what the SHEET supplied, falling back to what the record already holds:
+        // a file that names only the City must still be placed within the employee's existing
+        // region, or the same row would resolve on create and fail to on update.
+        // ⚠ Only when the sheet actually said something about the address. Resolving from the
+        // record's own existing text on every row would show a diff for each employee the seed
+        // happens to be able to place, on a file that never mentioned an address.
+        if (cityText != null || regionText != null)
+        {
+            var area = ResolveGeoArea(refs, regionText ?? snap.State, cityText ?? snap.City, Warn);
+            if (area?.Id != snap.GeoAreaId)
+            {
+                Change("Administrative area", snap.GeoAreaName, area?.Name);
+                dto.GeoAreaId = area?.Id;
+                // A null id reads as "not supplied", so removing a placement has to say so.
+                dto.ClearGeoArea = area is null;
+            }
+        }
+        var notes = Get(EmployeeImportColumns.Notes)?.Trim();
+        if (!string.IsNullOrEmpty(notes) && Differs(notes, snap.Notes)) { Change("Notes", snap.Notes, notes); dto.Notes = notes; }
+        row.DisplayName = string.Join(" ", new[] { firstName ?? snap.FirstName, lastName ?? snap.LastName }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+        // Enums
+        var genderText = Get(EmployeeImportColumns.Gender);
+        if (!string.IsNullOrWhiteSpace(genderText))
+        {
+            if (EmployeeImportValues.TryParseEnum<Gender>(genderText, out var g))
+            {
+                if (g != snap.Gender) { Change("Gender", snap.Gender?.ToString(), g.ToString()); dto.Gender = g; }
+            }
+            else Err(EmployeeImportColumns.Gender, $"Gender '{genderText}' is not one of: {string.Join(", ", Enum.GetNames<Gender>())}.");
+        }
+        var maritalText = Get(EmployeeImportColumns.MaritalStatus);
+        if (!string.IsNullOrWhiteSpace(maritalText))
+        {
+            if (EmployeeImportValues.TryParseEnum<MaritalStatus>(maritalText, out var m))
+            {
+                if (m != snap.MaritalStatus) { Change("Marital Status", snap.MaritalStatus?.ToString(), m.ToString()); dto.MaritalStatus = m; }
+            }
+            else Err(EmployeeImportColumns.MaritalStatus, $"Marital Status '{maritalText}' is not one of: {string.Join(", ", Enum.GetNames<MaritalStatus>())}.");
+        }
+
+        var employmentType = snap.EmploymentType;
+        var typeText = Get(EmployeeImportColumns.EmploymentType);
+        if (!string.IsNullOrWhiteSpace(typeText))
+        {
+            if (EmployeeImportValues.TryParseEnum<EmploymentType>(typeText, out var et))
+            {
+                if (et != snap.EmploymentType)
+                {
+                    Change("Employment Type", snap.EmploymentType.ToString(), et.ToString());
+                    dto.EmploymentType = et;
+                    dto.IsFullTime = et != EmploymentType.PartTime;
+                    employmentType = et;
+                }
+            }
+            else Err(EmployeeImportColumns.EmploymentType, $"Employment Type '{typeText}' is not one of: {string.Join(", ", Enum.GetNames<EmploymentType>())}.");
+        }
+        row.EmploymentType = employmentType;
+
+        // Dates
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var dateEmployed = Date(Get(EmployeeImportColumns.DateEmployed), EmployeeImportColumns.DateEmployed, "Date Employed", Err);
+        if (dateEmployed > today) Err(EmployeeImportColumns.DateEmployed, $"Date Employed {EmployeeImportValues.FormatDate(dateEmployed!.Value)} is in the future.");
+        else if (dateEmployed != null && dateEmployed != snap.DateEmployed)
+        {
+            Change("Date Employed", snap.DateEmployed.HasValue ? EmployeeImportValues.FormatDate(snap.DateEmployed.Value) : null, EmployeeImportValues.FormatDate(dateEmployed.Value));
+            dto.DateEmployed = dateEmployed;
+        }
+        var dob = Date(Get(EmployeeImportColumns.DateOfBirth), EmployeeImportColumns.DateOfBirth, "Date of Birth", Err);
+        if (dob != null && dob != snap.DateOfBirth)
+        {
+            Change("Date of Birth", snap.DateOfBirth.HasValue ? EmployeeImportValues.FormatDate(snap.DateOfBirth.Value) : null, EmployeeImportValues.FormatDate(dob.Value));
+            dto.DateOfBirth = dob;
+        }
+        CheckAges(dob ?? snap.DateOfBirth, dateEmployed ?? snap.DateEmployed, Err, Warn);
+
+        if (!string.IsNullOrWhiteSpace(Get(EmployeeImportColumns.ContractEndDate)))
+            Warn(EmployeeImportColumns.ContractEndDate, "Contract End Date is not applied by an update; change the contract on the employee's profile.");
+
+        // Organisation
+        Guid? departmentId = snap.DepartmentId;
+        string? departmentName = snap.DepartmentId.HasValue ? names.Department(snap.DepartmentId.Value) : null;
+        var departmentText = Get(EmployeeImportColumns.Department);
+        if (!string.IsNullOrWhiteSpace(departmentText))
+        {
+            if (refs.Departments.TryResolve(departmentText, out var d))
+            {
+                if (d.Id != snap.DepartmentId) { Change("Department", departmentName, d.Name); dto.DepartmentId = d.Id; }
+                departmentId = d.Id;
+                departmentName = d.Name;
+            }
+            else Err(EmployeeImportColumns.Department, $"Department '{departmentText}' is not on the Departments sheet.", refs.Departments.Suggest(departmentText));
+        }
+
+        var section = ResolveSection(Get(EmployeeImportColumns.Section), departmentId, departmentName, refs, Err, Warn);
+        if (section != null && section.Id != snap.SectionId)
+        {
+            Change("Section", snap.SectionId.HasValue ? names.Section(snap.SectionId.Value) : null, section.Name);
+            dto.SectionId = section.Id;
+        }
+
+        var positionText = Get(EmployeeImportColumns.Position);
+        if (!string.IsNullOrWhiteSpace(positionText))
+        {
+            if (refs.Positions.TryResolve(positionText, out var p))
+            {
+                if (p.Id != snap.PositionId)
+                {
+                    Change("Position", names.Position(snap.PositionId), p.Title);
+                    // The service checks the position against the org unit it is given; send the position's own.
+                    dto.PositionId = p.Id;
+                    dto.OrganizationUnitId = p.OrganizationUnitId;
+                    if (p.OrganizationUnitId != snap.OrganizationUnitId)
+                        Change("Organisation Unit", snap.OrganizationUnitId.HasValue ? refs.OrganizationUnitNames.GetValueOrDefault(snap.OrganizationUnitId.Value) : null,
+                            refs.OrganizationUnitNames.GetValueOrDefault(p.OrganizationUnitId));
+                }
+            }
+            else Err(EmployeeImportColumns.Position, $"Position '{positionText}' is not on the Positions sheet.", refs.Positions.Suggest(positionText));
+        }
+
+        var locationText = Get(EmployeeImportColumns.Location);
+        if (!string.IsNullOrWhiteSpace(locationText))
+        {
+            if (refs.Locations.TryResolve(locationText, out var l))
+            {
+                if (l.Id != snap.LocationId) { Change("Location", snap.LocationId.HasValue ? names.Location(snap.LocationId.Value) : null, l.Name); dto.LocationId = l.Id; }
+            }
+            else Err(EmployeeImportColumns.Location, $"Location '{locationText}' is not on the Locations sheet.", refs.Locations.Suggest(locationText));
+        }
+
+        // Payroll membership
+        var onPayroll = snap.IsOnPayroll;
+        var onPayrollText = Get(EmployeeImportColumns.OnPayroll);
+        if (!string.IsNullOrWhiteSpace(onPayrollText))
+        {
+            if (EmployeeImportValues.TryParseYesNo(onPayrollText, out var yes))
+            {
+                if (yes != snap.IsOnPayroll) { Change("On Payroll", snap.IsOnPayroll ? "Yes" : "No", yes ? "Yes" : "No"); dto.IsOnPayroll = yes; }
+                onPayroll = yes;
+            }
+            else Err(EmployeeImportColumns.OnPayroll, $"On Payroll must be Yes or No, not '{onPayrollText}'.");
+        }
+        var reasonText = Get(EmployeeImportColumns.OffPayrollReason);
+        if (!onPayroll)
+        {
+            OffPayrollReason? reason = null;
+            if (!string.IsNullOrWhiteSpace(reasonText))
+            {
+                if (EmployeeImportValues.TryParseEnum<OffPayrollReason>(reasonText, out var r)) reason = r;
+                else Err(EmployeeImportColumns.OffPayrollReason, $"Off-Payroll Reason '{reasonText}' is not one of: {string.Join(", ", Enum.GetNames<OffPayrollReason>())}.");
+            }
+            if (dto.IsOnPayroll == false && reason == null && snap.OffPayrollReason == null)
+                Err(EmployeeImportColumns.OffPayrollReason, "Taking an employee off payroll needs an Off-Payroll Reason.");
+            if (reason != null && reason != snap.OffPayrollReason)
+            {
+                Change("Off-Payroll Reason", snap.OffPayrollReason?.ToString(), reason.ToString());
+                dto.OffPayrollReason = reason;
+                if (dto.IsOnPayroll == false) dto.OffPayrollNote = "Imported from the employee register.";
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(reasonText))
+            Warn(EmployeeImportColumns.OffPayrollReason, "Off-Payroll Reason is ignored because the employee is on payroll.");
+
+        var salary = Money(Get(EmployeeImportColumns.MonthlyBasicSalary), EmployeeImportColumns.MonthlyBasicSalary, "Monthly Basic Salary", Err);
+        if (salary is < 0) Err(EmployeeImportColumns.MonthlyBasicSalary, "Monthly Basic Salary cannot be negative.");
+        else if (salary is > 0 && !onPayroll) Err(EmployeeImportColumns.MonthlyBasicSalary, "A salary cannot be recorded for somebody who is not on payroll.");
+        else if (salary != null && salary != snap.Salary)
+        {
+            Change("Monthly Basic Salary", snap.Salary?.ToString("N2", CultureInfo.InvariantCulture), salary.Value.ToString("N2", CultureInfo.InvariantCulture));
+            dto.Salary = salary;
+        }
+
+        var level = ResolveSalaryLevel(Get(EmployeeImportColumns.SalaryLevel), Get(EmployeeImportColumns.Notch), salary ?? snap.Salary, onPayroll, refs, Err, Warn);
+        if (level != null)
+        {
+            if (level.LevelId != snap.CurrentLevelId || level.NotchId != snap.CurrentNotchId)
+            {
+                var from = snap.CurrentLevelCode == null ? null : snap.CurrentNotchNumber.HasValue ? $"{snap.CurrentLevelCode} notch {snap.CurrentNotchNumber}" : snap.CurrentLevelCode;
+                var to = level.NotchNumber.HasValue ? $"{level.LevelCode} notch {level.NotchNumber}" : level.LevelCode;
+                Change("Salary Level / Notch", from, to);
+                resolved.Salary = level;
+                resolved.SalaryChanged = true;
+            }
+        }
+
+        // Contact — uniqueness excludes the employee's own current values
+        var email = Get(EmployeeImportColumns.Email);
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            if (!EmailRegex.IsMatch(email.Trim()) || email.Trim().Length > 200) Err(EmployeeImportColumns.Email, $"'{email}' is not a valid email address.");
+            else
+            {
+                var normalized = email.Trim().ToLowerInvariant();
+                if (Differs(normalized, snap.Email?.ToLowerInvariant()))
+                {
+                    if (refs.ExistingEmails.Contains(normalized)) Err(EmployeeImportColumns.Email, $"Email '{normalized}' already belongs to another employee.");
+                    else { Change("Email", snap.Email, normalized); dto.EmailAddress = normalized; }
+                }
+            }
+        }
+        var mobile = Phone(Get(EmployeeImportColumns.MobileNumber), EmployeeImportColumns.MobileNumber, "Mobile Number", Warn);
+        if (mobile != null && Differs(mobile, snap.MobileNumber)) { Change("Mobile Number", snap.MobileNumber, mobile); dto.MobileNumber = mobile; }
+        var telephone = Phone(Get(EmployeeImportColumns.Telephone), EmployeeImportColumns.Telephone, "Telephone", Warn);
+        if (telephone != null && Differs(telephone, snap.TelephoneNumber)) { Change("Telephone", snap.TelephoneNumber, telephone); dto.TelephoneNumber = telephone; }
+
+        var ssnit = Text(Get(EmployeeImportColumns.SsnitNumber), 50, EmployeeImportColumns.SsnitNumber, Err);
+        if (ssnit != null && Differs(EmployeeImportColumns.NormalizeKey(ssnit), EmployeeImportColumns.NormalizeKey(snap.SsnitNumber)))
+        {
+            if (refs.ExistingSsnitNumbers.Contains(EmployeeImportColumns.NormalizeKey(ssnit))) Err(EmployeeImportColumns.SsnitNumber, "SSNIT Number already belongs to another employee.");
+            else { Change("SSNIT Number", snap.SsnitNumber, ssnit); dto.SocialSecurityNumber = ssnit; }
+        }
+        var tin = Text(Get(EmployeeImportColumns.Tin), 50, EmployeeImportColumns.Tin, Err);
+        if (tin != null && Differs(EmployeeImportColumns.NormalizeKey(tin), EmployeeImportColumns.NormalizeKey(snap.TinNumber)))
+        {
+            if (refs.ExistingTinNumbers.Contains(EmployeeImportColumns.NormalizeKey(tin))) Err(EmployeeImportColumns.Tin, "TIN already belongs to another employee.");
+            else { Change("TIN", snap.TinNumber, tin); dto.TINNumber = tin; }
+        }
+
+        // Children: only what the profile does not already hold
+        ResolveIdentifications(row, refs, snap, resolved, Err, Warn);
+        ResolveQualifications(row, refs, snap, resolved, Err, Warn);
+
+        CheckNumberShape(row.StaffNumber, employmentType, dateEmployed ?? snap.DateEmployed, refs, Warn);
+
+        row.Resolved = resolved;
+    }
+
+    // ── Shared pieces ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves the sheet's Region and City text to one <c>GeoAreaId</c> — the deepest of the two
+    /// that can be placed. Returns null when nothing can be, which is not a failure.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Everything here WARNS; nothing errors.</b> A row must never be blocked because an
+    /// address cannot be placed on the tree. Only Greater Accra and Ho are seeded — roughly 232 of
+    /// Ghana's MMDAs are deliberately absent — so treating an unknown district as an error would
+    /// reject most of the country's real addresses. The text is kept either way and the row
+    /// imports; the link is a bonus, not a gate.</para>
+    ///
+    /// <para>⚠ <b>An empty tree means silence.</b> With no scheme seeded the columns behave exactly
+    /// as they did before geography existed: plain text, no findings. Anything else would turn a
+    /// missing reference table into a wall of warnings on every existing import.</para>
+    ///
+    /// <para>⚠ <b>An ambiguous city is reported, never guessed.</b> Place names repeat across
+    /// regions; picking the first would file someone in the wrong half of the country silently.</para>
+    /// </remarks>
+    private static GeoAreaRef? ResolveGeoArea(
+        EmployeeImportReferenceData refs,
+        string? regionText,
+        string? cityText,
+        Action<string, string, List<string>?> warn)
+    {
+        if (refs.GeoRegions.Count == 0) return null;
+        if (string.IsNullOrWhiteSpace(regionText) && string.IsNullOrWhiteSpace(cityText)) return null;
+
+        // A name that used to exist gets told what replaced it — the single most useful thing to
+        // say to someone importing a file of old records. Never resolved to, only explained: a
+        // dissolved region became several, and only a person knows which one a row belongs to.
+        string? RetirementNote(string? text)
+        {
+            if (!refs.GeoRetiredAreas.TryResolve(text, out var retired)) return null;
+            return retired.RetiredInFavourOf is { } successor
+                ? $"'{text!.Trim()}' no longer exists — it was replaced by {successor}. "
+                  + "The address is kept as text only; set the current area on the record."
+                : $"'{text!.Trim()}' no longer exists, so the address is kept as text only.";
+        }
+
+        GeoAreaRef? region = null;
+        if (!string.IsNullOrWhiteSpace(regionText))
+        {
+            if (refs.GeoRegions.TryResolve(regionText, out var found)) region = found;
+            else if (RetirementNote(regionText) is { } note)
+                warn(EmployeeImportColumns.Region, note, null);
+            else
+                warn(EmployeeImportColumns.Region,
+                    $"'{regionText.Trim()}' is not a region we hold, so the address is kept as text only.",
+                    refs.GeoRegions.Suggest(regionText));
+        }
+
+        if (string.IsNullOrWhiteSpace(cityText)) return region;
+
+        var matches = refs.GeoSubAreas.Find(cityText, region?.Id);
+
+        if (matches.Count == 1) return matches[0];
+
+        if (matches.Count > 1)
+        {
+            // Narrowing by region is the fix, so say so rather than listing near-misses.
+            warn(EmployeeImportColumns.City,
+                $"'{cityText.Trim()}' matches {matches.Count} places"
+                + (region is null ? " — fill in the Region column to say which." : " within that region."),
+                matches.Select(m => $"{m.Name} ({m.TierName})").Take(3).ToList());
+            return region;
+        }
+
+        // Nothing under the named region — but it may exist elsewhere, which is a more useful thing
+        // to say than "unknown".
+        if (region is not null && refs.GeoSubAreas.Find(cityText, null).Count > 0)
+        {
+            warn(EmployeeImportColumns.City,
+                $"'{cityText.Trim()}' is not in {region.Name}, so the address is kept as text only.",
+                refs.GeoSubAreas.Suggest(cityText));
+            return region;
+        }
+
+        if (RetirementNote(cityText) is { } cityNote)
+            warn(EmployeeImportColumns.City, cityNote, null);
+        else
+            warn(EmployeeImportColumns.City,
+                $"'{cityText.Trim()}' is not a place we hold, so the address is kept as text only.",
+                refs.GeoSubAreas.Suggest(cityText));
+        return region;
+    }
+
+    private static void CheckAges(DateOnly? dob, DateOnly? dateEmployed, Action<string, string, List<string>?> err, Action<string, string, List<string>?> warn)
+    {
+        if (dob == null || dateEmployed == null) return;
+        if (dob >= dateEmployed) { err(EmployeeImportColumns.DateOfBirth, "Date of Birth is on or after Date Employed.", null); return; }
+        var age = dateEmployed.Value.Year - dob.Value.Year - (dateEmployed.Value.DayOfYear < dob.Value.DayOfYear ? 1 : 0);
+        if (age < 18 || age > 70) warn(EmployeeImportColumns.DateOfBirth, $"Aged {age} at Date Employed — check the dates.", null);
+    }
+
+    private static SectionRef? ResolveSection(
+        string? sectionText, Guid? departmentId, string? departmentName, EmployeeImportReferenceData refs,
+        Action<string, string, List<string>?> err, Action<string, string, List<string>?> warn)
+    {
+        if (string.IsNullOrWhiteSpace(sectionText)) return null;
+        if (refs.Sections.TryResolve(sectionText, out var s))
+        {
+            if (departmentId != null && s.DepartmentId != departmentId)
+            {
+                err(EmployeeImportColumns.Section, $"Section '{s.Name}' does not belong to department '{departmentName}'.", null);
+                return null;
+            }
+            return s;
+        }
+        if (departmentName != null && EmployeeImportColumns.NormalizeKey(sectionText) == EmployeeImportColumns.NormalizeKey(departmentName))
+        {
+            warn(EmployeeImportColumns.Section, "Section repeats the Department name; treated as no section.", null);
+            return null;
+        }
+        err(EmployeeImportColumns.Section, $"Section '{sectionText}' is not on the Sections sheet.", refs.Sections.Suggest(sectionText));
+        return null;
+    }
+
+    private static EmployeeImportResolvedSalary? ResolveSalaryLevel(
+        string? levelText, string? notchText, decimal? salary, bool onPayroll, EmployeeImportReferenceData refs,
+        Action<string, string, List<string>?> err, Action<string, string, List<string>?> warn)
+    {
+        var notchNumber = WholeNumber(notchText, EmployeeImportColumns.Notch, "Notch", err);
+        if (string.IsNullOrWhiteSpace(levelText))
+        {
+            if (notchNumber != null) warn(EmployeeImportColumns.Notch, "Notch is ignored because no Salary Level is given.", null);
+            return null;
+        }
+
+        var code = EmployeeImportColumns.NormalizeCode(levelText);
+        if (!refs.SalaryLevels.TryGetValue(code, out var level))
+        {
+            var known = refs.SalaryLevels.Values.Select(v => v.Code).Distinct().OrderBy(c => c).ToList();
+            err(EmployeeImportColumns.SalaryLevel, $"Salary Level '{levelText}' is not on the Salary Structure sheet.",
+                known.Where(k => k.StartsWith(code[..1], StringComparison.OrdinalIgnoreCase)).Take(3).ToList());
+            return null;
+        }
+        if (!onPayroll)
+        {
+            err(EmployeeImportColumns.SalaryLevel, "A salary level cannot be assigned to somebody who is not on payroll.", null);
+            return null;
+        }
+
+        var result = new EmployeeImportResolvedSalary { GradeId = level.GradeId, LevelId = level.Id, LevelCode = level.Code };
+        var notches = refs.NotchesByLevel.GetValueOrDefault(level.Id) ?? new List<SalaryNotchRef>();
+        if (notchNumber == null)
+        {
+            if (string.IsNullOrWhiteSpace(notchText))
+                warn(EmployeeImportColumns.Notch, $"No Notch given for level {level.Code}; the level is assigned without a notch.", null);
+            return result;
+        }
+
+        var notch = notches.FirstOrDefault(n => n.Number == notchNumber.Value);
+        if (notch == null)
+        {
+            err(EmployeeImportColumns.Notch, notches.Count == 0
+                ? $"Level {level.Code} has no notches on record."
+                : $"Notch {notchNumber} does not exist under level {level.Code} (notches {notches.Min(n => n.Number)}–{notches.Max(n => n.Number)}).", null);
+            return null;
+        }
+
+        result.NotchId = notch.Id;
+        result.NotchNumber = notch.Number;
+        if (salary is > 0 && notch.Amount > 0)
+        {
+            var monthly = notch.Amount;
+            var asMonthlyFromAnnual = notch.Amount / 12m;
+            var deviation = Math.Min(Math.Abs(salary.Value - monthly) / monthly, Math.Abs(salary.Value - asMonthlyFromAnnual) / asMonthlyFromAnnual);
+            if (deviation > 0.05m)
+                warn(EmployeeImportColumns.MonthlyBasicSalary, $"Monthly Basic Salary {salary:N2} differs from the amount on record for {level.Code} notch {notch.Number} ({notch.Amount:N2}) by more than 5%.", null);
+        }
+        return result;
+    }
+
+    private static void CheckNumberShape(string? staffNumber, EmploymentType? employmentType, DateOnly? dateEmployed, EmployeeImportReferenceData refs, Action<string, string, List<string>?> warn)
+    {
+        if (employmentType == null || staffNumber == null) return;
+        if (!refs.Rules.TryGetValue(employmentType.Value, out var rule) || rule is not { AutoGenerate: true }) return;
+        var yearNow = DateTime.UtcNow.Year;
+        var yearEmployed = dateEmployed?.Year ?? yearNow;
+        if (!rule.TryReadSequence(staffNumber, yearNow, out _) && !rule.TryReadSequence(staffNumber, yearEmployed, out _))
+            warn(EmployeeImportColumns.StaffNumber, $"Staff Number '{staffNumber}' does not match the {employmentType} register's format (e.g. {rule.Example(yearNow)}). It is accepted as given; the counter will not learn from it.", null);
+    }
+
+    private static void ResolveIdentifications(
+        EmployeeImportParsedRow row, EmployeeImportReferenceData refs, EmployeeSnapshot? snap, EmployeeImportResolvedRow resolved,
+        Action<string, string, List<string>?> err, Action<string, string, List<string>?> warn)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        foreach (var type in refs.IdentificationTypes)
+        {
+            var numberKey = EmployeeImportColumns.IdNumberKey(type.Id);
+            var expiryKey = EmployeeImportColumns.IdExpiryKey(type.Id);
+            var number = Text(row.Raw.GetValueOrDefault(numberKey), 100, numberKey, err);
+            var expiry = Date(row.Raw.GetValueOrDefault(expiryKey), expiryKey, $"{type.Name} Expiry", err);
+            if (number == null)
+            {
+                if (expiry != null) warn(expiryKey, $"{type.Name} Expiry is ignored because no {type.Name} Number is given.", null);
+                continue;
+            }
+            var normalized = EmployeeImportColumns.NormalizeKey(number);
+            if (snap != null && snap.IdNumbers.TryGetValue(type.Id, out var own) && own.Contains(normalized))
+                continue; // already on the profile
+            if (refs.ExistingIdNumbersByType.TryGetValue(type.Id, out var existing) && existing.Contains(normalized))
+                err(numberKey, $"{type.Name} Number '{number}' already belongs to another employee.", null);
+            if (expiry != null && !type.HasExpiryDate) { warn(expiryKey, $"{type.Name} does not expire; the expiry date is ignored.", null); expiry = null; }
+            if (expiry != null && expiry < today) warn(expiryKey, $"{type.Name} expired on {EmployeeImportValues.FormatDate(expiry.Value)}.", null);
+            resolved.Identifications.Add(new EmployeeImportResolvedIdentification
+            {
+                IdentificationTypeId = type.Id, TypeName = type.Name, DocumentNumber = number, ExpiryDate = expiry,
+            });
+            if (snap != null) resolved.Changes.Add(new EmployeeImportChangeDto { Field = $"{type.Name} (new document)", From = null, To = number });
+        }
+    }
+
+    private static void ResolveQualifications(
+        EmployeeImportParsedRow row, EmployeeImportReferenceData refs, EmployeeSnapshot? snap, EmployeeImportResolvedRow resolved,
+        Action<string, string, List<string>?> err, Action<string, string, List<string>?> warn)
+    {
+        var institution = Text(row.Raw.GetValueOrDefault(EmployeeImportColumns.Institution), 200, EmployeeImportColumns.Institution, err);
+        var year = WholeNumber(row.Raw.GetValueOrDefault(EmployeeImportColumns.YearCompleted), EmployeeImportColumns.YearCompleted, "Year Completed", err);
+        if (year is < 1940 or > 2100) { err(EmployeeImportColumns.YearCompleted, $"Year Completed {year} is not a plausible year.", null); year = null; }
+
+        var highest = Qualification(row.Raw.GetValueOrDefault(EmployeeImportColumns.HighestQualification));
+        if (highest != null)
+        {
+            if (snap != null && snap.QualificationNames.Contains(EmployeeImportColumns.NormalizeKey(highest)))
+            {
+                // already on the profile
+            }
+            else
+            {
+                var q = new EmployeeImportResolvedQualification { Kind = "Highest", Institution = institution ?? "Not recorded", YearCompleted = year };
+                if (refs.Qualifications.TryResolve(highest, out var master)) q.QualificationId = master.Id; else q.CustomName = highest.Length > 200 ? highest[..200] : highest;
+                if (institution == null) warn(EmployeeImportColumns.Institution, "Institution is blank; the qualification is recorded as 'Not recorded' until completed.", null);
+                resolved.Qualifications.Add(q);
+                if (snap != null) resolved.Changes.Add(new EmployeeImportChangeDto { Field = "Qualification", From = null, To = highest });
+            }
+        }
+        else if (institution != null || year != null)
+            warn(EmployeeImportColumns.HighestQualification, "Institution / Year Completed are ignored because no Highest Qualification is given.", null);
+
+        var professional = Qualification(row.Raw.GetValueOrDefault(EmployeeImportColumns.ProfessionalQualification));
+        if (professional != null && !(snap != null && snap.QualificationNames.Contains(EmployeeImportColumns.NormalizeKey(professional))))
+        {
+            if (professional.Contains('/'))
+                warn(EmployeeImportColumns.ProfessionalQualification, "Several qualifications appear in one cell; they are recorded as one entry. Split them on the profile if each needs its own record.", null);
+            var q = new EmployeeImportResolvedQualification { Kind = "Professional", Institution = "Not recorded" };
+            if (refs.Qualifications.TryResolve(professional, out var master)) q.QualificationId = master.Id; else q.CustomName = professional.Length > 200 ? professional[..200] : professional;
+            resolved.Qualifications.Add(q);
+            if (snap != null) resolved.Changes.Add(new EmployeeImportChangeDto { Field = "Professional Qualification", From = null, To = professional });
+        }
+    }
+
+    // ── Cross-row checks ─────────────────────────────────────────────────────────────────────
+
+    private static void CheckInFileDuplicates(List<EmployeeImportParsedRow> rows, Dictionary<string, int> columnIndex)
+    {
+        void Check(string key, string label, Func<EmployeeImportParsedRow, string?> select)
+        {
+            var groups = rows
+                .Select(r => (Row: r, Value: EmployeeImportColumns.NormalizeKey(select(r))))
+                .Where(p => p.Value.Length > 0)
+                .GroupBy(p => p.Value)
+                .Where(g => g.Count() > 1);
+            foreach (var group in groups)
+            {
+                var numbers = group.Select(g => g.Row.RowNumber).OrderBy(n => n).ToList();
+                foreach (var (row, _) in group)
+                {
+                    var others = numbers.Where(n => n != row.RowNumber).Select(n => n.ToString());
+                    var cell = columnIndex.TryGetValue(key, out var c) ? EmployeeImportColumns.CellAddress(c, row.RowNumber) : null;
+                    row.Findings.Add(Error(key, cell, $"{label} also appears on row {string.Join(", ", others)} of this file."));
+                }
+            }
+        }
+
+        Check(EmployeeImportColumns.StaffNumber, "Staff Number", r => r.Raw.GetValueOrDefault(EmployeeImportColumns.StaffNumber));
+        Check(EmployeeImportColumns.Email, "Email", r => r.Resolved?.Action == EmployeeImportRowAction.Update ? r.Resolved.Update?.EmailAddress : r.Resolved?.Employee.EmailAddress);
+        Check(EmployeeImportColumns.SsnitNumber, "SSNIT Number", r => r.Resolved?.Action == EmployeeImportRowAction.Update ? r.Resolved.Update?.SocialSecurityNumber : r.Resolved?.Employee.SocialSecurityNumber);
+        Check(EmployeeImportColumns.Tin, "TIN", r => r.Resolved?.Action == EmployeeImportRowAction.Update ? r.Resolved.Update?.TINNumber : r.Resolved?.Employee.TINNumber);
+
+        var typeIds = rows.SelectMany(r => r.Resolved?.Identifications ?? new List<EmployeeImportResolvedIdentification>())
+            .Select(i => (i.IdentificationTypeId, i.TypeName)).Distinct();
+        foreach (var (typeId, typeName) in typeIds)
+            Check(EmployeeImportColumns.IdNumberKey(typeId), $"{typeName} Number",
+                r => r.Resolved?.Identifications.FirstOrDefault(i => i.IdentificationTypeId == typeId)?.DocumentNumber);
+    }
+
+    private static void ResolveManagers(List<EmployeeImportParsedRow> rows, EmployeeImportReferenceData refs, Dictionary<string, int> columnIndex)
+    {
+        var byNumber = rows.Where(r => r.StaffNumber != null)
+            .GroupBy(r => EmployeeImportColumns.NormalizeKey(r.StaffNumber))
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var row in rows)
+        {
+            var managerText = row.Raw.GetValueOrDefault(EmployeeImportColumns.ManagerStaffNumber);
+            if (string.IsNullOrWhiteSpace(managerText) || row.Resolved == null) continue;
+            var key = EmployeeImportColumns.NormalizeKey(managerText);
+            var cell = columnIndex.TryGetValue(EmployeeImportColumns.ManagerStaffNumber, out var c) ? EmployeeImportColumns.CellAddress(c, row.RowNumber) : null;
+            var isUpdate = row.Resolved.Action == EmployeeImportRowAction.Update;
+            var snap = isUpdate && row.StaffNumber != null ? refs.Snapshots.GetValueOrDefault(EmployeeImportColumns.NormalizeKey(row.StaffNumber)) : null;
+
+            if (row.StaffNumber != null && key == EmployeeImportColumns.NormalizeKey(row.StaffNumber))
+            {
+                row.Findings.Add(Error(EmployeeImportColumns.ManagerStaffNumber, cell, "An employee cannot be their own manager."));
+                continue;
+            }
+
+            void SetManager(Guid managerId)
+            {
+                if (isUpdate)
+                {
+                    if (snap?.ManagerId == managerId) return; // unchanged
+                    row.Resolved!.Changes.Add(new EmployeeImportChangeDto { Field = "Manager", From = snap?.ManagerNumber, To = managerText.Trim() });
+                    row.Resolved.Update!.ManagerId = managerId;
+                }
+                else row.Resolved!.Employee.ManagerId = managerId;
+            }
+
+            if (byNumber.TryGetValue(key, out var managerRow))
+            {
+                if (managerRow.TargetEmployeeId.HasValue) { SetManager(managerRow.TargetEmployeeId.Value); continue; }
+                row.ManagerRowNumber = managerRow.RowNumber;
+                row.Resolved.ManagerRowNumber = managerRow.RowNumber;
+                if (isUpdate) row.Resolved.Changes.Add(new EmployeeImportChangeDto { Field = "Manager", From = snap?.ManagerNumber, To = managerText.Trim() });
+                if (managerRow.ErrorCount > 0)
+                    row.Findings.Add(Warning(EmployeeImportColumns.ManagerStaffNumber, cell, $"The manager is row {managerRow.RowNumber} of this file, which has errors; the manager link is set only if that row imports."));
+                continue;
+            }
+            if (refs.ExistingEmployeeNumbers.TryGetValue(key, out var managerId))
+            {
+                if (managerId == Guid.Empty)
+                    row.Findings.Add(Warning(EmployeeImportColumns.ManagerStaffNumber, cell, $"Manager Staff Number '{managerText}' belongs to a former employee; the manager is left as it is."));
+                else
+                    SetManager(managerId);
+                continue;
+            }
+            row.Findings.Add(Warning(EmployeeImportColumns.ManagerStaffNumber, cell, $"Manager Staff Number '{managerText}' is not in this file or in the system; the manager is left as it is."));
+        }
+
+        // An update that changes nothing is not an error, but the person should know before committing.
+        foreach (var row in rows.Where(r => r.Resolved?.Action == EmployeeImportRowAction.Update && r.ErrorCount == 0))
+        {
+            var r = row.Resolved!;
+            if (r.Changes.Count == 0 && !r.SalaryChanged && r.Identifications.Count == 0 && r.Qualifications.Count == 0 && r.ManagerRowNumber == null)
+                row.Findings.Add(Warning(null, null, "Nothing on this row differs from the register; the employee is left as it is."));
+        }
+    }
+
+    // ── Cell readers ─────────────────────────────────────────────────────────────────────────
+
+    private static string? ReadCell(IXLCell cell, EmployeeImportColumn column, EmployeeImportRawRow row)
+    {
+        if (cell.IsEmpty()) return null;
+        switch (cell.DataType)
+        {
+            case XLDataType.DateTime:
+                var date = DateOnly.FromDateTime(cell.GetDateTime());
+                return column.Kind == EmployeeImportColumnKind.Date
+                    ? EmployeeImportValues.FormatDate(date)
+                    : cell.GetFormattedString();
+            case XLDataType.Number:
+                var number = cell.GetDouble();
+                if (column.Kind == EmployeeImportColumnKind.Date)
+                {
+                    if (number is > 10_000 and < 100_000) return EmployeeImportValues.FormatDate(DateOnly.FromDateTime(DateTime.FromOADate(number)));
+                    return number.ToString(CultureInfo.InvariantCulture);
+                }
+                if (column.TextFormat)
+                    row.ReadFindings.Add(Warning(column.Key, $"{EmployeeImportColumns.EmployeesSheet}!{cell.Address}",
+                        $"{column.Header} was typed as a number; a leading zero, if there was one, has been lost."));
+                return number == Math.Floor(number) && Math.Abs(number) < 1e15
+                    ? ((long)number).ToString(CultureInfo.InvariantCulture)
+                    : number.ToString(CultureInfo.InvariantCulture);
+            case XLDataType.Boolean:
+                return cell.GetBoolean() ? "Yes" : "No";
+            case XLDataType.Text:
+                var text = cell.GetText().Trim();
+                return text.Length == 0 ? null : text;
+            default:
+                var formatted = cell.GetFormattedString().Trim();
+                return formatted.Length == 0 ? null : formatted;
+        }
+    }
+
+    private static string? ReadText(IXLCell cell)
+    {
+        if (cell.IsEmpty()) return null;
+        var text = cell.DataType == XLDataType.Text ? cell.GetText() : cell.GetFormattedString();
+        text = text.Trim();
+        return text.Length == 0 ? null : text;
+    }
+
+    private static string? Text(string? value, int maxLength, string key, Action<string, string, List<string>?> err)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        if (text.Length > maxLength) { err(key, $"Longer than {maxLength} characters.", null); return null; }
+        return text;
+    }
+
+    private static DateOnly? Date(string? value, string key, string label, Action<string, string, List<string>?> err)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        if (EmployeeImportValues.TryParseDate(value, out var date)) return date;
+        err(key, $"{label} '{value}' is not a date. Type a real date such as 08/07/1970.", null);
+        return null;
+    }
+
+    private static decimal? Money(string? value, string key, string label, Action<string, string, List<string>?> err)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Replace(",", "").Replace("GHS", "", StringComparison.OrdinalIgnoreCase).Trim();
+        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var d)) return Math.Round(d, 2);
+        err(key, $"{label} '{value}' is not a number.", null);
+        return null;
+    }
+
+    private static int? WholeNumber(string? value, string key, string label, Action<string, string, List<string>?> err)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        if (digits.Length > 0 && digits.Length <= 9 && int.TryParse(digits, out var n) && value.Trim().Length - digits.Length <= 1) return n;
+        err(key, $"{label} '{value}' is not a whole number.", null);
+        return null;
+    }
+
+    private static string? Phone(string? value, string key, string label, Action<string, string, List<string>?> warn)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        if (text.Length > 50) { warn(key, $"{label} is longer than 50 characters and was left blank.", null); return null; }
+        if (!PhoneRegex.IsMatch(text)) warn(key, $"{label} '{text}' does not look like a phone number.", null);
+        return text;
+    }
+
+    private static string? Qualification(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        return EmployeeImportColumns.NormalizeKey(text) is "N/A" or "NA" or "NONE" or "NIL" or "-" ? null : text;
+    }
+
+    private static EmployeeImportFindingDto Error(string? column, string? cell, string message, List<string>? suggestions = null) => new()
+    {
+        Severity = EmployeeImportFindingSeverity.Error, Column = column, Cell = cell, Message = message, Suggestions = suggestions ?? new List<string>(),
+    };
+
+    private static EmployeeImportFindingDto Warning(string? column, string? cell, string message, List<string>? suggestions = null) => new()
+    {
+        Severity = EmployeeImportFindingSeverity.Warning, Column = column, Cell = cell, Message = message, Suggestions = suggestions ?? new List<string>(),
+    };
+
+    /// <summary>Id → display name, for the "from" side of a diff.</summary>
+    private sealed class DisplayNames
+    {
+        private readonly Dictionary<Guid, string> _departments;
+        private readonly Dictionary<Guid, string> _sections;
+        private readonly Dictionary<Guid, string> _positions;
+        private readonly Dictionary<Guid, string> _locations;
+
+        public DisplayNames(EmployeeImportReferenceData refs)
+        {
+            _departments = refs.Departments.Items.ToDictionary(i => i.Item.Id, i => i.Item.Name);
+            _sections = refs.Sections.Items.ToDictionary(i => i.Item.Id, i => i.Item.Name);
+            _positions = refs.Positions.Items.ToDictionary(i => i.Item.Id, i => i.Item.Title);
+            _locations = refs.Locations.Items.ToDictionary(i => i.Item.Id, i => i.Item.Name);
+        }
+
+        public string? Department(Guid id) => _departments.GetValueOrDefault(id);
+        public string? Section(Guid id) => _sections.GetValueOrDefault(id);
+        public string? Position(Guid id) => _positions.GetValueOrDefault(id);
+        public string? Location(Guid id) => _locations.GetValueOrDefault(id);
+    }
+}

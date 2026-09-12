@@ -191,6 +191,7 @@ public sealed class PurchaseRequisitionSourcingReleaseControllerTests
                 Mock.Of<IProcurementRequisitionBudgetControlService>(),
                 Mock.Of<IProcurementRequisitionAuthorityRouteService>(),
                 Sourcing.Object,
+                Mock.Of<IProcurementAccessControlService>(),
                 Mock.Of<IAppEventBus>(),
                 NullLogger<PurchaseRequisitionsController>.Instance)
             {

@@ -47,6 +47,14 @@ describe('AllSettingsPage', () => {
 
     expect(modules?.cards.map(card => card.title)).toContain('Procurement');
     expect(modules?.cards.map(card => card.title)).toContain('Inventory');
+    // SHE configuration is its own module card, ordered right after Human Resources, and
+    // its links never fall into the General Administration bucket.
+    const moduleTitles = modules?.cards.map(card => card.title) ?? [];
+    expect(moduleTitles.indexOf('Safety (SHE)')).toBe(moduleTitles.indexOf('Human Resources') + 1);
+    expect(modules?.cards.find(card => card.title === 'Safety (SHE)')?.links.map(link => link.title))
+      .toEqual(expect.arrayContaining(['Incident Types', 'PPE Types', 'Reminder Engine']));
+    const generalAdmin = administration?.cards.find(card => card.title === 'General Administration');
+    expect(generalAdmin?.links.map(link => link.title) ?? []).not.toContain('Incident Types');
     expect(modules?.cards.find(card => card.title === 'Inventory')?.links.map(link => link.title)).toEqual([
       'Units of Measure',
       'UoM Schedules',
@@ -72,47 +80,44 @@ describe('AllSettingsPage', () => {
       ]));
   });
 
-  it('searches setting children and closes back to the previous workspace', () => {
+  it('finds the owning module when a child setting is searched and closes back to the previous workspace', () => {
     render(<AllSettingsPage />);
 
     expect(screen.getByRole('heading', { name: 'All Settings' })).toBeInTheDocument();
     expect(screen.getByText('Demo Organization')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Notification Center' })).toHaveAttribute('href', '/notifications#center');
+    expect(screen.getByRole('link', { name: 'Open Notifications & Communications settings' }))
+      .toHaveAttribute('href', '/settings/administration/communications');
+    expect(screen.queryByRole('link', { name: 'Notification Center' })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Search settings' }), {
       target: { value: 'audit logs' },
     });
 
-    expect(screen.getByRole('link', { name: 'Audit Logs' })).toHaveAttribute('href', '/administration/audit-logs');
-    expect(screen.queryByRole('link', { name: 'Finance Settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Audit & Monitoring settings' }))
+      .toHaveAttribute('href', '/settings/administration/audit');
+    expect(screen.queryByRole('link', { name: 'Open Finance settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Audit Logs' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Close Settings/ }));
     expect(mocks.back).toHaveBeenCalledOnce();
   });
 
-  it('loads every category expanded and toggles each card from its header', () => {
+  it('shows module-only cards that open isolated module settings pages', () => {
     render(<AllSettingsPage />);
 
-    expect(screen.getByTestId('modules-settings-masonry')).toHaveClass(
-      'columns-1',
-      'md:columns-2',
-      'xl:columns-4',
-      '2xl:columns-5',
+    expect(screen.getByTestId('modules-settings-grid')).toHaveClass(
+      'grid',
+      'sm:grid-cols-2',
+      'xl:grid-cols-4',
     );
 
-    const collapseInventory = screen.getByRole('button', { name: 'Collapse Inventory settings' });
-    expect(collapseInventory.closest('article')).toHaveClass('break-inside-avoid');
-    expect(collapseInventory).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('link', { name: 'Units of Measure' })).toBeInTheDocument();
-
-    fireEvent.click(collapseInventory);
-    const expandInventory = screen.getByRole('button', { name: 'Expand Inventory settings' });
-    expect(expandInventory).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('link', { name: 'Open Inventory settings' }))
+      .toHaveAttribute('href', '/settings/modules/inventory');
+    expect(screen.getByRole('link', { name: 'Open Inventory settings' }))
+      .toHaveClass('min-h-20', 'px-4', 'py-3');
+    expect(screen.getByRole('link', { name: 'Open Procurement settings' }))
+      .toHaveAttribute('href', '/settings/modules/procurement');
     expect(screen.queryByRole('link', { name: 'Units of Measure' })).not.toBeInTheDocument();
-
-    fireEvent.click(expandInventory);
-    expect(screen.getByRole('button', { name: 'Collapse Inventory settings' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('link', { name: 'Units of Measure' })).toBeInTheDocument();
   });
 
   it('derives module visibility from authorized children and removes inaccessible siblings', () => {
@@ -140,7 +145,9 @@ describe('AllSettingsPage', () => {
     mocks.permissions = ['procurement.access.manage'];
     render(<AllSettingsPage />);
 
-    expect(screen.getByRole('link', { name: 'Scopes & Committees' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open Procurement settings' }))
+      .toHaveAttribute('href', '/settings/modules/procurement');
+    expect(screen.queryByRole('link', { name: 'Scopes & Committees' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Policy Profiles' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Inventory Items' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Notification Center' })).not.toBeInTheDocument();
@@ -156,10 +163,8 @@ describe('AllSettingsPage', () => {
       target: { value: 'committees' },
     });
 
-    expect(screen.getByRole('link', { name: 'Scopes & Committees' })).toHaveAttribute(
-      'href',
-      '/administration/procurement/access-controls',
-    );
+    expect(screen.getByRole('link', { name: 'Open Procurement settings' }))
+      .toHaveAttribute('href', '/settings/modules/procurement');
   });
 
   it('exposes only the Civil Engineering policy to a configuration reader', () => {
@@ -185,8 +190,8 @@ describe('AllSettingsPage', () => {
     mocks.permissions = [];
     render(<AllSettingsPage />);
 
-    expect(screen.queryByTestId('modules-settings-masonry')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('administration-settings-masonry')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('modules-settings-grid')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('administration-settings-grid')).not.toBeInTheDocument();
     expect(screen.getByText('No settings are available for your current roles and permissions.')).toBeInTheDocument();
   });
 });

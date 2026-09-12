@@ -17,6 +17,9 @@ public interface IStaffTravelFlightBookingRepository : IGenericRepository<StaffT
     /// <summary>Returns a flight booking with its ordered segments loaded.</summary>
     Task<StaffTravelFlightBooking?> GetWithSegmentsAsync(Guid id);
 
+    /// <summary>Flight with its segments and vendor, scoped to the tenant — for reloading a write.</summary>
+    Task<StaffTravelFlightBooking?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns flight bookings filtered by status.</summary>
     Task<IEnumerable<StaffTravelFlightBooking>> GetByStatusAsync(TravelBookingStatus status);
 
@@ -40,6 +43,9 @@ public interface IStaffTravelFlightSegmentRepository : IGenericRepository<StaffT
 
 public interface IStaffTravelHotelBookingRepository : IGenericRepository<StaffTravelHotelBooking>
 {
+    /// <summary>The hotel with its country and vendor, scoped to the tenant — for reloading a write (F-12).</summary>
+    Task<StaffTravelHotelBooking?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all hotel bookings for a request, with vendor loaded.</summary>
     Task<IEnumerable<StaffTravelHotelBooking>> GetByRequestIdAsync(Guid requestId);
 
@@ -56,6 +62,9 @@ public interface IStaffTravelHotelBookingRepository : IGenericRepository<StaffTr
 
 public interface IStaffTravelGroundTransportRepository : IGenericRepository<StaffTravelGroundTransport>
 {
+    /// <summary>The ground transport with its vendor, scoped to the tenant — for reloading a write (F-12).</summary>
+    Task<StaffTravelGroundTransport?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all ground transport arrangements for a request.</summary>
     Task<IEnumerable<StaffTravelGroundTransport>> GetByRequestIdAsync(Guid requestId);
 
@@ -69,6 +78,9 @@ public interface IStaffTravelGroundTransportRepository : IGenericRepository<Staf
 
 public interface IStaffTravelCarRentalBookingRepository : IGenericRepository<StaffTravelCarRentalBooking>
 {
+    /// <summary>The car rental with its vendor, scoped to the tenant — for reloading a write (F-12).</summary>
+    Task<StaffTravelCarRentalBooking?> GetWithDetailsAsync(Guid tenantId, Guid id);
+
     /// <summary>Returns all car rental bookings for a request, with vendor loaded.</summary>
     Task<IEnumerable<StaffTravelCarRentalBooking>> GetByRequestIdAsync(Guid requestId);
 

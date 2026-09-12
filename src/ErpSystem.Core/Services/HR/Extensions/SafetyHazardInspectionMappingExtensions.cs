@@ -65,6 +65,9 @@ public static class SafetyHazardInspectionMappingExtensions
         LastReviewedDate = e.LastReviewedDate,
         LastReviewedById = e.LastReviewedById,
         LastReviewedByName = e.LastReviewedBy?.FullName,
+        ReportedById = e.ReportedById,
+        ReportedByName = e.ReportedBy?.FullName,
+        ReportedDate = e.ReportedDate,
         IsActive = e.IsActive,
         Controls = e.Controls.Select(c => c.ToDto()).ToList(),
         CorrectiveActions = e.CorrectiveActions.Select(a => a.ToDto()).ToList(),
@@ -82,6 +85,7 @@ public static class SafetyHazardInspectionMappingExtensions
         ResidualRiskLevel = e.ResidualRiskLevel,
         Status = e.Status,
         OwnerName = e.Owner?.FullName,
+        ReportedByName = e.ReportedBy?.FullName,
         ReviewDueDate = e.ReviewDueDate,
         IsActive = e.IsActive,
     };
@@ -110,6 +114,8 @@ public static class SafetyHazardInspectionMappingExtensions
             OwnerId = dto.OwnerId,
             ReviewDueDate = dto.ReviewDueDate,
             IsActive = dto.IsActive,
+            ReportedById = dto.ReportedById,
+            ReportedDate = dto.ReportedById is null ? null : DateTime.UtcNow,
             CreatedBy = userId.ToString(),
         };
     }

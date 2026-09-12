@@ -27,6 +27,17 @@ public interface INotificationService
     Task SendEmailAsync(string to, string subject, string body, bool isHtml = true);
 
     /// <summary>
+    /// Sends an email while allowing one-time secrets to be omitted from the
+    /// persisted notification audit body.
+    /// </summary>
+    Task SendEmailAsync(
+        string to,
+        string subject,
+        string body,
+        bool isHtml,
+        bool persistBody);
+
+    /// <summary>
     /// Sends email notification with attachments
     /// </summary>
     Task SendEmailWithAttachmentsAsync(string to, string subject, string body, List<EmailAttachmentInfo> attachments, bool isHtml = true);

@@ -42,6 +42,7 @@ namespace ErpSystem.Api.Controllers
         private readonly ITenantSmsSender _tenantSmsSender;
         private readonly ICaptchaVerificationService _captchaVerificationService;
         private readonly IOtpService _otpService;
+        private readonly IEmployeeLinkResolutionService _employeeLinkResolution;
         private readonly IHrIdentityAccessService _hrIdentityAccessService;
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
@@ -67,6 +68,7 @@ namespace ErpSystem.Api.Controllers
             ITenantSmsSender tenantSmsSender,
             ICaptchaVerificationService captchaVerificationService,
             IOtpService otpService,
+            IEmployeeLinkResolutionService employeeLinkResolution,
             IHrIdentityAccessService hrIdentityAccessService,
             ApplicationDbContext context,
             IConfiguration configuration,
@@ -91,6 +93,7 @@ namespace ErpSystem.Api.Controllers
             _tenantSmsSender = tenantSmsSender;
             _captchaVerificationService = captchaVerificationService;
             _otpService = otpService;
+            _employeeLinkResolution = employeeLinkResolution;
             _hrIdentityAccessService = hrIdentityAccessService;
             _context = context;
             _configuration = configuration;
@@ -397,11 +400,55 @@ namespace ErpSystem.Api.Controllers
                     TemporaryPasswordExpiresAtUtc = user.TemporaryPasswordExpiresAtUtc,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                     Permissions = await GetUserPermissionsAsync(user),
-                    AuthenticationProvider = user.AuthenticationProvider.ToString()
+                    AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                    EmployeeId = user.EmployeeId
                 }
             };
 
             return Ok(response);
+        }
+
+        /// <summary>
+        /// Links a just-provisioned LDAP user to their employee record when — and
+        /// only when — exactly one exact match exists (AD mail → Employee.EmailAddress, else
+        /// sAMAccountName → EmployeeNumber; unlinked employees only). The Employee role rides
+        /// the link because a linked employee IS the portal's audience. Zero or multiple
+        /// matches provision as before; the HR unlinked-users queue shows the candidates.
+        /// </summary>
+        private async Task TryAutoLinkProvisionedLdapUserAsync(ApplicationUser user, LdapUser ldapUser, Guid tenantId)
+        {
+            try
+            {
+                var match = await _employeeLinkResolution.FindExactMatchAsync(tenantId, ldapUser.Email, ldapUser.Username);
+                if (match == null)
+                {
+                    _logger.LogInformation("LDAP provision: no unambiguous employee match for {Username}; left unlinked for the HR queue", user.UserName);
+                    return;
+                }
+
+                user.EmployeeId = match.EmployeeId;
+                var update = await _userManager.UpdateAsync(user);
+                if (!update.Succeeded)
+                {
+                    _logger.LogWarning("LDAP auto-link failed to save for {Username}: {Errors}",
+                        user.UserName, string.Join(", ", update.Errors.Select(e => e.Description)));
+                    return;
+                }
+
+                var roleResult = await _userManager.AddToRoleAsync(user, Constants.Roles.Employee);
+                if (!roleResult.Succeeded)
+                {
+                    _logger.LogWarning("LDAP auto-link: Employee role grant failed for {Username}: {Errors}",
+                        user.UserName, string.Join(", ", roleResult.Errors.Select(e => e.Description)));
+                }
+
+                _logger.LogInformation("LDAP provision auto-linked {Username} to employee {EmployeeId} (matched by {MatchedBy})",
+                    user.UserName, match.EmployeeId, match.MatchedBy);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "LDAP auto-link errored for {Username}; user left unlinked", user.UserName);
+            }
         }
 
         [HttpPost("login")]
@@ -467,6 +514,27 @@ namespace ErpSystem.Api.Controllers
                 user = await _userManager.FindByNameAsync(request.Username) ??
                        await _userManager.FindByEmailAsync(request.Username);
 
+                // The identifier may be an employee number. Only consulted when no
+                // username/email matched (that precedence is the contract), and it resolves
+                // through the user↔employee link — an unlinked employee's number is nothing to
+                // authenticate. The resolved user then goes down the NORMAL path for their own
+                // provider, so the LDAP bind below must use their real username, not the number.
+                var effectiveUsername = request.Username;
+                if (user == null)
+                {
+                    var resolvedUserId = await _employeeLinkResolution.ResolveUserIdByEmployeeNumberAsync(
+                        request.Username, (tenant ?? defaultTenant)?.Id);
+                    if (resolvedUserId.HasValue)
+                    {
+                        user = await _userManager.FindByIdAsync(resolvedUserId.Value.ToString());
+                        if (user?.UserName != null)
+                        {
+                            effectiveUsername = user.UserName;
+                            _logger.LogInformation("Login identifier resolved as employee number to user {UserId}", user.Id);
+                        }
+                    }
+                }
+
                 // Prefer LDAP authentication when available. If a tenant code isn't provided, use the default tenant's LDAP config.
                 var tenantForLdap = tenant ?? defaultTenant;
 
@@ -480,7 +548,7 @@ namespace ErpSystem.Api.Controllers
                         tenantForLdap.LdapPort ?? 389,
                         tenantForLdap.LdapBaseDn);
 
-                    var ldapResult = await _ldapAuthService.AuthenticateAsync(request.Username, request.Password, tenantForLdap);
+                    var ldapResult = await _ldapAuthService.AuthenticateAsync(effectiveUsername, request.Password, tenantForLdap);
                     ldapFailureReason = ldapResult.ErrorMessage;
 
                     _logger.LogInformation(
@@ -526,6 +594,12 @@ namespace ErpSystem.Api.Controllers
                                     string.Join(", ", createResult.Errors.Select(e => e.Description)));
                                 return StatusCode(500, new { message = "Failed to create user account" });
                             }
+
+                            // Exact-match auto-link on provision. One unambiguous
+                            // match links the account and grants the Employee role; anything
+                            // else leaves the user for the HR unlinked-users queue. Never fails
+                            // the login — an unlinked portal beats a locked-out employee.
+                            await TryAutoLinkProvisionedLdapUserAsync(user, ldapUser, provisionTenantId);
                         }
                         else
                         {
@@ -875,7 +949,8 @@ namespace ErpSystem.Api.Controllers
                         TemporaryPasswordExpiresAtUtc = user.TemporaryPasswordExpiresAtUtc,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                         Permissions = await GetUserPermissionsAsync(user),
-                        AuthenticationProvider = user.AuthenticationProvider.ToString()
+                        AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                        EmployeeId = user.EmployeeId
                     }
                 };
 
@@ -1233,7 +1308,8 @@ namespace ErpSystem.Api.Controllers
                     IsActive = user.IsActive,
                     Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                     Permissions = await GetUserPermissionsAsync(user),
-                    AuthenticationProvider = user.AuthenticationProvider.ToString()
+                    AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                    EmployeeId = user.EmployeeId
                 };
 
                 return Ok(userInfo);
@@ -1410,7 +1486,8 @@ namespace ErpSystem.Api.Controllers
                         IsActive = user.IsActive,
                         Roles = (await _userManager.GetRolesAsync(user)).ToList(),
                         Permissions = await GetUserPermissionsAsync(user),
-                        AuthenticationProvider = user.AuthenticationProvider.ToString()
+                        AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                        EmployeeId = user.EmployeeId
                     }
                 };
 
@@ -1424,11 +1501,20 @@ namespace ErpSystem.Api.Controllers
         }
 
         [HttpGet("tenant/{tenantId}/users")]
-        [Authorize]
+        [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
         public async Task<IActionResult> GetTenantUsers(Guid tenantId)
         {
             try
             {
+                // UserTenant mappings grant broad ERP tenant access. Enforce the
+                // token tenant boundary before any target-tenant data access.
+                if (!_currentUserService.IsAuthenticated ||
+                    !_currentUserService.TenantId.HasValue ||
+                    _currentUserService.TenantId.Value != tenantId)
+                {
+                    return Forbid();
+                }
+
                 // Validate tenant exists
                 var tenant = await _tenantService.GetTenantByIdAsync(tenantId);
                 if (tenant == null || tenant.Status != TenantStatus.Active)
@@ -1636,6 +1722,162 @@ namespace ErpSystem.Api.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during registration for user: {Username}", request.Username);
+                return StatusCode(500, new { message = "An error occurred during registration" });
+            }
+        }
+
+        /// <summary>
+        /// Self-registration for job candidates on the public careers surface (replacing
+        /// the retired PortalBearer candidate portal). Mirrors <see cref="Register"/>
+        /// with two deliberate deltas:
+        /// (1) the tenant comes from the required <c>X-Tenant-Id</c> header — a candidate arrives
+        ///     from a tenant-specific job board, and the host-based fallback of the partner flow
+        ///     would land shared-host signups on an arbitrary tenant;
+        /// (2) the account gets <c>Constants.Roles.Candidate</c>, never ExternalUser — the
+        ///     Candidate role is fenced by CandidateAccessMiddleware and refused by InternalOnly,
+        ///     while ExternalUser's allowlist carries the procurement/projects/estate portals.
+        /// Activation is the same SMS OTP as the partner flow (<c>verify-otp</c>). Linking the
+        /// account to an existing JobCandidate profile happens later and only under email proof —
+        /// a phone OTP does not prove the mailbox, and adopting on registration would let anyone
+        /// claim a candidate's application history by typing their email address.
+        /// </summary>
+        [HttpPost("register-candidate")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        public async Task<IActionResult> RegisterCandidate([FromBody] RegisterRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                _logger.LogInformation("Candidate registration attempt for user: {Username}, email: {Email}", request.Username, request.Email);
+
+                var existingUserByUsername = await _userManager.FindByNameAsync(request.Username);
+                if (existingUserByUsername != null)
+                {
+                    return BadRequest(new { message = "A user with this username already exists." });
+                }
+
+                var existingUserByEmail = await _userManager.FindByEmailAsync(request.Email);
+                if (existingUserByEmail != null)
+                {
+                    return BadRequest(new { message = "A user with this email address already exists." });
+                }
+
+                // The careers surface is tenant-specific and passes the tenant explicitly, the same
+                // way the anonymous public job board does. No host fallback: on a shared host that
+                // guessed "first active tenant", which is exactly wrong for a job applicant.
+                if (!Guid.TryParse(Request.Headers["X-Tenant-Id"].FirstOrDefault(), out var candidateTenantId) ||
+                    candidateTenantId == Guid.Empty)
+                {
+                    return BadRequest(new { message = "The X-Tenant-Id header is required for candidate registration." });
+                }
+
+                var registrationTenant = await _tenantService.GetTenantByIdAsync(candidateTenantId);
+                if (registrationTenant == null || registrationTenant.Status != TenantStatus.Active)
+                {
+                    return BadRequest(new { message = "Candidate registration is not currently available." });
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(registrationTenant.Id, request.RecaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+
+                var user = new ApplicationUser
+                {
+                    UserName = request.Username,
+                    Email = request.Email,
+                    PhoneNumber = request.PhoneNumber,
+                    FirstName = request.FirstName,
+                    LastName = request.LastName,
+                    TenantId = registrationTenant.Id,
+                    IsActive = false, // Activated after OTP verification, exactly like Register
+                    EmailConfirmed = false,
+                    PhoneNumberConfirmed = false,
+                    AuthenticationProvider = AuthenticationProvider.Local,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = "Candidate-Self-Registration"
+                };
+
+                var result = await _userManager.CreateAsync(user, request.Password);
+                if (!result.Succeeded)
+                {
+                    var errors = result.Errors.Select(e => e.Description).ToList();
+                    _logger.LogWarning("Candidate registration failed for {Username}: {Errors}", request.Username, string.Join(", ", errors));
+                    return BadRequest(new { message = "Registration failed.", errors });
+                }
+
+                await _userManager.AddToRoleAsync(user, Constants.Roles.Candidate);
+
+                await _userTenantService.GrantUserAccessToTenantAsync(
+                    user.Id,
+                    registrationTenant.Id,
+                    UserTenantAccessLevel.Standard,
+                    "Candidate-Self-Registration"
+                );
+
+                var registrationSecurityLog = new SecurityLog
+                {
+                    Action = "CandidateRegistration",
+                    Success = true,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    Username = request.Username,
+                    UserId = user.Id,
+                    Details = "Candidate self-registered successfully",
+                    FailureReason = null,
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = registrationTenant.Id
+                };
+                await _securityLogService.CreateSecurityLogAsync(registrationSecurityLog);
+
+                _logger.LogInformation("Candidate registration successful for: {Username}", request.Username);
+
+                // Send OTP via SMS for phone verification (best-effort; do not fail registration if SMS fails)
+                try
+                {
+                    var phone = NormalizePhone(request.PhoneNumber);
+                    var otp = await _otpService.CreateOtpAsync(
+                        registrationTenant.Id,
+                        OtpPurpose.PhoneVerification,
+                        OtpChannel.Sms,
+                        phone,
+                        TimeSpan.FromMinutes(10),
+                        maxAttempts: 5,
+                        HttpContext.RequestAborted);
+
+                    await _tenantSmsSender.SendAsync(
+                        registrationTenant.Id,
+                        phone,
+                        $"Your {registrationTenant.Name} verification code is {otp}. It expires in 10 minutes.",
+                        HttpContext.RequestAborted);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to send phone verification OTP for candidate {Username}", request.Username);
+                }
+
+                return Ok(new RegisterResponse
+                {
+                    Success = true,
+                    Message = "Registration successful. Please verify your phone number.",
+                    PhoneNumber = request.PhoneNumber,
+                    RequiresOtpVerification = true
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during candidate registration for user: {Username}", request.Username);
                 return StatusCode(500, new { message = "An error occurred during registration" });
             }
         }
@@ -2306,6 +2548,103 @@ namespace ErpSystem.Api.Controllers
             {
                 _logger.LogError(ex, "Error during password reset");
                 return StatusCode(500, new { message = "An error occurred during password reset" });
+            }
+        }
+
+        /// <summary>
+        /// Completes an HR-invited consultant-client contact's account setup: consumes the
+        /// emailed setup token, sets the contact's chosen password, and activates the account.
+        /// </summary>
+        /// <remarks>
+        /// The setup token is an Identity password-reset token that only ever travelled by
+        /// email, so consuming it IS the mailbox proof — which is why this endpoint may confirm
+        /// the email and activate the account in the same step (an invited account starts
+        /// IsActive = false with EmailConfirmed = false and can neither log in nor be adopted
+        /// until here). Restricted to accounts holding ONLY the ConsultantClient role: a plain
+        /// reset flow must never become a back door that force-activates a staff account.
+        /// </remarks>
+        [HttpPost("complete-client-setup")]
+        [AllowAnonymous]
+        [EnableRateLimiting("SensitivePolicy")]
+        public async Task<IActionResult> CompleteClientSetup([FromBody] ErpSystem.Core.DTOs.Auth.CompleteClientSetupRequest request)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                // CAPTCHA enforcement (when enabled for tenant)
+                try
+                {
+                    var tenantIdForCaptcha = await ResolveTenantIdForCaptchaAsync(null);
+                    var host = GetEffectiveHost();
+                    var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    await _captchaVerificationService.EnsureCaptchaValidAsync(tenantIdForCaptcha, request.CaptchaToken, host, remoteIp, HttpContext.RequestAborted);
+                }
+                catch (CaptchaVerificationException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
+
+                var user = await _userManager.FindByEmailAsync(request.Email);
+                if (user == null)
+                {
+                    return BadRequest(new { message = "Invalid email or setup token" });
+                }
+
+                var roles = await _userManager.GetRolesAsync(user);
+                var isClientContact = roles.Count == 1
+                    && string.Equals(roles[0], Constants.Roles.ConsultantClient, StringComparison.OrdinalIgnoreCase);
+                if (!isClientContact)
+                {
+                    _logger.LogWarning("complete-client-setup refused for non-client account {UserId}", user.Id);
+                    return BadRequest(new { message = "Invalid email or setup token" });
+                }
+
+                var success = await _passwordResetService.ResetPasswordAsync(
+                    user.Id, request.Token, request.NewPassword);
+                if (!success)
+                {
+                    return BadRequest(new { message = "Invalid or expired setup token" });
+                }
+
+                user.EmailConfirmed = true;
+                user.IsActive = true;
+                user.UpdatedAt = DateTime.UtcNow;
+                user.UpdatedBy = "ClientPortal-Setup";
+                var updateResult = await _userManager.UpdateAsync(user);
+                if (!updateResult.Succeeded)
+                {
+                    _logger.LogError("Failed to activate client contact {UserId} after setup", user.Id);
+                    return StatusCode(500, new { message = "Failed to activate account" });
+                }
+
+                await _securityLogService.CreateSecurityLogAsync(new SecurityLog
+                {
+                    Action = "ClientContactSetupCompleted",
+                    Success = true,
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                    Username = user.UserName ?? request.Email,
+                    UserId = user.Id,
+                    Details = "Consultant-client contact completed account setup via invite link",
+                    UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                    TenantId = user.TenantId
+                });
+
+                _logger.LogInformation("Client contact {UserId} completed account setup", user.Id);
+
+                return Ok(new ErpSystem.Core.DTOs.Auth.ResetPasswordResponse
+                {
+                    Success = true,
+                    Message = "Account setup complete. You can now sign in with your new password."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during client contact setup completion");
+                return StatusCode(500, new { message = "An error occurred during account setup" });
             }
         }
 

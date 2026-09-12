@@ -20560,16 +20560,6 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<string>("WithdrawalReason")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<Guid?>("WithdrawnByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("WithdrawnDate")
-                        .HasColumnType("datetime2");
-
                     b.Property<bool>("IsAutoReversalEntry")
                         .HasColumnType("bit");
 
@@ -20716,6 +20706,16 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("WithdrawalReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("WithdrawnByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("WithdrawnDate")
+                        .HasColumnType("datetime2");
 
                     b.HasKey("Id");
 
@@ -27116,6 +27116,182 @@ namespace ErpSystem.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Announcements.HrAnnouncement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ArchivedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ExpiresOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("FilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PublishedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArchivedById");
+
+                    b.HasIndex("Category");
+
+                    b.HasIndex("PublishedById");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TenantId", "Status", "ExpiresOn");
+
+                    b.ToTable("HrAnnouncements");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Announcements.HrAnnouncementAudience", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AnnouncementId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsExclusion")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("TargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("TargetType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AnnouncementId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TargetType", "TargetId");
+
+                    b.ToTable("HrAnnouncementAudiences");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetAssignment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -27145,6 +27321,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(70)
                         .HasColumnType("nvarchar(70)");
+
+                    b.Property<decimal?>("BenefitInKindValue")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("ConditionAtAssignment")
                         .HasColumnType("int");
@@ -27190,6 +27369,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateOnly?>("ExpectedReturnDate")
                         .HasColumnType("date");
 
+                    b.Property<bool>("IsBenefitInKind")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -27202,11 +27384,30 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("Purpose")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("RentalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("RentalCurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateOnly?>("RentalEffectiveFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("RentalEffectiveTo")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("RentalFrequency")
+                        .HasColumnType("int");
+
                     b.Property<decimal?>("RepairCost")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal?>("ReplacementCost")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid?>("RequisitionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("ResponsibleForDamage")
                         .HasColumnType("bit");
@@ -27237,6 +27438,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<DateTime?>("TermsDocumentSentAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("TermsDocumentSentById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TermsDocumentSentTo")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("TransferId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("Type")
                         .HasColumnType("int");
 
@@ -27258,11 +27472,19 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("EmployeeId");
 
+                    b.HasIndex("RentalEffectiveFrom");
+
+                    b.HasIndex("RequisitionId");
+
                     b.HasIndex("ReturnedToId");
 
                     b.HasIndex("Status");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("TermsDocumentSentById");
+
+                    b.HasIndex("TransferId");
 
                     b.ToTable("AssetAssignments");
                 });
@@ -27295,6 +27517,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(250)
@@ -27304,6 +27532,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -27322,6 +27556,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<DateTime>("UploadDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -27399,6 +27636,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("AssetId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Caption")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -27414,6 +27655,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -27421,6 +27668,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("FilePath")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -27439,6 +27692,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<DateTime>("UploadDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -27494,8 +27750,18 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("MaintenanceAdmissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MaintenanceAdmissionNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<DateTime>("MaintenanceDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("MaintenanceDischargeId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("MaintenanceNumber")
                         .IsRequired()
@@ -27558,6 +27824,154 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("AssetMaintenances");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetReminderDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("TenantId", "AssetId");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("AssetReminderDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("AssetReminderRuns");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetRequisition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -27577,7 +27991,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("AssetTypeId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("AssignedAssetId")
+                    b.Property<Guid?>("BeneficiaryEmployeeId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
@@ -27665,7 +28079,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("AssetTypeId");
 
-                    b.HasIndex("AssignedAssetId");
+                    b.HasIndex("BeneficiaryEmployeeId");
 
                     b.HasIndex("FulfilledById");
 
@@ -27680,6 +28094,240 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("AssetRequisitions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetSurcharge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("AmountRecovered")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ApprovalComments")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ApprovalDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("AssessedAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("BasisRepairCost")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("BasisReplacementCost")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("EmployeeRespondedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("EmployeeResponse")
+                        .HasColumnType("int");
+
+                    b.Property<string>("EmployeeResponseComments")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int?>("InstalmentCount")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("NotifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ProceededWithoutResponseReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("RaisedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RaisedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Reason")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RecoveryMethod")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly?>("RecoveryStartDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("RejectedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SurchargeNumber")
+                        .IsRequired()
+                        .HasMaxLength(70)
+                        .HasColumnType("nvarchar(70)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("WaivedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("WaivedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("WaiverReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedById");
+
+                    b.HasIndex("AssignmentId");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("RaisedById");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("SurchargeNumber");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("WaivedById");
+
+                    b.ToTable("AssetSurcharges");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetSurchargeRecovery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("RecordedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("RecoveredOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("SurchargeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecordedById");
+
+                    b.HasIndex("RecoveredOn");
+
+                    b.HasIndex("SurchargeId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("AssetSurchargeRecoveries");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetTransfer", b =>
@@ -27937,6 +28585,10 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AdditionalRemarks")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<string>("AssetName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -27994,8 +28646,14 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("FixedAssetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("HasWarranty")
                         .HasColumnType("bit");
+
+                    b.Property<DateOnly?>("InsuranceExpiryDate")
+                        .HasColumnType("date");
 
                     b.Property<string>("InsurancePolicyNumber")
                         .HasMaxLength(70)
@@ -28020,6 +28678,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsInsured")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsRentable")
+                        .HasColumnType("bit");
+
                     b.Property<DateOnly?>("LastMaintenanceDate")
                         .HasColumnType("date");
 
@@ -28031,6 +28692,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("MaintenanceAssetId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<int?>("MaintenanceIntervalDays")
@@ -28053,6 +28717,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateOnly?>("PurchaseDate")
                         .HasColumnType("date");
 
+                    b.Property<string>("RentalCurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
                     b.Property<bool>("RequiresRegularMaintenance")
                         .HasColumnType("bit");
 
@@ -28064,9 +28732,17 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<int>("Source")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("Specifications")
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<decimal?>("StandardRentalAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -28109,9 +28785,19 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("CurrentAssignedToId");
 
+                    b.HasIndex("FixedAssetId");
+
+                    b.HasIndex("InsuranceExpiryDate");
+
+                    b.HasIndex("IsRentable");
+
                     b.HasIndex("LocationId");
 
+                    b.HasIndex("MaintenanceAssetId");
+
                     b.HasIndex("SerialNumber");
+
+                    b.HasIndex("Source");
 
                     b.HasIndex("Status");
 
@@ -28153,6 +28839,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -28162,6 +28854,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -28421,6 +29119,98 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("AwardCommitteeMembers");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardCycle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AwardTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CycleCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<DateTime?>("NominationClosesOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("NominationOpensOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("Quarter")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("VotingClosesOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("VotingOpensOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AwardTypeId");
+
+                    b.HasIndex("CycleCode");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("AwardTypeId", "Year", "Quarter", "Month");
+
+                    b.ToTable("AwardCycles");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardLevel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -28510,6 +29300,9 @@ namespace ErpSystem.Data.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AwardCycleId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("AwardLevelId")
@@ -28604,6 +29397,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AwardCycleId");
+
                     b.HasIndex("AwardLevelId");
 
                     b.HasIndex("AwardTypeId");
@@ -28660,6 +29455,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -28669,6 +29470,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -28708,9 +29515,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool?>("Approved")
-                        .HasColumnType("bit");
-
                     b.Property<Guid>("AwardNominationId")
                         .HasColumnType("uniqueidentifier");
 
@@ -28744,6 +29548,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid>("ReviewerId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Score")
+                        .HasColumnType("int");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -28824,8 +29631,10 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("AutoGenerateNominees")
-                        .HasColumnType("bit");
+                    b.Property<bool>("AllowSelfNomination")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<int>("Category")
                         .HasColumnType("int");
@@ -28854,6 +29663,14 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("DisqualifyOnDisciplinaryRecord")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("DisqualifyingDisciplineMonths")
+                        .HasColumnType("int");
 
                     b.Property<int>("Frequency")
                         .HasColumnType("int");
@@ -28903,8 +29720,14 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int?>("MinAge")
                         .HasColumnType("int");
 
+                    b.Property<int?>("MinGoalsAchieved")
+                        .HasColumnType("int");
+
                     b.Property<decimal?>("MinMonetaryAmount")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("MinPerformanceScore")
+                        .HasColumnType("decimal(5,2)");
 
                     b.Property<int?>("MinRequiredReviewers")
                         .HasColumnType("int");
@@ -28916,6 +29739,11 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("NominationSource")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
@@ -28933,6 +29761,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("WinnerDecision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(2);
+
                     b.HasKey("Id");
 
                     b.HasIndex("Category");
@@ -28943,7 +29776,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Name");
 
+                    b.HasIndex("NominationSource");
+
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("WinnerDecision");
 
                     b.ToTable("AwardTypes");
                 });
@@ -28993,6 +29830,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int?>("MinAge")
                         .HasColumnType("int");
 
+                    b.Property<int>("Purpose")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("Reason")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -29022,13 +29864,87 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
+                    b.HasIndex("AwardTypeId", "Purpose");
+
                     b.ToTable("AwardTypeTargets");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardVote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AwardCycleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AwardNominationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CastOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Justification")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("VoterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AwardCycleId");
+
+                    b.HasIndex("AwardNominationId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("VoterId");
+
+                    b.HasIndex("AwardCycleId", "VoterId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("AwardVotes");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.EmployeeAward", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AwardCycleId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("AwardDate")
@@ -29145,6 +30061,8 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AwardCycleId");
 
                     b.HasIndex("AwardDate");
 
@@ -29283,6 +30201,78 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("YearsOfService");
 
                     b.ToTable("LongServiceAwards");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.LongServiceMilestone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AwardTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Benefits")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("LeaveDaysBonus")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("MonetaryAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Years")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AwardTypeId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("AwardTypeId", "Years")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("LongServiceMilestones");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.TeamAwardNominee", b =>
@@ -29994,6 +30984,80 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("JobLevels");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CertifyingBody", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Abbreviation")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("CountryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Website")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CountryId");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("CertifyingBodies");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.ClientEngagement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -30183,10 +31247,16 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("AttendanceRateIncludesApprovedLeave")
+                        .HasColumnType("bit");
+
                     b.Property<int>("BudgetEnforcementMode")
                         .HasColumnType("int");
 
                     b.Property<int>("CompulsoryRetirementAge")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ConcernTriageChaseDays")
                         .HasColumnType("int");
 
                     b.Property<int>("ContractExpiryLeadDays")
@@ -30221,6 +31291,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("DisciplineBacklogHorizonDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EstablishmentEnforcementMode")
+                        .HasColumnType("int");
+
                     b.Property<int?>("FemaleRetirementAge")
                         .HasColumnType("int");
 
@@ -30237,6 +31313,15 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<int>("FitWeightTenure")
+                        .HasColumnType("int");
+
+                    b.Property<int>("GrievanceAgreementChaseDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("GrievanceRungChaseDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("InvestigationDays")
                         .HasColumnType("int");
 
                     b.Property<bool>("IsDeleted")
@@ -30259,10 +31344,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("ProbationEndLeadDays")
                         .HasColumnType("int");
 
+                    b.Property<int>("ProceduralAbsenceDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("QueryResponseWindowHours")
+                        .HasColumnType("int");
+
                     b.Property<int>("RetirementCountdownLeadDays")
                         .HasColumnType("int");
 
                     b.Property<int>("ReviewDueLeadDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SettlementDaysPerYear")
                         .HasColumnType("int");
 
                     b.Property<string>("SuccessionPlanNumberPrefix")
@@ -30288,6 +31382,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("VoluntaryRetirementAge")
                         .HasColumnType("int");
 
+                    b.Property<int>("WrittenQueryHours")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId")
@@ -30301,8 +31398,10 @@ namespace ErpSystem.Data.Migrations
                         new
                         {
                             Id = new Guid("b2c3d4e5-0000-0000-0000-000000000001"),
+                            AttendanceRateIncludesApprovedLeave = true,
                             BudgetEnforcementMode = 2,
                             CompulsoryRetirementAge = 60,
+                            ConcernTriageChaseDays = 3,
                             ContractExpiryLeadDays = 60,
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             CreatedBy = "System",
@@ -30310,22 +31409,31 @@ namespace ErpSystem.Data.Migrations
                             DefaultProbationMonths = 6,
                             DefaultResignationNoticeDays = 30,
                             DefaultTerminationNoticeDays = 30,
+                            DisciplineBacklogHorizonDays = 90,
+                            EstablishmentEnforcementMode = 3,
                             FiscalYearStartMonth = 1,
                             FitWeightCompetency = 30,
                             FitWeightPerformance = 35,
                             FitWeightPotential = 20,
                             FitWeightTenure = 15,
+                            GrievanceAgreementChaseDays = 14,
+                            GrievanceRungChaseDays = 5,
+                            InvestigationDays = 28,
                             IsDeleted = false,
                             LongServiceMilestoneYears = "5,10,15,20,25",
                             MinimumWorkingAge = 18,
                             ProbationEndLeadDays = 30,
+                            ProceduralAbsenceDays = 10,
+                            QueryResponseWindowHours = 72,
                             RetirementCountdownLeadDays = 365,
                             ReviewDueLeadDays = 30,
+                            SettlementDaysPerYear = 365,
                             SuccessionPlanNumberPrefix = "SP",
                             TenantId = new Guid("00000000-0000-0000-0000-000000000001"),
                             UseGenderSpecificRetirementAge = false,
                             VacancyAlertLeadDays = 90,
-                            VoluntaryRetirementAge = 55
+                            VoluntaryRetirementAge = 55,
+                            WrittenQueryHours = 48
                         });
                 });
 
@@ -30386,6 +31494,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("GeneralEmail")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("GeoAreaId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("HrEmail")
                         .HasMaxLength(200)
@@ -30476,6 +31587,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("CountryOfIncorporationId");
 
+                    b.HasIndex("GeoAreaId");
+
                     b.HasIndex("TenantId")
                         .IsUnique()
                         .HasDatabaseName("UX_CompanyProfile_Tenant")
@@ -30536,15 +31649,15 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Reason")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("StationId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -30571,9 +31684,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("EndDate");
 
-                    b.HasIndex("StartDate");
+                    b.HasIndex("LocationId");
 
-                    b.HasIndex("StationId");
+                    b.HasIndex("StartDate");
 
                     b.HasIndex("TenantId");
 
@@ -30693,6 +31806,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("LocationType")
                         .HasColumnType("int");
 
@@ -30771,9 +31887,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<TimeSpan?>("StartTime")
                         .HasColumnType("time");
 
-                    b.Property<Guid?>("StationId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -30818,11 +31931,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("EventNumber");
 
+                    b.HasIndex("LocationId");
+
                     b.HasIndex("OrganizerId");
 
                     b.HasIndex("StartDate");
-
-                    b.HasIndex("StationId");
 
                     b.HasIndex("Status");
 
@@ -31439,6 +32552,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int?>("MaxBookingDurationHours")
                         .HasColumnType("int");
 
@@ -31459,9 +32575,6 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<Guid>("StationId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -31478,11 +32591,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("IsActive");
 
+                    b.HasIndex("LocationId");
+
                     b.HasIndex("RoomCode");
 
                     b.HasIndex("RoomName");
-
-                    b.HasIndex("StationId");
 
                     b.HasIndex("TenantId");
 
@@ -31608,6 +32721,83 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("RoomBookings");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySealAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MimeType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<DateTime?>("RetiredOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RetiredReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Kind", "RetiredOn")
+                        .HasDatabaseName("IX_CompanySealAsset_Tenant_Kind_RetiredOn");
+
+                    b.ToTable("CompanySealAssets");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Competency", b =>
                 {
                     b.Property<Guid>("Id")
@@ -31669,7 +32859,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "Code")
                         .IsUnique()
-                        .HasDatabaseName("IX_Competency_Tenant_Code");
+                        .HasDatabaseName("IX_Competency_Tenant_Code")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "CompetencyCategory")
                         .HasDatabaseName("IX_Competency_Tenant_Category");
@@ -31878,18 +33069,11 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ConsultantClients");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ConsultantClientPortalAccount", b =>
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ConsultantClientContact", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("AccountSetupExpiry")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("AccountSetupToken")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
 
                     b.Property<Guid>("ConsultantClientId")
                         .HasColumnType("uniqueidentifier");
@@ -31917,20 +33101,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("EmailVerificationExpiry")
+                    b.Property<DateTime?>("InvitedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("EmailVerificationToken")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<int>("FailedLoginAttempts")
-                        .HasColumnType("int");
+                    b.Property<Guid?>("InvitedById")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -31938,31 +33113,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsEmailVerified")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastLoginAt")
+                    b.Property<DateTime?>("LastInviteSentAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("LastVerificationEmailSentAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LockedOutUntil")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("PasswordHash")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("PasswordResetExpiry")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("PasswordResetToken")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -31973,14 +33128,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ConsultantClientId");
 
-                    b.HasIndex("TenantId", "Email")
-                        .IsUnique();
+                    b.HasIndex("InvitedById");
 
-                    b.ToTable("ConsultantClientPortalAccounts");
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("TenantId", "ConsultantClientId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ConsultantClientContact_Tenant_Client_User")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("ConsultantClientContacts");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Country", b =>
@@ -32296,11 +33460,14 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("DisabilityDescription")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<Guid?>("DivisionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("EmailAddress")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
@@ -32331,11 +33498,25 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int?>("Gender")
                         .HasColumnType("int");
 
+                    b.Property<string>("GenderDescription")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("GeoAreaId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("GrossUp")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("HasDisability")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("HireRecordId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Hometown")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -32347,6 +33528,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsFullTime")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsOnPayroll")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
@@ -32396,6 +33580,13 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<string>("OffPayrollNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("OffPayrollReason")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("OrganizationLevelId")
                         .HasColumnType("uniqueidentifier");
 
@@ -32407,6 +33598,26 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<bool>("PayTax")
                         .HasColumnType("bit");
+
+                    b.Property<Guid?>("PhotoDocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PhotoDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PhotoFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long?>("PhotoFileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("PhotoFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PhotoMimeType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
 
                     b.Property<string>("PicturePath")
                         .HasMaxLength(500)
@@ -32507,6 +33718,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("DivisionId");
 
+                    b.HasIndex("GeoAreaId");
+
                     b.HasIndex("HireRecordId");
 
                     b.HasIndex("IsActive");
@@ -32533,11 +33746,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "EmailAddress")
                         .IsUnique()
-                        .HasDatabaseName("IX_Employee_Tenant_EmailAddress");
+                        .HasDatabaseName("IX_Employee_Tenant_EmailAddress")
+                        .HasFilter("[EmailAddress] IS NOT NULL");
 
                     b.HasIndex("TenantId", "EmployeeNumber")
                         .IsUnique()
                         .HasDatabaseName("IX_Employee_Tenant_EmployeeNumber");
+
+                    b.HasIndex("TenantId", "GeoAreaId")
+                        .HasDatabaseName("IX_Employee_Tenant_GeoArea");
 
                     b.ToTable("Employees");
                 });
@@ -32993,7 +34210,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "EmployeeId", "CompetencyId")
                         .IsUnique()
-                        .HasDatabaseName("IX_EmployeeCompetency_Tenant_Employee_Competency");
+                        .HasDatabaseName("IX_EmployeeCompetency_Tenant_Employee_Competency")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("EmployeeCompetencies");
                 });
@@ -33412,6 +34630,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int?>("Gender")
                         .HasColumnType("int");
 
+                    b.Property<string>("GenderDescription")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("GhanaCardNumber")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -33451,6 +34673,26 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Phone")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("PhotoDocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PhotoDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PhotoFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long?>("PhotoFileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("PhotoFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PhotoMimeType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
 
                     b.Property<string>("PicturePath")
                         .HasMaxLength(500)
@@ -33558,6 +34800,168 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("EmployeeDependentBenefits");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("DocumentTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("ExpiresOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateOnly?>("IssuedOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MimeType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentTypeId");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("UploadedById");
+
+                    b.HasIndex("TenantId", "ExpiresOn");
+
+                    b.HasIndex("TenantId", "EmployeeId", "DocumentTypeId");
+
+                    b.ToTable("EmployeeDocuments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeDocumentType", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("ExpiryReminderLeadDays")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("HasExpiry")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EmployeeDocumentTypes_Tenant_Name")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("EmployeeDocumentTypes");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeEmergencyContact", b =>
@@ -33685,6 +35089,13 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<decimal?>("AmountGuaranteed")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("AmountGuaranteedCurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
                     b.Property<string>("City")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -33743,6 +35154,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<int?>("Gender")
                         .HasColumnType("int");
+
+                    b.Property<string>("GenderDescription")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("GuarantorFormPath")
                         .HasMaxLength(500)
@@ -33803,6 +35218,26 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("PhoneNumber")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("PhotoDocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PhotoDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PhotoFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long?>("PhotoFileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("PhotoFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PhotoMimeType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
 
                     b.Property<string>("Relationship")
                         .IsRequired()
@@ -33929,6 +35364,276 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("EmployeeIdentificationCards");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeImportRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Action")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CommitMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("CommittedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CreatedEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<int?>("EmploymentType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ErrorCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FindingsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ManagerRowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RawJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ResolvedJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("RowNumber")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("Skip")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("StaffNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("TargetEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("WarningCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedEmployeeId");
+
+                    b.HasIndex("TargetEmployeeId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("SessionId", "Outcome");
+
+                    b.HasIndex("SessionId", "RowNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_EmployeeImportRow_Session_RowNumber");
+
+                    b.ToTable("EmployeeImportRows");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeImportSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CommitCompletedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("CommitPolicy")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("CommitRequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CommitRequestedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CommitStartedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("CommittedCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CounterReconciliationJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("CreateCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CreatedCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ErrorCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("FailedCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("FileFindingsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FileHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("ReadyCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("SkippedCount")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SourceDocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SourceFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateVersion")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("TotalRows")
+                        .HasColumnType("int");
+
+                    b.Property<int>("UpdateCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("UpdatedCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UploadedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UploadedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("WarningCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UploadedOn");
+
+                    b.HasIndex("TenantId", "FileHash");
+
+                    b.HasIndex("TenantId", "Reference")
+                        .IsUnique()
+                        .HasDatabaseName("IX_EmployeeImportSession_Tenant_Reference");
+
+                    b.HasIndex("TenantId", "SourceFileUploadRecordId");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("EmployeeImportSessions");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeePayComponent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -34030,6 +35735,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<DateTime?>("EstablishmentApprovedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("EstablishmentSourceBudgetId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("ExpectedHeadcount")
                         .HasColumnType("int");
 
@@ -34073,6 +35784,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("ReportsToPositionId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("RequiredGuarantorAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("RequiredGuarantorCurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
 
                     b.Property<bool>("RequiresCertification")
                         .HasColumnType("bit");
@@ -34435,6 +36153,26 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("LetterDocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LetterDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LetterFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long?>("LetterFileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("LetterFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LetterMimeType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
                     b.Property<string>("Organization")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
@@ -34560,6 +36298,284 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("EmployeeSalaryAssignments");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSeparation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AbsenceDays")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ApprovalNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("ApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("CancelledById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CancelledOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DisciplinaryActionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("EffectiveDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("EligibleForRehireDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("EmployeeRecordUpdatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("InitiatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("InitiatedOn")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsEligibleForRehire")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsNoticePaidInLieu")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsNoticeWaived")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsProcedural")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystemInitiated")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("LastWorkingDay")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("NoticeDays")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("NoticeDecidedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("NoticeDecisionOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateOnly?>("NoticeGivenOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("NoticeWaiverReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("ReasonCategory")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReasonNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("RehireRestrictions")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("RejectedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RejectedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("SeparationNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("SeparationType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SubmittedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("SubmittedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedById");
+
+                    b.HasIndex("CancelledById");
+
+                    b.HasIndex("DisciplinaryActionId")
+                        .HasDatabaseName("IX_EmployeeSeparation_DisciplinaryActionId");
+
+                    b.HasIndex("EffectiveDate")
+                        .HasDatabaseName("IX_EmployeeSeparation_EffectiveDate");
+
+                    b.HasIndex("EmployeeId")
+                        .HasDatabaseName("IX_EmployeeSeparation_EmployeeId");
+
+                    b.HasIndex("InitiatedById");
+
+                    b.HasIndex("NoticeDecidedById");
+
+                    b.HasIndex("RejectedById");
+
+                    b.HasIndex("SeparationType")
+                        .HasDatabaseName("IX_EmployeeSeparation_Type");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_EmployeeSeparation_Status");
+
+                    b.HasIndex("SubmittedById");
+
+                    b.HasIndex("TenantId", "SeparationNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EmployeeSeparation_Tenant_Number")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("EmployeeSeparations");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSeparationDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SeparationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("UploadedOn")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category")
+                        .HasDatabaseName("IX_EmployeeSeparationDocument_Category");
+
+                    b.HasIndex("SeparationId")
+                        .HasDatabaseName("IX_EmployeeSeparationDocument_SeparationId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UploadedById");
+
+                    b.ToTable("EmployeeSeparationDocuments");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSkill", b =>
                 {
                     b.Property<Guid>("Id")
@@ -34582,6 +36598,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("CertifyingBody")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("CertifyingBodyId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -34636,6 +36655,8 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CertifyingBodyId");
 
                     b.HasIndex("EmployeeCertificateId");
 
@@ -34793,6 +36814,16 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateOnly?>("RelocationDate")
                         .HasColumnType("date");
 
+                    b.Property<DateOnly?>("ResidentPermitExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ResidentPermitIssueDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("ResidentPermitNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date");
 
@@ -34808,11 +36839,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateOnly?>("VisaExpiryDate")
                         .HasColumnType("date");
 
+                    b.Property<DateOnly?>("VisaIssueDate")
+                        .HasColumnType("date");
+
                     b.Property<string>("VisaType")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<DateOnly?>("WorkPermitExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("WorkPermitIssueDate")
                         .HasColumnType("date");
 
                     b.Property<string>("WorkPermitNumber")
@@ -34830,6 +36867,105 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("EmployeeId", "StartDate");
 
                     b.ToTable("ExpatriateAssignments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ExpatriateFamilyMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("ArrivalDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("DepartureDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("ExpatriateAssignmentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FullName")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<int?>("Gender")
+                        .HasColumnType("int");
+
+                    b.Property<string>("GenderDescription")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateOnly?>("PassportExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("PassportNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Relationship")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RelationshipDescription")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateOnly?>("ResidentPermitExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ResidentPermitIssueDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("ResidentPermitNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpatriateAssignmentId");
+
+                    b.HasIndex("TenantId", "ExpatriateAssignmentId");
+
+                    b.HasIndex("TenantId", "ResidentPermitExpiryDate");
+
+                    b.ToTable("ExpatriateFamilyMembers");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.ExternalAssociate", b =>
@@ -34905,6 +37041,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(15)
                         .HasColumnType("nvarchar(15)");
 
+                    b.Property<Guid?>("PhotoFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("PicturePath")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -34934,7 +37073,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("IsActive");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "AssociateNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ExternalAssociates_Tenant_Number")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("ExternalAssociates");
                 });
@@ -35015,6 +37157,161 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("HrLegacyFileMigrationEntries");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.IdentificationExpiryDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("DueDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("EmployeeIdentificationCardId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("IdentificationTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("RoutedToEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId")
+                        .HasDatabaseName("IX_IdentificationExpiryDispatch_EmployeeId");
+
+                    b.HasIndex("Kind")
+                        .HasDatabaseName("IX_IdentificationExpiryDispatch_Kind");
+
+                    b.HasIndex("RunId")
+                        .HasDatabaseName("IX_IdentificationExpiryDispatch_RunId");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .HasDatabaseName("IX_IdentificationExpiryDispatch_Tenant_DedupeKey");
+
+                    b.ToTable("IdentificationExpiryDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.IdentificationExpiryReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartedAt")
+                        .HasDatabaseName("IX_IdentificationExpiryRun_StartedAt");
+
+                    b.HasIndex("TenantId", "StartedAt")
+                        .HasDatabaseName("IX_IdentificationExpiryRun_Tenant_StartedAt");
+
+                    b.ToTable("IdentificationExpiryReminderRuns");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.IdentificationType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -35043,6 +37340,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Description")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("ExpiryNotificationLeadDays")
+                        .HasColumnType("int");
 
                     b.Property<bool>("HasExpiryDate")
                         .HasColumnType("bit");
@@ -36242,6 +38542,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("RecruitmentBudget")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<decimal>("SalaryBudget")
                         .HasColumnType("decimal(18,2)");
 
@@ -36520,6 +38824,131 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("JobSubFamilies");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Letters.HrLetterRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AddressedTo")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionComments")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("FilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("IssuedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("IssuedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("IssuedDocumentHtml")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LetterNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("LetterType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("RejectedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RequestNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("IssuedById");
+
+                    b.HasIndex("LetterType");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "RequestNumber")
+                        .IsUnique();
+
+                    b.ToTable("HrLetterRequests");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Location", b =>
                 {
                     b.Property<Guid>("Id")
@@ -36584,6 +39013,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("Floor")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("GeoAreaId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("GeofenceZoneId")
                         .HasColumnType("uniqueidentifier");
@@ -36655,6 +39087,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("CountryId")
                         .HasDatabaseName("IX_Location_CountryId");
 
+                    b.HasIndex("GeoAreaId");
+
                     b.HasIndex("GeofenceZoneId");
 
                     b.HasIndex("LocationLevelId")
@@ -36668,6 +39102,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("StructureId", "IsActive")
                         .HasDatabaseName("IX_Location_Structure_Active");
+
+                    b.HasIndex("TenantId", "GeoAreaId")
+                        .HasDatabaseName("IX_Location_Tenant_GeoArea");
 
                     b.HasIndex("TenantId", "StructureId", "Code")
                         .IsUnique()
@@ -37634,6 +40071,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("FacilityType")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("GeoAreaId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("Has24HourService")
                         .HasColumnType("bit");
 
@@ -37725,10 +40165,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("FacilityType");
 
+                    b.HasIndex("GeoAreaId");
+
                     b.HasIndex("IsActive");
 
                     b.HasIndex("TenantId", "FacilityCode")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "GeoAreaId")
+                        .HasDatabaseName("IX_HealthcareFacility_Tenant_GeoArea");
 
                     b.ToTable("HealthcareFacilities");
                 });
@@ -38499,6 +40944,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -38508,6 +40959,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -38534,7 +40988,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ClaimId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "FileUploadRecordId");
 
                     b.ToTable("MedicalExpenseDocuments");
                 });
@@ -39211,8 +41665,14 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("DocumentType")
                         .HasColumnType("int");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ExpiryDate")
                         .HasColumnType("datetime2");
@@ -39226,6 +41686,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -39626,6 +42089,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -39635,6 +42104,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -44334,7 +46806,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "AccountCode");
 
                     b.HasIndex("TenantId", "PayrollRunId", "SequenceNo")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("PayrollJournalLines");
                 });
@@ -51530,6 +54003,281 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("UnitGoals");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Policies.HrPolicyAcknowledgement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AcknowledgementText")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DeclineReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("DeclinedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("PolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SignatureHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SignatureIpAddress")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("SignedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("Outcome");
+
+                    b.HasIndex("PolicyId");
+
+                    b.HasIndex("TenantId", "PolicyId", "EmployeeId")
+                        .IsUnique();
+
+                    b.ToTable("HrPolicyAcknowledgements");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Policies.HrPolicyAudience", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsExclusion")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("TargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("TargetType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PolicyId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("TargetType", "TargetId");
+
+                    b.ToTable("HrPolicyAudiences");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Policies.HrPolicyDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AcknowledgementDueDays")
+                        .HasColumnType("int");
+
+                    b.Property<string>("AcknowledgementText")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ArchivedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("FilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PolicyNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PublishedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("RequiresAcknowledgement")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("ReviewOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("SupersedesPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("VersionLabel")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArchivedById");
+
+                    b.HasIndex("Category");
+
+                    b.HasIndex("PublishedById");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("SupersedesPolicyId");
+
+                    b.HasIndex("TenantId", "PolicyNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Status", "EffectiveFrom");
+
+                    b.ToTable("HrPolicyDocuments");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PositionCompetency", b =>
                 {
                     b.Property<Guid>("Id")
@@ -51589,9 +54337,73 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "PositionId", "CompetencyId")
                         .IsUnique()
-                        .HasDatabaseName("IX_PositionCompetency_Tenant_Position_Competency");
+                        .HasDatabaseName("IX_PositionCompetency_Tenant_Position_Competency")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("PositionCompetencies");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.PositionDocumentRequirement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("DocumentTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsMandatory")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("PositionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentTypeId");
+
+                    b.HasIndex("PositionId");
+
+                    b.HasIndex("TenantId", "PositionId", "DocumentTypeId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PositionDocumentRequirements_Position_Type")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("PositionDocumentRequirements");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PositionPayComponent", b =>
@@ -51729,6 +54541,186 @@ namespace ErpSystem.Data.Migrations
                         .HasDatabaseName("IX_PositionSkillRequirement_Tenant_Position_Skill");
 
                     b.ToTable("PositionSkillRequirements");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ProfileChanges.EmployeeProfileChangeItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AppliedValue")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Field")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("NewValue")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("OldValue")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Field");
+
+                    b.HasIndex("RequestId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("EmployeeProfileChangeItems");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ProfileChanges.EmployeeProfileChangeRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("BankDetailId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EvidenceContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("EvidenceDocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("EvidenceDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EvidenceFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("EvidenceFilePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("EvidenceFileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("EvidenceFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("RequestNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("ReviewComments")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReviewedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("SubmittedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankDetailId");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("ReviewedById");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "RequestNumber")
+                        .IsUnique();
+
+                    b.ToTable("EmployeeProfileChangeRequests");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.EmployeeCareerPath", b =>
@@ -52598,6 +55590,149 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("StaffMovementChecklistItems");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementReminderDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("StaffMovementReminderDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("StaffMovementReminderRuns");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementStatusHistory", b =>
                 {
                     b.Property<Guid>("Id")
@@ -53074,6 +56209,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<Guid?>("QualificationLevelId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ShortCode")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -53096,6 +56234,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Name");
 
+                    b.HasIndex("QualificationLevelId");
+
                     b.HasIndex("ShortCode");
 
                     b.HasIndex("TenantId");
@@ -53103,6 +56243,76 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("Type");
 
                     b.ToTable("Qualifications");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.QualificationLevel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("Name");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "Rank");
+
+                    b.ToTable("QualificationLevels");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.CandidateEngagementEvent", b =>
@@ -53175,95 +56385,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("CandidateEngagementEvents");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.CandidatePortalAccount", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<DateTime?>("EmailVerificationExpiry")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("EmailVerificationToken")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<int>("FailedLoginAttempts")
-                        .HasColumnType("int");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsEmailVerified")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("JobCandidateId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("LastLoginAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("LastVerificationEmailSentAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("LockedOutUntil")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("PasswordHash")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("PasswordResetExpiry")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("PasswordResetToken")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("JobCandidateId");
-
-                    b.HasIndex("TenantId");
-
-                    b.ToTable("CandidatePortalAccounts");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.CandidateSegmentMembership", b =>
@@ -53395,6 +56516,110 @@ namespace ErpSystem.Data.Migrations
                         .HasDatabaseName("IX_CandidateTalentSegment_Tenant_Name");
 
                     b.ToTable("CandidateTalentSegments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.EmployeeOathOfSecrecy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int");
+
+                    b.Property<string>("MimeType")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("OathText")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("RecordedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RecordedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SignatureHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SignatureIpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateOnly>("SwornOn")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("WitnessedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("RecordedById");
+
+                    b.HasIndex("WitnessedById");
+
+                    b.HasIndex("TenantId", "EmployeeId", "SwornOn");
+
+                    b.ToTable("EmployeeOathsOfSecrecy");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.InterviewQuestionPreset", b =>
@@ -53868,7 +57093,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("JobVacancyId", "JobCandidateId")
                         .IsUnique()
-                        .HasDatabaseName("IX_JobApplication_Vacancy_Candidate");
+                        .HasDatabaseName("IX_JobApplication_Vacancy_Candidate")
+                        .HasFilter("[Status] <> 13 AND [IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "ApplicationNumber")
                         .IsUnique()
@@ -53982,7 +57208,7 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
-                    b.Property<Guid>("CountryId")
+                    b.Property<Guid?>("CountryId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
@@ -54159,6 +57385,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("WorkAuthorizationStatus")
                         .HasColumnType("int");
 
@@ -54183,6 +57412,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TalentPoolStatus")
                         .HasDatabaseName("IX_JobCandidate_TalentPoolStatus");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_JobCandidate_UserId")
+                        .HasFilter("[UserId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "CandidateNumber")
                         .IsUnique()
@@ -56241,6 +59475,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -56250,6 +59490,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -56644,6 +59890,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -56653,6 +59905,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -57553,9 +60811,22 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("DocumentFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<Guid?>("DocumentFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("DocumentPath")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int?>("ExpectedDays")
                         .HasColumnType("int");
@@ -57771,6 +61042,73 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PreEmploymentCheckTemplateItems");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationConfirmingAuthority", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AuthorityEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("OrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("StaffLevelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorityEmployeeId");
+
+                    b.HasIndex("OrganizationUnitId");
+
+                    b.HasIndex("StaffLevelId");
+
+                    b.HasIndex("TenantId", "OrganizationUnitId", "StaffLevelId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("ProbationConfirmingAuthorities");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationExtension", b =>
                 {
                     b.Property<Guid>("Id")
@@ -57927,6 +61265,157 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("ProbationPeriods");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationReminderDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProbationPeriodId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid?>("RoutedToEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProbationPeriodId");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("ProbationReminderDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("ProbationReminderRuns");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationReview", b =>
@@ -58253,9 +61742,22 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("DocumentFileName")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<Guid?>("DocumentFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("DocumentPath")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -58824,6 +62326,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -58833,6 +62341,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -60426,6 +63940,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LeadInvestigatorId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LessonsLearned")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<int?>("LikelihoodAfter")
                         .HasColumnType("int");
@@ -62083,6 +65601,364 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("SheAssemblyPoints");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ActualEndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ActualStartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AuditNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("ClosedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ClosedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ClosureNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ExternalAuditorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExternalAuditorOrganization")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("LeadAuditorId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Objectives")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("OrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("PlannedEndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("PlannedStartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReportDocumentPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ReportIssuedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Scope")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Standard")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClosedById");
+
+                    b.HasIndex("LeadAuditorId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("OrganizationUnitId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "AuditNumber")
+                        .IsUnique();
+
+                    b.ToTable("SheAudits");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAuditFinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AuditId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Classification")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ClauseReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Evidence")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("FindingNumber")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ResolutionNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("ResolvedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ResponsiblePersonId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("VerificationNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("VerifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("VerifiedDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResponsiblePersonId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("VerifiedById");
+
+                    b.HasIndex("AuditId", "FindingNumber");
+
+                    b.ToTable("SheAuditFindings");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAuditFindingAction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AssignedToId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CompletionNotes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("CorrectiveActionTemplateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("FindingId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedToId");
+
+                    b.HasIndex("CorrectiveActionTemplateId");
+
+                    b.HasIndex("FindingId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SheAuditFindingActions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAuditTeamMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AuditId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuditId");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SheAuditTeamMembers");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheBodyPart", b =>
                 {
                     b.Property<Guid>("Id")
@@ -62628,6 +66504,135 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("SheContractorNonCompliances");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheControlledDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ArchiveReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("ArchivedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ArchivedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrentVersionLabel")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("EffectiveDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Keywords")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("NextReviewDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("OrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ReviewFrequencyMonths")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedById");
+
+                    b.HasIndex("ArchivedById");
+
+                    b.HasIndex("DocumentRecordId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("OrganizationUnitId");
+
+                    b.HasIndex("OwnerId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "DocumentNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "NextReviewDate");
+
+                    b.ToTable("SheControlledDocuments");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheCorrectiveActionTemplate", b =>
                 {
                     b.Property<Guid>("Id")
@@ -62766,8 +66771,16 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("LessonsLearned")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PreventiveActions")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<Guid>("ReportedById")
                         .HasColumnType("uniqueidentifier");
@@ -62906,6 +66919,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("RegulatoryLimit")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<Guid?>("ScheduleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -62930,10 +66946,464 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("MeasuredById");
 
+                    b.HasIndex("ScheduleId");
+
                     b.HasIndex("TenantId", "RecordNumber")
                         .IsUnique();
 
                     b.ToTable("SheEnvironmentalMonitoringRecords");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalMonitoringSchedule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("FrequencyDays")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LastPerformedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MonitoringPoint")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("MonitoringType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("NextDueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ResponsibleOfficerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ScheduleNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("ResponsibleOfficerId");
+
+                    b.HasIndex("TenantId", "NextDueDate");
+
+                    b.HasIndex("TenantId", "ScheduleNumber")
+                        .IsUnique();
+
+                    b.ToTable("SheEnvironmentalMonitoringSchedules");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalPermit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AuthorityReferenceNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Conditions")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrentVersionLabel")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("ExpiryDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("IssueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("IssuingBodyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastRenewedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("LastRenewedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("PermitName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<int>("PermitType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RegisterNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int?>("RenewalPeriodMonths")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ResponsibleOfficerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentRecordId");
+
+                    b.HasIndex("IssuingBodyId");
+
+                    b.HasIndex("LastRenewedById");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("ResponsibleOfficerId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "ExpiryDate");
+
+                    b.HasIndex("TenantId", "RegisterNumber")
+                        .IsUnique();
+
+                    b.ToTable("SheEnvironmentalPermits");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApplicableLaws")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("ApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ClearanceIssuedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ClearanceIssuedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CommencementApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CommencementApprovedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ComplianceChecklist")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(3000)
+                        .HasColumnType("nvarchar(3000)");
+
+                    b.Property<DateTime?>("EpaSubmissionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EpaSubmissionReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ManagementApprovedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ManagementApprovedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("OfficerComments")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("OrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("PermitRequired")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("PlannedStartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ProjectName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("ProjectReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("RequiresEnvironmentalPermit")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequiresEpaSubmission")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequiresFullEia")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequiresManagementApproval")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequiresRegistration")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequiresRiskAssessment")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("ResponsibleManagerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReviewNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("ScreenedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ScreeningCompletedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ScreeningNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("SubmittedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("SubmittedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("WorkClassification")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedById");
+
+                    b.HasIndex("ClearanceIssuedById");
+
+                    b.HasIndex("CommencementApprovedById");
+
+                    b.HasIndex("ManagementApprovedById");
+
+                    b.HasIndex("OrganizationUnitId");
+
+                    b.HasIndex("ResponsibleManagerId");
+
+                    b.HasIndex("ScreenedById");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("SubmittedById");
+
+                    b.HasIndex("TenantId", "PlannedStartDate");
+
+                    b.HasIndex("TenantId", "ReviewNumber")
+                        .IsUnique();
+
+                    b.ToTable("SheEnvironmentalReviews");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalReviewAction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTime>("ActionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("ReviewId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorId");
+
+                    b.HasIndex("ReviewId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SheEnvironmentalReviewActions");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheFirstAidStation", b =>
@@ -63095,6 +67565,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("OwnerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ReportedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReportedDate")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("ResidualLikelihood")
                         .HasColumnType("int");
 
@@ -63135,6 +67611,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("LocationId");
 
                     b.HasIndex("OwnerId");
+
+                    b.HasIndex("ReportedById");
 
                     b.HasIndex("ResidualRiskLevel");
 
@@ -63617,6 +68095,150 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("SheInspectionChecklistItems");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheMonthlyEnvironmentalReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AuditFindingsRaised")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ClearancesIssued")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("CompliancePercentage")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("CorrectiveActionsOpen")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("EnvironmentalIncidents")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EnvironmentalIncidentsClosed")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("GeneratedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("GeneratedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("MonitoringExceedances")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<int>("NewRegulatoryUpdates")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ObligationsCompliant")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ObligationsTotal")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OfficerSummary")
+                        .HasMaxLength(3000)
+                        .HasColumnType("nvarchar(3000)");
+
+                    b.Property<DateTime>("PeriodEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("PermitsActive")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PermitsExpired")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PermitsExpiringIn90Days")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProjectsReviewed")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReportNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("SubmittedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("SubmittedToManagementAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("SustainabilityCostSavings")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("SustainabilityInitiativesActive")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SustainabilityInitiativesCompleted")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("WasteGeneratedKg")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("WasteRecycledKg")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("WasteRecyclingRate")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GeneratedById");
+
+                    b.HasIndex("SubmittedById");
+
+                    b.HasIndex("TenantId", "ReportNumber")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Year", "Month")
+                        .IsUnique();
+
+                    b.ToTable("SheMonthlyEnvironmentalReports");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheOccupationalHealthSurveillance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -63726,6 +68348,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("AverageInspectionComplianceScore")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<decimal?>("ContractorComplianceRate")
                         .HasColumnType("decimal(18,4)");
 
@@ -63777,6 +68402,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("EnvironmentalIncidentsReportedToEpa")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("FireDrillObjectivesMetRate")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<decimal?>("HousekeepingComplianceRating")
                         .HasColumnType("decimal(18,4)");
 
@@ -63792,6 +68420,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<DateTime?>("KpisComputedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("KpisComputedById")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -63804,6 +68438,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("ManagementComments")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<decimal?>("NearMissFrequencyRate")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<int?>("PeriodNumber")
                         .HasColumnType("int");
@@ -63874,8 +68511,14 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("TotalNearMisses")
                         .HasColumnType("int");
 
+                    b.Property<decimal?>("TotalRecordableIncidentRate")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<int>("TotalTrainingHours")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("TrainingCompletionRate")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("TrainingProgramsConducted")
                         .HasColumnType("int");
@@ -63889,10 +68532,15 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<decimal?>("WasteRecyclingRate")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<int>("Year")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("KpisComputedById");
 
                     b.HasIndex("LocationId");
 
@@ -64562,6 +69210,300 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("SheRegulatoryObligations");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheRegulatoryUpdate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AffectedDepartments")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("AuthorityName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ClosedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ClosureNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("ComplianceDeadline")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ComplianceStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Domain")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("EffectiveDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("IssueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LinkedObligationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ManagementNotifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ManagementNotifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OfficerComments")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("RecordedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RegulationReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("RegulatoryBodyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequiredActions")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("ReviewDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("RiskLevel")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("UpdateNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClosedById");
+
+                    b.HasIndex("Domain");
+
+                    b.HasIndex("LinkedObligationId");
+
+                    b.HasIndex("ManagementNotifiedById");
+
+                    b.HasIndex("RecordedById");
+
+                    b.HasIndex("RegulatoryBodyId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "UpdateNumber")
+                        .IsUnique();
+
+                    b.ToTable("SheRegulatoryUpdates");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReminderDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("SheReminderDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("EnvironmentalPermitsExpired")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("PermitsExpired")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RiskAssessmentsExpired")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("SheReminderRuns");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReturnToWorkPhase", b =>
                 {
                     b.Property<Guid>("Id")
@@ -65163,6 +70105,340 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("SheRiskAssessmentHazards");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheStatutoryIncidentSubmission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AcknowledgementDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("AcknowledgementReceived")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("AcknowledgementReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DocumentPath")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("IncidentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("ReferenceNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("RegulatoryBodyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("SubmissionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("SubmittedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IncidentId");
+
+                    b.HasIndex("RegulatoryBodyId");
+
+                    b.HasIndex("SubmittedById");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SheStatutoryIncidentSubmissions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheStopWorkOrder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("CancelledById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CancelledDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ClearanceNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("ClearedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ClearedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("HazardId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ImmediateActionsTaken")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("IncidentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OrderNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("PermitToWorkId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RaisedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RaisedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReasonDescription")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("ResolutionDescription")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("ResolvedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ResolvedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("RoutedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RoutedToId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SpecificArea")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("WorkDescription")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CancelledById");
+
+                    b.HasIndex("ClearedById");
+
+                    b.HasIndex("HazardId");
+
+                    b.HasIndex("IncidentId");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("PermitToWorkId");
+
+                    b.HasIndex("RaisedById");
+
+                    b.HasIndex("ResolvedById");
+
+                    b.HasIndex("RoutedToId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "OrderNumber")
+                        .IsUnique();
+
+                    b.ToTable("SheStopWorkOrders");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheSustainabilityInitiative", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("ActualValue")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("EndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("EstimatedCostSavings")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("InitiativeNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MeasurementUnit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("OwnerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("TargetValue")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category");
+
+                    b.HasIndex("LocationId");
+
+                    b.HasIndex("OwnerId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "InitiativeNumber")
+                        .IsUnique();
+
+                    b.ToTable("SheSustainabilityInitiatives");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheTrainingAttendance", b =>
                 {
                     b.Property<Guid>("Id")
@@ -65534,6 +70810,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("RecordedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("StorageLocation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -65801,6 +71081,655 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("Sections");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationClearanceItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsMandatory")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<decimal?>("OutstandingAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("OutstandingCurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<Guid?>("OwningOrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("RecordedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RecordedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("SeparationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SignedOffBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SourceAssignmentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SourceSurchargeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("TemplateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwningOrganizationUnitId");
+
+                    b.HasIndex("RecordedById");
+
+                    b.HasIndex("SeparationId")
+                        .HasDatabaseName("IX_SeparationClearanceItem_SeparationId");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_SeparationClearanceItem_Status");
+
+                    b.HasIndex("TemplateId")
+                        .HasDatabaseName("IX_SeparationClearanceItem_TemplateId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SeparationClearanceItems");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationClearanceTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsMandatory")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("OwningOrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("SourcesFromAssetRegister")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("IX_SeparationClearanceTemplate_IsActive");
+
+                    b.HasIndex("Kind")
+                        .HasDatabaseName("IX_SeparationClearanceTemplate_Kind");
+
+                    b.HasIndex("OwningOrganizationUnitId");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SeparationClearanceTemplate_Tenant_Name")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("SeparationClearanceTemplates");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationExitInterview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AdditionalComments")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int?>("CareerDevelopmentRating")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ConductedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ConductedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateOnly?>("ConductedOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DeclinedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ManagementRating")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OverallExperienceRating")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PayAndBenefitsRating")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PrimaryReason")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PrimaryReasonDetail")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("RecordedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RecordedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("SeparationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("WasDeclined")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("WhatShouldChange")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("WhatWorkedWell")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool?>("WouldConsiderReturning")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("WouldRecommendEmployer")
+                        .HasColumnType("bit");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConductedById");
+
+                    b.HasIndex("PrimaryReason")
+                        .HasDatabaseName("IX_SeparationExitInterview_PrimaryReason");
+
+                    b.HasIndex("RecordedById");
+
+                    b.HasIndex("SeparationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SeparationExitInterview_SeparationId")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SeparationExitInterviews");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationReminderDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("DueDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("RoutedToEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SeparationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EmployeeId")
+                        .HasDatabaseName("IX_SeparationReminderDispatch_EmployeeId");
+
+                    b.HasIndex("Kind")
+                        .HasDatabaseName("IX_SeparationReminderDispatch_Kind");
+
+                    b.HasIndex("RunId")
+                        .HasDatabaseName("IX_SeparationReminderDispatch_RunId");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .HasDatabaseName("IX_SeparationReminderDispatch_Tenant_DedupeKey");
+
+                    b.ToTable("SeparationReminderDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartedAt")
+                        .HasDatabaseName("IX_SeparationReminderRun_StartedAt");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SeparationReminderRuns");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationSettlement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<decimal?>("DailyRate")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("DailyRateBasis")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("FinalisedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("FinalisedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid?>("PreparedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("PreparedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ReturnCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReviewNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("ReviewOutcome")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ReviewedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReviewedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("SeparationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FinalisedById");
+
+                    b.HasIndex("PreparedById");
+
+                    b.HasIndex("ReviewedById");
+
+                    b.HasIndex("SeparationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SeparationSettlement_SeparationId")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SeparationSettlements");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationSettlementLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Basis")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Computation")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("IsDeduction")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystemGenerated")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SettlementId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("SourceClearanceItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceReference")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<Guid?>("SourceTravelAdvanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category")
+                        .HasDatabaseName("IX_SeparationSettlementLine_Category");
+
+                    b.HasIndex("SettlementId")
+                        .HasDatabaseName("IX_SeparationSettlementLine_SettlementId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SeparationSettlementLines");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Skill", b =>
@@ -69092,6 +75021,16 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("QueryOpportunityWaivedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("QueryOpportunityWaivedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("QueryOpportunityWaivedReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<Guid>("ReportedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -69135,6 +75074,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("EmployeeId");
 
                     b.HasIndex("IncidentDate");
+
+                    b.HasIndex("QueryOpportunityWaivedById");
 
                     b.HasIndex("ReportedById");
 
@@ -69197,6 +75138,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("MinimumAuthority")
+                        .HasColumnType("int");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -70619,6 +76563,1172 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("StaffOffenseProcedures");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.DisciplineReminderDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("DisciplineReminderDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.DisciplineReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("DisciplineReminderRuns");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsConcern", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ClosedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ClosureReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("ConcernNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("ConvertedCaseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("ReportedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RetrievalCodeHash")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RetrievalCodeSalt")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Statement")
+                        .IsRequired()
+                        .HasMaxLength(6000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TriageNotes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime?>("TriagedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("TriagedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category");
+
+                    b.HasIndex("ClosedById");
+
+                    b.HasIndex("ConvertedCaseId");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TriagedById");
+
+                    b.HasIndex("TenantId", "ConcernNumber")
+                        .IsUnique();
+
+                    b.ToTable("EmployeeRelationsConcerns");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsConcernUpdate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AuthorEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid>("ConcernId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsFromReporter")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("PostedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorEmployeeId");
+
+                    b.HasIndex("ConcernId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("EmployeeRelationsConcernUpdates");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsResponder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("OrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ResponderEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationUnitId");
+
+                    b.HasIndex("ResponderEmployeeId");
+
+                    b.HasIndex("TenantId", "Level", "OrganizationUnitId");
+
+                    b.ToTable("EmployeeRelationsResponders");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CaseType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<Guid?>("ClosedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ClosedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ClosureReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CurrentLevel")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("FiledDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("GrievanceNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("HrInterpretation")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid?>("HrInterpretationById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("HrInterpretationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PerformanceImprovementPlanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ResolutionSummary")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime?>("ResolvedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("SafetyIncidentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("StaffDisciplinaryActionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Statement")
+                        .IsRequired()
+                        .HasMaxLength(6000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("WithdrawalReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("WithdrawnDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClosedById");
+
+                    b.HasIndex("CurrentLevel");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("HrInterpretationById");
+
+                    b.HasIndex("PerformanceImprovementPlanId")
+                        .HasFilter("[PerformanceImprovementPlanId] IS NOT NULL");
+
+                    b.HasIndex("SafetyIncidentId")
+                        .HasFilter("[SafetyIncidentId] IS NOT NULL");
+
+                    b.HasIndex("StaffDisciplinaryActionId")
+                        .HasFilter("[StaffDisciplinaryActionId] IS NOT NULL");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId", "CaseType");
+
+                    b.HasIndex("TenantId", "GrievanceNumber")
+                        .IsUnique();
+
+                    b.ToTable("StaffGrievances");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceConference", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("CancelledDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ChairId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ConferenceType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("ConvenedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ExternalChairName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExternalChairOrganisation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("GrievanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("HeldDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(6000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Purpose")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("ScheduledFor")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("UnionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Venue")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChairId");
+
+                    b.HasIndex("ConferenceType");
+
+                    b.HasIndex("ConvenedById");
+
+                    b.HasIndex("GrievanceId");
+
+                    b.HasIndex("ScheduledFor");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UnionId");
+
+                    b.ToTable("StaffGrievanceConferences");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceConferenceAttendee", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApologyReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Capacity")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("ConferenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool?>("DidAttend")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ExternalName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExternalOrganisation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConferenceId");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("StaffGrievanceConferenceAttendees");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ConferenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("GrievanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Scope")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("StepId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UploadDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConferenceId");
+
+                    b.HasIndex("GrievanceId");
+
+                    b.HasIndex("Scope");
+
+                    b.HasIndex("StepId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UploadedById");
+
+                    b.ToTable("StaffGrievanceDocuments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceInvestigation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EvidenceCollected")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("ExternalInvestigatorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExternalInvestigatorOrganisation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Findings")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid>("GrievanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("InvestigatorId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OpenedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Recommendation")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime>("StartedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("TargetDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GrievanceId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("InvestigatorId");
+
+                    b.HasIndex("OpenedById");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("StaffGrievanceInvestigations");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceParty", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AddedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AddedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("EmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ExternalName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExternalOrganisation")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("GrievanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("RemovalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("RemovedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RepresentsEmployeeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("UnionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AddedById");
+
+                    b.HasIndex("EmployeeId");
+
+                    b.HasIndex("GrievanceId");
+
+                    b.HasIndex("RepresentsEmployeeId");
+
+                    b.HasIndex("Role");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UnionId");
+
+                    b.ToTable("StaffGrievanceParties");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceResolution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AgreementAcceptanceComment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("AgreementAcceptedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AgreementAcceptedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("AgreementSignedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DecidedAtLevel")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("DecidedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("DecidedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("GrievanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("OutcomeRecordedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("OutcomeRecordedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RemedyOrUndertakings")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgreementAcceptedById");
+
+                    b.HasIndex("DecidedById");
+
+                    b.HasIndex("GrievanceId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("Outcome");
+
+                    b.HasIndex("OutcomeRecordedById");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("StaffGrievanceResolutions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceStep", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AssignedToId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("GrievanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ReachedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RespondedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RespondedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Response")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedToId");
+
+                    b.HasIndex("GrievanceId");
+
+                    b.HasIndex("Outcome");
+
+                    b.HasIndex("RespondedById");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("StaffGrievanceSteps");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffLeave.EmployeeReliever", b =>
                 {
                     b.Property<Guid>("Id")
@@ -70672,7 +77782,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("RelieverEmployeeId");
 
                     b.HasIndex("EmployeeId", "Priority")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "EmployeeId");
 
@@ -71812,6 +78923,98 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("StaffLevels");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffNumberFormat", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AppliesToEmploymentType")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("AutoGenerate")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IncludeYear")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Prefix")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("Separator")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("SequenceDigits")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SequenceKey")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("Suffix")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("YearDigits")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("TenantId", "AppliesToEmploymentType")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [IsActive] = 1");
+
+                    b.HasIndex("TenantId", "SequenceKey");
+
+                    b.ToTable("StaffNumberFormats");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffGroupTravel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -72141,313 +79344,6 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("StaffTravelAlertNotifications");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalDecision", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ApprovalInstanceId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("ApproverId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Comments")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Decision")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("EscalatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsEscalated")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("OriginalApproverId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("SlaDeadline")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("StepOrder")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApprovalInstanceId");
-
-                    b.HasIndex("ApproverId");
-
-                    b.HasIndex("OriginalApproverId");
-
-                    b.HasIndex("TenantId");
-
-                    b.ToTable("StaffTravelApprovalDecisions");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalInstance", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("CurrentStepOrder")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("InitiatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("StaffTravelRequestId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("WorkflowTemplateId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StaffTravelRequestId");
-
-                    b.HasIndex("TenantId");
-
-                    b.HasIndex("WorkflowTemplateId");
-
-                    b.ToTable("StaffTravelApprovalInstances");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalWorkflowStep", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ApproverRole")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<int>("ApproverType")
-                        .HasColumnType("int");
-
-                    b.Property<bool>("CanDelegate")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("EscalationApproverId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsMandatory")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("SlaHours")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("SpecificApproverId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("StepName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int>("StepOrder")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("WorkflowTemplateId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EscalationApproverId");
-
-                    b.HasIndex("SpecificApproverId");
-
-                    b.HasIndex("TenantId");
-
-                    b.HasIndex("WorkflowTemplateId");
-
-                    b.ToTable("StaffTravelApprovalWorkflowSteps");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalWorkflowTemplate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("AppliesToLevelFromId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("AppliesToLevelToId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool?>("IsInternational")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("MaxBudgetThreshold")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("MinBudgetThreshold")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<int?>("RiskLevel")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("TravelType")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AppliesToLevelFromId");
-
-                    b.HasIndex("AppliesToLevelToId");
-
-                    b.HasIndex("TenantId");
-
-                    b.ToTable("StaffTravelApprovalWorkflowTemplates");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelBudget", b =>
                 {
                     b.Property<Guid>("Id")
@@ -72641,71 +79537,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("VendorId");
 
                     b.ToTable("StaffTravelCarRentalBookings");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelCurrencyExchangeRate", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("FromCurrency")
-                        .IsRequired()
-                        .HasColumnType("char(3)");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsOfficial")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,8)");
-
-                    b.Property<DateOnly>("RateDate")
-                        .HasColumnType("date");
-
-                    b.Property<string>("RateSource")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("ToCurrency")
-                        .IsRequired()
-                        .HasColumnType("char(3)");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TenantId", "FromCurrency", "ToCurrency", "RateDate")
-                        .IsUnique();
-
-                    b.ToTable("StaffTravelCurrencyExchangeRates");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelDocument", b =>
@@ -73264,6 +80095,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal?>("EstimatedCost")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid?>("FleetTripId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -74118,6 +80952,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("DecidedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("DecisionNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -74256,6 +81094,149 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("StaffTravelPolicyRules");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelReminderDispatchLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DaysRemaining")
+                        .HasColumnType("int");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("EscalationTier")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("ItemType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid>("RunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RunId");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "DedupeKey")
+                        .IsUnique();
+
+                    b.ToTable("StaffTravelReminderDispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RemindersQueued")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("StaffTravelReminderRuns");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest", b =>
@@ -74462,6 +81443,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -74469,6 +81456,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("FileUrl")
                         .IsRequired()
@@ -74680,103 +81670,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("StaffTravelRiskAssessments");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AccountNumber")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("ContactEmail")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("ContactPhone")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)");
-
-                    b.Property<DateOnly?>("ContractEndDate")
-                        .HasColumnType("date");
-
-                    b.Property<DateOnly?>("ContractStartDate")
-                        .HasColumnType("date");
-
-                    b.Property<Guid?>("CountryId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("CreatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("CreatedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("DeletedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsPreferred")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("PaymentTerms")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<decimal?>("Rating")
-                        .HasColumnType("decimal(18,4)");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("VendorCode")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)");
-
-                    b.Property<string>("VendorName")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
-
-                    b.Property<int>("VendorType")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CountryId");
-
-                    b.HasIndex("IsActive");
-
-                    b.HasIndex("VendorType");
-
-                    b.HasIndex("TenantId", "VendorCode")
-                        .IsUnique();
-
-                    b.ToTable("StaffTravelVendors");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVisaApplication", b =>
@@ -75640,6 +82533,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("DocumentType")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -75648,11 +82544,17 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FileHash")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsConfidential")
                         .HasColumnType("bit");
@@ -76655,7 +83557,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "Code")
                         .IsUnique()
-                        .HasDatabaseName("IX_Team_Tenant_Code");
+                        .HasDatabaseName("IX_Team_Tenant_Code")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("TenantId", "Status")
                         .HasDatabaseName("IX_Team_Tenant_Status");
@@ -102637,6 +109540,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsRequired")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("RequiresDocument")
+                        .HasColumnType("bit");
+
                     b.Property<string>("ItemText")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -103334,6 +110240,92 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_BusinessPartners_CompliancePeriod", "[ComplianceReviewDateUtc] IS NULL OR [ComplianceValidUntilUtc] IS NULL OR [ComplianceValidUntilUtc] >= [ComplianceReviewDateUtc]");
                         });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.BusinessPartnerBankAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("AccountNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("BankName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("BranchName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("BusinessPartnerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Iban")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SwiftCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BusinessPartnerId");
+
+                    b.HasIndex("TenantId", "BusinessPartnerId");
+
+                    b.HasIndex("TenantId", "BusinessPartnerId", "IsPrimary")
+                        .IsUnique()
+                        .HasFilter("[IsPrimary] = 1 AND [IsDeleted] = 0");
+
+                    b.ToTable("BusinessPartnerBankAccounts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.BusinessPartnerCategory", b =>
@@ -109216,7 +116208,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProcurementConfigurationDecisions_SchemaVersion", "[SchemaVersion] > 0");
 
-                            t.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3)");
+                            t.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3) OR ([Status] = 4 AND [DecisionKey] = 'DEC-011')");
                         });
                 });
 
@@ -110405,6 +117397,24 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("RequiredQuorum")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("RetiredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetiredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RetirementEvidenceReference")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("RetirementIdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("RetirementReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -110477,7 +117487,7 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_ProcurementEvaluationCommitteeControls_Lifecycle");
 
-                            t.HasCheckConstraint("CK_ProcurementEvaluationCommitteeControls_State", "[SourceType] BETWEEN 0 AND 1 AND [Version] >= 1 AND [Status] BETWEEN 0 AND 2 AND [RequiredQuorum] BETWEEN 1 AND 50 AND [PolicyVersion] >= 1 AND ([ConfigurationProfileVersion] IS NULL OR [ConfigurationProfileVersion] >= 1) AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] >= [EffectiveFromUtc]) AND LEN([CompositionIntegrityHash]) = 64 AND ISJSON([CompositionSnapshotJson]) = 1 AND (([Status] = 0 AND [ActivatedAtUtc] IS NULL AND [ActivatedByUserId] IS NULL AND [ActivationEvidenceReference] IS NULL) OR ([Status] IN (1, 2) AND [ActivatedAtUtc] IS NOT NULL AND [ActivatedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([ActivationEvidenceReference], '')))) > 0))");
+                            t.HasCheckConstraint("CK_ProcurementEvaluationCommitteeControls_State", "[SourceType] BETWEEN 0 AND 1 AND [Version] >= 1 AND [Status] BETWEEN 0 AND 3 AND [RequiredQuorum] BETWEEN 1 AND 50 AND [PolicyVersion] >= 1 AND ([ConfigurationProfileVersion] IS NULL OR [ConfigurationProfileVersion] >= 1) AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] >= [EffectiveFromUtc]) AND LEN([CompositionIntegrityHash]) = 64 AND ISJSON([CompositionSnapshotJson]) = 1 AND (([Status] = 0 AND [ActivatedAtUtc] IS NULL AND [ActivatedByUserId] IS NULL AND [ActivationEvidenceReference] IS NULL AND [RetiredAtUtc] IS NULL AND [RetiredByUserId] IS NULL AND [RetirementReason] IS NULL AND [RetirementEvidenceReference] IS NULL AND [RetirementIdempotencyKey] IS NULL) OR ([Status] IN (1, 2) AND [ActivatedAtUtc] IS NOT NULL AND [ActivatedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([ActivationEvidenceReference], '')))) > 0 AND [RetiredAtUtc] IS NULL AND [RetiredByUserId] IS NULL AND [RetirementReason] IS NULL AND [RetirementEvidenceReference] IS NULL AND [RetirementIdempotencyKey] IS NULL) OR ([Status] = 3 AND [ActivatedAtUtc] IS NULL AND [ActivatedByUserId] IS NULL AND [ActivationEvidenceReference] IS NULL AND [ActivationIdempotencyKey] IS NULL AND [RetiredAtUtc] IS NOT NULL AND [RetiredByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([RetirementReason], '')))) >= 10 AND LEN(LTRIM(RTRIM(ISNULL([RetirementEvidenceReference], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([RetirementIdempotencyKey], '')))) > 0))");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -111114,7 +118124,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("AuthorityRouteId")
+                    b.Property<Guid?>("AuthorityRouteId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AuthorityRouteReference")
@@ -119598,7 +126608,8 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique();
 
                     b.HasIndex("TenantId", "SourcingReleaseId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [Status] IN (0, 1)");
 
                     b.HasIndex("TenantId", "Status");
 
@@ -123267,11 +130278,17 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("NewTemplateVersionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("NewOpeningScheduledAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("NewValueUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("PreviousTemplateVersionId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("PreviousOpeningScheduledAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("PreviousValueUtc")
                         .HasColumnType("datetime2");
@@ -123358,9 +130375,9 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_ProcurementTenderDocumentChanges_Lifecycle");
 
-                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_Kind", "([ChangeType] = 0 AND [PreviousTemplateVersionId] IS NOT NULL AND [NewTemplateVersionId] IS NOT NULL AND [PreviousTemplateVersionId] <> [NewTemplateVersionId] AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL) OR ([ChangeType] IN (1, 2) AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc])");
+                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_Kind", "([ChangeType] = 0 AND [PreviousTemplateVersionId] IS NOT NULL AND [NewTemplateVersionId] IS NOT NULL AND [PreviousTemplateVersionId] <> [NewTemplateVersionId] AND [PreviousValueUtc] IS NULL AND [NewValueUtc] IS NULL AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR ([ChangeType] IN (1, 2) AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] AND [PreviousOpeningScheduledAtUtc] IS NULL AND [NewOpeningScheduledAtUtc] IS NULL) OR ([ChangeType] = 3 AND [PreviousTemplateVersionId] IS NULL AND [NewTemplateVersionId] IS NULL AND [PreviousValueUtc] IS NOT NULL AND [NewValueUtc] IS NOT NULL AND [NewValueUtc] > [PreviousValueUtc] AND [NewOpeningScheduledAtUtc] IS NOT NULL AND [NewOpeningScheduledAtUtc] > [NewValueUtc] AND ([PreviousOpeningScheduledAtUtc] IS NULL OR [NewOpeningScheduledAtUtc] > [PreviousOpeningScheduledAtUtc]) AND [RequiresAcknowledgement] = 0)");
 
-                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_State", "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 2 AND [Status] BETWEEN 0 AND 2 AND (([Status] = 0 AND [DecidedAtUtc] IS NULL AND [DecidedByUserId] IS NULL AND [WorkflowOutcome] IS NULL AND [ApprovalReference] IS NULL AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([Status] = 1 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND (([DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([DispatchedAtUtc] IS NOT NULL AND [DispatchedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([DispatchEvidenceReference], '')))) > 0))) OR ([Status] = 2 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL)) AND LEN([CorrelationId]) > 0 AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1 AND ([EvidenceWorkflowDocumentId] IS NULL OR [EvidenceFileUploadRecordId] IS NULL)");
+                            t.HasCheckConstraint("CK_ProcurementTenderDocumentChanges_State", "[Sequence] >= 1 AND [ChangeType] BETWEEN 0 AND 3 AND [Status] BETWEEN 0 AND 2 AND (([Status] = 0 AND [DecidedAtUtc] IS NULL AND [DecidedByUserId] IS NULL AND [WorkflowOutcome] IS NULL AND [ApprovalReference] IS NULL AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([Status] = 1 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND (([DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL) OR ([DispatchedAtUtc] IS NOT NULL AND [DispatchedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([DispatchEvidenceReference], '')))) > 0))) OR ([Status] = 2 AND [DecidedAtUtc] IS NOT NULL AND [DecidedByUserId] IS NOT NULL AND LEN(LTRIM(RTRIM(ISNULL([WorkflowOutcome], '')))) > 0 AND LEN(LTRIM(RTRIM(ISNULL([ApprovalReference], '')))) > 0 AND [DispatchedAtUtc] IS NULL AND [DispatchedByUserId] IS NULL AND [DispatchEvidenceReference] IS NULL)) AND LEN([CorrelationId]) > 0 AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1 AND ([EvidenceWorkflowDocumentId] IS NULL OR [EvidenceFileUploadRecordId] IS NULL)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -124200,7 +131217,7 @@ namespace ErpSystem.Data.Migrations
 
                             t.HasCheckConstraint("CK_ProcurementTenderDocumentTemplateVersions_ContentEvidence", "([ContentWorkflowEvidenceDocumentId] IS NULL OR [ContentFileUploadRecordId] IS NULL)");
 
-                            t.HasCheckConstraint("CK_ProcurementTenderDocumentTemplateVersions_State", "[Version] >= 1 AND [PolicySetVersion] >= 1 AND [Status] BETWEEN 0 AND 3 AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]) AND LEN([ContentChecksumSha256]) = 64 AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1");
+                            t.HasCheckConstraint("CK_ProcurementTenderDocumentTemplateVersions_State", "[Version] >= 1 AND [PolicySetVersion] >= 1 AND [Status] BETWEEN 0 AND 3 AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]) AND (([Status] IN (0, 1) AND LEN([ContentChecksumSha256]) IN (0, 64)) OR ([Status] IN (2, 3) AND LEN([ContentChecksumSha256]) = 64)) AND LEN([IntegrityHash]) = 64 AND ISJSON([LifecycleSnapshotJson]) = 1");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -127510,6 +134527,9 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.Tender", b =>
                 {
+                    b.Property<int?>("BidValidityPeriodDays")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -127685,6 +134705,8 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("Tenders", null, t =>
                         {
                             t.HasTrigger("TR_Tenders_SourcingReleaseGuard");
+                            t.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
+                            t.HasTrigger("TR_Tenders_BidValidityTerms_Immutable");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -129044,7 +136066,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenderEvaluatorId");
 
-                    b.ToTable("TenderEvaluations");
+                    b.ToTable("TenderEvaluations", null, t =>
+                        {
+                            t.HasTrigger("TR_TenderEvaluations_CommitteeScoreProjection");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.TenderEvaluator", b =>
@@ -156171,6 +163198,340 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ReasonCodes");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoArea", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateOnly?>("EffectiveFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("EffectiveTo")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("GeoLevelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("float");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("ParentAreaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("PolygonCoordinatesJson")
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("SchemeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SupersededByGeoAreaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GeoLevelId")
+                        .HasDatabaseName("IX_GeoArea_LevelId");
+
+                    b.HasIndex("ParentAreaId")
+                        .HasDatabaseName("IX_GeoArea_ParentId");
+
+                    b.HasIndex("SchemeId");
+
+                    b.HasIndex("SupersededByGeoAreaId");
+
+                    b.HasIndex("TenantId", "ParentAreaId", "IsActive")
+                        .HasDatabaseName("IX_GeoArea_Tenant_Parent_Active");
+
+                    b.HasIndex("TenantId", "SchemeId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("IX_GeoArea_Tenant_Scheme_Code")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "SchemeId", "Name")
+                        .HasDatabaseName("IX_GeoArea_Tenant_Scheme_Name");
+
+                    b.ToTable("GeoAreas", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoAreaAlias", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Alias")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("GeoAreaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GeoAreaId");
+
+                    b.HasIndex("TenantId", "Alias")
+                        .HasDatabaseName("IX_GeoAreaAlias_Tenant_Alias");
+
+                    b.HasIndex("TenantId", "GeoAreaId", "Alias")
+                        .IsUnique()
+                        .HasDatabaseName("IX_GeoAreaAlias_Tenant_Area_Alias")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("GeoAreaAliases", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoLevel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("AllowsAddressAssignment")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsRequiredInAddress")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("LevelNumber")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("SchemeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SchemeId");
+
+                    b.HasIndex("TenantId", "SchemeId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("IX_GeoLevel_Tenant_Scheme_Code")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "SchemeId", "LevelNumber")
+                        .IsUnique()
+                        .HasDatabaseName("IX_GeoLevel_Tenant_Scheme_LevelNum")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("GeoLevels", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoScheme", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("CountryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CountryId");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("IX_GeoScheme_Tenant_Code")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "CountryId")
+                        .HasDatabaseName("IX_GeoScheme_Tenant_Country");
+
+                    b.ToTable("GeoSchemes", (string)null);
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -172248,6 +179609,50 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("VendorPayment");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Announcements.HrAnnouncement", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ArchivedBy")
+                        .WithMany()
+                        .HasForeignKey("ArchivedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "PublishedBy")
+                        .WithMany()
+                        .HasForeignKey("PublishedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ArchivedBy");
+
+                    b.Navigation("PublishedBy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Announcements.HrAnnouncementAudience", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Announcements.HrAnnouncement", "Announcement")
+                        .WithMany("Audiences")
+                        .HasForeignKey("AnnouncementId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Announcement");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetAssignment", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
@@ -172267,6 +179672,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Assets.AssetRequisition", "Requisition")
+                        .WithMany("FulfilledAssignments")
+                        .HasForeignKey("RequisitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ReturnedTo")
                         .WithMany()
                         .HasForeignKey("ReturnedToId")
@@ -172278,15 +179688,31 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "TermsDocumentSentBy")
+                        .WithMany()
+                        .HasForeignKey("TermsDocumentSentById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Assets.AssetTransfer", "Transfer")
+                        .WithMany()
+                        .HasForeignKey("TransferId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ApprovedBy");
 
                     b.Navigation("Asset");
 
                     b.Navigation("Employee");
 
+                    b.Navigation("Requisition");
+
                     b.Navigation("ReturnedTo");
 
                     b.Navigation("Tenant");
+
+                    b.Navigation("TermsDocumentSentBy");
+
+                    b.Navigation("Transfer");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetAttachment", b =>
@@ -172380,6 +179806,36 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetReminderDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Assets.AssetReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetReminderRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetRequisition", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
@@ -172393,9 +179849,9 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.Assets.CompanyAsset", "AssignedAsset")
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "BeneficiaryEmployee")
                         .WithMany()
-                        .HasForeignKey("AssignedAssetId")
+                        .HasForeignKey("BeneficiaryEmployeeId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "FulfilledBy")
@@ -172419,11 +179875,85 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("AssetType");
 
-                    b.Navigation("AssignedAsset");
+                    b.Navigation("BeneficiaryEmployee");
 
                     b.Navigation("FulfilledBy");
 
                     b.Navigation("RequestedBy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetSurcharge", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ApprovedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Assets.AssetAssignment", "Assignment")
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RaisedBy")
+                        .WithMany()
+                        .HasForeignKey("RaisedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "WaivedBy")
+                        .WithMany()
+                        .HasForeignKey("WaivedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ApprovedBy");
+
+                    b.Navigation("Assignment");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("RaisedBy");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("WaivedBy");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetSurchargeRecovery", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RecordedBy")
+                        .WithMany()
+                        .HasForeignKey("RecordedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Assets.AssetSurcharge", "Surcharge")
+                        .WithMany("Recoveries")
+                        .HasForeignKey("SurchargeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("RecordedBy");
+
+                    b.Navigation("Surcharge");
 
                     b.Navigation("Tenant");
                 });
@@ -172464,7 +179994,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ToEmployee")
@@ -172545,9 +180075,19 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("CurrentAssignedToId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset", "FixedAsset")
+                        .WithMany()
+                        .HasForeignKey("FixedAssetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
                         .WithMany()
                         .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Maintenance.MaintenanceAsset", "MaintenanceAsset")
+                        .WithMany()
+                        .HasForeignKey("MaintenanceAssetId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -172558,13 +180098,18 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "Unit")
                         .WithMany()
-                        .HasForeignKey("UnitId");
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("AssetType");
 
                     b.Navigation("CurrentAssignedTo");
 
+                    b.Navigation("FixedAsset");
+
                     b.Navigation("Location");
+
+                    b.Navigation("MaintenanceAsset");
 
                     b.Navigation("Tenant");
 
@@ -172655,6 +180200,25 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardCycle", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardType", "AwardType")
+                        .WithMany()
+                        .HasForeignKey("AwardTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AwardType");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardLevel", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardType", "AwardType")
@@ -172676,6 +180240,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardNomination", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardCycle", "AwardCycle")
+                        .WithMany("Nominations")
+                        .HasForeignKey("AwardCycleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardLevel", "AwardLevel")
                         .WithMany("Nominations")
                         .HasForeignKey("AwardLevelId")
@@ -172715,6 +180284,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Award");
+
+                    b.Navigation("AwardCycle");
 
                     b.Navigation("AwardLevel");
 
@@ -172832,8 +180403,48 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardVote", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardCycle", "AwardCycle")
+                        .WithMany()
+                        .HasForeignKey("AwardCycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardNomination", "AwardNomination")
+                        .WithMany()
+                        .HasForeignKey("AwardNominationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Voter")
+                        .WithMany()
+                        .HasForeignKey("VoterId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AwardCycle");
+
+                    b.Navigation("AwardNomination");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Voter");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.EmployeeAward", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardCycle", "AwardCycle")
+                        .WithMany()
+                        .HasForeignKey("AwardCycleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardLevel", "AwardLevel")
                         .WithMany("Awards")
                         .HasForeignKey("AwardLevelId")
@@ -172861,6 +180472,8 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("AwardCycle");
 
                     b.Navigation("AwardLevel");
 
@@ -172902,6 +180515,25 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Employee");
 
                     b.Navigation("EmployeeAward");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.LongServiceMilestone", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Awards.AwardType", "AwardType")
+                        .WithMany()
+                        .HasForeignKey("AwardTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AwardType");
 
                     b.Navigation("Tenant");
                 });
@@ -173100,6 +180732,24 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CertifyingBody", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
+                        .WithMany()
+                        .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Country");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.ClientEngagement", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.ConsultantClient", "Client")
@@ -173169,6 +180819,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("CountryOfIncorporationId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoArea", "GeoArea")
+                        .WithMany()
+                        .HasForeignKey("GeoAreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -173178,6 +180833,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Country");
 
                     b.Navigation("CountryOfIncorporation");
+
+                    b.Navigation("GeoArea");
 
                     b.Navigation("Tenant");
                 });
@@ -173194,9 +180851,9 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("DepartmentId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.WorkStation", "Station")
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "SiteLocation")
                         .WithMany()
-                        .HasForeignKey("StationId")
+                        .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -173209,7 +180866,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("Department");
 
-                    b.Navigation("Station");
+                    b.Navigation("SiteLocation");
 
                     b.Navigation("Tenant");
                 });
@@ -173226,16 +180883,16 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("DepartmentId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "SiteLocation")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Organizer")
                         .WithMany()
                         .HasForeignKey("OrganizerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.WorkStation", "Station")
-                        .WithMany()
-                        .HasForeignKey("StationId")
-                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -173249,7 +180906,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("Organizer");
 
-                    b.Navigation("Station");
+                    b.Navigation("SiteLocation");
 
                     b.Navigation("Tenant");
                 });
@@ -173402,9 +181059,9 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.MeetingRoom", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.HR.WorkStation", "Station")
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "SiteLocation")
                         .WithMany()
-                        .HasForeignKey("StationId")
+                        .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -173414,7 +181071,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("Station");
+                    b.Navigation("SiteLocation");
 
                     b.Navigation("Tenant");
                 });
@@ -173456,6 +181113,17 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Event");
 
                     b.Navigation("Room");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySealAsset", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -173516,13 +181184,18 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ConsultantClientPortalAccount", b =>
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ConsultantClientContact", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.ConsultantClient", "ConsultantClient")
-                        .WithMany("PortalAccounts")
+                        .WithMany("Contacts")
                         .HasForeignKey("ConsultantClientId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "InvitedBy")
+                        .WithMany()
+                        .HasForeignKey("InvitedById")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -173530,9 +181203,19 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("ConsultantClient");
 
+                    b.Navigation("InvitedBy");
+
                     b.Navigation("Tenant");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Country", b =>
@@ -173611,6 +181294,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("DivisionId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoArea", "GeoArea")
+                        .WithMany()
+                        .HasForeignKey("GeoAreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Recruitment.JobHireRecord", "JobHireRecord")
                         .WithMany()
                         .HasForeignKey("HireRecordId");
@@ -173672,6 +181360,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Department");
 
                     b.Navigation("Division");
+
+                    b.Navigation("GeoArea");
 
                     b.Navigation("JobHireRecord");
 
@@ -173989,6 +181679,51 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeDocument", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeDocumentType", "DocumentType")
+                        .WithMany("Documents")
+                        .HasForeignKey("DocumentTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "UploadedBy")
+                        .WithMany()
+                        .HasForeignKey("UploadedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("DocumentType");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("UploadedBy");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeDocumentType", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeEmergencyContact", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
@@ -174071,6 +181806,43 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Employee");
 
                     b.Navigation("IdentificationType");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeImportRow", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CreatedEmployee")
+                        .WithMany()
+                        .HasForeignKey("CreatedEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeImportSession", "Session")
+                        .WithMany("Rows")
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedEmployee");
+
+                    b.Navigation("Session");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeImportSession", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -174329,8 +182101,100 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSeparation", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ApprovedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CancelledBy")
+                        .WithMany()
+                        .HasForeignKey("CancelledById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "InitiatedBy")
+                        .WithMany()
+                        .HasForeignKey("InitiatedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "NoticeDecidedBy")
+                        .WithMany()
+                        .HasForeignKey("NoticeDecidedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RejectedBy")
+                        .WithMany()
+                        .HasForeignKey("RejectedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "SubmittedBy")
+                        .WithMany()
+                        .HasForeignKey("SubmittedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedBy");
+
+                    b.Navigation("CancelledBy");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("InitiatedBy");
+
+                    b.Navigation("NoticeDecidedBy");
+
+                    b.Navigation("RejectedBy");
+
+                    b.Navigation("SubmittedBy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSeparationDocument", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeSeparation", "Separation")
+                        .WithMany("Documents")
+                        .HasForeignKey("SeparationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "UploadedBy")
+                        .WithMany()
+                        .HasForeignKey("UploadedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Separation");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("UploadedBy");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSkill", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.HR.CertifyingBody", "CertifyingBodyRef")
+                        .WithMany("EmployeeSkills")
+                        .HasForeignKey("CertifyingBodyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Training.EmployeeCertificate", null)
                         .WithMany("LinkedSkills")
                         .HasForeignKey("EmployeeCertificateId");
@@ -174352,6 +182216,8 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("CertifyingBodyRef");
 
                     b.Navigation("Employee");
 
@@ -174406,6 +182272,25 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ExpatriateFamilyMember", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.ExpatriateAssignment", "ExpatriateAssignment")
+                        .WithMany("FamilyMembers")
+                        .HasForeignKey("ExpatriateAssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ExpatriateAssignment");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.ExternalAssociate", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -174418,6 +182303,36 @@ namespace ErpSystem.Data.Migrations
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.HrLegacyFileMigrationEntry", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.IdentificationExpiryDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.IdentificationExpiryReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.IdentificationExpiryReminderRun", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -174922,11 +182837,42 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Letters.HrLetterRequest", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "IssuedBy")
+                        .WithMany()
+                        .HasForeignKey("IssuedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("IssuedBy");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Location", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
                         .WithMany()
                         .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoArea", "GeoArea")
+                        .WithMany()
+                        .HasForeignKey("GeoAreaId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.HR.StaffAttendance.GeofenceZone", "GeofenceZone")
@@ -174957,6 +182903,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Country");
+
+                    b.Navigation("GeoArea");
 
                     b.Navigation("GeofenceZone");
 
@@ -175233,6 +183181,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("CountryId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoArea", "GeoArea")
+                        .WithMany()
+                        .HasForeignKey("GeoAreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -175244,6 +183197,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("Country");
+
+                    b.Navigation("GeoArea");
 
                     b.Navigation("Tenant");
                 });
@@ -178996,6 +186951,84 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Policies.HrPolicyAcknowledgement", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Policies.HrPolicyDocument", "Policy")
+                        .WithMany("Acknowledgements")
+                        .HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("Policy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Policies.HrPolicyAudience", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Policies.HrPolicyDocument", "Policy")
+                        .WithMany("Audiences")
+                        .HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Policy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Policies.HrPolicyDocument", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ArchivedBy")
+                        .WithMany()
+                        .HasForeignKey("ArchivedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "PublishedBy")
+                        .WithMany()
+                        .HasForeignKey("PublishedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Policies.HrPolicyDocument", "Supersedes")
+                        .WithMany()
+                        .HasForeignKey("SupersedesPolicyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ArchivedBy");
+
+                    b.Navigation("PublishedBy");
+
+                    b.Navigation("Supersedes");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PositionCompetency", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Competency", "Competency")
@@ -179017,6 +187050,33 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Competency");
+
+                    b.Navigation("Position");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.PositionDocumentRequirement", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeDocumentType", "DocumentType")
+                        .WithMany()
+                        .HasForeignKey("DocumentTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeePosition", "Position")
+                        .WithMany()
+                        .HasForeignKey("PositionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("DocumentType");
 
                     b.Navigation("Position");
 
@@ -179073,6 +187133,58 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Position");
 
                     b.Navigation("Skill");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ProfileChanges.EmployeeProfileChangeItem", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.ProfileChanges.EmployeeProfileChangeRequest", "Request")
+                        .WithMany("Items")
+                        .HasForeignKey("RequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Request");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ProfileChanges.EmployeeProfileChangeRequest", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeBankDetail", "BankDetail")
+                        .WithMany()
+                        .HasForeignKey("BankDetailId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ReviewedBy")
+                        .WithMany()
+                        .HasForeignKey("ReviewedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BankDetail");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("ReviewedBy");
 
                     b.Navigation("Tenant");
                 });
@@ -179528,6 +187640,36 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementReminderDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementReminderRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementStatusHistory", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ChangedBy")
@@ -179632,6 +187774,24 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Qualification", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.HR.QualificationLevel", "QualificationLevel")
+                        .WithMany("Qualifications")
+                        .HasForeignKey("QualificationLevelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("QualificationLevel");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.QualificationLevel", b =>
+                {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -179648,23 +187808,6 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("JobCandidateId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("JobCandidate");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.CandidatePortalAccount", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Recruitment.JobCandidate", "JobCandidate")
-                        .WithMany()
-                        .HasForeignKey("JobCandidateId");
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -179713,6 +187856,40 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.EmployeeOathOfSecrecy", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RecordedBy")
+                        .WithMany()
+                        .HasForeignKey("RecordedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "WitnessedBy")
+                        .WithMany()
+                        .HasForeignKey("WitnessedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("RecordedBy");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("WitnessedBy");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.InterviewQuestionPreset", b =>
@@ -179906,8 +188083,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
                         .WithMany()
                         .HasForeignKey("CountryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -179915,9 +188091,16 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Country");
 
                     b.Navigation("Tenant");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.JobCandidateDocument", b =>
@@ -181060,6 +189243,39 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationConfirmingAuthority", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AuthorityEmployee")
+                        .WithMany()
+                        .HasForeignKey("AuthorityEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffLevel", "StaffLevel")
+                        .WithMany()
+                        .HasForeignKey("StaffLevelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AuthorityEmployee");
+
+                    b.Navigation("OrganizationUnit");
+
+                    b.Navigation("StaffLevel");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationExtension", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ExtendedBy")
@@ -181110,6 +189326,36 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Employee");
 
                     b.Navigation("EmployeeContractDetail");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationReminderDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Recruitment.ProbationReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationReminderRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -182543,6 +190789,140 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAudit", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ClosedBy")
+                        .WithMany()
+                        .HasForeignKey("ClosedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "LeadAuditor")
+                        .WithMany()
+                        .HasForeignKey("LeadAuditorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ClosedBy");
+
+                    b.Navigation("LeadAuditor");
+
+                    b.Navigation("Location");
+
+                    b.Navigation("OrganizationUnit");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAuditFinding", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheAudit", "Audit")
+                        .WithMany("Findings")
+                        .HasForeignKey("AuditId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ResponsiblePerson")
+                        .WithMany()
+                        .HasForeignKey("ResponsiblePersonId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "VerifiedBy")
+                        .WithMany()
+                        .HasForeignKey("VerifiedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Audit");
+
+                    b.Navigation("ResponsiblePerson");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("VerifiedBy");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAuditFindingAction", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AssignedTo")
+                        .WithMany()
+                        .HasForeignKey("AssignedToId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheCorrectiveActionTemplate", "CorrectiveActionTemplate")
+                        .WithMany()
+                        .HasForeignKey("CorrectiveActionTemplateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheAuditFinding", "Finding")
+                        .WithMany("Actions")
+                        .HasForeignKey("FindingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AssignedTo");
+
+                    b.Navigation("CorrectiveActionTemplate");
+
+                    b.Navigation("Finding");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAuditTeamMember", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheAudit", "Audit")
+                        .WithMany("TeamMembers")
+                        .HasForeignKey("AuditId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Audit");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheBodyPart", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -182701,6 +191081,60 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheControlledDocument", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ApprovedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ArchivedBy")
+                        .WithMany()
+                        .HasForeignKey("ArchivedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentRecord", "DocumentRecord")
+                        .WithMany()
+                        .HasForeignKey("DocumentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedBy");
+
+                    b.Navigation("ArchivedBy");
+
+                    b.Navigation("DocumentRecord");
+
+                    b.Navigation("Location");
+
+                    b.Navigation("OrganizationUnit");
+
+                    b.Navigation("Owner");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheCorrectiveActionTemplate", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -182765,6 +191199,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalMonitoringSchedule", "Schedule")
+                        .WithMany("Records")
+                        .HasForeignKey("ScheduleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -182774,6 +191213,175 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Location");
 
                     b.Navigation("MeasuredBy");
+
+                    b.Navigation("Schedule");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalMonitoringSchedule", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ResponsibleOfficer")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleOfficerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Location");
+
+                    b.Navigation("ResponsibleOfficer");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalPermit", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentRecord", "DocumentRecord")
+                        .WithMany()
+                        .HasForeignKey("DocumentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheRegulatoryBody", "IssuingBody")
+                        .WithMany()
+                        .HasForeignKey("IssuingBodyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "LastRenewedBy")
+                        .WithMany()
+                        .HasForeignKey("LastRenewedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ResponsibleOfficer")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleOfficerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("DocumentRecord");
+
+                    b.Navigation("IssuingBody");
+
+                    b.Navigation("LastRenewedBy");
+
+                    b.Navigation("Location");
+
+                    b.Navigation("ResponsibleOfficer");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalReview", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ApprovedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ClearanceIssuedBy")
+                        .WithMany()
+                        .HasForeignKey("ClearanceIssuedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CommencementApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("CommencementApprovedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ManagementApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ManagementApprovedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ResponsibleManager")
+                        .WithMany()
+                        .HasForeignKey("ResponsibleManagerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ScreenedBy")
+                        .WithMany()
+                        .HasForeignKey("ScreenedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "SubmittedBy")
+                        .WithMany()
+                        .HasForeignKey("SubmittedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedBy");
+
+                    b.Navigation("ClearanceIssuedBy");
+
+                    b.Navigation("CommencementApprovedBy");
+
+                    b.Navigation("ManagementApprovedBy");
+
+                    b.Navigation("OrganizationUnit");
+
+                    b.Navigation("ResponsibleManager");
+
+                    b.Navigation("ScreenedBy");
+
+                    b.Navigation("SubmittedBy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalReviewAction", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Actor")
+                        .WithMany()
+                        .HasForeignKey("ActorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalReview", "Review")
+                        .WithMany("Actions")
+                        .HasForeignKey("ReviewId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Actor");
+
+                    b.Navigation("Review");
 
                     b.Navigation("Tenant");
                 });
@@ -182821,6 +191429,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("OwnerId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ReportedBy")
+                        .WithMany()
+                        .HasForeignKey("ReportedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -182832,6 +191445,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Location");
 
                     b.Navigation("Owner");
+
+                    b.Navigation("ReportedBy");
 
                     b.Navigation("Tenant");
                 });
@@ -182975,6 +191590,31 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheMonthlyEnvironmentalReport", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "GeneratedBy")
+                        .WithMany()
+                        .HasForeignKey("GeneratedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "SubmittedBy")
+                        .WithMany()
+                        .HasForeignKey("SubmittedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("GeneratedBy");
+
+                    b.Navigation("SubmittedBy");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheOccupationalHealthSurveillance", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
@@ -183011,6 +191651,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.ShePerformanceSnapshot", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "KpisComputedBy")
+                        .WithMany()
+                        .HasForeignKey("KpisComputedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
                         .WithMany()
                         .HasForeignKey("LocationId")
@@ -183032,6 +191677,8 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("KpisComputedBy");
 
                     b.Navigation("Location");
 
@@ -183253,6 +191900,83 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheRegulatoryUpdate", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ClosedBy")
+                        .WithMany()
+                        .HasForeignKey("ClosedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheRegulatoryObligation", "LinkedObligation")
+                        .WithMany()
+                        .HasForeignKey("LinkedObligationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ManagementNotifiedBy")
+                        .WithMany()
+                        .HasForeignKey("ManagementNotifiedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RecordedBy")
+                        .WithMany()
+                        .HasForeignKey("RecordedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheRegulatoryBody", "RegulatoryBody")
+                        .WithMany()
+                        .HasForeignKey("RegulatoryBodyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ClosedBy");
+
+                    b.Navigation("LinkedObligation");
+
+                    b.Navigation("ManagementNotifiedBy");
+
+                    b.Navigation("RecordedBy");
+
+                    b.Navigation("RegulatoryBody");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReminderDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReminderRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReturnToWorkPhase", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AssessedBy")
@@ -183447,6 +192171,141 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheStatutoryIncidentSubmission", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SafetyIncident", "Incident")
+                        .WithMany("StatutorySubmissions")
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheRegulatoryBody", "RegulatoryBody")
+                        .WithMany()
+                        .HasForeignKey("RegulatoryBodyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "SubmittedBy")
+                        .WithMany()
+                        .HasForeignKey("SubmittedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Incident");
+
+                    b.Navigation("RegulatoryBody");
+
+                    b.Navigation("SubmittedBy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheStopWorkOrder", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CancelledBy")
+                        .WithMany()
+                        .HasForeignKey("CancelledById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ClearedBy")
+                        .WithMany()
+                        .HasForeignKey("ClearedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SheHazard", "Hazard")
+                        .WithMany()
+                        .HasForeignKey("HazardId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SafetyIncident", "Incident")
+                        .WithMany()
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.ShePermitToWork", "PermitToWork")
+                        .WithMany()
+                        .HasForeignKey("PermitToWorkId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RaisedBy")
+                        .WithMany()
+                        .HasForeignKey("RaisedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ResolvedBy")
+                        .WithMany()
+                        .HasForeignKey("ResolvedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RoutedTo")
+                        .WithMany()
+                        .HasForeignKey("RoutedToId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CancelledBy");
+
+                    b.Navigation("ClearedBy");
+
+                    b.Navigation("Hazard");
+
+                    b.Navigation("Incident");
+
+                    b.Navigation("Location");
+
+                    b.Navigation("PermitToWork");
+
+                    b.Navigation("RaisedBy");
+
+                    b.Navigation("ResolvedBy");
+
+                    b.Navigation("RoutedTo");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheSustainabilityInitiative", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Location");
+
+                    b.Navigation("Owner");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheTrainingAttendance", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
@@ -183637,6 +192496,179 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Department");
 
                     b.Navigation("SectionHead");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationClearanceItem", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OwningOrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OwningOrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RecordedBy")
+                        .WithMany()
+                        .HasForeignKey("RecordedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeSeparation", "Separation")
+                        .WithMany("ClearanceItems")
+                        .HasForeignKey("SeparationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OwningOrganizationUnit");
+
+                    b.Navigation("RecordedBy");
+
+                    b.Navigation("Separation");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationClearanceTemplate", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OwningOrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OwningOrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OwningOrganizationUnit");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationExitInterview", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ConductedBy")
+                        .WithMany()
+                        .HasForeignKey("ConductedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RecordedBy")
+                        .WithMany()
+                        .HasForeignKey("RecordedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeSeparation", "Separation")
+                        .WithMany()
+                        .HasForeignKey("SeparationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ConductedBy");
+
+                    b.Navigation("RecordedBy");
+
+                    b.Navigation("Separation");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationReminderDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.SeparationReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationReminderRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationSettlement", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "FinalisedBy")
+                        .WithMany()
+                        .HasForeignKey("FinalisedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "PreparedBy")
+                        .WithMany()
+                        .HasForeignKey("PreparedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ReviewedBy")
+                        .WithMany()
+                        .HasForeignKey("ReviewedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.EmployeeSeparation", "Separation")
+                        .WithMany()
+                        .HasForeignKey("SeparationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("FinalisedBy");
+
+                    b.Navigation("PreparedBy");
+
+                    b.Navigation("ReviewedBy");
+
+                    b.Navigation("Separation");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationSettlementLine", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.SeparationSettlement", "Settlement")
+                        .WithMany("Lines")
+                        .HasForeignKey("SettlementId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Settlement");
 
                     b.Navigation("Tenant");
                 });
@@ -184622,6 +193654,10 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "QueryOpportunityWaivedBy")
+                        .WithMany()
+                        .HasForeignKey("QueryOpportunityWaivedById");
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ReportedBy")
                         .WithMany()
                         .HasForeignKey("ReportedById")
@@ -184652,6 +193688,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("DecisionBy");
 
                     b.Navigation("Employee");
+
+                    b.Navigation("QueryOpportunityWaivedBy");
 
                     b.Navigation("ReportedBy");
 
@@ -185154,6 +194192,435 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.DisciplineReminderDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.DisciplineReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.DisciplineReminderRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsConcern", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ClosedBy")
+                        .WithMany()
+                        .HasForeignKey("ClosedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", "ConvertedCase")
+                        .WithMany()
+                        .HasForeignKey("ConvertedCaseId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "TriagedBy")
+                        .WithMany()
+                        .HasForeignKey("TriagedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ClosedBy");
+
+                    b.Navigation("ConvertedCase");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("TriagedBy");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsConcernUpdate", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Author")
+                        .WithMany()
+                        .HasForeignKey("AuthorEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsConcern", "Concern")
+                        .WithMany("Updates")
+                        .HasForeignKey("ConcernId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Author");
+
+                    b.Navigation("Concern");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsResponder", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ResponderEmployee")
+                        .WithMany()
+                        .HasForeignKey("ResponderEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OrganizationUnit");
+
+                    b.Navigation("ResponderEmployee");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ClosedBy")
+                        .WithMany()
+                        .HasForeignKey("ClosedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "HrInterpretationBy")
+                        .WithMany()
+                        .HasForeignKey("HrInterpretationById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan", "PerformanceImprovementPlan")
+                        .WithMany()
+                        .HasForeignKey("PerformanceImprovementPlanId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Safety.SafetyIncident", "SafetyIncident")
+                        .WithMany()
+                        .HasForeignKey("SafetyIncidentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction", "StaffDisciplinaryAction")
+                        .WithMany()
+                        .HasForeignKey("StaffDisciplinaryActionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ClosedBy");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("HrInterpretationBy");
+
+                    b.Navigation("PerformanceImprovementPlan");
+
+                    b.Navigation("SafetyIncident");
+
+                    b.Navigation("StaffDisciplinaryAction");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceConference", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Chair")
+                        .WithMany()
+                        .HasForeignKey("ChairId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ConvenedBy")
+                        .WithMany()
+                        .HasForeignKey("ConvenedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", "Grievance")
+                        .WithMany("Conferences")
+                        .HasForeignKey("GrievanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Union", "Union")
+                        .WithMany()
+                        .HasForeignKey("UnionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Chair");
+
+                    b.Navigation("ConvenedBy");
+
+                    b.Navigation("Grievance");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Union");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceConferenceAttendee", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceConference", "Conference")
+                        .WithMany("Attendees")
+                        .HasForeignKey("ConferenceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Conference");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceDocument", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceConference", "Conference")
+                        .WithMany()
+                        .HasForeignKey("ConferenceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", "Grievance")
+                        .WithMany("Documents")
+                        .HasForeignKey("GrievanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceStep", "Step")
+                        .WithMany()
+                        .HasForeignKey("StepId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "UploadedBy")
+                        .WithMany()
+                        .HasForeignKey("UploadedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Conference");
+
+                    b.Navigation("Grievance");
+
+                    b.Navigation("Step");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("UploadedBy");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceInvestigation", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", "Grievance")
+                        .WithOne("Investigation")
+                        .HasForeignKey("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceInvestigation", "GrievanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Investigator")
+                        .WithMany()
+                        .HasForeignKey("InvestigatorId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "OpenedBy")
+                        .WithMany()
+                        .HasForeignKey("OpenedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Grievance");
+
+                    b.Navigation("Investigator");
+
+                    b.Navigation("OpenedBy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceParty", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AddedBy")
+                        .WithMany()
+                        .HasForeignKey("AddedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", "Grievance")
+                        .WithMany("Parties")
+                        .HasForeignKey("GrievanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RepresentsEmployee")
+                        .WithMany()
+                        .HasForeignKey("RepresentsEmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Union", "Union")
+                        .WithMany()
+                        .HasForeignKey("UnionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AddedBy");
+
+                    b.Navigation("Employee");
+
+                    b.Navigation("Grievance");
+
+                    b.Navigation("RepresentsEmployee");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("Union");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceResolution", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AgreementAcceptedBy")
+                        .WithMany()
+                        .HasForeignKey("AgreementAcceptedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "DecidedBy")
+                        .WithMany()
+                        .HasForeignKey("DecidedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", "Grievance")
+                        .WithOne("Resolution")
+                        .HasForeignKey("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceResolution", "GrievanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "OutcomeRecordedBy")
+                        .WithMany()
+                        .HasForeignKey("OutcomeRecordedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AgreementAcceptedBy");
+
+                    b.Navigation("DecidedBy");
+
+                    b.Navigation("Grievance");
+
+                    b.Navigation("OutcomeRecordedBy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceStep", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "AssignedTo")
+                        .WithMany()
+                        .HasForeignKey("AssignedToId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", "Grievance")
+                        .WithMany("Steps")
+                        .HasForeignKey("GrievanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "RespondedBy")
+                        .WithMany()
+                        .HasForeignKey("RespondedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AssignedTo");
+
+                    b.Navigation("Grievance");
+
+                    b.Navigation("RespondedBy");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffLeave.EmployeeReliever", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Employee")
@@ -185603,6 +195070,17 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffNumberFormat", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffGroupTravel", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Country", "DestinationCountry")
@@ -185725,125 +195203,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("TravelAlert");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalDecision", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalInstance", "ApprovalInstance")
-                        .WithMany("Decisions")
-                        .HasForeignKey("ApprovalInstanceId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Approver")
-                        .WithMany()
-                        .HasForeignKey("ApproverId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "OriginalApprover")
-                        .WithMany()
-                        .HasForeignKey("OriginalApproverId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ApprovalInstance");
-
-                    b.Navigation("Approver");
-
-                    b.Navigation("OriginalApprover");
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalInstance", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest", "StaffTravelRequest")
-                        .WithMany("ApprovalInstances")
-                        .HasForeignKey("StaffTravelRequestId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalWorkflowTemplate", "WorkflowTemplate")
-                        .WithMany("Instances")
-                        .HasForeignKey("WorkflowTemplateId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("StaffTravelRequest");
-
-                    b.Navigation("Tenant");
-
-                    b.Navigation("WorkflowTemplate");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalWorkflowStep", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "EscalationApprover")
-                        .WithMany()
-                        .HasForeignKey("EscalationApproverId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "SpecificApprover")
-                        .WithMany()
-                        .HasForeignKey("SpecificApproverId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalWorkflowTemplate", "WorkflowTemplate")
-                        .WithMany("Steps")
-                        .HasForeignKey("WorkflowTemplateId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("EscalationApprover");
-
-                    b.Navigation("SpecificApprover");
-
-                    b.Navigation("Tenant");
-
-                    b.Navigation("WorkflowTemplate");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalWorkflowTemplate", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffLevel", "AppliesToLevelFrom")
-                        .WithMany()
-                        .HasForeignKey("AppliesToLevelFromId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffLevel", "AppliesToLevelTo")
-                        .WithMany()
-                        .HasForeignKey("AppliesToLevelToId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("AppliesToLevelFrom");
-
-                    b.Navigation("AppliesToLevelTo");
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelBudget", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "ApprovedBy")
@@ -185884,7 +195243,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", "Vendor")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Vendor")
                         .WithMany()
                         .HasForeignKey("VendorId")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -185894,17 +195253,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
 
                     b.Navigation("Vendor");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelCurrencyExchangeRate", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelDocument", b =>
@@ -186036,7 +195384,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", "Vendor")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Vendor")
                         .WithMany()
                         .HasForeignKey("VendorId")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -186081,7 +195429,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", "Vendor")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Vendor")
                         .WithMany()
                         .HasForeignKey("VendorId")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -186132,7 +195480,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", "Vendor")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Vendor")
                         .WithMany()
                         .HasForeignKey("VendorId")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -186160,7 +195508,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", "Vendor")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Vendor")
                         .WithMany()
                         .HasForeignKey("VendorId")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -186382,6 +195730,36 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelReminderDispatchLog", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelReminderRun", "Run")
+                        .WithMany("DispatchLogs")
+                        .HasForeignKey("RunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Run");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelReminderRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CancelledBy")
@@ -186555,24 +195933,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
-                        .WithMany()
-                        .HasForeignKey("CountryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Country");
-
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVisaApplication", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.Country", "DestinationCountry")
@@ -186599,7 +195959,7 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelVendor", "Vendor")
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.Supplier", "Vendor")
                         .WithMany()
                         .HasForeignKey("VendorId")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -194430,6 +203790,25 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.BusinessPartnerBankAccount", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
+                        .WithMany("BankAccounts")
+                        .HasForeignKey("BusinessPartnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BusinessPartner");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.BusinessPartnerCategory", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
@@ -196351,8 +205730,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementRequisitionAuthorityRoute", "AuthorityRoute")
                         .WithMany()
                         .HasForeignKey("AuthorityRouteId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Procurement.ProcurementPolicyExceptionRule", "ExceptionRule")
                         .WithMany()
@@ -209663,6 +219041,104 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoArea", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoLevel", "GeoLevel")
+                        .WithMany("Areas")
+                        .HasForeignKey("GeoLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoArea", "ParentArea")
+                        .WithMany("ChildAreas")
+                        .HasForeignKey("ParentAreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoScheme", "Scheme")
+                        .WithMany("Areas")
+                        .HasForeignKey("SchemeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoArea", "SupersededByArea")
+                        .WithMany()
+                        .HasForeignKey("SupersededByGeoAreaId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("GeoLevel");
+
+                    b.Navigation("ParentArea");
+
+                    b.Navigation("Scheme");
+
+                    b.Navigation("SupersededByArea");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoAreaAlias", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoArea", "GeoArea")
+                        .WithMany("Aliases")
+                        .HasForeignKey("GeoAreaId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("GeoArea");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoLevel", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Reference.GeoScheme", "Scheme")
+                        .WithMany("Levels")
+                        .HasForeignKey("SchemeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Scheme");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoScheme", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.Country", "Country")
+                        .WithMany()
+                        .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Country");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.RefreshToken", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -212090,6 +221566,26 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Lines");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Announcements.HrAnnouncement", b =>
+                {
+                    b.Navigation("Audiences");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetRequisition", b =>
+                {
+                    b.Navigation("FulfilledAssignments");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetSurcharge", b =>
+                {
+                    b.Navigation("Recoveries");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Assets.AssetType", b =>
                 {
                     b.Navigation("AssetTypeAttributes");
@@ -212112,6 +221608,11 @@ namespace ErpSystem.Data.Migrations
                 {
                     b.Navigation("Members");
 
+                    b.Navigation("Nominations");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Awards.AwardCycle", b =>
+                {
                     b.Navigation("Nominations");
                 });
 
@@ -212166,6 +221667,11 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("PositionBenefits");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CertifyingBody", b =>
+                {
+                    b.Navigation("EmployeeSkills");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.ClientEngagement", b =>
                 {
                     b.Navigation("Timesheets");
@@ -212203,11 +221709,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.ConsultantClient", b =>
                 {
+                    b.Navigation("Contacts");
+
                     b.Navigation("Engagements");
 
                     b.Navigation("Invoices");
-
-                    b.Navigation("PortalAccounts");
 
                     b.Navigation("Timesheets");
                 });
@@ -212336,6 +221842,16 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("EmployeeDependentBenefits");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeDocumentType", b =>
+                {
+                    b.Navigation("Documents");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeImportSession", b =>
+                {
+                    b.Navigation("Rows");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeePosition", b =>
                 {
                     b.Navigation("Employees");
@@ -212347,6 +221863,23 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("PositionHistories");
 
                     b.Navigation("SkillRequirements");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.EmployeeSeparation", b =>
+                {
+                    b.Navigation("ClearanceItems");
+
+                    b.Navigation("Documents");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ExpatriateAssignment", b =>
+                {
+                    b.Navigation("FamilyMembers");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.IdentificationExpiryReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.IdentificationType", b =>
@@ -212886,6 +222419,18 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("EmployeeGoals");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Policies.HrPolicyDocument", b =>
+                {
+                    b.Navigation("Acknowledgements");
+
+                    b.Navigation("Audiences");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.ProfileChanges.EmployeeProfileChangeRequest", b =>
+                {
+                    b.Navigation("Items");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement", b =>
                 {
                     b.Navigation("ApprovalLevels");
@@ -212903,6 +222448,16 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("StatusHistory");
 
                     b.Navigation("Transfer");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovementReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.QualificationLevel", b =>
+                {
+                    b.Navigation("Qualifications");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.CandidateTalentSegment", b =>
@@ -213068,6 +222623,11 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Reviews");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.ProbationReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Recruitment.RecruitmentPipeline", b =>
                 {
                     b.Navigation("Stages");
@@ -213140,6 +222700,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("InvolvedPersons");
 
+                    b.Navigation("StatutorySubmissions");
+
                     b.Navigation("Witnesses");
                 });
 
@@ -213171,6 +222733,18 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Documents");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAudit", b =>
+                {
+                    b.Navigation("Findings");
+
+                    b.Navigation("TeamMembers");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheAuditFinding", b =>
+                {
+                    b.Navigation("Actions");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheContractor", b =>
                 {
                     b.Navigation("Documents");
@@ -213189,6 +222763,16 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("IncidentTypeCorrectiveActions");
 
                     b.Navigation("InspectionActions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalMonitoringSchedule", b =>
+                {
+                    b.Navigation("Records");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheEnvironmentalReview", b =>
+                {
+                    b.Navigation("Actions");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheHazard", b =>
@@ -213222,6 +222806,11 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("EvidenceRecords");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Safety.SheReturnToWorkPlan", b =>
                 {
                     b.Navigation("Phases");
@@ -213251,6 +222840,16 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Employees");
 
                     b.Navigation("Units");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.SeparationSettlement", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.Skill", b =>
@@ -213403,6 +223002,36 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("OffenseProcedures");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.DisciplineReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.EmployeeRelationsConcern", b =>
+                {
+                    b.Navigation("Updates");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievance", b =>
+                {
+                    b.Navigation("Conferences");
+
+                    b.Navigation("Documents");
+
+                    b.Navigation("Investigation");
+
+                    b.Navigation("Parties");
+
+                    b.Navigation("Resolution");
+
+                    b.Navigation("Steps");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffGrievance.StaffGrievanceConference", b =>
+                {
+                    b.Navigation("Attendees");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffLeave.LeaveBalance", b =>
                 {
                     b.Navigation("Adjustments");
@@ -213465,18 +223094,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Notifications");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalInstance", b =>
-                {
-                    b.Navigation("Decisions");
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelApprovalWorkflowTemplate", b =>
-                {
-                    b.Navigation("Instances");
-
-                    b.Navigation("Steps");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelExpenseClaim", b =>
                 {
                     b.Navigation("Lines");
@@ -213509,11 +223126,14 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Exceptions");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelReminderRun", b =>
+                {
+                    b.Navigation("DispatchLogs");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest", b =>
                 {
                     b.Navigation("Advances");
-
-                    b.Navigation("ApprovalInstances");
 
                     b.Navigation("Attachments");
 
@@ -214154,6 +223774,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.BusinessPartner", b =>
                 {
+                    b.Navigation("BankAccounts");
+
                     b.Navigation("Categories");
 
                     b.Navigation("Children");
@@ -215333,6 +224955,25 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Evidence");
 
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoArea", b =>
+                {
+                    b.Navigation("Aliases");
+
+                    b.Navigation("ChildAreas");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoLevel", b =>
+                {
+                    b.Navigation("Areas");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Reference.GeoScheme", b =>
+                {
+                    b.Navigation("Areas");
+
+                    b.Navigation("Levels");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Report", b =>

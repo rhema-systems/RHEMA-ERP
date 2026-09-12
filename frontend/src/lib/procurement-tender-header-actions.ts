@@ -5,6 +5,8 @@ type TenderHeaderActionInput = {
   tenderType?: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType | number;
+  status?: string;
+  bidCount?: number;
   canReadProcurementRecords: boolean;
 };
 
@@ -29,9 +31,23 @@ const exceptionalMethods = new Set<ProcurementMethodType>([
 const normalizeMethod = (value?: ProcurementMethodType | number) =>
   typeof value === 'number' ? legacyMethodNames[value] : value;
 
+export function getTenderStageVisibility(status?: string) {
+  const normalized = status?.toLowerCase() ?? '';
+  const awardStage = ['closed', 'underevaluation', 'evaluated', 'awarded'].includes(
+    normalized
+  );
+  return {
+    publishedStage: normalized === 'published' || awardStage,
+    awardStage,
+  };
+}
+
 export function getTenderHeaderActions(input: TenderHeaderActionInput) {
   const isTender = input.tenderType !== 'RFQ';
   const visible = isTender && input.canReadProcurementRecords;
+  const { publishedStage: published, awardStage } = getTenderStageVisibility(
+    input.status
+  );
   const hasSourcingCase = Boolean(input.sourcingCaseId?.trim());
   const method = normalizeMethod(input.sourcingMethod);
   const sourceQuery =
@@ -41,9 +57,10 @@ export function getTenderHeaderActions(input: TenderHeaderActionInput) {
   const root = `/procurement/tenders/${input.tenderId}`;
 
   return {
-    showCommitteeControls: visible && hasSourcingCase,
-    showAwardReadiness: visible,
-    showGhanepsExchange: visible,
+    showCommitteeControls:
+      visible && hasSourcingCase && published && (input.bidCount ?? 0) > 0,
+    showAwardReadiness: visible && awardStage,
+    showGhanepsExchange: visible && published,
     committeeControlsHref: `${root}/committee-controls`,
     awardReadinessHref: `${root}/award-readiness${sourceQuery}`,
     ghanepsExchangeHref: `${root}/ghaneps-exchange${sourceQuery}`,

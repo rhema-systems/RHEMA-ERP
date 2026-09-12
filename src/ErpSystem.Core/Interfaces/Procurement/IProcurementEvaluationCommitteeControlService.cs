@@ -1,10 +1,16 @@
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.Procurement;
 
 public interface IProcurementEvaluationCommitteeControlService
 {
+    // Null means this tender has no source committee and retains standalone assignments.
+    Task<TenderEvaluator?> EnsureTenderEvaluatorAsync(
+        Guid tenderId, string correlationId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<Guid>?> GetTenderScoringUserIdsAsync(
+        Guid tenderId, CancellationToken cancellationToken = default);
     Task<ProcurementEvaluationCommitteeReadinessDto> GetReadinessAsync(
         ProcurementEvaluationSourceType sourceType,
         Guid sourceId,
@@ -24,6 +30,11 @@ public interface IProcurementEvaluationCommitteeControlService
     Task<ProcurementEvaluationCommitteeDto> ActivateAsync(
         Guid committeeControlId,
         ActivateProcurementEvaluationCommitteeRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default);
+    Task<ProcurementEvaluationCommitteeDto> RetireDraftAsync(
+        Guid committeeControlId,
+        RetireProcurementEvaluationCommitteeDraftRequest request,
         string correlationId,
         CancellationToken cancellationToken = default);
     Task<ProcurementEvaluationAppointmentDto> RespondToAppointmentAsync(

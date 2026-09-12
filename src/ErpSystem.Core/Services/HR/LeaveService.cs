@@ -38,6 +38,13 @@ public class LeaveService : ILeaveService
     private readonly ILeaveBalanceRecalculationService _recalculationService;
     private readonly ILeaveEntitlementService _entitlementService;
     private readonly IDateTimeProvider _clock;
+    private readonly INumberSequenceService _numberSequence;
+
+    /// <summary>
+    /// Sequence key for leave request numbers. Year-bucketed: the printed number is
+    /// <c>LV{year}{seq:D6}</c> and restarts each January, so the counter must too.
+    /// </summary>
+    private const string LeaveRequestSequenceKey = "LEAVE-REQ";
 
     public LeaveService(
             ILeaveRepository leaveRepository,
@@ -57,7 +64,8 @@ public class LeaveService : ILeaveService
             ICurrentUserService currentUserService,
             ILeaveBalanceRecalculationService recalculationService,
             ILeaveEntitlementService entitlementService,
-            IDateTimeProvider clock)
+            IDateTimeProvider clock,
+            INumberSequenceService numberSequence)
     {
         _leaveRepository = leaveRepository;
         _leaveTypeRepository = leaveTypeRepository;
@@ -76,6 +84,7 @@ public class LeaveService : ILeaveService
         _currentUserService = currentUserService;
         _recalculationService = recalculationService;
         _entitlementService = entitlementService;
+        _numberSequence = numberSequence;
         _clock = clock;
     }
 
@@ -1001,34 +1010,84 @@ public class LeaveService : ILeaveService
         return message.Contains("RequestNumber", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Issues the next leave request number, <c>LV{year}{seq:D6}</c>, from the tenant's atomic
+    /// number sequence.
+    /// </summary>
+    /// <remarks>
+    /// <para>Finish-plan lane 4 (2026-09-01). This used to be a max+1 scan over the LIVE rows:
+    /// order by number, take the last, add one. Two things were wrong with that. Under concurrency
+    /// two creates could read the same maximum (the unique index caught it and the retry loop
+    /// below re-ran the same scan). And a soft-deleted request vanished from the scan while its
+    /// number stayed in the unique index, so the next create was handed a number already taken —
+    /// every retry recomputed the same collision and the create failed. Training, recruitment and
+    /// staff numbering had already moved to <see cref="INumberSequenceService"/> for exactly this.</para>
+    ///
+    /// <para><b>Seeding.</b> Numbers already in the table were never issued by the counter. The first
+    /// time the counter is used for a year it is advanced past the highest number on record for that
+    /// year — deleted rows included, because those numbers are still in the index — so it keeps
+    /// issuing after the numbers already in the wild rather than restarting at 000001. The seed
+    /// runs only while the counter reads zero, so it costs one scan per tenant per year, not one per
+    /// create. <see cref="INumberSequenceService.AdvanceToAtLeastAsync"/> only ever moves forward, so
+    /// two concurrent first creates cannot lower it.</para>
+    /// </remarks>
     private async Task<string> GenerateRequestNumberAsync()
     {
         var year = _clock.UtcNow.Year;
         var prefix = $"LV{year}";
         var tenantId = GetTenantId();
 
-        var lastrequest = await _leaveRepository
-            .GetQueryable()
-            .Where(lr => lr.TenantId == tenantId && lr.RequestNumber.StartsWith(prefix))
-            .OrderByDescending(lr => lr.RequestNumber)
-            .FirstOrDefaultAsync();
-
-        int nextNumber = 1;
-        if (lastrequest != null)
+        if (await _numberSequence.PeekAsync(LeaveRequestSequenceKey, year) == 0)
         {
-            var lastNumberStr = lastrequest.RequestNumber.Substring(prefix.Length);
-            if (int.TryParse(lastNumberStr, out int lastNumber))
+            // GetQueryableIncludingDeleted: the repository applies its soft-delete filter as a plain
+            // Where, which IgnoreQueryFilters cannot remove — and a deleted request's number is
+            // still in the unique index.
+            var existing = await _leaveRepository
+                .GetQueryableIncludingDeleted(lr => lr.TenantId == tenantId && lr.RequestNumber.StartsWith(prefix))
+                .Select(lr => lr.RequestNumber)
+                .ToListAsync();
+
+            long highest = 0;
+            foreach (var number in existing)
             {
-                nextNumber = lastNumber + 1;
+                if (number.Length > prefix.Length
+                    && long.TryParse(number.AsSpan(prefix.Length), out var value)
+                    && value > highest)
+                {
+                    highest = value;
+                }
             }
+
+            if (highest > 0)
+                await _numberSequence.AdvanceToAtLeastAsync(LeaveRequestSequenceKey, highest, year);
         }
 
-        return $"{prefix}{nextNumber:D6}";
+        var next = await _numberSequence.NextAsync(LeaveRequestSequenceKey, year);
+        return $"{prefix}{next:D6}";
     }
 
     private Guid GetCurrentUserId()
     {
         return Guid.TryParse(_currentUserService.UserId, out var id) ? id : Guid.Empty;
+    }
+
+    /// <summary>
+    /// The employee the token belongs to, for columns that are Employee foreign keys (an
+    /// adjustment's <c>PerformedBy</c>). Not the user id: a user id is never an employee id, and the
+    /// column's constraint refuses it.
+    /// </summary>
+    /// <remarks>
+    /// Finish-plan lane 4 (2026-09-01). The screen sent the login's user id and the service accepted
+    /// it, so no adjustment raised from the desk had ever been saved (the table was empty). The
+    /// house rule from <c>HrControllerBase.TryGetEmployeeWriteContext</c>: an actor column names an
+    /// employee, and an unlinked account cannot be that actor.
+    /// </remarks>
+    private Guid RequireActingEmployeeId(string purpose)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+            return me;
+        throw new InvalidOperationException(
+            $"{purpose} requires your user account to be linked to an employee record. Please contact your administrator.");
     }
 
     #endregion Private helper methods
@@ -1057,7 +1116,7 @@ public class LeaveService : ILeaveService
             ReasonCodeId   = dto.ReasonCodeId,
             Reason         = dto.Reason,
             AdjustmentDate = _clock.UtcNow,
-            PerformedBy    = dto.PerformedBy
+            PerformedBy    = RequireActingEmployeeId("Recording a leave adjustment")
         };
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
@@ -1177,9 +1236,9 @@ public class LeaveService : ILeaveService
             await _unitOfWork.SaveChangesAsync();
         }
 
-        var performedBy = dto.PerformedBy == Guid.Empty
-            ? GetCurrentUserId()
-            : dto.PerformedBy;
+        // Stamped from the token, never from the payload — see RequireActingEmployeeId. The old
+        // fallback here was GetCurrentUserId(), a USER id, which the Employee constraint refuses.
+        var performedBy = RequireActingEmployeeId("Recording a leave adjustment");
 
         var adjustment = new LeaveAdjustment
         {

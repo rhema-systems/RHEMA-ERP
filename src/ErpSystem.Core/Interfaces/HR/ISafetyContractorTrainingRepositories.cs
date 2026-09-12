@@ -61,7 +61,6 @@ public interface ISheContractorDocumentRepository : IGenericRepository<SheContra
 
 public interface ISheTrainingPlanRepository : IGenericRepository<SheTrainingPlan>
 {
-    Task<SheTrainingPlan?> GetByNumberAsync(string planNumber);
     /// <summary>Returns the plan with its programs loaded.</summary>
     Task<SheTrainingPlan?> GetWithProgramsAsync(Guid id);
     Task<IEnumerable<SheTrainingPlan>> GetByYearAsync(int year);
@@ -70,7 +69,6 @@ public interface ISheTrainingPlanRepository : IGenericRepository<SheTrainingPlan
 
 public interface ISheTrainingProgramRepository : IGenericRepository<SheTrainingProgram>
 {
-    Task<SheTrainingProgram?> GetByCodeAsync(string programCode);
     /// <summary>Returns the program with its attendance register loaded.</summary>
     Task<SheTrainingProgram?> GetWithAttendancesAsync(Guid id);
     Task<IEnumerable<SheTrainingProgram>> GetByPlanIdAsync(Guid planId);

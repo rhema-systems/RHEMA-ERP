@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
+using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,25 +11,24 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-travel/policies")]
-[Authorize]
-public class StaffTravelPoliciesController : ControllerBase
+[StaffTravelBusinessRules]
+[Authorize(Policy = HrPermissions.TravelReadPolicy)]
+public class StaffTravelPoliciesController : HrControllerBase
 {
     private readonly IStaffTravelPolicyService _service;
-    private readonly ICurrentUserService _currentUser;
 
     public StaffTravelPoliciesController(IStaffTravelPolicyService service, ICurrentUserService currentUser)
+        : base(currentUser)
     {
         _service = service;
-        _currentUser = currentUser;
     }
 
+    /// <summary>
+    /// Tenant + platform user id for audit fields. Deliberately does not require an employee
+    /// link — see <see cref="HrControllerBase"/>.
+    /// </summary>
     private (Guid tenantId, Guid userId)? ResolveContext()
-    {
-        var tenantId = _currentUser.TenantId;
-        var userId = _currentUser.EmployeeId;
-        if (tenantId is null || userId is null) return null;
-        return (tenantId.Value, userId.Value);
-    }
+        => TryGetWriteContext(out var tenantId, out var userId) is null ? (tenantId, userId) : null;
 
     // =========================================================================
     // POLICIES
@@ -50,6 +51,7 @@ public class StaffTravelPoliciesController : ControllerBase
     public async Task<ActionResult<StaffTravelPolicyDto>> GetById(Guid id)
         => Ok(await _service.GetPolicyByIdAsync(id));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<StaffTravelPolicyDto>> Create([FromBody] CreateStaffTravelPolicyDto dto)
     {
@@ -61,6 +63,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StaffTravelPolicyDto>> Update(Guid id, [FromBody] UpdateStaffTravelPolicyDto dto)
     {
@@ -72,6 +75,42 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.UpdatePolicyAsync(dto, ctx.Value.userId));
     }
 
+    /// <summary>Approve a travel policy and put it in force.</summary>
+    /// <remarks>
+    /// <para><b>Admin-gated, deliberately.</b> A policy decides what everyone may spend on travel
+    /// and its caps genuinely refuse bookings, so approving one is the same authority as
+    /// authorising a booking above a cap — <c>HR.Travel.Admin</c>, which HR does not hold. Before
+    /// this endpoint existed nothing wrote <c>ApprovedById</c> at all, so every policy was
+    /// unapproved and the field was decoration.</para>
+    ///
+    /// <para>Approving supersedes whichever policy covered the same scope, so exactly one is ever
+    /// in force for a given unit and staff-level band.</para>
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("{id:guid}/approve")]
+    public async Task<ActionResult<StaffTravelPolicyDto>> Approve(Guid id, CancellationToken ct)
+    {
+        // ApprovedById is an Employee FK, so this is one of the travel writes that genuinely needs
+        // the caller's employee link — an unlinked administrator cannot sign a spending policy.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Approving a travel policy") is { } contextError) return contextError;
+
+        return Ok(await _service.ApprovePolicyAsync(id, employeeId, ct));
+    }
+
+    /// <summary>Stand an approved policy down so it stops capping bookings.</summary>
+    /// <remarks>
+    /// Admin-gated like approval — putting a rule in force and taking it out are the same
+    /// authority. The policy stays approved; approval is a fact about the past and withdrawing does
+    /// not unmake it. Without this, undoing an approval meant approving a replacement with an
+    /// identical scope, or deleting the record of a rule that really did govern spending.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("{id:guid}/withdraw")]
+    public async Task<ActionResult<StaffTravelPolicyDto>> Withdraw(Guid id, CancellationToken ct)
+        => Ok(await _service.WithdrawPolicyAsync(id, ct));
+
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -91,6 +130,7 @@ public class StaffTravelPoliciesController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelPolicyRuleDto>>> GetActiveRules(Guid policyId)
         => Ok(await _service.GetActiveRulesAsync(policyId));
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{policyId:guid}/rules")]
     public async Task<ActionResult<StaffTravelPolicyRuleDto>> AddRule(Guid policyId, [FromBody] CreateStaffTravelPolicyRuleDto dto)
     {
@@ -102,6 +142,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.AddRuleAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("rules/{ruleId:guid}")]
     public async Task<ActionResult<StaffTravelPolicyRuleDto>> UpdateRule(Guid ruleId, [FromBody] UpdateStaffTravelPolicyRuleDto dto)
     {
@@ -113,6 +154,7 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.UpdateRuleAsync(dto, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("rules/{ruleId:guid}")]
     public async Task<IActionResult> DeleteRule(Guid ruleId)
     {
@@ -132,6 +174,7 @@ public class StaffTravelPoliciesController : ControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelPolicyExceptionDto>>> GetPendingExceptions()
         => Ok(await _service.GetPendingExceptionsAsync());
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("exceptions")]
     public async Task<ActionResult<StaffTravelPolicyExceptionDto>> CreateException([FromBody] CreateStaffTravelPolicyExceptionDto dto)
     {
@@ -142,73 +185,32 @@ public class StaffTravelPoliciesController : ControllerBase
         return Ok(await _service.CreateExceptionAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("exceptions/{id:guid}/decide")]
     public async Task<IActionResult> DecideException(Guid id, [FromBody] DecideStaffTravelPolicyExceptionDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var userId = _currentUser.EmployeeId;
-        if (userId is null) return BadRequest("Your user account is not linked to an employee record.");
+        // ApprovedById is an Employee FK — who granted an exception to travel policy is a person.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Deciding a travel policy exception") is { } contextError) return contextError;
 
         dto.ExceptionId = id;
-        dto.ApprovedById = userId.Value;
-        await _service.DecideExceptionAsync(dto);
+        await _service.DecideExceptionAsync(dto, employeeId);
         return Ok(new { message = "Policy exception decision recorded." });
     }
 
     // =========================================================================
-    // VENDORS
+    // VENDORS — retired in slice 3
     // =========================================================================
+    //
+    // Travel vendors were a second supplier master: VendorCode, VendorName, contact, account
+    // number, contract dates, IsPreferred, Rating and PaymentTerms as free text — all of which
+    // Procurement's Supplier already models, with SupplierPerformanceMetric behind the rating and
+    // PaymentTerm as a real entity rather than a string. An airline paid through travel and the
+    // same airline paid through procurement must not be two records that can disagree.
+    //
+    // The six VendorId columns across flights, hotels, ground transport, car rentals, visa
+    // applications and insurance now point at Suppliers. Onboard a travel vendor through
+    // Procurement; there is deliberately no travel-side create.
 
-    [HttpGet("vendors")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetAllVendors()
-        => Ok(await _service.GetAllVendorsAsync());
-
-    [HttpGet("vendors/active")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetActiveVendors()
-        => Ok(await _service.GetActiveVendorsAsync());
-
-    [HttpGet("vendors/type/{vendorType}")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetVendorsByType(TravelVendorType vendorType)
-        => Ok(await _service.GetVendorsByTypeAsync(vendorType));
-
-    [HttpGet("vendors/preferred")]
-    public async Task<ActionResult<IEnumerable<StaffTravelVendorSummaryDto>>> GetPreferredVendors([FromQuery] TravelVendorType? vendorType = null)
-        => Ok(await _service.GetPreferredVendorsAsync(vendorType));
-
-    [HttpGet("vendors/{id:guid}")]
-    public async Task<ActionResult<StaffTravelVendorDto>> GetVendorById(Guid id)
-        => Ok(await _service.GetVendorByIdAsync(id));
-
-    [HttpGet("vendors/code/{vendorCode}")]
-    public async Task<ActionResult<StaffTravelVendorDto?>> GetVendorByCode(string vendorCode)
-        => Ok(await _service.GetVendorByCodeAsync(vendorCode));
-
-    [HttpPost("vendors")]
-    public async Task<ActionResult<StaffTravelVendorDto>> CreateVendor([FromBody] CreateStaffTravelVendorDto dto)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var ctx = ResolveContext();
-        if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
-
-        var created = await _service.CreateVendorAsync(dto, ctx.Value.tenantId, ctx.Value.userId);
-        return CreatedAtAction(nameof(GetVendorById), new { id = created.Id }, created);
-    }
-
-    [HttpPut("vendors/{id:guid}")]
-    public async Task<ActionResult<StaffTravelVendorDto>> UpdateVendor(Guid id, [FromBody] UpdateStaffTravelVendorDto dto)
-    {
-        if (id != dto.Id) return BadRequest("ID mismatch.");
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var ctx = ResolveContext();
-        if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
-
-        return Ok(await _service.UpdateVendorAsync(dto, ctx.Value.userId));
-    }
-
-    [HttpDelete("vendors/{id:guid}")]
-    public async Task<IActionResult> DeleteVendor(Guid id)
-    {
-        await _service.DeleteVendorAsync(id);
-        return NoContent();
-    }
 }

@@ -26,6 +26,7 @@ const formData: PersistedTenderFormData = {
   evaluationCriteriaJson: '{"mandatory":true}',
   notes: 'Retain these notes',
   termsAndConditions: 'Retain these terms',
+  bidValidityPeriodDays: 60,
   documentRequirements: [
     { documentType: 'TaxClearance', isRequired: true },
   ],
@@ -47,6 +48,11 @@ const formData: PersistedTenderFormData = {
 };
 
 describe('tender form persistence payloads', () => {
+  it('round trips the specified validity period without assuming a default', () => {
+    expect(buildUpdateTenderDto(formData).bidValidityPeriodDays).toBe(60);
+    expect(buildCreateTenderDto(formData, 'pr', true).bidValidityPeriodDays).toBe(60);
+    expect(buildUpdateTenderDto({ ...formData, bidValidityPeriodDays: null }).bidValidityPeriodDays).toBeNull();
+  });
   it('retains the selected evaluation template and every persisted setting on create', () => {
     const payload = buildCreateTenderDto(
       formData,
@@ -86,5 +92,9 @@ describe('tender form persistence payloads', () => {
       experienceWeightage: 10,
       minimumPerformanceRating: 4,
     });
+    expect(payload.requiredDocuments).toBeDefined();
+    expect(JSON.parse(payload.requiredDocuments ?? '[]')).toEqual(
+      formData.documentRequirements
+    );
   });
 });

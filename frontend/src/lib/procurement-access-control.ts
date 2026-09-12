@@ -1,6 +1,7 @@
 import type {
   ProcurementAccessCapabilityRequest, ProcurementAccessPermission, ProcurementAccessRole,
-  ProcurementCommittee, SaveProcurementResponsibilityAssignment,
+  ProcurementCommittee, ProcurementCommitteeMemberKind, ProcurementResponsibilityAssignment,
+  SaveProcurementResponsibilityAssignment,
 } from '@/types/procurement-access-control';
 
 export const roleRequiresWarehouseScope = (
@@ -27,6 +28,42 @@ export const validateResponsibilityAssignment = (
 
 export const canActivateCommittee = (committee: Pick<ProcurementCommittee, 'activeVotingMemberCount' | 'requiredQuorum'>) =>
   committee.activeVotingMemberCount >= committee.requiredQuorum;
+
+export const committeeAssignmentEligibilityIssue = (
+  assignment: ProcurementResponsibilityAssignment,
+  requiredRoleName: string,
+  memberKind: ProcurementCommitteeMemberKind,
+  effectiveFrom: string,
+  effectiveTo?: string,
+) => {
+  if (!assignment.isActive) return 'This responsibility assignment is inactive.';
+
+  const isObserverResponsibility = assignment.roleName === 'TDC_OBSERVER' ||
+    assignment.roleName === 'TDC_INTERNAL_AUDIT';
+  if (assignment.roleName !== requiredRoleName &&
+      !(memberKind === 'Observer' && isObserverResponsibility)) {
+    return memberKind === 'Observer'
+      ? `Observers require ${requiredRoleName}, TDC_OBSERVER, or TDC_INTERNAL_AUDIT.`
+      : `This committee role requires ${requiredRoleName}.`;
+  }
+
+  const assignmentFrom = assignment.effectiveFrom.slice(0, 10);
+  const assignmentTo = assignment.effectiveTo?.slice(0, 10);
+  if (assignmentFrom > effectiveFrom) {
+    return `The responsibility starts on ${assignmentFrom}; the membership cannot start earlier.`;
+  }
+  if (assignmentTo && assignmentTo < effectiveFrom) {
+    return `The responsibility ended on ${assignmentTo}.`;
+  }
+  if (assignmentTo && !effectiveTo) {
+    return `Set the membership end date no later than ${assignmentTo}.`;
+  }
+  if (assignmentTo && effectiveTo && assignmentTo < effectiveTo) {
+    return `The membership cannot continue after the responsibility ends on ${assignmentTo}.`;
+  }
+
+  return undefined;
+};
 
 export const canCheckAccessCapability = (request: ProcurementAccessCapabilityRequest, warehouseRequired: boolean) =>
   Boolean(request.permissionCode && request.sourceType.trim() && request.sourceReference.trim() &&

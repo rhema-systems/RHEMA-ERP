@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -47,6 +47,7 @@ import type {
 export type EvaluationCommitteeDialogAction =
   | { type: 'bind' }
   | { type: 'activate' }
+  | { type: 'retireDraft' }
   | {
       type: 'appointment';
       member: ProcurementEvaluationAppointment;
@@ -94,6 +95,7 @@ export function EvaluationCommitteeActionDialogs({
   options?: ProcurementEvaluationCommitteeOptions;
 }) {
   const [busy, setBusy] = useState(false);
+  const [recallError, setRecallError] = useState<string>();
   const [committeeTemplateId, setCommitteeTemplateId] = useState('');
   const [purpose, setPurpose] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(toLocalDateTime());
@@ -119,6 +121,7 @@ export function EvaluationCommitteeActionDialogs({
   useEffect(() => {
     if (!action) return;
     setBusy(false);
+    setRecallError(undefined);
     setEvidenceReference('');
     setSignatureReference('');
     setReason('');
@@ -141,7 +144,7 @@ export function EvaluationCommitteeActionDialogs({
     setMeetingMode('InPerson');
     setMeetingChannel('');
     setScheduledAt(toLocalDateTime());
-    setWorkflowDefinitionId(options?.workflows[0]?.id ?? '');
+    setWorkflowDefinitionId('');
   }, [action, options, readiness.sourceReference, readiness.sourceType]);
 
   const selectedCommittee = options?.committees.find(
@@ -179,16 +182,12 @@ export function EvaluationCommitteeActionDialogs({
           'Select a committee with a complete active composition.'
         );
     }
-    if (action.type === 'activate' && !evidenceReference.trim())
-      return 'Activation evidence is required.';
     if (action.type === 'appointment') {
-      if (action.accept && !signatureReference.trim())
-        return 'Appointment acceptance requires a signature reference.';
-      if (!evidenceReference.trim())
-        return 'Appointment-response evidence is required.';
       if (!action.accept && reason.trim().length < 5)
         return 'Provide the appointment-decline reason.';
     }
+    if (action.type === 'retireDraft' && reason.trim().length < 10)
+      return 'Provide a retirement reason of at least 10 characters.';
     if (action.type === 'coi') {
       return validateCoiDeclaration({
         outcome: coiOutcome,
@@ -206,18 +205,11 @@ export function EvaluationCommitteeActionDialogs({
     if (action.type === 'meeting') {
       if (!meetingChannel.trim())
         return 'Meeting channel or venue is required.';
-      if (!evidenceReference.trim()) return 'Meeting evidence is required.';
       if (!scheduledAt || Number.isNaN(Date.parse(scheduledAt)))
         return 'Scheduled meeting time is invalid.';
       if (['Remote', 'Hybrid'].includes(meetingMode) && !remoteEvidence.trim())
         return 'Remote or hybrid meetings require a remote-session evidence reference.';
     }
-    if (action.type === 'attendance') {
-      if (!signatureReference.trim() || !evidenceReference.trim())
-        return 'Signed attendance evidence is required.';
-    }
-    if (action.type === 'quorum' && !evidenceReference.trim())
-      return 'Quorum confirmation evidence is required.';
     if (action.type === 'recall') {
       return validateRecallRequest({
         scoreSheetRowVersion: action.scoreSheet.rowVersion,
@@ -257,6 +249,8 @@ export function EvaluationCommitteeActionDialogs({
 
   const submit = async () => {
     if (!action || validation) return;
+    if (action.type === 'recall' || action.type === 'recall-decision')
+      setRecallError(undefined);
     setBusy(true);
     try {
       const key = createEvaluationIdempotencyKey(action.type);
@@ -265,15 +259,24 @@ export function EvaluationCommitteeActionDialogs({
       } else if (action.type === 'activate' && control) {
         await service.activate(control.id, {
           rowVersion: control.rowVersion,
-          evidenceReference,
+          evidenceReference: evidenceReference.trim() || undefined,
+          idempotencyKey: key,
+        });
+      } else if (action.type === 'retireDraft' && control) {
+        await service.retireDraft(control.id, {
+          rowVersion: control.rowVersion,
+          reason: reason.trim(),
+          evidenceReference: evidenceReference.trim() || undefined,
           idempotencyKey: key,
         });
       } else if (action.type === 'appointment') {
         await service.respondToAppointment(action.member.id, {
           accept: action.accept,
           rowVersion: action.member.rowVersion,
-          signatureReference: action.accept ? signatureReference : undefined,
-          evidenceReference,
+          signatureReference: action.accept
+            ? signatureReference.trim() || undefined
+            : undefined,
+          evidenceReference: evidenceReference.trim() || undefined,
           reason: action.accept ? undefined : reason,
           idempotencyKey: key,
         });
@@ -283,8 +286,8 @@ export function EvaluationCommitteeActionDialogs({
           declaration,
           conflictDetails:
             coiOutcome === 'ConflictDeclared' ? conflictDetails : undefined,
-          signatureReference,
-          evidenceReference,
+          signatureReference: signatureReference.trim() || undefined,
+          evidenceReference: evidenceReference.trim() || undefined,
           validFromUtc: toUtc(validFrom),
           validToUtc: validTo ? toUtc(validTo) : undefined,
           appointmentRowVersion: action.member.rowVersion,
@@ -296,7 +299,7 @@ export function EvaluationCommitteeActionDialogs({
           meetingMode,
           meetingChannel,
           scheduledAtUtc: toUtc(scheduledAt),
-          evidenceReference,
+          evidenceReference: evidenceReference.trim() || undefined,
           remoteMeetingEvidenceReference:
             meetingMode === 'InPerson' ? undefined : remoteEvidence,
           committeeRowVersion: control.rowVersion,
@@ -305,8 +308,8 @@ export function EvaluationCommitteeActionDialogs({
       } else if (action.type === 'attendance') {
         await service.signAttendance(action.meeting.id, {
           isPresent: true,
-          signatureReference,
-          evidenceReference,
+          signatureReference: signatureReference.trim() || undefined,
+          evidenceReference: evidenceReference.trim() || undefined,
           meetingRowVersion: action.meeting.rowVersion,
           appointmentRowVersion: action.member.rowVersion,
           idempotencyKey: key,
@@ -314,7 +317,7 @@ export function EvaluationCommitteeActionDialogs({
       } else if (action.type === 'quorum') {
         await service.confirmQuorum(action.meeting.id, {
           rowVersion: action.meeting.rowVersion,
-          evidenceReference,
+          evidenceReference: evidenceReference.trim() || undefined,
           remoteMeetingEvidenceReference: remoteEvidence || undefined,
           idempotencyKey: key,
         });
@@ -339,12 +342,13 @@ export function EvaluationCommitteeActionDialogs({
       onClose();
       await onCompleted();
     } catch (error) {
-      toast.error(
-        getProcurementProblemMessage(
-          error,
-          'The controlled committee action failed.'
-        )
+      const message = getProcurementProblemMessage(
+        error,
+        'The controlled committee action failed.'
       );
+      if (action.type === 'recall' || action.type === 'recall-decision')
+        setRecallError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -436,7 +440,33 @@ export function EvaluationCommitteeActionDialogs({
             <EvidenceFields
               evidenceReference={evidenceReference}
               setEvidenceReference={setEvidenceReference}
+              required={false}
             />
+          )}
+
+          {action.type === 'retireDraft' && (
+            <>
+              <Alert variant="destructive">
+                <AlertTitle>Retire this unactivated draft?</AlertTitle>
+                <AlertDescription>
+                  The record and its audit history will remain available. This
+                  action is rejected after activation or any appointment,
+                  declaration, meeting, attendance, or scoring activity.
+                </AlertDescription>
+              </Alert>
+              <Field label="Retirement reason *">
+                <Textarea
+                  rows={4}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                />
+              </Field>
+              <EvidenceFields
+                evidenceReference={evidenceReference}
+                setEvidenceReference={setEvidenceReference}
+                required={false}
+              />
+            </>
           )}
 
           {action.type === 'appointment' && (
@@ -446,7 +476,7 @@ export function EvaluationCommitteeActionDialogs({
                 value={`${action.member.userDisplayName} · ${action.member.memberKind}`}
               />
               {action.accept && (
-                <Field label="Acceptance signature reference *">
+                <Field label="External signature reference (optional)">
                   <Input
                     value={signatureReference}
                     onChange={(event) =>
@@ -466,6 +496,7 @@ export function EvaluationCommitteeActionDialogs({
               <EvidenceFields
                 evidenceReference={evidenceReference}
                 setEvidenceReference={setEvidenceReference}
+                required={false}
               />
             </>
           )}
@@ -508,7 +539,13 @@ export function EvaluationCommitteeActionDialogs({
                   />
                 </Field>
               )}
-              <Field label="Signature reference *">
+              <Field
+                label={
+                  coiOutcome === 'ConflictDeclared'
+                    ? 'Signature reference *'
+                    : 'External signature reference (optional)'
+                }
+              >
                 <Input
                   value={signatureReference}
                   onChange={(event) =>
@@ -519,6 +556,7 @@ export function EvaluationCommitteeActionDialogs({
               <EvidenceFields
                 evidenceReference={evidenceReference}
                 setEvidenceReference={setEvidenceReference}
+                required={coiOutcome === 'ConflictDeclared'}
               />
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Valid from *">
@@ -589,6 +627,7 @@ export function EvaluationCommitteeActionDialogs({
               <EvidenceFields
                 evidenceReference={evidenceReference}
                 setEvidenceReference={setEvidenceReference}
+                required={false}
               />
               {meetingMode !== 'InPerson' && (
                 <Field label="Remote-session evidence reference *">
@@ -612,7 +651,7 @@ export function EvaluationCommitteeActionDialogs({
                 label="Meeting"
                 value={`${action.meeting.phase} · ${action.meeting.meetingMode} · ${action.meeting.meetingChannel}`}
               />
-              <Field label="Attendance signature reference *">
+              <Field label="External attendance signature reference (optional)">
                 <Input
                   value={signatureReference}
                   onChange={(event) =>
@@ -623,23 +662,17 @@ export function EvaluationCommitteeActionDialogs({
               <EvidenceFields
                 evidenceReference={evidenceReference}
                 setEvidenceReference={setEvidenceReference}
+                required={false}
               />
             </>
           )}
 
           {action.type === 'quorum' && (
             <>
-              <Alert>
-                <AlertTitle>Server-derived quorum</AlertTitle>
-                <AlertDescription>
-                  The server revalidates eligible signed voting attendance plus
-                  required Chair and Secretary presence. Client counts do not
-                  authorize evaluation.
-                </AlertDescription>
-              </Alert>
               <EvidenceFields
                 evidenceReference={evidenceReference}
                 setEvidenceReference={setEvidenceReference}
+                required={false}
               />
               {action.meeting.meetingMode !== 'InPerson' && (
                 <Field label="Remote-session evidence reference">
@@ -721,6 +754,13 @@ export function EvaluationCommitteeActionDialogs({
           {validation && (
             <p className="text-sm text-destructive">{validation}</p>
           )}
+          {recallError &&
+            (action.type === 'recall' || action.type === 'recall-decision') && (
+              <Alert variant="destructive">
+                <AlertTitle>Recall action could not be confirmed</AlertTitle>
+                <AlertDescription>{recallError}</AlertDescription>
+              </Alert>
+            )}
         </div>
 
         <DialogFooter>
@@ -729,7 +769,8 @@ export function EvaluationCommitteeActionDialogs({
           </Button>
           <Button
             variant={
-              action.type === 'recall-decision' && !action.approve
+              action.type === 'retireDraft' ||
+              (action.type === 'recall-decision' && !action.approve)
                 ? 'destructive'
                 : 'default'
             }
@@ -760,6 +801,13 @@ function dialogMetadata(action: EvaluationCommitteeDialogAction) {
         description:
           'Activation verifies the exact composition and required roles. Member acceptance, current COI declarations, signed attendance, and quorum are subsequent scorer-readiness gates.',
         submit: 'Activate committee',
+      };
+    case 'retireDraft':
+      return {
+        title: 'Retire unactivated committee draft',
+        description:
+          'Preserve the incorrect snapshot as retired so a corrected committee can be constituted for this source.',
+        submit: 'Retire draft',
       };
     case 'appointment':
       return {
@@ -792,9 +840,8 @@ function dialogMetadata(action: EvaluationCommitteeDialogAction) {
     case 'quorum':
       return {
         title: 'Confirm evaluation quorum',
-        description:
-          'The server derives quorum from accepted, non-conflicted members, required roles, and signed attendance.',
-        submit: 'Confirm quorum',
+        description: 'Confirm the recorded meeting attendance and quorum.',
+        submit: 'Confirm Quorum',
       };
     case 'recall':
       return {
@@ -819,6 +866,8 @@ function successMessage(action: EvaluationCommitteeDialogAction) {
       return 'Evaluation committee snapshot created.';
     case 'activate':
       return 'Evaluation committee activated.';
+    case 'retireDraft':
+      return 'Draft committee retired. A corrected committee can now be constituted.';
     case 'appointment':
       return action.accept ? 'Appointment accepted.' : 'Appointment declined.';
     case 'coi':
@@ -854,12 +903,20 @@ function Field({
 function EvidenceFields({
   evidenceReference,
   setEvidenceReference,
+  required = true,
 }: {
   evidenceReference: string;
   setEvidenceReference: (value: string) => void;
+  required?: boolean;
 }) {
   return (
-    <Field label="Evidence reference *">
+    <Field
+      label={
+        required
+          ? 'Evidence reference *'
+          : 'Supporting evidence reference (optional)'
+      }
+    >
       <Input
         value={evidenceReference}
         onChange={(event) => setEvidenceReference(event.target.value)}

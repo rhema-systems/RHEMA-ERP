@@ -23,6 +23,8 @@ describe('TenderHeaderControlActions', () => {
         tenderType="ITB"
         sourcingCaseId="case-1"
         sourcingMethod="RestrictedTendering"
+        status="Closed"
+        bidCount={2}
       />
     );
 
@@ -55,6 +57,8 @@ describe('TenderHeaderControlActions', () => {
         tenderId="tender-1"
         tenderType="ITB"
         sourcingMethod="NationalCompetitiveTendering"
+        status="Closed"
+        bidCount={2}
       />
     );
 
@@ -78,9 +82,25 @@ describe('TenderHeaderControlActions', () => {
         tenderType="ITB"
         sourcingCaseId="case-1"
         sourcingMethod="NationalCompetitiveTendering"
+        status="Closed"
+        bidCount={2}
       />
     );
 
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('renders none of these later-stage shortcuts for an approved tender', () => {
+    const { container } = render(
+      <TenderHeaderControlActions
+        tenderId="tender-1"
+        tenderType="ITB"
+        sourcingCaseId="case-1"
+        sourcingMethod="NationalCompetitiveTendering"
+        status="Approved"
+        bidCount={0}
+      />
+    );
     expect(container).toBeEmptyDOMElement();
   });
 });

@@ -88,7 +88,7 @@ const POStatusIcons: Partial<
   'Pending Approval': Clock,
   Approved: CheckCircle,
   Rejected: XCircle,
-  Sent,
+  Sent: Send,
   Acknowledged: CheckCircle,
   'Partially Received': Package,
   Received: TruckIcon,

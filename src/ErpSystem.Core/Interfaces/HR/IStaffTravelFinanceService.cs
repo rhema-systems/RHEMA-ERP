@@ -28,14 +28,18 @@ public interface IStaffTravelFinanceService
     Task<StaffTravelExpenseClaimDto> UpdateClaimAsync(UpdateStaffTravelExpenseClaimDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteClaimAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> SubmitClaimAsync(Guid claimId, Guid submittedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ReviewClaimAsync(ReviewStaffTravelExpenseClaimDto reviewDto, CancellationToken cancellationToken = default);
+    /// <summary>ReviewClaim. <paramref name="reviewerEmployeeId"/> is the caller's employee record and
+    /// overrides any <c>FinanceReviewedById</c> on the payload — who acted is identity, not an input.</summary>
+    Task<bool> ReviewClaimAsync(ReviewStaffTravelExpenseClaimDto reviewDto, Guid reviewerEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> PayClaimAsync(PayStaffTravelExpenseClaimDto payDto, CancellationToken cancellationToken = default);
 
     // Expense claim lines
     Task<StaffTravelExpenseClaimLineDto> AddClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelExpenseClaimLineDto>> GetClaimLinesAsync(Guid claimId, CancellationToken cancellationToken = default);
     Task<StaffTravelExpenseClaimLineDto> UpdateClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ReviewClaimLineAsync(ReviewStaffTravelExpenseClaimLineDto reviewDto, CancellationToken cancellationToken = default);
+    /// <summary>ReviewClaimLine. <paramref name="reviewerEmployeeId"/> is the caller's employee record and
+    /// overrides any <c>ReviewedById</c> on the payload — who acted is identity, not an input.</summary>
+    Task<bool> ReviewClaimLineAsync(ReviewStaffTravelExpenseClaimLineDto reviewDto, Guid reviewerEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteClaimLineAsync(Guid lineId, CancellationToken cancellationToken = default);
 
     // Advances
@@ -50,8 +54,12 @@ public interface IStaffTravelFinanceService
     Task<StaffTravelAdvanceDto> CreateAdvanceAsync(CreateStaffTravelAdvanceDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelAdvanceDto> UpdateAdvanceAsync(UpdateStaffTravelAdvanceDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAdvanceAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<bool> ApproveAdvanceAsync(ApproveStaffTravelAdvanceDto approveDto, CancellationToken cancellationToken = default);
-    Task<bool> DisburseAdvanceAsync(DisburseStaffTravelAdvanceDto disburseDto, CancellationToken cancellationToken = default);
+    /// <summary>ApproveAdvance. <paramref name="approverEmployeeId"/> is the caller's employee record and
+    /// overrides any <c>ApprovedById</c> on the payload — who acted is identity, not an input.</summary>
+    Task<bool> ApproveAdvanceAsync(ApproveStaffTravelAdvanceDto approveDto, Guid approverEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>DisburseAdvance. <paramref name="disburserEmployeeId"/> is the caller's employee record and
+    /// overrides any <c>DisbursedById</c> on the payload — who acted is identity, not an input.</summary>
+    Task<bool> DisburseAdvanceAsync(DisburseStaffTravelAdvanceDto disburseDto, Guid disburserEmployeeId, CancellationToken cancellationToken = default);
 
     // Per-diem rates
     Task<StaffTravelPerDiemRateDto> GetPerDiemRateByIdAsync(Guid id, CancellationToken cancellationToken = default);

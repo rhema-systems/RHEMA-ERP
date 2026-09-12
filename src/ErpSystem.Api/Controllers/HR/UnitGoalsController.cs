@@ -1,23 +1,47 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class UnitGoalsController : ControllerBase
 {
     private readonly IUnitGoalService _unitGoalService;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorageService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<UnitGoalsController> _logger;
 
-    public UnitGoalsController(IUnitGoalService unitGoalService, ILogger<UnitGoalsController> logger)
+    public UnitGoalsController(
+        IUnitGoalService unitGoalService,
+        ICurrentUserService currentUserService,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorageService,
+        ApplicationDbContext db,
+        ILogger<UnitGoalsController> logger)
     {
         _unitGoalService = unitGoalService;
+        _currentUserService = currentUserService;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorageService = fileStorageService;
+        _db = db;
         _logger = logger;
     }
 
@@ -189,12 +213,55 @@ public class UnitGoalsController : ControllerBase
         }
     }
 
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>
+    /// Who may change a unit goal: the desk (performance Write), the manager who raised it, or
+    /// the head of the org unit it belongs to.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Reads stay open to the tenant deliberately.</b> A unit goal is a departmental
+    /// target and the entire point of the cascade is that people can see what their unit is aiming
+    /// at and align to it — restricting reads would defeat the feature.</para>
+    ///
+    /// <para><b>Writes were open too, which was a hole.</b> Every endpoint on this controller was
+    /// plain <c>[Authorize]</c>, so any authenticated employee could rewrite or delete any
+    /// department's goals. Visibility and authorship are different questions.</para>
+    /// </remarks>
+    private async Task<bool> CanManageGoalAsync(Guid goalId, CancellationToken ct)
+    {
+        if (await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<UnitGoal>()
+            .AsNoTracking()
+            .Where(g => g.Id == goalId && g.TenantId == tenantId)
+            .AnyAsync(g => g.CreatedByManagerId == me || g.OrganizationUnit.HeadEmployeeId == me, ct);
+    }
+
     /// <summary>Create a new unit goal</summary>
     [HttpPost]
     [ProducesResponseType(typeof(UnitGoalDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create([FromBody] CreateUnitGoalDto createDto, CancellationToken cancellationToken = default)
     {
+        // The author is the caller. CreatedByManagerId arrives on the payload, so without this
+        // anyone could raise a goal in someone else's name. The desk may still name a manager
+        // explicitly when raising one on their behalf.
+        if (!await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy))
+        {
+            if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty)
+                return Forbid();
+            createDto.CreatedByManagerId = me;
+        }
+
         try
         {
             var result = await _unitGoalService.CreateAsync(createDto, cancellationToken);
@@ -217,6 +284,12 @@ public class UnitGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUnitGoalDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service updates the body's id, so without this a PUT to one goal's URL could edit another.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "Route id does not match body id." });
+
+        if (!await CanManageGoalAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _unitGoalService.UpdateAsync(updateDto, cancellationToken);
@@ -239,6 +312,8 @@ public class UnitGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanManageGoalAsync(id, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _unitGoalService.DeleteAsync(id, cancellationToken);
@@ -258,26 +333,67 @@ public class UnitGoalsController : ControllerBase
 
     // ── Attachments ───────────────────────────────────────────────────────
 
-    /// <summary>Add an attachment to a unit goal</summary>
+    /// <summary>
+    /// Attach a file to a unit goal, through the controlled-upload gate.
+    /// </summary>
+    /// <remarks>
+    /// Replaces a JSON endpoint that took a caller-supplied <c>filePath</c> and could not have
+    /// worked in any case — see <c>UnitGoalService.AddAttachmentAsync</c>.
+    ///
+    /// <para>⚠ <b>Attaching</b> follows the write rule (HR, the goal's author, or the org-unit
+    /// head); <b>reading</b> stays open to the tenant, matching the goal itself. So evidence on a
+    /// unit goal is tenant-wide readable — a weaker rule than the appraisal and check-in
+    /// attachments next door, and deliberately so, because a departmental target is not personal
+    /// data. Do not attach anything personal to one.</para>
+    /// </remarks>
     [HttpPost("{goalId:guid}/attachments")]
     [ProducesResponseType(typeof(AppraisalAttachmentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AddAttachment(Guid goalId, [FromBody] CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> AddAttachment(
+        Guid goalId, IFormFile file, [FromForm] string? description, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var result = await _unitGoalService.AddAttachmentAsync(goalId, dto, cancellationToken);
-            return StatusCode(201, result);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding attachment to unit goal {GoalId}", goalId);
-            return StatusCode(500, "An error occurred while adding the attachment");
-        }
+        if (!await CanManageGoalAsync(goalId, cancellationToken)) return Forbid();
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUserService, _logger, file,
+            sourceEntityType: "UnitGoal",
+            sourceRecordId: goalId,
+            sourceLabel: "Unit goal attachment",
+            documentType: "UnitGoalAttachment",
+            description: description,
+            persist: (uploadedById, document) => _unitGoalService.AddAttachmentAsync(
+                goalId, uploadedById, document.OriginalFileName, document.FileSize, description,
+                cancellationToken,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+            cancellationToken);
+    }
+
+    /// <summary>Streams a unit-goal attachment — the file lives outside the web root.</summary>
+    [HttpGet("{goalId:guid}/attachments/{attachmentId:guid}/download")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadAttachment(Guid goalId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        var attachment = await _db.Set<AppraisalAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                a => a.Id == attachmentId && a.UnitGoalId == goalId && a.TenantId == tenantId && !a.IsDeleted,
+                cancellationToken);
+
+        if (attachment is null)
+            return NotFound(new { message = "Attachment not found" });
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorageService, _db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FilePath,
+            attachment.FileName, fallbackContentType: null,
+            inline: false, cancellationToken);
     }
 
     /// <summary>Get attachments for a unit goal</summary>
@@ -341,6 +457,8 @@ public class UnitGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteAttachment(Guid goalId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        if (!await CanManageGoalAsync(goalId, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _unitGoalService.DeleteAttachmentAsync(goalId, attachmentId, cancellationToken);

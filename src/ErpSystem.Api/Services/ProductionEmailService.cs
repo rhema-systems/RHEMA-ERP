@@ -87,9 +87,9 @@ public class ProductionEmailService : IEmailService
                     _logger.LogInformation("To: {Email}", to);
                     _logger.LogInformation("Subject: {Subject}", subject);
                     _logger.LogInformation("Is HTML: {IsHtml}", isHtml);
-                    _logger.LogInformation("Body: {Body}", body);
+                    _logger.LogInformation("Email body omitted: SMTP is not configured; no message was sent.");
                     _logger.LogInformation("===============================");
-                    return true;
+                    return false;
                 }
 
                 return false;
@@ -126,7 +126,9 @@ public class ProductionEmailService : IEmailService
             mailMessage.To.Add(new MailAddress(to));
 
             // Send email
-            await smtpClient.SendMailAsync(mailMessage);
+            // SmtpClient.Timeout applies to synchronous Send, not SendMailAsync.
+            using var sendDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await smtpClient.SendMailAsync(mailMessage, sendDeadline.Token);
 
             _logger.LogInformation("Successfully sent email to {Email} with subject '{Subject}'", to, subject);
             return true;
@@ -172,9 +174,9 @@ public class ProductionEmailService : IEmailService
                                 attachment.Content?.Length ?? 0);
                         }
                     }
-                    _logger.LogInformation("Body Preview: {BodyPreview}", body?.Length > 200 ? body.Substring(0, 200) + "..." : body);
+                    _logger.LogInformation("Email body omitted: SMTP is not configured; no message was sent.");
                     _logger.LogInformation("================================================");
-                    return true;
+                    return false;
                 }
 
                 return false;
@@ -225,7 +227,8 @@ public class ProductionEmailService : IEmailService
             }
 
             // Send email
-            await smtpClient.SendMailAsync(mailMessage);
+            using var sendDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await smtpClient.SendMailAsync(mailMessage, sendDeadline.Token);
 
             _logger.LogInformation("Successfully sent email with {AttachmentCount} attachment(s) to {Email} with subject '{Subject}'",
                 attachments?.Count ?? 0, to, subject);

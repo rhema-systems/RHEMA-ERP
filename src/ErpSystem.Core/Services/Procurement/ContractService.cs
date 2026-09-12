@@ -190,6 +190,7 @@ public class ContractService : IContractService
                     "The award and tender tenant lineage does not match.");
             EnsureExactAwardCommercials(
                 dto.ContractValue, dto.Currency, award.AwardedAmount, award.Currency);
+            ValidateRetention(dto.RetentionPercentage, dto.RetentionClause);
 
             await RecoverTenderSourceLineageAsync(tender, dto.TenderAwardId);
 
@@ -219,6 +220,7 @@ public class ContractService : IContractService
                 Currency = dto.Currency,
                 PaymentTerms = dto.PaymentTerms,
                 RetentionPercentage = dto.RetentionPercentage,
+                RetentionClause = dto.RetentionClause?.Trim(),
                 StartDate = dto.StartDate,
                 EndDate = dto.EndDate,
                 DurationDays = dto.DurationDays ?? (dto.StartDate.HasValue && dto.EndDate.HasValue
@@ -293,11 +295,21 @@ public class ContractService : IContractService
                     "A Works contract cannot be reclassified. Create or amend it through the governed Works-contract process.");
             }
 
+            if (!string.Equals(contract.Status, "Draft", StringComparison.OrdinalIgnoreCase) &&
+                ((dto.RetentionPercentage.HasValue && dto.RetentionPercentage.Value != contract.RetentionPercentage) ||
+                 (dto.RetentionClause != null &&
+                  !string.Equals(dto.RetentionClause.Trim(), contract.RetentionClause ?? string.Empty, StringComparison.Ordinal))))
+            {
+                throw new InvalidOperationException("Retention terms cannot be edited after Draft status. Use the governed contract change process.");
+            }
+
             if (!string.IsNullOrWhiteSpace(contract.CommercialTermsPolicyHash) &&
                 ((dto.ContractValue.HasValue && dto.ContractValue.Value != contract.ContractValue) ||
                  (!string.IsNullOrWhiteSpace(dto.PaymentTerms) &&
                   !string.Equals(dto.PaymentTerms, contract.PaymentTerms, StringComparison.Ordinal)) ||
                  (dto.RetentionPercentage.HasValue && dto.RetentionPercentage.Value != contract.RetentionPercentage) ||
+                 (dto.RetentionClause != null &&
+                  !string.Equals(dto.RetentionClause.Trim(), contract.RetentionClause, StringComparison.Ordinal)) ||
                  (dto.WarrantyPeriodDays.HasValue && dto.WarrantyPeriodDays.Value != contract.WarrantyPeriodDays)))
             {
                 throw new InvalidOperationException(
@@ -314,11 +326,16 @@ public class ContractService : IContractService
                     award.AwardedAmount, award.Currency);
             }
 
+            ValidateRetention(
+                dto.RetentionPercentage ?? contract.RetentionPercentage,
+                dto.RetentionClause ?? contract.RetentionClause);
+
             if (!string.IsNullOrEmpty(dto.ContractTitle)) contract.ContractTitle = dto.ContractTitle;
             if (!string.IsNullOrEmpty(dto.ContractType)) contract.ContractType = dto.ContractType;
             if (dto.ContractValue.HasValue) contract.ContractValue = dto.ContractValue.Value;
             if (!string.IsNullOrEmpty(dto.PaymentTerms)) contract.PaymentTerms = dto.PaymentTerms;
             if (dto.RetentionPercentage.HasValue) contract.RetentionPercentage = dto.RetentionPercentage.Value;
+            if (dto.RetentionClause != null) contract.RetentionClause = dto.RetentionClause.Trim();
             if (dto.StartDate.HasValue) contract.StartDate = dto.StartDate.Value;
             if (dto.EndDate.HasValue) contract.EndDate = dto.EndDate.Value;
             if (dto.DurationDays.HasValue) contract.DurationDays = dto.DurationDays.Value;
@@ -340,6 +357,17 @@ public class ContractService : IContractService
             _logger.LogError(ex, "Error updating contract {ContractId}", id);
             throw;
         }
+    }
+
+    private static void ValidateRetention(decimal percentage, string? clause)
+    {
+        if (percentage < 0m || percentage > 100m)
+            throw new InvalidOperationException("Retention percentage must be between 0 and 100.");
+        if (clause?.Length > 2000)
+            throw new InvalidOperationException("Retention clause must not exceed 2000 characters.");
+        if (percentage > 0m && string.IsNullOrWhiteSpace(clause))
+            throw new InvalidOperationException(
+                "A retention clause describing deduction and release conditions is required when retention is greater than zero.");
     }
 
     private async Task RecoverTenderSourceLineageAsync(
@@ -1067,6 +1095,7 @@ public class ContractService : IContractService
             Currency = contract.Currency,
             PaymentTerms = contract.PaymentTerms,
             RetentionPercentage = contract.RetentionPercentage,
+            RetentionClause = contract.RetentionClause,
             StartDate = contract.StartDate,
             EndDate = contract.EndDate,
             DurationDays = contract.DurationDays,

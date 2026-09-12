@@ -1,5 +1,4 @@
 using ErpSystem.Core.Entities.HR.Performance;
-using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
@@ -67,11 +66,21 @@ public sealed class GoalRiskSettingsProvider : IGoalRiskSettingsProvider
 
         if (setting is null)
         {
-            _logger.LogError(
-                "GoalRiskSettingsProvider: no active GoalRiskSetting found. " +
-                "Ensure the migration seed has run and the record has IsActive = true.");
+            // Nothing seeds this table, so a tenant that has never opened the goal-risk settings
+            // screen has no row. Throwing here took the whole manager workspace with it — five of
+            // the Team Goals tabs and the org-wide at-risk report all load these settings, so an
+            // unconfigured tenant got a 500 on every one of them. Fall back to the thresholds the
+            // entity documents as defaults instead; HR can tune them from Administration → HR →
+            // Performance → Goal Risk Thresholds, which is what persists a real row.
+            _logger.LogWarning(
+                "GoalRiskSettingsProvider: no active GoalRiskSetting for tenant {TenantId}; " +
+                "falling back to the documented defaults ({Days}d / {Min}% / {Tol}%).",
+                tenantId,
+                GoalRiskSettingDefaults.DaysRemainingThreshold,
+                GoalRiskSettingDefaults.MinimumProgressPercent,
+                GoalRiskSettingDefaults.ExpectedProgressTolerancePercent);
 
-            throw new GoalRiskSettingNotFoundException();
+            return GoalRiskSettingDefaults.Create(tenantId);
         }
 
         _logger.LogDebug(

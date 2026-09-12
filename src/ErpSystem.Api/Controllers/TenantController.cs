@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Data.Seeders;
@@ -28,6 +28,7 @@ public class TenantController : ControllerBase
     private readonly CivilEngineeringAccessControlSeeder? _civilEngineeringAccessControlSeeder;
     private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
     private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
+    private readonly HrAwardsReportSeeder? _hrAwardsReportSeeder;
     private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
     private readonly QuantitySurveyStatutoryReportSeeder? _quantitySurveyStatutoryReportSeeder;
     private readonly CivilEngineeringStatutoryReportSeeder? _civilEngineeringStatutoryReportSeeder;
@@ -48,6 +49,7 @@ public class TenantController : ControllerBase
         CivilEngineeringAccessControlSeeder? civilEngineeringAccessControlSeeder = null,
         ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
         InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
+        HrAwardsReportSeeder? hrAwardsReportSeeder = null,
         AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
         QuantitySurveyStatutoryReportSeeder? quantitySurveyStatutoryReportSeeder = null,
         CivilEngineeringStatutoryReportSeeder? civilEngineeringStatutoryReportSeeder = null)
@@ -67,6 +69,7 @@ public class TenantController : ControllerBase
         _civilEngineeringAccessControlSeeder = civilEngineeringAccessControlSeeder;
         _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
         _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
+        _hrAwardsReportSeeder = hrAwardsReportSeeder;
         _auditComplianceReportSeeder = auditComplianceReportSeeder;
         _quantitySurveyStatutoryReportSeeder = quantitySurveyStatutoryReportSeeder;
         _civilEngineeringStatutoryReportSeeder = civilEngineeringStatutoryReportSeeder;
@@ -266,6 +269,10 @@ public class TenantController : ControllerBase
             if (_inventoryStatutoryReportSeeder is not null)
             {
                 await _inventoryStatutoryReportSeeder.SeedTenantAsync(createdTenant.Id);
+            }
+            if (_hrAwardsReportSeeder is not null)
+            {
+                await _hrAwardsReportSeeder.SeedTenantAsync(createdTenant.Id);
             }
             if (_auditComplianceReportSeeder is not null)
             {

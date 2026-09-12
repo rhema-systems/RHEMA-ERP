@@ -1,17 +1,28 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Session scheduling and the attendance register — HR only, with one exception: the by-id read stays
+/// open so an enrolled participant can see when and where their session is and follow the joining
+/// link. A session's time and venue are not sensitive; who attended it is, which is why the register
+/// and the enrollment lists are gated.
+/// </summary>
 [ApiController]
+[OrientationBusinessRules]
 [Route("api/orientation-sessions")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class OrientationSessionsController : ControllerBase
 {
+    // Gated per action rather than on the class: authorize attributes stack as AND, so a class-level
+    // role requirement cannot be relaxed for the one read participants need.
     private readonly IOrientationSessionService _service;
     private readonly ICurrentUserService _currentUser;
 
@@ -25,26 +36,33 @@ public class OrientationSessionsController : ControllerBase
     // QUERIES
     // =========================================================================
 
+    /// <summary>Open to any authenticated user — participants need their session's time, venue and joining link.</summary>
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = "InternalOnly")]
     public async Task<ActionResult<OrientationSessionDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("code/{sessionCode}")]
     public async Task<ActionResult<OrientationSessionDto?>> GetByCode(string sessionCode)
         => Ok(await _service.GetBySessionCodeAsync(sessionCode));
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("program/{programId:guid}")]
     public async Task<ActionResult<IEnumerable<OrientationSessionSummaryDto>>> GetByProgram(Guid programId)
         => Ok(await _service.GetByProgramIdAsync(programId));
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("status/{status}")]
     public async Task<ActionResult<IEnumerable<OrientationSessionSummaryDto>>> GetByStatus(OrientationSessionStatus status)
         => Ok(await _service.GetByStatusAsync(status));
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("upcoming")]
     public async Task<ActionResult<IEnumerable<OrientationSessionSummaryDto>>> GetUpcoming([FromQuery] int daysAhead = 30)
         => Ok(await _service.GetUpcomingAsync(daysAhead));
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("open-for-enrollment")]
     public async Task<ActionResult<IEnumerable<OrientationSessionSummaryDto>>> GetOpenForEnrollment()
         => Ok(await _service.GetOpenForEnrollmentAsync());
@@ -53,6 +71,7 @@ public class OrientationSessionsController : ControllerBase
     // CRUD + LIFECYCLE
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<OrientationSessionDto>> Create([FromBody] CreateOrientationSessionDto dto)
     {
@@ -64,6 +83,7 @@ public class OrientationSessionsController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<OrientationSessionDto>> Update(Guid id, [FromBody] UpdateOrientationSessionDto dto)
     {
@@ -74,6 +94,7 @@ public class OrientationSessionsController : ControllerBase
         return Ok(await _service.UpdateAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     [HttpPost("{id:guid}/status")]
     public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeOrientationSessionStatusDto dto)
     {
@@ -85,6 +106,7 @@ public class OrientationSessionsController : ControllerBase
         return Ok(new { message = $"Session status changed to {dto.NewStatus}." });
     }
 
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -96,10 +118,12 @@ public class OrientationSessionsController : ControllerBase
     // FACILITATORS
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("{id:guid}/facilitators")]
     public async Task<ActionResult<IEnumerable<OrientationSessionFacilitatorDto>>> GetFacilitators(Guid id)
         => Ok(await _service.GetFacilitatorsAsync(id));
 
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     [HttpPost("{id:guid}/facilitators")]
     public async Task<ActionResult<OrientationSessionFacilitatorDto>> AddFacilitator(Guid id, [FromBody] CreateOrientationSessionFacilitatorDto dto)
     {
@@ -111,6 +135,7 @@ public class OrientationSessionsController : ControllerBase
         return Ok(await _service.AddFacilitatorAsync(dto, ctx.TenantId, ctx.UserId));
     }
 
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     [HttpPut("facilitators/{facilitatorId:guid}")]
     public async Task<ActionResult<OrientationSessionFacilitatorDto>> UpdateFacilitator(Guid facilitatorId, [FromBody] UpdateOrientationSessionFacilitatorDto dto)
     {
@@ -121,6 +146,7 @@ public class OrientationSessionsController : ControllerBase
         return Ok(await _service.UpdateFacilitatorAsync(dto, userId));
     }
 
+    [Authorize(Policy = HrPermissions.OrientationAdminPolicy)]
     [HttpDelete("facilitators/{facilitatorId:guid}")]
     public async Task<IActionResult> RemoveFacilitator(Guid facilitatorId)
     {
@@ -132,14 +158,17 @@ public class OrientationSessionsController : ControllerBase
     // ATTENDANCE
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("{id:guid}/attendance")]
     public async Task<ActionResult<IEnumerable<OrientationAttendanceRecordDto>>> GetAttendanceForSession(Guid id)
         => Ok(await _service.GetAttendanceForSessionAsync(id));
 
+    [Authorize(Policy = HrPermissions.OrientationReadPolicy)]
     [HttpGet("enrollments/{enrollmentId:guid}/attendance")]
     public async Task<ActionResult<IEnumerable<OrientationAttendanceRecordDto>>> GetAttendanceForEnrollment(Guid enrollmentId)
         => Ok(await _service.GetAttendanceForEnrollmentAsync(enrollmentId));
 
+    [Authorize(Policy = HrPermissions.OrientationWritePolicy)]
     [HttpPost("{id:guid}/attendance")]
     public async Task<ActionResult<IEnumerable<OrientationAttendanceRecordDto>>> MarkAttendance(Guid id, [FromBody] MarkOrientationAttendanceDto dto)
     {

@@ -864,6 +864,7 @@ public static class TrainingMappingExtensions
             CompletionNotes = entity.CompletionNotes,
             CancellationReason = entity.CancellationReason,
             CancelledDate = entity.CancelledDate,
+            CancelledById = entity.CancelledById,
             Sessions = entity.Sessions.Select(s => s.ToDto()).ToList(),
         };
     }
@@ -1016,6 +1017,7 @@ public static class TrainingMappingExtensions
             NominationNumber = entity.NominationNumber,
             ScheduleId = entity.ScheduleId,
             ScheduleNumber = entity.Schedule?.ScheduleNumber ?? string.Empty,
+            ProgramId = entity.Schedule?.ProgramId ?? Guid.Empty,
             ProgramName = entity.Schedule?.Program?.ProgramName ?? string.Empty,
             TrainingStartDate = entity.Schedule?.StartDate ?? default,
             TrainingEndDate = entity.Schedule?.EndDate ?? default,
@@ -1056,6 +1058,9 @@ public static class TrainingMappingExtensions
             Id = entity.Id,
             NominationNumber = entity.NominationNumber,
             ProgramName = entity.Schedule?.Program?.ProgramName ?? string.Empty,
+            // Taken from the FK, not the navigation — these are correct even if the include is missed.
+            EmployeeId = entity.EmployeeId,
+            ScheduleId = entity.ScheduleId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             EmployeeNumber = entity.Employee?.EmployeeNumber ?? string.Empty,
             Type = entity.Type,
@@ -1110,6 +1115,7 @@ public static class TrainingMappingExtensions
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             EmployeeNumber = entity.Employee?.EmployeeNumber ?? string.Empty,
             ProgramName = entity.Nomination?.Schedule?.Program?.ProgramName ?? string.Empty,
+            ProgramProvidesCertificate = entity.Nomination?.Schedule?.Program?.ProvidesCertificate ?? false,
             CompletionDate = entity.CompletionDate,
             Status = entity.Status,
             FinalScore = entity.FinalScore,
@@ -1407,6 +1413,9 @@ public static class TrainingMappingExtensions
             Id = entity.Id,
             CertificateNumber = entity.CertificateNumber,
             VerificationCode = entity.VerificationCode,
+            // From the FKs, so a missed include cannot blank them.
+            EmployeeId = entity.EmployeeId,
+            ProgramId = entity.ProgramId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             ProgramName = entity.Program?.ProgramName ?? string.Empty,
             CertificateName = entity.CertificateName,
@@ -1484,6 +1493,8 @@ public static class TrainingMappingExtensions
         return new EmployeeCertificateSummaryDto
         {
             Id = entity.Id,
+            EmployeeId = entity.EmployeeId,
+            EmployeeName = entity.Employee?.FullName ?? string.Empty,
             CertificateName = entity.CertificateName,
             IssuingBody = entity.IssuingBody,
             IssuedDate = entity.IssuedDate,
@@ -1582,6 +1593,7 @@ public static class TrainingMappingExtensions
             Id = entity.Id,
             RequirementCode = entity.RequirementCode,
             RequirementName = entity.RequirementName,
+            ProgramId = entity.ProgramId,
             ProgramName = entity.Program?.ProgramName ?? string.Empty,
             Frequency = entity.Frequency,
             IsActive = entity.IsActive,
@@ -1687,8 +1699,13 @@ public static class TrainingMappingExtensions
         return new EmployeeComplianceRecordSummaryDto
         {
             Id = entity.Id,
+            // From the FKs, so a missed include cannot blank them.
+            EmployeeId = entity.EmployeeId,
+            RequirementId = entity.RequirementId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             RequirementName = entity.Requirement?.RequirementName ?? string.Empty,
+            ProgramName = entity.Requirement?.Program?.ProgramName ?? string.Empty,
+            ExemptedByName = entity.ExemptedBy?.FullName,
             Status = entity.Status,
             NextDueDate = entity.NextDueDate,
             IsExempt = entity.IsExempt,
@@ -2368,8 +2385,17 @@ public static class TrainingMappingExtensions
             CompletionCertificateName = entity.CompletionCertificateName,
             TotalProgramsCount = entity.Programs.Count,
             EnrollmentsCount = entity.Enrollments.Count,
-            Programs = entity.Programs.Select(p => p.ToDto()).ToList(),
-            TargetSkills = entity.TargetSkills.Select(s => s.ToDto()).ToList(),
+            // Same unordered-.Include trap as the enrolment steps: the detail read loads Programs as
+            // a collection, so without this the sequence renders in whatever order the database
+            // returns — while the sibling /programs endpoint (which orders in SQL) looks correct.
+            Programs = entity.Programs
+                .OrderBy(p => p.SequenceOrder)
+                .Select(p => p.ToDto())
+                .ToList(),
+            TargetSkills = entity.TargetSkills
+                .OrderBy(s => s.Skill != null ? s.Skill.Name : string.Empty)
+                .Select(s => s.ToDto())
+                .ToList(),
         };
     }
 
@@ -2548,7 +2574,13 @@ public static class TrainingMappingExtensions
             AssignedById = entity.AssignedById,
             AssignedByName = entity.AssignedBy?.FullName,
             Notes = entity.Notes,
-            Steps = entity.Steps.Select(s => s.ToDto()).ToList(),
+            // Ordered here rather than in each query: SequenceOrder lives on the LearningPathProgram,
+            // and an unordered .Include returns rows in whatever order the database chooses — so the
+            // sequence a path exists to express survived only by luck.
+            Steps = entity.Steps
+                .OrderBy(s => s.LearningPathProgram?.SequenceOrder ?? int.MaxValue)
+                .Select(s => s.ToDto())
+                .ToList(),
         };
     }
 
@@ -2559,6 +2591,7 @@ public static class TrainingMappingExtensions
             Id = entity.Id,
             EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
+            LearningPathId = entity.LearningPathId,
             LearningPathName = entity.LearningPath?.Name ?? string.Empty,
             EnrolledDate = entity.EnrolledDate,
             TargetCompletionDate = entity.TargetCompletionDate,
@@ -2644,7 +2677,13 @@ public static class TrainingMappingExtensions
     {
         entity.IsCompleted = dto.IsCompleted;
         entity.CompletedDate = dto.CompletedDate;
-        entity.NominationId = dto.NominationId;
+
+        // Only re-point the nomination when one is supplied. Assigning it unconditionally meant any
+        // caller that left the field out — an HR completion, say — silently cut the step's link to the
+        // nomination, erasing the attendance and completion record that evidence the step.
+        if (dto.NominationId.HasValue)
+            entity.NominationId = dto.NominationId;
+
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

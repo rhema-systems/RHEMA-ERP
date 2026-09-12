@@ -3,9 +3,16 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, MoreHorizontal, Eye, Pencil, UserX, UserCheck, Trash2, Users } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Eye, Pencil, UserX, UserCheck, Trash2, Users, Scale } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
@@ -46,10 +53,18 @@ export default function EmployeesPage() {
   const [page, setPage] = useState(1);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [busy, setBusy] = useState(false);
+  // 'all' | 'on' | 'off' — whether the person is paid through the payroll run.
+  const [payrollFilter, setPayrollFilter] = useState<'all' | 'on' | 'off'>('all');
+  const isOnPayroll = payrollFilter === 'all' ? undefined : payrollFilter === 'on';
 
   const { data, isLoading } = useQuery({
-    queryKey: ['hr', 'employees', page, PAGE_SIZE, debouncedSearch],
-    queryFn: () => employeeService.searchPaged({ searchTerm: debouncedSearch || undefined }, page, PAGE_SIZE),
+    queryKey: ['hr', 'employees', page, PAGE_SIZE, debouncedSearch, payrollFilter],
+    queryFn: () =>
+      employeeService.searchPaged(
+        { searchTerm: debouncedSearch || undefined, isOnPayroll },
+        page,
+        PAGE_SIZE,
+      ),
   });
 
   const employees = data?.items ?? [];
@@ -90,27 +105,50 @@ export default function EmployeesPage() {
         title="Employees"
         description="Manage your organization's employee records."
         actions={
-          <Button onClick={() => router.push('/hr/employees/new')}>
-            <Plus className="mr-2 h-4 w-4" /> New Employee
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => router.push('/hr/employees/payroll-reconciliation')}>
+              <Scale className="mr-2 h-4 w-4" /> Payroll reconciliation
+            </Button>
+            <Button onClick={() => router.push('/hr/employees/new')}>
+              <Plus className="mr-2 h-4 w-4" /> New Employee
+            </Button>
+          </div>
         }
       />
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <CardTitle>Employee List</CardTitle>
-            <div className="relative w-72">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by name, number, email…"
-                className="pl-8"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+            <div className="flex items-center gap-2">
+              <Select
+                value={payrollFilter}
+                onValueChange={(v) => {
+                  setPayrollFilter(v as 'all' | 'on' | 'off');
                   setPage(1);
                 }}
-              />
+              >
+                <SelectTrigger className="w-44" aria-label="Payroll filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All staff</SelectItem>
+                  <SelectItem value="on">On payroll</SelectItem>
+                  <SelectItem value="off">Not on payroll</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="relative w-72">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by name, number, email…"
+                  className="pl-8"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -177,7 +215,14 @@ export default function EmployeesPage() {
                         {emp.organizationUnitName || '—'}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={emp.staffStatus} />
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusBadge status={emp.staffStatus} />
+                          {emp.isOnPayroll === false && (
+                            <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                              Not on payroll
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

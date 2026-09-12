@@ -106,6 +106,10 @@ public interface IShePerformanceService
     Task<ShePerformanceSnapshotDto?> GetLatestAsync(CancellationToken cancellationToken = default);
 
     Task<ShePerformanceSnapshotDto> CreateAsync(CreateShePerformanceSnapshotDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>Corrects the reported figures. Refused once the snapshot has been reviewed.</summary>
+    Task<ShePerformanceSnapshotDto> UpdateAsync(UpdateShePerformanceSnapshotDto dto, Guid userId, CancellationToken cancellationToken = default);
+
     Task<bool> ReviewAsync(ReviewShePerformanceSnapshotDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }

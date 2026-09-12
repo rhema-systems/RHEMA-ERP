@@ -22,7 +22,17 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly IAppraisalNotificationService _notifications;
     private readonly ILogger<PerformanceImprovementPlan> _logger;
+
+    /// <summary>
+    /// Entity type registered with the workflow engine. Must match the catalog entry in
+    /// <c>WorkflowEntityTypeCatalogService</c> and the aliases on
+    /// <c>PerformanceImprovementPlanWorkflowStatusAdapter</c>.
+    /// </summary>
+    private const string EntityType = "PerformanceImprovementPlan";
 
     public PerformanceImprovementPlanService(
         IGenericRepository<PerformanceImprovementPlan> improvementPlanRepository,
@@ -32,6 +42,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         IGenericRepository<Employee> employeeRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        IAppraisalNotificationService notifications,
         ILogger<PerformanceImprovementPlan> logger)
     {
         _improvementPlanRepository = improvementPlanRepository;
@@ -41,7 +54,27 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         _employeeRepository = employeeRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _notifications = notifications;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Raises in-app notifications without ever failing the action that produced them. The work is
+    /// already saved by the time we notify, so a bad recipient must not surface as a 500 on a PIP
+    /// that was in fact created. Matches the best-effort pattern in <c>PerformanceAppraisalService</c>.
+    /// </summary>
+    private async Task NotifyQuietlyAsync(IEnumerable<AppraisalNotificationRequest> requests, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _notifications.RaiseAsync(requests, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to raise PIP notification(s); the originating action stands.");
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -71,6 +104,63 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         return _improvementPlanRepository.GetQueryable().Where(p => p.TenantId == tenantId);
     }
 
+    /// <summary>
+    /// Every read has to carry these four: the DTO shows the employee, the supervisor, the HR
+    /// co-owner and the appraisal that triggered the plan, and a missing include renders as a
+    /// blank name rather than an error.
+    /// </summary>
+    private IQueryable<PerformanceImprovementPlan> TenantPipQueryWithNames()
+        => TenantPipQuery()
+            .Include(p => p.Employee)
+            .Include(p => p.Supervisor)
+            .Include(p => p.HROwner)
+            .Include(p => p.Appraisal);
+
+    /// <summary>
+    /// Re-reads a plan with its navigations so a write response carries real names. Writing
+    /// straight back from the tracked entity returns blanks — it was never loaded with includes.
+    /// </summary>
+    private async Task<PerformanceImprovementPlanDto> ReloadDtoAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var entity = await TenantPipQueryWithNames().FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
+        if (entity == null)
+            throw new ArgumentException($"Performance Improvement Plan with ID '{id}' not found.");
+        return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Allocates the next PIP reference for the tenant and year. Nothing else assigns one on this
+    /// path, so before this a plan created from the UI carried an empty reference while one raised
+    /// by <c>PipRecommendationHandler</c> did not — the same record type with and without an
+    /// identity. The loop covers the race between two concurrent creates; the column is indexed
+    /// but not unique, so the check is ours to make.
+    /// </summary>
+    private async Task<string> NextPipNumberAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var year = DateTime.UtcNow.Year;
+        var prefix = $"PIP-{year}-";
+
+        var used = await _improvementPlanRepository
+            .GetQueryable(p => p.TenantId == tenantId && p.PipNumber.StartsWith(prefix))
+            .Select(p => p.PipNumber)
+            .ToListAsync(cancellationToken);
+
+        var taken = new HashSet<string>(used, StringComparer.OrdinalIgnoreCase);
+        for (var next = used.Count + 1; next <= used.Count + 1000; next++)
+        {
+            var candidate = $"{prefix}{next:D4}";
+            if (!taken.Contains(candidate))
+                return candidate;
+        }
+
+        // Unreachable in practice; a distinct fallback beats handing back a duplicate.
+        return $"{prefix}{Guid.NewGuid().ToString()[..6].ToUpperInvariant()}";
+    }
+
+    /// <summary>The states in which a plan is live against the employee.</summary>
+    private static bool IsLive(PipStatus status)
+        => status is PipStatus.Active or PipStatus.InProgress;
+
     public async Task<PipReviewMeetingDto> AddReviewMeetingAsync(Guid pipId, CreatePipReviewMeetingDto createDto, CancellationToken cancellationToken = default)
     {
         var pip = await GetOwnedPipAsync(pipId, cancellationToken);
@@ -79,6 +169,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         var conductorExists = await _employeeRepository.ExistsAsync(e => e.TenantId == tenantId && e.Id == createDto.ConductedById);
         if (!conductorExists)
             throw new ArgumentException("Meeting conductor not found");
+
+        if (pip.Status is PipStatus.Draft or PipStatus.PendingApproval)
+            throw new InvalidOperationException(
+                "Review meetings can only be held once the plan is in force.");
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
@@ -94,54 +188,144 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
         _logger.LogInformation("Review meeting added successfully: {Id}", entity!.Id);
 
+        // Only a meeting still ahead of us is news; logging one that has already been held is a
+        // record, not an invitation.
+        if (entity.MeetingDate > DateTime.UtcNow)
+        {
+            await NotifyQuietlyAsync(new[]
+            {
+                new AppraisalNotificationRequest(
+                    pip.EmployeeId,
+                    AppraisalNotificationType.PipMeetingScheduled,
+                    "Improvement plan review scheduled",
+                    $"A review of {pip.PipNumber} is set for {entity.MeetingDate:d MMM yyyy}.",
+                    NavigationUrl: $"/hr/performance/pip/{pipId}",
+                    AppraisalId: pip.AppraisalId)
+            }, cancellationToken);
+        }
+
         return entity!.ToDto();
     }
 
+    /// <summary>
+    /// Closes a plan with its outcome — or, for <see cref="PipOutcome.Extended"/>, pushes the end
+    /// date out and leaves it running. Extending is not a completion: the old code set every
+    /// outcome other than "improved" to Unsuccessful, so extending a plan marked the employee as
+    /// having failed it and closed the record they were still working through.
+    /// </summary>
     public async Task<bool> CompletePipAsync(CompletePipDto completeDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(completeDto.PipId, cancellationToken);
 
-        entity.Status = completeDto.Outcome == PipOutcome.PerformanceImproved ? PipStatus.Completed : PipStatus.Unsuccessful;
-        entity.CompletionDate = DateTime.UtcNow;
-        entity.Outcome = completeDto.Outcome;
-        entity.OutcomeNotes = completeDto.OutcomeNotes;
+        if (!IsLive(entity.Status))
+            throw new InvalidOperationException(
+                entity.Status is PipStatus.Draft or PipStatus.PendingApproval
+                    ? "An outcome can only be recorded once the plan is in force. Get it approved first."
+                    : $"This plan is already closed ({entity.Status}).");
+
+        if (completeDto.Outcome == PipOutcome.Extended)
+        {
+            if (completeDto.NewEndDate is not DateTime newEnd)
+                throw new InvalidOperationException("Extending a plan needs a new end date.");
+            if (newEnd.Date <= entity.EndDate.Date)
+                throw new InvalidOperationException("The new end date has to be later than the current one.");
+
+            entity.EndDate = newEnd;
+            entity.Outcome = PipOutcome.Extended;
+            entity.OutcomeNotes = completeDto.OutcomeNotes;
+            // Status, CompletionDate untouched on purpose — the plan is still running.
+        }
+        else
+        {
+            entity.Status = completeDto.Outcome == PipOutcome.PerformanceImproved ? PipStatus.Completed : PipStatus.Unsuccessful;
+            entity.CompletionDate = DateTime.UtcNow;
+            entity.Outcome = completeDto.Outcome;
+            entity.OutcomeNotes = completeDto.OutcomeNotes;
+        }
 
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Performance Improvement Plan completed: {Id}", completeDto.PipId);
+        _logger.LogInformation("Performance Improvement Plan {Id} outcome recorded: {Outcome}", completeDto.PipId, completeDto.Outcome);
+
+        var subject = await ReloadDtoAsync(entity.Id, cancellationToken);
+        var recipients = new List<Guid> { entity.EmployeeId, entity.SupervisorId };
+        if (entity.HROwnerId is Guid hrOwner) recipients.Add(hrOwner);
+
+        await NotifyQuietlyAsync(recipients.Distinct().Select(r => new AppraisalNotificationRequest(
+            r,
+            AppraisalNotificationType.PipOutcomeRecorded,
+            completeDto.Outcome == PipOutcome.Extended ? "Improvement plan extended" : "Improvement plan closed",
+            completeDto.Outcome == PipOutcome.Extended
+                ? $"{subject.PipNumber} now runs to {entity.EndDate:d MMM yyyy}."
+                : $"{subject.PipNumber} was closed with outcome: {completeDto.Outcome}.",
+            NavigationUrl: $"/hr/performance/pip/{entity.Id}",
+            AppraisalId: entity.AppraisalId,
+            SubjectEmployeeName: subject.EmployeeName,
+            Urgency: completeDto.Outcome is PipOutcome.Termination or PipOutcome.Demotion
+                ? NotificationUrgency.Urgent
+                : NotificationUrgency.Normal)), cancellationToken);
 
         return true;
     }
 
+    /// <summary>
+    /// Creates a plan in <see cref="PipStatus.Draft"/>. A PIP is an employment record served on a
+    /// named employee, so it goes out for approval before it is in force — see
+    /// <c>PerformanceImprovementPlanWorkflowStatusAdapter</c>.
+    /// </summary>
     public async Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, CancellationToken cancellationToken = default)
     {
-        // ── Data integrity: only one active PIP per employee at a time ──────────
+        // ── Data integrity: only one live or in-flight PIP per employee at a time ──────────
         var tenantId = GetTenantId();
-        var hasActivePip = await _improvementPlanRepository.ExistsAsync(
-            p => p.TenantId == tenantId
-              && p.EmployeeId == createDto.EmployeeId
-              && (p.Status == PipStatus.Active || p.Status == PipStatus.InProgress));
+        var blocking = await _improvementPlanRepository
+            .GetQueryable(p => p.TenantId == tenantId && p.EmployeeId == createDto.EmployeeId)
+            .Where(p => p.Status == PipStatus.Active
+                     || p.Status == PipStatus.InProgress
+                     || p.Status == PipStatus.PendingApproval)
+            .Select(p => new { p.PipNumber, p.Status })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (hasActivePip)
+        if (blocking != null)
             throw new InvalidOperationException(
-                "This employee already has an active Performance Improvement Plan. " +
-                "Complete or cancel the existing PIP before creating a new one.");
+                blocking.Status == PipStatus.PendingApproval
+                    ? $"Improvement plan {blocking.PipNumber} for this employee is already out for approval."
+                    : $"This employee is already on improvement plan {blocking.PipNumber}. " +
+                      "Complete or cancel it before creating another.");
+
+        if (createDto.EndDate.Date <= createDto.StartDate.Date)
+            throw new InvalidOperationException("The plan's end date has to be after its start date.");
+
+        var supervisorExists = await _employeeRepository.ExistsAsync(
+            e => e.TenantId == tenantId && e.Id == createDto.SupervisorId);
+        if (!supervisorExists)
+            throw new ArgumentException("Supervisor not found.");
 
         var performanceImprovementPlan = createDto.ToEntity();
         performanceImprovementPlan.TenantId = tenantId;
+        performanceImprovementPlan.Status = PipStatus.Draft;
+        performanceImprovementPlan.PipNumber = await NextPipNumberAsync(tenantId, cancellationToken);
 
         await _improvementPlanRepository.AddAsync(performanceImprovementPlan);
-        await _unitOfWork.SaveChangesAsync();
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Performance Improvement Plan created: {pipId}", performanceImprovementPlan.Id);
+        _logger.LogInformation("Performance Improvement Plan created: {PipNumber} ({pipId})",
+            performanceImprovementPlan.PipNumber, performanceImprovementPlan.Id);
 
-        return performanceImprovementPlan.ToDto();
+        return await ReloadDtoAsync(performanceImprovementPlan.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
+
+        // A plan that has been in force is part of the employment record. Cancelling it says it
+        // was stopped; deleting it says it never happened.
+        if (entity.Status != PipStatus.Draft)
+            throw new InvalidOperationException(
+                entity.Status == PipStatus.PendingApproval
+                    ? "Recall the plan from approval before deleting it."
+                    : $"A {entity.Status} plan is part of the employment record and cannot be deleted. Cancel it instead.");
 
         await _improvementPlanRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -171,10 +355,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetActivePipsAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await TenantPipQuery().Where(p => p.Status == PipStatus.Active || p.Status == PipStatus.InProgress)
-                                                    .Include(p => p.Employee)
-                                                    .Include(p => p.Supervisor)
-                                                    .Include(p => p.Appraisal)
+        var entities = await TenantPipQueryWithNames()
+                                                    .Where(p => p.Status == PipStatus.Active || p.Status == PipStatus.InProgress)
+                                                    .OrderByDescending(p => p.StartDate)
                                                     .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -182,10 +365,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var entities = await TenantPipQuery()
-                                                    .Include(p => p.Employee)
-                                                    .Include(p => p.Supervisor)
-                                                    .Include(p => p.Appraisal)
+        var entities = await TenantPipQueryWithNames()
+                                                    .OrderByDescending(p => p.StartDate)
                                                     .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -193,11 +374,22 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        var entities = await TenantPipQuery()
+        var entities = await TenantPipQueryWithNames()
                                     .Where(p => p.EmployeeId == employeeId)
-                                    .Include(p => p.Employee)
-                                    .Include(p => p.Supervisor)
-                                    .Include(p => p.Appraisal)
+                                    .OrderByDescending(p => p.StartDate)
+                                    .ToListAsync(cancellationToken);
+
+        return entities.ToDtoList();
+    }
+
+    /// <summary>
+    /// Plans a manager owns — as the named supervisor or the named HR owner. Their worklist,
+    /// without giving them the org-wide list.
+    /// </summary>
+    public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetBySupervisorAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var entities = await TenantPipQueryWithNames()
+                                    .Where(p => p.SupervisorId == employeeId || p.HROwnerId == employeeId)
                                     .OrderByDescending(p => p.StartDate)
                                     .ToListAsync(cancellationToken);
 
@@ -206,11 +398,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PerformanceImprovementPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entity = await TenantPipQuery()
-                                                    .Include(p => p.Employee)
-                                                    .Include(p => p.Supervisor)
-                                                    .Include(p => p.Appraisal)
+        var entity = await TenantPipQueryWithNames()
                                                     .FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
         if (entity == null)
@@ -223,11 +411,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<IEnumerable<PerformanceImprovementPlanDto>> GetByStatusAsync(PipStatus status, CancellationToken cancellationToken = default)
     {
-        var entities = await TenantPipQuery()
+        var entities = await TenantPipQueryWithNames()
                                                     .Where(p => p.Status == status)
-                                                    .Include(p => p.Employee)
-                                                    .Include(p => p.Supervisor)
-                                                    .Include(p => p.Appraisal)
+                                                    .OrderByDescending(p => p.StartDate)
                                                     .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -251,10 +437,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PagedResult<PerformanceImprovementPlanDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = TenantPipQuery()
-                                            .Include(p => p.Employee)
-                                            .Include(p => p.Supervisor)
-                                            .Include(p => p.Appraisal);
+        var query = TenantPipQueryWithNames();
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -300,14 +483,196 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     {
         var entity = await GetOwnedPipAsync(updateDto.Id, cancellationToken);
 
+        if (entity.Status == PipStatus.PendingApproval)
+            throw new InvalidOperationException(
+                "This plan is out for approval. Recall it before making changes.");
+        if (entity.Status is PipStatus.Completed or PipStatus.Unsuccessful or PipStatus.Cancelled)
+            throw new InvalidOperationException($"A {entity.Status} plan can no longer be edited.");
+
+        if (updateDto.EndDate.Date <= updateDto.StartDate.Date)
+            throw new InvalidOperationException("The plan's end date has to be after its start date.");
+
+        // The status is the workflow's and the outcome path's to set. Letting the edit form carry
+        // them would hand any editor a way round both the approval and the closure rules.
+        var status = entity.Status;
+        var outcome = entity.Outcome;
+        var outcomeNotes = entity.OutcomeNotes;
+        var completionDate = entity.CompletionDate;
+
         updateDto.UpdateEntity(entity);
+
+        entity.Status = status;
+        entity.Outcome = outcome;
+        entity.OutcomeNotes = outcomeNotes;
+        entity.CompletionDate = completionDate;
 
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Performance Improvement Plan updated: {Id}", updateDto.Id);
 
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id, cancellationToken);
+    }
+
+    // ── Approval workflow ──────────────────────────────────────────────────
+    // Draft → PendingApproval → Active runs on the generic workflow engine; this service never
+    // sets those three itself. PerformanceImprovementPlanWorkflowStatusAdapter maps the engine's
+    // outcome onto the entity.
+    //
+    // ⚠ Inoperable until a PerformanceImprovementPlan workflow definition has been published —
+    // the authority to approve comes from the definition, not from a role attribute.
+
+    public async Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPipAsync(id, cancellationToken);
+
+        if (entity.Status == PipStatus.PendingApproval)
+            throw new InvalidOperationException("This plan is already awaiting approval.");
+        if (entity.Status != PipStatus.Draft)
+            throw new InvalidOperationException($"A {entity.Status} plan cannot be submitted for approval.");
+
+        // An approver is being asked to sign off what will be served on the employee. A plan with
+        // no measurable goals is not something anyone can weigh.
+        var goalCount = await _pipGoalRepository.CountAsync(g => g.PipId == id && g.TenantId == entity.TenantId);
+        if (goalCount == 0)
+            throw new InvalidOperationException(
+                "Add at least one improvement goal before submitting the plan for approval.");
+
+        // The one-plan-per-employee rule has to hold here as well as at create. Two people can
+        // each write a draft for the same employee — that is reasonable — but only one of them
+        // can go into force, and a draft written weeks ago must not sail past a plan that has
+        // become live since.
+        var competing = await _improvementPlanRepository
+            .GetQueryable(p => p.TenantId == entity.TenantId
+                            && p.EmployeeId == entity.EmployeeId
+                            && p.Id != entity.Id)
+            .Where(p => p.Status == PipStatus.Active
+                     || p.Status == PipStatus.InProgress
+                     || p.Status == PipStatus.PendingApproval)
+            .Select(p => new { p.PipNumber, p.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (competing != null)
+            throw new InvalidOperationException(
+                competing.Status == PipStatus.PendingApproval
+                    ? $"Improvement plan {competing.PipNumber} for this employee is already out for approval."
+                    : $"This employee is already on improvement plan {competing.PipNumber}. " +
+                      "Complete or cancel it before putting another into force.");
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the improvement plan approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+
+        await _improvementPlanRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Performance Improvement Plan {Id} submitted for approval", id);
+        return await AfterApprovalStepAsync(entity, cancellationToken);
+    }
+
+    public async Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPipAsync(id, cancellationToken);
+        var userId = RequireUserId();
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+
+        await _improvementPlanRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Performance Improvement Plan {Id} approval step processed", id);
+        return await AfterApprovalStepAsync(entity, cancellationToken);
+    }
+
+    public async Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPipAsync(id, cancellationToken);
+        var userId = RequireUserId();
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+
+        await _improvementPlanRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Performance Improvement Plan {Id} rejected", id);
+        return await ReloadDtoAsync(id, cancellationToken);
+    }
+
+    public async Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedPipAsync(id, cancellationToken);
+        var userId = RequireUserId();
+
+        if (entity.Status != PipStatus.PendingApproval)
+            throw new InvalidOperationException("Only a plan still awaiting approval can be recalled.");
+
+        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, id, userId);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the plan.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
+
+        await _improvementPlanRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Performance Improvement Plan {Id} recalled", id);
+        return await ReloadDtoAsync(id, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reloads after a workflow step and, when that step put the plan in force, tells the people
+    /// it now binds. A single-step definition approves on submission, so this is checked after
+    /// both submit and approve rather than assumed from which endpoint was called.
+    /// </summary>
+    private async Task<PerformanceImprovementPlanDto> AfterApprovalStepAsync(
+        PerformanceImprovementPlan entity, CancellationToken cancellationToken)
+    {
+        var dto = await ReloadDtoAsync(entity.Id, cancellationToken);
+        if (entity.Status != PipStatus.Active)
+            return dto;
+
+        var recipients = new List<Guid> { entity.EmployeeId, entity.SupervisorId };
+        if (entity.HROwnerId is Guid hrOwner) recipients.Add(hrOwner);
+
+        await NotifyQuietlyAsync(recipients.Distinct().Select(r => new AppraisalNotificationRequest(
+            r,
+            AppraisalNotificationType.PipOpened,
+            "Improvement plan in force",
+            $"{dto.PipNumber} runs from {entity.StartDate:d MMM yyyy} to {entity.EndDate:d MMM yyyy}.",
+            NavigationUrl: $"/hr/performance/pip/{entity.Id}",
+            AppraisalId: entity.AppraisalId,
+            SubjectEmployeeName: dto.EmployeeName,
+            Urgency: NotificationUrgency.Urgent)), cancellationToken);
+
+        return dto;
+    }
+
+    private Guid RequireUserId()
+    {
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new InvalidOperationException("No signed-in user could be resolved for this workflow action.");
+        return userId;
     }
 
     public async Task<PipReviewMeetingDto> UpdateReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default)
@@ -323,6 +688,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
             throw new ArgumentException("Review meeting not found");
 
         updateDto.UpdateEntity(entity);
+        // The mapper copies PipId from the body; the meeting belongs to the plan it was found
+        // under, and an edit is not a way to move it to a different one.
+        entity.PipId = pipId;
         await _reviewMeetingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -331,9 +699,24 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// Moves a plan that is already in force between its running states. Draft, PendingApproval
+    /// and Active belong to the workflow engine, and Completed/Unsuccessful belong to the outcome
+    /// path — routing them through here would be a way round both.
+    /// </summary>
     public async Task<bool> UpdateStatusAsync(UpdatePipStatusDto statusDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(statusDto.PipId, cancellationToken);
+
+        if (statusDto.Status is PipStatus.Draft or PipStatus.PendingApproval or PipStatus.Active)
+            throw new InvalidOperationException(
+                $"{statusDto.Status} is set by the approval workflow, not directly.");
+        if (statusDto.Status is PipStatus.Completed or PipStatus.Unsuccessful)
+            throw new InvalidOperationException(
+                "Close the plan by recording its outcome, which captures why it ended.");
+        if (!IsLive(entity.Status))
+            throw new InvalidOperationException(
+                $"A {entity.Status} plan cannot be moved to {statusDto.Status}.");
 
         entity.Status = statusDto.Status;
 

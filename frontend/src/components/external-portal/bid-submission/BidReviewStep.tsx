@@ -39,11 +39,6 @@ export default function BidReviewStep({ tender, bidData, uploadedDocuments = [],
   const technicalProposalDoc = uploadedDocuments.find(doc => doc.documentType === 'TechnicalProposal');
   const commercialProposalDoc = uploadedDocuments.find(doc => doc.documentType === 'CommercialProposal');
 
-  // Filter out proposal documents from the uploaded documents list (only show required documents)
-  const requiredDocuments = uploadedDocuments.filter(
-    doc => doc.documentType !== 'TechnicalProposal' && doc.documentType !== 'CommercialProposal'
-  );
-
   return (
     <div className="space-y-6">
       {/* Summary */}
@@ -247,15 +242,15 @@ export default function BidReviewStep({ tender, bidData, uploadedDocuments = [],
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
-            Required Documents ({requiredDocuments.length})
+            Uploaded Documents ({uploadedDocuments.length})
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {requiredDocuments.length === 0 ? (
-            <p className="text-center py-8 text-gray-500">No required documents uploaded</p>
+          {uploadedDocuments.length === 0 ? (
+            <p className="text-center py-8 text-gray-500">No documents uploaded</p>
           ) : (
             <div className="space-y-2">
-              {requiredDocuments.map((doc) => (
+              {uploadedDocuments.map((doc) => (
                 <div key={doc.id} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded">
                   <div className="flex items-center gap-3">
                     <CheckCircle className="h-5 w-5 text-green-600" />
@@ -318,4 +313,3 @@ export default function BidReviewStep({ tender, bidData, uploadedDocuments = [],
     </div>
   );
 }
-

@@ -208,7 +208,9 @@ public class PipMeetingListItemResponse
     public bool EmployeeAttended { get; set; }
     public string ConductedByName { get; set; } = string.Empty;
     public string ProgressNotesPreview { get; set; } = string.Empty;
-    public int GoalsUpdatedCount { get; set; }
+    // GoalsUpdatedCount was here and was always 0: goal progress recorded in a meeting is written
+    // straight onto the goal, and nothing links the update back to the meeting that produced it.
+    // A column that can only ever say "0 goals updated" is worse than no column.
 }
 
 // ── Request bodies ───────────────────────────────────────────────────────────
@@ -225,7 +227,16 @@ public class PipOutcomeRequest
     public int Outcome { get; set; }
     public string? Notes { get; set; }
     public DateTime CompletionDate { get; set; }
+
+    /// <summary>Required when the outcome is Extended; the plan runs on to this date instead of closing.</summary>
     public DateTime? NewEndDate { get; set; }
+}
+
+/// <summary>Reason an approver gave for sending a plan back. Kept on the plan's working notes.</summary>
+public class PipRejectionRequest
+{
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
 }
 
 public class ManualAdvanceRequest
@@ -239,10 +250,6 @@ public class ManualAdvanceRequest
     /// <summary>HR-provided justification, stored verbatim in the audit log.</summary>
     [Required, MaxLength(1000)]
     public string Reason { get; set; } = string.Empty;
-
-    /// <summary>Employee ID of the HR officer performing the advance.</summary>
-    [Required]
-    public Guid AdvancedByEmployeeId { get; set; }
 }
 
 
@@ -256,9 +263,14 @@ public class EmployeeCommentRequest
 
 public class PipDashboardResponse
 {
+    // Named explicitly: the camelCase policy turns "PIPs" into "piPs", which no client would
+    // guess and which reads as a typo in the payload.
+    [System.Text.Json.Serialization.JsonPropertyName("pips")]
     public List<PipListItemResponse> PIPs { get; set; } = new();
     public int ActiveCount { get; set; }
     public int DraftCount { get; set; }
+    /// <summary>Plans out for approval on the workflow engine — written, but not yet in force.</summary>
+    public int PendingApprovalCount { get; set; }
     public int OverdueCount { get; set; }
     public int CompletedThisYearCount { get; set; }
     public int PassedCount { get; set; }

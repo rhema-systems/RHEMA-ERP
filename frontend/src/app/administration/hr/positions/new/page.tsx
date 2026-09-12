@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
@@ -66,6 +67,13 @@ export default function NewEmployeePositionPage() {
     queryFn: () => benefitPolicyService.getActive(),
   });
 
+  // Finance owns the currency list; the server refuses a code it does not hold, so a free-text
+  // box would be offering a way to fail.
+  const { data: currencies } = useQuery({
+    queryKey: ['finance', 'currencies'],
+    queryFn: () => hrCurrencyService.getActive(),
+  });
+
   const handleSubmit = async (values: EmployeePositionFormValues) => {
     setSubmitting(true);
     try {
@@ -88,6 +96,11 @@ export default function NewEmployeePositionPage() {
         maximumAge: toIntOrNull(values.maximumAge ?? ''),
         requiresCertification: values.requiresCertification,
         requiresGuarantor: values.requiresGuarantor,
+        // Blank means "no set amount", which the compliance read treats as "a guarantor, any sum".
+        requiredGuarantorAmount: values.requiredGuarantorAmount
+          ? Number(values.requiredGuarantorAmount)
+          : null,
+        requiredGuarantorCurrencyCode: values.requiredGuarantorCurrencyCode || null,
         requiresLicense: values.requiresLicense,
         skillRequirements: values.skillRequirements.map((r) => ({
           skillId: r.skillId,
@@ -138,6 +151,7 @@ export default function NewEmployeePositionPage() {
           salaryGrades={salaryGrades ?? []}
           skills={skills ?? []}
           benefitPolicies={benefitPolicies ?? []}
+          currencies={currencies ?? []}
           defaultValues={emptyEmployeePosition}
           onSubmit={handleSubmit}
           submitting={submitting}

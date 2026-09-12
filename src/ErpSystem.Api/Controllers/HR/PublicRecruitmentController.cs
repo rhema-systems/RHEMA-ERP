@@ -20,29 +20,20 @@ namespace ErpSystem.Api.Controllers.HR;
 public class PublicRecruitmentController : ControllerBase
 {
     private readonly IJobVacancyService    _vacancyService;
-    private readonly IJobApplicationService _applicationService;
     private readonly ICountryService       _countryService;
-    private readonly IControlledFileUploadService _controlledFiles;
     private readonly ISkillService         _skillService;
     private readonly IQualificationCatalogueService _qualificationCatalogueService;
-    private readonly ILogger<PublicRecruitmentController> _logger;
 
     public PublicRecruitmentController(
         IJobVacancyService vacancyService,
-        IJobApplicationService applicationService,
         ICountryService countryService,
-        IControlledFileUploadService controlledFiles,
         ISkillService skillService,
-        IQualificationCatalogueService qualificationCatalogueService,
-        ILogger<PublicRecruitmentController> logger)
+        IQualificationCatalogueService qualificationCatalogueService)
     {
         _vacancyService              = vacancyService;
-        _applicationService          = applicationService;
         _countryService              = countryService;
-        _controlledFiles             = controlledFiles;
         _skillService                = skillService;
         _qualificationCatalogueService = qualificationCatalogueService;
-        _logger                      = logger;
     }
 
     // =========================================================================
@@ -109,118 +100,10 @@ public class PublicRecruitmentController : ControllerBase
             && tenantId != Guid.Empty;
     }
 
-    // =========================================================================
-    // APPLICATION SUBMISSION
-    // =========================================================================
-
-    /// <summary>
-    /// Submits an external candidate application.
-    /// Resolves or creates a candidate profile keyed by email address.
-    /// Returns a tracking token that the candidate can use to check their status.
-    /// </summary>
-    [HttpPost("apply")]
-    [EnableRateLimiting("PublicApplyPolicy")]
-    [ProducesResponseType(typeof(ExternalApplicationConfirmationDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<ExternalApplicationConfirmationDto>> Apply(
-        [FromBody] ExternalApplicationDto dto,
-        CancellationToken ct = default)
-    {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
-        // Resolve tenant from the X-Tenant-Id header (required for public portal)
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
-
-        try
-        {
-            var confirmation = await _applicationService.ExternalApplyAsync(dto, tenantId, ct);
-            return CreatedAtAction(
-                nameof(GetApplicationStatus),
-                new { token = confirmation.TrackingToken },
-                confirmation);
-        }
-        catch (ArgumentException ex)
-        {
-            return NotFound(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("already submitted"))
-        {
-            return Conflict(new { message = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return UnprocessableEntity(new { message = ex.Message });
-        }
-    }
-
-    // =========================================================================
-    // APPLICATION STATUS TRACKING
-    // =========================================================================
-
-    /// <summary>
-    /// Returns the public status of an application identified by tracking token.
-    /// No personally sensitive scoring or HR-internal data is disclosed.
-    /// </summary>
-    [HttpGet("track/{token}")]
-    [ProducesResponseType(typeof(PublicApplicationStatusDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<PublicApplicationStatusDto>> GetApplicationStatus(
-        [FromRoute] string token,
-        CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(token) || token.Length > 100)
-            return BadRequest(new { message = "Invalid tracking token." });
-
-        try
-        {
-            var status = await _applicationService.GetApplicationStatusByTokenAsync(token, ct);
-            return Ok(status);
-        }
-        catch (KeyNotFoundException)
-        {
-            // Return 404 without revealing whether the token format is invalid vs. not found
-            return NotFound(new { message = "No application found for the provided tracking token." });
-        }
-    }
-
-    /// <summary>
-    /// Allows an external candidate to withdraw their application using only their tracking token.
-    /// </summary>
-    [HttpPost("track/{token}/withdraw")]
-    [EnableRateLimiting("PublicApplyPolicy")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> WithdrawApplication(
-        [FromRoute] string token,
-        [FromBody] ExternalWithdrawDto dto,
-        CancellationToken ct = default)
-    {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
-        if (!string.Equals(token, dto.TrackingToken, StringComparison.Ordinal))
-            return BadRequest(new { message = "Token in URL and body must match." });
-
-        try
-        {
-            await _applicationService.WithdrawByTokenAsync(token, dto.Reason, ct);
-            return Ok(new { message = "Your application has been withdrawn successfully." });
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound(new { message = "No application found for the provided tracking token." });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return UnprocessableEntity(new { message = ex.Message });
-        }
-    }
+    // The anonymous APPLY, TRACK and WITHDRAW endpoints were retired 2026-08-30: applying now
+    // requires a registered candidate account (main JWT scheme, Candidate role) and lives on
+    // api/candidate/applications, where "my applications" replaces token-based tracking. The
+    // board below stays anonymous by design - browse public, apply logged-in.
 
     // =========================================================================
     // REFERENCE DATA
@@ -268,81 +151,9 @@ public class PublicRecruitmentController : ControllerBase
         return Ok(quals.Select(q => new { q.Id, q.Name }));
     }
 
-    // =========================================================================
-    // CV UPLOAD
-    // =========================================================================
+    // The anonymous two-phase CV upload (cv-upload -> single-use ticket -> apply) was retired
+    // with the anonymous apply, 2026-08-30. A registered candidate's CV rides their profile and
+    // documents on api/candidate. The ticket table, minting service and sweeper survive only to
+    // drain pre-retirement rows.
 
-    /// <summary>
-    /// Accepts a CV/résumé for a specific vacancy and returns a single-use token.
-    /// </summary>
-    /// <remarks>
-    /// <para>The applicant echoes the token back as <c>CvUploadToken</c> when they apply. The
-    /// response deliberately contains no storage path and no record id: previously this returned
-    /// the path and the apply endpoint accepted whatever path it was given, so the client chose
-    /// which stored file a candidate record pointed at.</para>
-    ///
-    /// <para><paramref name="vacancyId"/> is required and must resolve to a published vacancy in
-    /// the header's tenant. That is not decoration — <c>FileUploadRecord.TenantId</c> is a real
-    /// foreign key, so an invented header would otherwise fail deep in the insert, and without it
-    /// this endpoint is free anonymous file storage for anyone who can guess a GUID.</para>
-    ///
-    /// <para>Size, extension, MIME and malware checks all belong to the shared upload gate now,
-    /// which is why the local allowlist and size constant are gone.</para>
-    /// </remarks>
-    [HttpPost("cv-upload")]
-    [EnableRateLimiting("PublicUploadPolicy")]
-    [ProducesResponseType(typeof(PublicCvUploadTicketDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
-    public async Task<IActionResult> UploadCv(
-        IFormFile file,
-        [FromForm] Guid vacancyId,
-        CancellationToken ct = default)
-    {
-        if (!TryGetTenantId(out var tenantId))
-            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
-
-        if (file == null || file.Length == 0)
-            return BadRequest(new { message = "No file provided." });
-
-        var vacancy = await _vacancyService.GetPublicVacancyByIdAsync(tenantId, vacancyId, ct);
-        if (vacancy == null)
-            return NotFound(new { message = "Vacancy not found or no longer available." });
-
-        try
-        {
-            var upload = await _controlledFiles.UploadAsync(new ControlledFileUploadRequest
-            {
-                TenantId = tenantId,
-                // No authenticated user exists on this path; the gate rejects an empty actor.
-                ActorUserId = ControlledFileUploadActors.PublicPortalAnonymous,
-                ActorName = "public-career-portal",
-                Category = ControlledFileUploadCategories.HrCandidateCv,
-                FileName = Path.GetFileName(file.FileName),
-                ContentType = string.IsNullOrWhiteSpace(file.ContentType)
-                    ? "application/octet-stream"
-                    : file.ContentType,
-                FileSize = file.Length,
-                OpenReadStream = file.OpenReadStream
-            }, ct);
-
-            var ticket = await _applicationService.MintCvUploadTicketAsync(
-                tenantId, vacancyId, upload.Record.Id,
-                upload.Record.OriginalFileName, upload.Record.ContentType,
-                upload.Record.FileSize, ct);
-
-            return Ok(ticket);
-        }
-        catch (ControlledFileUploadException ex)
-        {
-            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error uploading CV file {FileName}", file.FileName);
-            return StatusCode(StatusCodes.Status500InternalServerError,
-                new { message = "Failed to upload the file. Please try again." });
-        }
-    }
 }

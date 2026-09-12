@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,6 +15,8 @@ import {
   buildCreateTenderDto,
   buildUpdateTenderDto,
 } from '@/lib/tender-form-payload';
+import { completeExistingTenderDraft } from '@/lib/tender-completion';
+import { getTenderScheduleError } from '@/lib/tender-schedule';
 
 // Import step components (we'll create these)
 import BasicInformation from '@/components/procurement/tenders/BasicInformation';
@@ -98,6 +100,7 @@ export interface TenderFormData {
   evaluationCriteriaJson: string;
   notes: string;
   termsAndConditions: string;
+  bidValidityPeriodDays?: number | null;
 
   // QCBS Evaluation Settings
   useQCBSEvaluation: boolean;
@@ -170,6 +173,11 @@ const validateStep1 = (formData: TenderFormData): string[] => {
   if (!formData.title?.trim()) errors.push('Title is required');
   if (!formData.tenderType) errors.push('Tender Type is required');
   if (!formData.submissionDeadline) errors.push('Submission Deadline is required');
+  const scheduleError = getTenderScheduleError(
+    formData.submissionDeadline,
+    formData.openingDate
+  );
+  if (scheduleError) errors.push(scheduleError);
 
   // Validate evaluation template is selected
   if (!formData.evaluationTemplateId) {
@@ -256,6 +264,7 @@ function NewTenderPageContent() {
           requiredDeliveryDate: i.requiredDate || '',
           deliveryLocation: '',
         }));
+        const sourceCurrency = pr.currency?.trim().toUpperCase() || 'USD';
 
         const suggestedLot: TenderLotFormData = {
           lotNumber: 1,
@@ -263,7 +272,7 @@ function NewTenderPageContent() {
           title: `Lot 1 (${pr.requisitionNumber})`,
           description: `Auto-created from Purchase Requisition ${pr.requisitionNumber}`,
           estimatedValue: pr.totalAmount ?? undefined,
-          currency: 'USD',
+          currency: sourceCurrency,
           requiredDeliveryDate: pr.requiredDate || '',
           deliveryLocation: '',
           specifications: '',
@@ -277,9 +286,10 @@ function NewTenderPageContent() {
           title: prev.title?.trim() ? prev.title : `Tender for ${pr.requisitionNumber}`,
           description: prev.description?.trim() ? prev.description : (pr.justification || pr.notes || ''),
           estimatedValue: prev.estimatedValue ?? pr.totalAmount ?? null,
+          currency: sourceCurrency,
           lots: (prev.lots && prev.lots.length > 0)
-            ? prev.lots
-            : [{ ...suggestedLot, currency: prev.currency || suggestedLot.currency }],
+            ? prev.lots.map((lot) => ({ ...lot, currency: sourceCurrency }))
+            : [suggestedLot],
           items: [],
           notes: prev.notes?.trim() ? prev.notes : `Source PR: ${pr.requisitionNumber}`,
         }));
@@ -436,12 +446,15 @@ function NewTenderPageContent() {
     invitedBusinessPartnerIds: [],
     sendNotifications: false,
   });
+  const draftSaveInFlightRef = useRef(false);
 
   const updateFormData = (data: Partial<TenderFormData>) => {
     setFormData(prev => ({ ...prev, ...data }));
   };
 
   const handleNext = async () => {
+    if (draftSaveInFlightRef.current) return;
+
     // Validate current step
     let errors: string[] = [];
     switch (currentStep) {
@@ -472,6 +485,7 @@ function NewTenderPageContent() {
 
     // Auto-save when moving from step 1 to step 2 (create the tender if it doesn't exist)
     if (currentStep === 1 && !tenderId) {
+      draftSaveInFlightRef.current = true;
       try {
         setSavingDraft(true);
         const createDto = buildCreateTenderDto(
@@ -513,9 +527,10 @@ function NewTenderPageContent() {
         toast.success('Draft saved automatically');
       } catch (error: any) {
         console.error('Error auto-saving tender:', error);
-        toast.error('Failed to save tender. Please try again.');
+        toast.error(error?.message || 'Failed to save tender. Please try again.');
         return; // Don't proceed to next step if save failed
       } finally {
+        draftSaveInFlightRef.current = false;
         setSavingDraft(false);
       }
     }
@@ -532,6 +547,18 @@ function NewTenderPageContent() {
   };
 
   const handleSaveDraft = async () => {
+    if (draftSaveInFlightRef.current) return;
+
+    const scheduleError = getTenderScheduleError(
+      formData.submissionDeadline,
+      formData.openingDate
+    );
+    if (scheduleError) {
+      toast.error(scheduleError);
+      return;
+    }
+
+    draftSaveInFlightRef.current = true;
     try {
       setSavingDraft(true);
 
@@ -636,6 +663,7 @@ function NewTenderPageContent() {
       const errorMessage = error?.message || 'Failed to save draft';
       toast.error(`Error saving draft: ${errorMessage}`);
     } finally {
+      draftSaveInFlightRef.current = false;
       setSavingDraft(false);
     }
   };
@@ -674,6 +702,15 @@ function NewTenderPageContent() {
 
   const confirmSubmit = async () => {
     console.log('🔵 User confirmed tender creation');
+
+    const scheduleError = getTenderScheduleError(
+      formData.submissionDeadline,
+      formData.openingDate
+    );
+    if (scheduleError) {
+      toast.error(scheduleError);
+      return;
+    }
 
     try {
       setLoading(true);
@@ -719,6 +756,16 @@ function NewTenderPageContent() {
         }
       } else {
         console.log('🔵 Tender already exists with ID:', finalTenderId);
+        await completeExistingTenderDraft(
+          finalTenderId,
+          formData,
+          (completedTenderId) => {
+            toast.success('✅ Tender created successfully! You can now add invitations and publish it.');
+            console.log('🔵 Redirecting to tender details page...');
+            router.push(`/procurement/tenders/${completedTenderId}`);
+          }
+        );
+        return;
       }
 
       toast.success('✅ Tender created successfully! You can now add invitations and publish it.');
@@ -748,6 +795,7 @@ function NewTenderPageContent() {
           formData={formData}
           updateFormData={updateFormData}
           procurementCategory={sourceRequisition?.procurementCategory}
+          sourceCurrency={sourceRequisition?.currency}
         />;
       case 2:
         return <TenderLots formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
@@ -883,7 +931,7 @@ function NewTenderPageContent() {
         </Button>
 
         {currentStep < STEPS.length ? (
-          <Button onClick={handleNext}>
+          <Button onClick={handleNext} disabled={savingDraft || loading}>
             Next
             <ArrowRight className="h-4 w-4 ml-2" />
           </Button>

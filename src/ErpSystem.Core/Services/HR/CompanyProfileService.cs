@@ -22,18 +22,45 @@ public class CompanyProfileService : ICompanyProfileService
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<CompanyProfileService> _logger;
 
+    // Shared reference data. Resolves the registered address's area into the Region and City text
+    // the profile prints, so the two cannot disagree.
+    private readonly ErpSystem.Core.Services.Reference.IGeographyService _geography;
+
     public CompanyProfileService(
         IGenericRepository<CompanyProfile> repository,
         ICompanyProfileProvider provider,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
+        ErpSystem.Core.Services.Reference.IGeographyService geography,
         ILogger<CompanyProfileService> logger)
     {
         _repository = repository;
         _provider = provider;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
+        _geography = geography;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Rewrites <c>Region</c> and <c>City</c> from the profile's administrative area. A null area
+    /// leaves both exactly as they were.
+    /// </summary>
+    private async Task ApplyGeoAreaSnapshotAsync(CompanyProfile entity, CancellationToken ct)
+    {
+        if (entity.GeoAreaId is not { } areaId) return;
+
+        var (region, city) = await _geography.GetAddressSnapshotAsync(areaId, ct);
+        if (region is null && city is null)
+        {
+            _logger.LogWarning(
+                "Company profile references geo area {GeoAreaId}, which could not be resolved; the "
+                + "address was left unchanged.", areaId);
+            return;
+        }
+
+        if (region is not null) entity.Region = region;
+        if (city is not null) entity.City = city;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -76,17 +103,27 @@ public class CompanyProfileService : ICompanyProfileService
         {
             entity = new CompanyProfile { TenantId = tenantId };
             entity.ApplyUpdate(dto);
+            await ApplyGeoAreaSnapshotAsync(entity, cancellationToken); // ⚠ after Apply — the tree wins
+            entity.StampCreated(_currentUser);
             await _repository.AddAsync(entity);
             _logger.LogInformation("Company profile created for tenant {TenantId}", entity.TenantId);
         }
         else
         {
             entity.ApplyUpdate(dto);
+            await ApplyGeoAreaSnapshotAsync(entity, cancellationToken); // ⚠ after Apply — the tree wins
+            entity.StampUpdated(_currentUser);
             await _repository.UpdateAsync(entity);
             _logger.LogInformation("Company profile updated for tenant {TenantId}", entity.TenantId);
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read through the provider rather than mapping the entity we just wrote. `CompanyProfileDto`
+        // carries `CountryName` and `CountryOfIncorporationName`, both read off navigations — and on
+        // this path those navigations are either absent (a first save creates the entity in memory) or
+        // stale (a save that CHANGES the country still holds the old one). Either way the caller gets a
+        // country id with a blank or wrong name beside it, which is exactly the shape the screen renders.
+        return await GetAsync(cancellationToken);
     }
 }

@@ -105,6 +105,14 @@ public interface ILeavePlanService
     Task<LeavePlanDto> SuggestChangesAsync(Guid id, SuggestLeavePlanChangesDto dto);
     Task<LeavePlanDto> RespondToSuggestionAsync(Guid id, RespondToLeaveSuggestionDto dto);
     Task CancelLeavePlanAsync(Guid id);
+
+    /// <summary>
+    /// Why <paramref name="relieverId"/> may not be free between the two dates: their own leave
+    /// plans and requests, and other plans that already name them as reliever. For the plan form,
+    /// before the plan exists; the register reads the same answer from <see cref="LeavePlanDto.RelieverClashes"/>.
+    /// </summary>
+    Task<IReadOnlyList<LeaveRelieverClashDto>> GetRelieverClashesAsync(
+        Guid relieverId, DateOnly startDate, DateOnly endDate, Guid? excludePlanId = null);
 }
 
 /// <summary>

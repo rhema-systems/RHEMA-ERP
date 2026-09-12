@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
 
@@ -70,7 +70,6 @@ public static class StaffTravelMappingExtensions
             Comments = entity.Comments.Select(c => c.ToDto()).ToList(),
             Attachments = entity.Attachments.Select(a => a.ToDto()).ToList(),
             Itineraries = entity.Itineraries.Select(i => i.ToSummaryDto()).ToList(),
-            ApprovalInstances = entity.ApprovalInstances.Select(a => a.ToSummaryDto()).ToList(),
             FlightBookings = entity.FlightBookings.Select(f => f.ToSummaryDto()).ToList(),
             HotelBookings = entity.HotelBookings.Select(h => h.ToSummaryDto()).ToList(),
             GroundTransports = entity.GroundTransports.Select(g => g.ToDto()).ToList(),
@@ -288,7 +287,7 @@ public static class StaffTravelMappingExtensions
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            AuthorId = dto.AuthorId,
+            // AuthorId is assigned by the service from the caller's token.
             CommentType = dto.CommentType,
             Body = dto.Body,
             IsVisibleToTraveller = dto.IsVisibleToTraveller,
@@ -324,6 +323,9 @@ public static class StaffTravelMappingExtensions
             FileSizeBytes = entity.FileSizeBytes,
             MimeType = entity.MimeType,
             AttachmentType = entity.AttachmentType,
+            FileUploadRecordId = entity.FileUploadRecordId,
+            DocumentRecordId = entity.DocumentRecordId,
+            DocumentVersionId = entity.DocumentVersionId,
             UploadedById = entity.UploadedById,
             UploadedByName = entity.UploadedBy?.FullName ?? string.Empty,
             UploadedAt = entity.UploadedAt,
@@ -337,11 +339,15 @@ public static class StaffTravelMappingExtensions
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
             FileName = dto.FileName,
-            FileUrl = dto.FileUrl,
+            // FileUrl stays empty for gated uploads — the file is addressed by its DMS ids.
+            FileUrl = string.Empty,
             FileSizeBytes = dto.FileSizeBytes,
             MimeType = dto.MimeType,
+            FileUploadRecordId = dto.FileUploadRecordId,
+            DocumentRecordId = dto.DocumentRecordId,
+            DocumentVersionId = dto.DocumentVersionId,
             AttachmentType = dto.AttachmentType,
-            UploadedById = dto.UploadedById,
+            // UploadedById is assigned by the service from the caller's token.
             UploadedAt = DateTime.UtcNow,
             CreatedBy = userId.ToString(),
         };
@@ -579,247 +585,6 @@ public static class StaffTravelMappingExtensions
     // GROUP 3 — APPROVAL WORKFLOW
     // ========================================================================
 
-    #region StaffTravelApprovalWorkflowTemplate
-
-    public static StaffTravelApprovalWorkflowTemplateDto ToDto(this StaffTravelApprovalWorkflowTemplate entity)
-    {
-        return new StaffTravelApprovalWorkflowTemplateDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy,
-            Name = entity.Name,
-            Description = entity.Description,
-            TravelType = entity.TravelType,
-            AppliesToLevelFromId = entity.AppliesToLevelFromId,
-            AppliesToLevelFromName = entity.AppliesToLevelFrom?.Name,
-            AppliesToLevelToId = entity.AppliesToLevelToId,
-            AppliesToLevelToName = entity.AppliesToLevelTo?.Name,
-            MinBudgetThreshold = entity.MinBudgetThreshold,
-            MaxBudgetThreshold = entity.MaxBudgetThreshold,
-            IsInternational = entity.IsInternational,
-            RiskLevel = entity.RiskLevel,
-            IsActive = entity.IsActive,
-            Steps = entity.Steps.OrderBy(s => s.StepOrder).Select(s => s.ToDto()).ToList(),
-        };
-    }
-
-    public static StaffTravelApprovalWorkflowTemplateSummaryDto ToSummaryDto(this StaffTravelApprovalWorkflowTemplate entity)
-    {
-        return new StaffTravelApprovalWorkflowTemplateSummaryDto
-        {
-            Id = entity.Id,
-            Name = entity.Name,
-            TravelType = entity.TravelType,
-            IsInternational = entity.IsInternational,
-            IsActive = entity.IsActive,
-            StepCount = entity.Steps.Count,
-        };
-    }
-
-    public static StaffTravelApprovalWorkflowTemplate ToEntity(this CreateStaffTravelApprovalWorkflowTemplateDto dto, Guid tenantId, Guid userId)
-    {
-        return new StaffTravelApprovalWorkflowTemplate
-        {
-            TenantId = tenantId,
-            Name = dto.Name,
-            Description = dto.Description,
-            TravelType = dto.TravelType,
-            AppliesToLevelFromId = dto.AppliesToLevelFromId,
-            AppliesToLevelToId = dto.AppliesToLevelToId,
-            MinBudgetThreshold = dto.MinBudgetThreshold,
-            MaxBudgetThreshold = dto.MaxBudgetThreshold,
-            IsInternational = dto.IsInternational,
-            RiskLevel = dto.RiskLevel,
-            IsActive = dto.IsActive,
-            CreatedBy = userId.ToString(),
-        };
-    }
-
-    public static void UpdateEntity(this StaffTravelApprovalWorkflowTemplate entity, UpdateStaffTravelApprovalWorkflowTemplateDto dto, Guid userId)
-    {
-        entity.Name = dto.Name;
-        entity.Description = dto.Description;
-        entity.TravelType = dto.TravelType;
-        entity.AppliesToLevelFromId = dto.AppliesToLevelFromId;
-        entity.AppliesToLevelToId = dto.AppliesToLevelToId;
-        entity.MinBudgetThreshold = dto.MinBudgetThreshold;
-        entity.MaxBudgetThreshold = dto.MaxBudgetThreshold;
-        entity.IsInternational = dto.IsInternational;
-        entity.RiskLevel = dto.RiskLevel;
-        entity.IsActive = dto.IsActive;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-    }
-
-    public static IEnumerable<StaffTravelApprovalWorkflowTemplateSummaryDto> ToSummaryDtoList(this IEnumerable<StaffTravelApprovalWorkflowTemplate> entities)
-        => entities.Select(e => e.ToSummaryDto());
-
-    #endregion
-
-    #region StaffTravelApprovalWorkflowStep
-
-    public static StaffTravelApprovalWorkflowStepDto ToDto(this StaffTravelApprovalWorkflowStep entity)
-    {
-        return new StaffTravelApprovalWorkflowStepDto
-        {
-            Id = entity.Id,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy,
-            WorkflowTemplateId = entity.WorkflowTemplateId,
-            StepOrder = entity.StepOrder,
-            StepName = entity.StepName,
-            ApproverType = entity.ApproverType,
-            ApproverRole = entity.ApproverRole,
-            SpecificApproverId = entity.SpecificApproverId,
-            SpecificApproverName = entity.SpecificApprover?.FullName,
-            IsMandatory = entity.IsMandatory,
-            CanDelegate = entity.CanDelegate,
-            SlaHours = entity.SlaHours,
-            EscalationApproverId = entity.EscalationApproverId,
-            EscalationApproverName = entity.EscalationApprover?.FullName,
-        };
-    }
-
-    public static StaffTravelApprovalWorkflowStep ToEntity(this CreateStaffTravelApprovalWorkflowStepDto dto, Guid tenantId, Guid userId)
-    {
-        return new StaffTravelApprovalWorkflowStep
-        {
-            TenantId = tenantId,
-            WorkflowTemplateId = dto.WorkflowTemplateId,
-            StepOrder = dto.StepOrder,
-            StepName = dto.StepName,
-            ApproverType = dto.ApproverType,
-            ApproverRole = dto.ApproverRole,
-            SpecificApproverId = dto.SpecificApproverId,
-            IsMandatory = dto.IsMandatory,
-            CanDelegate = dto.CanDelegate,
-            SlaHours = dto.SlaHours,
-            EscalationApproverId = dto.EscalationApproverId,
-            CreatedBy = userId.ToString(),
-        };
-    }
-
-    public static void UpdateEntity(this StaffTravelApprovalWorkflowStep entity, UpdateStaffTravelApprovalWorkflowStepDto dto, Guid userId)
-    {
-        entity.StepOrder = dto.StepOrder;
-        entity.StepName = dto.StepName;
-        entity.ApproverType = dto.ApproverType;
-        entity.ApproverRole = dto.ApproverRole;
-        entity.SpecificApproverId = dto.SpecificApproverId;
-        entity.IsMandatory = dto.IsMandatory;
-        entity.CanDelegate = dto.CanDelegate;
-        entity.SlaHours = dto.SlaHours;
-        entity.EscalationApproverId = dto.EscalationApproverId;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-    }
-
-    #endregion
-
-    #region StaffTravelApprovalInstance
-
-    public static StaffTravelApprovalInstanceDto ToDto(this StaffTravelApprovalInstance entity)
-    {
-        return new StaffTravelApprovalInstanceDto
-        {
-            Id = entity.Id,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy,
-            StaffTravelRequestId = entity.StaffTravelRequestId,
-            RequestNumber = entity.StaffTravelRequest?.RequestNumber,
-            WorkflowTemplateId = entity.WorkflowTemplateId,
-            WorkflowTemplateName = entity.WorkflowTemplate?.Name,
-            CurrentStepOrder = entity.CurrentStepOrder,
-            Status = entity.Status,
-            InitiatedAt = entity.InitiatedAt,
-            CompletedAt = entity.CompletedAt,
-            Decisions = entity.Decisions.OrderBy(d => d.StepOrder).Select(d => d.ToDto()).ToList(),
-        };
-    }
-
-    public static StaffTravelApprovalInstanceSummaryDto ToSummaryDto(this StaffTravelApprovalInstance entity)
-    {
-        return new StaffTravelApprovalInstanceSummaryDto
-        {
-            Id = entity.Id,
-            WorkflowTemplateName = entity.WorkflowTemplate?.Name,
-            CurrentStepOrder = entity.CurrentStepOrder,
-            Status = entity.Status,
-            InitiatedAt = entity.InitiatedAt,
-            CompletedAt = entity.CompletedAt,
-            DecisionCount = entity.Decisions.Count,
-        };
-    }
-
-    public static StaffTravelApprovalInstance ToEntity(this CreateStaffTravelApprovalInstanceDto dto, Guid tenantId, Guid userId)
-    {
-        return new StaffTravelApprovalInstance
-        {
-            TenantId = tenantId,
-            StaffTravelRequestId = dto.StaffTravelRequestId,
-            WorkflowTemplateId = dto.WorkflowTemplateId,
-            CurrentStepOrder = 1,
-            Status = TravelApprovalInstanceStatus.Pending,
-            InitiatedAt = DateTime.UtcNow,
-            CreatedBy = userId.ToString(),
-        };
-    }
-
-    public static IEnumerable<StaffTravelApprovalInstanceSummaryDto> ToSummaryDtoList(this IEnumerable<StaffTravelApprovalInstance> entities)
-        => entities.Select(e => e.ToSummaryDto());
-
-    #endregion
-
-    #region StaffTravelApprovalDecision
-
-    public static StaffTravelApprovalDecisionDto ToDto(this StaffTravelApprovalDecision entity)
-    {
-        return new StaffTravelApprovalDecisionDto
-        {
-            Id = entity.Id,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy,
-            ApprovalInstanceId = entity.ApprovalInstanceId,
-            StepOrder = entity.StepOrder,
-            ApproverId = entity.ApproverId,
-            ApproverName = entity.Approver?.FullName ?? string.Empty,
-            OriginalApproverId = entity.OriginalApproverId,
-            OriginalApproverName = entity.OriginalApprover?.FullName,
-            Decision = entity.Decision,
-            Comments = entity.Comments,
-            DecidedAt = entity.DecidedAt,
-            IsEscalated = entity.IsEscalated,
-            EscalatedAt = entity.EscalatedAt,
-            SlaDeadline = entity.SlaDeadline,
-        };
-    }
-
-    public static StaffTravelApprovalDecision ToEntity(this RecordStaffTravelApprovalDecisionDto dto, Guid tenantId, Guid userId)
-    {
-        return new StaffTravelApprovalDecision
-        {
-            TenantId = tenantId,
-            ApprovalInstanceId = dto.ApprovalInstanceId,
-            StepOrder = dto.StepOrder,
-            ApproverId = dto.ApproverId,
-            Decision = dto.Decision,
-            Comments = dto.Comments,
-            DecidedAt = dto.DecidedAt,
-            CreatedBy = userId.ToString(),
-        };
-    }
-
-    #endregion
 
     // ========================================================================
     // GROUP 4 — BOOKINGS
@@ -846,7 +611,7 @@ public static class StaffTravelMappingExtensions
             ClassExceptionReason = entity.ClassExceptionReason,
             BookedBy = entity.BookedBy,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             TotalFare = entity.TotalFare,
             TaxesAndFees = entity.TaxesAndFees,
             CurrencyCode = entity.CurrencyCode,
@@ -1036,7 +801,7 @@ public static class StaffTravelMappingExtensions
             RateExceptionApproved = entity.RateExceptionApproved,
             RateExceptionReason = entity.RateExceptionReason,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             BookedBy = entity.BookedBy,
             Status = entity.Status,
             CancellationPolicy = entity.CancellationPolicy,
@@ -1134,6 +899,7 @@ public static class StaffTravelMappingExtensions
     {
         return new StaffTravelGroundTransportDto
         {
+            FleetTripId = entity.FleetTripId,
             Id = entity.Id,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy,
@@ -1142,7 +908,7 @@ public static class StaffTravelMappingExtensions
             StaffTravelRequestId = entity.StaffTravelRequestId,
             TransportType = entity.TransportType,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             BookingReference = entity.BookingReference,
             PickupLocation = entity.PickupLocation,
             DropoffLocation = entity.DropoffLocation,
@@ -1211,7 +977,7 @@ public static class StaffTravelMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             StaffTravelRequestId = entity.StaffTravelRequestId,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             BookingReference = entity.BookingReference,
             PickupLocation = entity.PickupLocation,
             DropoffLocation = entity.DropoffLocation,
@@ -1340,9 +1106,10 @@ public static class StaffTravelMappingExtensions
         entity.PerDiemBudget = dto.PerDiemBudget;
         entity.TransportBudget = dto.TransportBudget;
         entity.MiscellaneousBudget = dto.MiscellaneousBudget;
-        entity.TotalCommitted = dto.TotalCommitted;
-        entity.TotalActual = dto.TotalActual;
-        entity.Variance = dto.TotalActual - dto.TotalCommitted;
+        // TotalCommitted / TotalActual / Variance are NOT mapped from the DTO: the service derives
+        // all three from the request's bookings and claims immediately after this runs
+        // (StaffTravelFinanceService.ApplyRollupAsync). Assigning them here as well would be
+        // harmless but misleading — a reader would think the client's figures survive.
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1479,8 +1246,9 @@ public static class StaffTravelMappingExtensions
             MerchantName = dto.MerchantName,
             AmountOriginal = dto.AmountOriginal,
             CurrencyOriginal = dto.CurrencyOriginal,
-            ExchangeRate = dto.ExchangeRate,
-            AmountBaseCurrency = dto.AmountBaseCurrency,
+            // ⚠ ExchangeRate and AmountBaseCurrency are set by the service from Finance's published
+            // rate immediately after this, so copying the payload's numbers here only made it look
+            // as though the caller's figures counted.
             PolicyLimit = dto.PolicyLimit,
             ReceiptAttachmentId = dto.ReceiptAttachmentId,
             IsPerDiem = dto.IsPerDiem,
@@ -1498,8 +1266,9 @@ public static class StaffTravelMappingExtensions
         entity.MerchantName = dto.MerchantName;
         entity.AmountOriginal = dto.AmountOriginal;
         entity.CurrencyOriginal = dto.CurrencyOriginal;
-        entity.ExchangeRate = dto.ExchangeRate;
-        entity.AmountBaseCurrency = dto.AmountBaseCurrency;
+        // ⚠ ExchangeRate and AmountBaseCurrency are DERIVED, not accepted. The service applies
+        // Finance's published rate for the expense date and does the arithmetic itself; taking them
+        // from the payload here is what let an edited line be valued at whatever the caller said.
         entity.PolicyLimit = dto.PolicyLimit;
         entity.ReceiptAttachmentId = dto.ReceiptAttachmentId;
         entity.IsPerDiem = dto.IsPerDiem;
@@ -1580,7 +1349,11 @@ public static class StaffTravelMappingExtensions
     public static void UpdateEntity(this StaffTravelAdvance entity, UpdateStaffTravelAdvanceDto dto, Guid userId)
     {
         entity.RequestedAmount = dto.RequestedAmount;
-        entity.ApprovedAmount = dto.ApprovedAmount;
+        // ⚠ ApprovedAmount is deliberately NOT mapped. Approving an advance is `ApproveAdvanceAsync`,
+        // which stamps ApprovedById from the token and checks the status; a plain PUT that could set
+        // the approved amount was a way round both, leaving an advance with money approved and no
+        // approver on record — and UnsettledAmount is computed off it. The area-5 "DTO owns too
+        // much" shape; slice 4 closed the actor half and this is the amount half.
         entity.CurrencyCode = dto.CurrencyCode;
         entity.AdvanceType = dto.AdvanceType;
         entity.SettlementDeadline = dto.SettlementDeadline;
@@ -1726,6 +1499,9 @@ public static class StaffTravelMappingExtensions
             EffectiveFrom = entity.EffectiveFrom,
             EffectiveTo = entity.EffectiveTo,
             MaxSingleTripBudget = entity.MaxSingleTripBudget,
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy != null ? entity.ApprovedBy.FullName : null,
+            ApprovedAt = entity.ApprovedAt,
             RuleCount = entity.Rules.Count,
         };
     }
@@ -1876,6 +1652,7 @@ public static class StaffTravelMappingExtensions
             ApprovedById = entity.ApprovedById,
             ApprovedByName = entity.ApprovedBy?.FullName,
             DecidedAt = entity.DecidedAt,
+            DecisionNotes = entity.DecisionNotes,
         };
     }
 
@@ -1896,94 +1673,6 @@ public static class StaffTravelMappingExtensions
 
     #endregion
 
-    #region StaffTravelVendor
-
-    public static StaffTravelVendorDto ToDto(this StaffTravelVendor entity)
-    {
-        return new StaffTravelVendorDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy,
-            VendorCode = entity.VendorCode,
-            VendorName = entity.VendorName,
-            VendorType = entity.VendorType,
-            CountryId = entity.CountryId,
-            CountryName = entity.Country?.Name,
-            ContactEmail = entity.ContactEmail,
-            ContactPhone = entity.ContactPhone,
-            AccountNumber = entity.AccountNumber,
-            ContractStartDate = entity.ContractStartDate,
-            ContractEndDate = entity.ContractEndDate,
-            IsPreferred = entity.IsPreferred,
-            IsActive = entity.IsActive,
-            Rating = entity.Rating,
-            PaymentTerms = entity.PaymentTerms,
-        };
-    }
-
-    public static StaffTravelVendorSummaryDto ToSummaryDto(this StaffTravelVendor entity)
-    {
-        return new StaffTravelVendorSummaryDto
-        {
-            Id = entity.Id,
-            VendorCode = entity.VendorCode,
-            VendorName = entity.VendorName,
-            VendorType = entity.VendorType,
-            IsPreferred = entity.IsPreferred,
-            IsActive = entity.IsActive,
-            Rating = entity.Rating,
-        };
-    }
-
-    public static StaffTravelVendor ToEntity(this CreateStaffTravelVendorDto dto, Guid tenantId, Guid userId)
-    {
-        return new StaffTravelVendor
-        {
-            TenantId = tenantId,
-            VendorCode = dto.VendorCode,
-            VendorName = dto.VendorName,
-            VendorType = dto.VendorType,
-            CountryId = dto.CountryId,
-            ContactEmail = dto.ContactEmail,
-            ContactPhone = dto.ContactPhone,
-            AccountNumber = dto.AccountNumber,
-            ContractStartDate = dto.ContractStartDate,
-            ContractEndDate = dto.ContractEndDate,
-            IsPreferred = dto.IsPreferred,
-            IsActive = dto.IsActive,
-            Rating = dto.Rating,
-            PaymentTerms = dto.PaymentTerms,
-            CreatedBy = userId.ToString(),
-        };
-    }
-
-    public static void UpdateEntity(this StaffTravelVendor entity, UpdateStaffTravelVendorDto dto, Guid userId)
-    {
-        entity.VendorCode = dto.VendorCode;
-        entity.VendorName = dto.VendorName;
-        entity.VendorType = dto.VendorType;
-        entity.CountryId = dto.CountryId;
-        entity.ContactEmail = dto.ContactEmail;
-        entity.ContactPhone = dto.ContactPhone;
-        entity.AccountNumber = dto.AccountNumber;
-        entity.ContractStartDate = dto.ContractStartDate;
-        entity.ContractEndDate = dto.ContractEndDate;
-        entity.IsPreferred = dto.IsPreferred;
-        entity.IsActive = dto.IsActive;
-        entity.Rating = dto.Rating;
-        entity.PaymentTerms = dto.PaymentTerms;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-    }
-
-    public static IEnumerable<StaffTravelVendorSummaryDto> ToSummaryDtoList(this IEnumerable<StaffTravelVendor> entities)
-        => entities.Select(e => e.ToSummaryDto());
-
-    #endregion
 
     // ========================================================================
     // GROUP 7 — COMPLIANCE & SAFETY
@@ -2130,7 +1819,7 @@ public static class StaffTravelMappingExtensions
             ProcessingFee = entity.ProcessingFee,
             CurrencyCode = entity.CurrencyCode,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             Notes = entity.Notes,
         };
     }
@@ -2356,6 +2045,8 @@ public static class StaffTravelMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             TravelAlertId = entity.TravelAlertId,
             AlertTitle = entity.TravelAlert?.Title,
+            AlertBody = entity.TravelAlert?.Body,
+            Severity = entity.TravelAlert?.Severity,
             StaffTravelRequestId = entity.StaffTravelRequestId,
             RequestNumber = entity.StaffTravelRequest?.RequestNumber,
             EmployeeId = entity.EmployeeId,
@@ -2366,14 +2057,19 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static StaffTravelAlertNotification ToEntity(this CreateStaffTravelAlertNotificationDto dto, Guid tenantId, Guid userId)
+    /// <param name="travellerEmployeeId">
+    /// The traveller, taken from the travel request. ⚠ A PARAMETER rather than a DTO field, so a
+    /// caller cannot assert who the notification is addressed to — the same treatment D-15 gave the
+    /// succession document uploader. See the remarks on CreateStaffTravelAlertNotificationDto.
+    /// </param>
+    public static StaffTravelAlertNotification ToEntity(this CreateStaffTravelAlertNotificationDto dto, Guid tenantId, Guid userId, Guid travellerEmployeeId)
     {
         return new StaffTravelAlertNotification
         {
             TenantId = tenantId,
             TravelAlertId = dto.TravelAlertId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            EmployeeId = dto.EmployeeId,
+            EmployeeId = travellerEmployeeId,
             NotificationSentAt = dto.NotificationSentAt ?? DateTime.UtcNow,
             IsAcknowledged = false,
             CreatedBy = userId.ToString(),
@@ -2395,7 +2091,7 @@ public static class StaffTravelMappingExtensions
             UpdatedBy = entity.UpdatedBy,
             StaffTravelRequestId = entity.StaffTravelRequestId,
             VendorId = entity.VendorId,
-            VendorName = entity.Vendor?.VendorName,
+            VendorName = entity.Vendor?.Name,   // Supplier.Name — Procurement owns the vendor master
             PolicyNumber = entity.PolicyNumber,
             InsuranceType = entity.InsuranceType,
             CoverageType = entity.CoverageType,
@@ -2509,53 +2205,4 @@ public static class StaffTravelMappingExtensions
     // GROUP 8 — CONFIGURATION
     // ========================================================================
 
-    #region StaffTravelCurrencyExchangeRate
-
-    public static StaffTravelCurrencyExchangeRateDto ToDto(this StaffTravelCurrencyExchangeRate entity)
-    {
-        return new StaffTravelCurrencyExchangeRateDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy,
-            FromCurrency = entity.FromCurrency,
-            ToCurrency = entity.ToCurrency,
-            Rate = entity.Rate,
-            RateDate = entity.RateDate,
-            RateSource = entity.RateSource,
-            IsOfficial = entity.IsOfficial,
-        };
-    }
-
-    public static StaffTravelCurrencyExchangeRate ToEntity(this CreateStaffTravelCurrencyExchangeRateDto dto, Guid tenantId, Guid userId)
-    {
-        return new StaffTravelCurrencyExchangeRate
-        {
-            TenantId = tenantId,
-            FromCurrency = dto.FromCurrency,
-            ToCurrency = dto.ToCurrency,
-            Rate = dto.Rate,
-            RateDate = dto.RateDate,
-            RateSource = dto.RateSource,
-            IsOfficial = dto.IsOfficial,
-            CreatedBy = userId.ToString(),
-        };
-    }
-
-    public static void UpdateEntity(this StaffTravelCurrencyExchangeRate entity, UpdateStaffTravelCurrencyExchangeRateDto dto, Guid userId)
-    {
-        entity.FromCurrency = dto.FromCurrency;
-        entity.ToCurrency = dto.ToCurrency;
-        entity.Rate = dto.Rate;
-        entity.RateDate = dto.RateDate;
-        entity.RateSource = dto.RateSource;
-        entity.IsOfficial = dto.IsOfficial;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
-    }
-
-    #endregion
 }

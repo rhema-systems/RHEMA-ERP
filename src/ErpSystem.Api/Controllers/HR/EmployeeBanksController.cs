@@ -3,6 +3,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// Manages bank (financial institution) and bank branch reference data.
 /// </summary>
 [ApiController]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeBanksController : ControllerBase
 {
     private readonly IEmployeeBankService _bankService;
@@ -103,6 +104,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Create a new bank.</summary>
     [HttpPost("api/hr/banks")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -131,6 +133,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Update an existing bank.</summary>
     [HttpPut("api/hr/banks/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -163,6 +166,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Activate a bank.</summary>
     [HttpPatch("api/hr/banks/{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -184,6 +188,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Deactivate a bank.</summary>
     [HttpPatch("api/hr/banks/{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -205,6 +210,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Delete a bank (soft delete). Blocked if referenced by employee bank details.</summary>
     [HttpDelete("api/hr/banks/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -269,6 +275,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Create a branch under a specific bank.</summary>
     [HttpPost("api/hr/banks/{bankId:guid}/branches")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -322,6 +329,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Update an existing branch.</summary>
     [HttpPut("api/hr/bank-branches/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -354,6 +362,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Activate a branch.</summary>
     [HttpPatch("api/hr/bank-branches/{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -375,6 +384,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Deactivate a branch.</summary>
     [HttpPatch("api/hr/bank-branches/{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeeBankBranchDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -396,6 +406,7 @@ public class EmployeeBanksController : ControllerBase
 
     /// <summary>Delete a branch (soft delete). Blocked if referenced by employee bank details.</summary>
     [HttpDelete("api/hr/bank-branches/{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

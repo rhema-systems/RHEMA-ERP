@@ -192,19 +192,36 @@ public class StaffRequisitionAttachment : TenantEntity
 
     [MaxLength(200)]
     public string FileName { get; set; } = string.Empty;
-    
+
     [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
-    
+
     [MaxLength(1000)]
     public string? Description { get; set; }
-    
+
     public DateTime UploadDate { get; set; }
-	
+
 	public Guid UploadedById { get; set; }
-    
+
 	[ForeignKey(nameof(UploadedById))]
     public virtual Employee UploadedBy { get; set; } = null!;
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    /// <remarks>
+    /// Null on rows written before requisition attachments moved onto the controlled-upload gate,
+    /// where <see cref="FilePath"/> arrived from the caller's payload and no file was ever stored.
+    /// The download endpoint falls back to the path for those, exactly as the appraisal
+    /// attachments do.
+    /// </remarks>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 }
 
 public class StaffRequisitionComment : TenantEntity

@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, FileText, DollarSign } from 'lucide-react';
@@ -66,6 +67,12 @@ export default function TenderReview({ formData, onSubmit, loading = false, butt
             <p className="text-sm">{formData.description}</p>
           </div>
         )}
+        {formData.bidValidityPeriodDays != null && (
+          <div className="mt-4">
+            <p className="text-sm text-gray-500">Bid validity</p>
+            <p className="text-sm">{formData.bidValidityPeriodDays} calendar days from submission closing</p>
+          </div>
+        )}
       </div>
 
       {/* Evaluation Template */}
@@ -85,21 +92,21 @@ export default function TenderReview({ formData, onSubmit, loading = false, butt
       <div className="border rounded-lg p-4">
         <h3 className="text-lg font-semibold mb-4">Tender Lots</h3>
         <p className="text-sm text-gray-600">
-          {formData.items.length} lot(s) added
+          {formData.lots.length} lot(s) added
         </p>
-        {formData.items.length > 0 && (
+        {formData.lots.length > 0 && (
           <div className="mt-4 space-y-2">
-            {formData.items.slice(0, 3).map((item, index) => (
-              <div key={index} className="text-sm border-l-2 border-blue-500 pl-3">
-                <p className="font-medium">{item.description}</p>
+            {formData.lots.slice(0, 3).map((lot, index) => (
+              <div key={lot.id || lot.lotCode || index} className="text-sm border-l-2 border-blue-500 pl-3">
+                <p className="font-medium">{lot.lotCode}: {lot.title}</p>
                 <p className="text-gray-500">
-                  Quantity: {item.quantity} {item.unitOfMeasure || ''}
+                  {lot.items?.length || 0} item(s)
                 </p>
               </div>
             ))}
-            {formData.items.length > 3 && (
+            {formData.lots.length > 3 && (
               <p className="text-sm text-gray-500">
-                ... and {formData.items.length - 3} more lot(s)
+                ... and {formData.lots.length - 3} more lot(s)
               </p>
             )}
           </div>
@@ -235,4 +242,3 @@ export default function TenderReview({ formData, onSubmit, loading = false, butt
     </div>
   );
 }
-

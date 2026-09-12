@@ -25,6 +25,9 @@ public class HealthcareFacilityDto : BaseDto
     public string? City { get; set; }
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>Administrative area the facility stands in; City is a snapshot of it.</summary>
+    public Guid? GeoAreaId { get; set; }
     public string? CountryName { get; set; }
     public string? PrimaryPhone { get; set; }
     public string? EmergencyPhone { get; set; }
@@ -106,6 +109,9 @@ public class CreateHealthcareFacilityDto : CreateDtoBase
     [MaxLength(70)]
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>Administrative area the facility stands in; City is a snapshot of it.</summary>
+    public Guid? GeoAreaId { get; set; }
     [MaxLength(50)]
     public string? PrimaryPhone { get; set; }
     [MaxLength(50)]
@@ -175,6 +181,9 @@ public class UpdateHealthcareFacilityDto : UpdateDtoBase
     [MaxLength(70)]
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>Administrative area the facility stands in; City is a snapshot of it.</summary>
+    public Guid? GeoAreaId { get; set; }
     [MaxLength(50)]
     public string? PrimaryPhone { get; set; }
     [MaxLength(50)]
@@ -991,7 +1000,11 @@ public class MedicalInsuranceProviderDocumentDto : BaseDto
     public Guid ProviderId { get; set; }
     public string ProviderName { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty;
+    /// <summary>⚠ Legacy path, empty on anything uploaded through the gate. Never a URL.</summary>
     public string FilePath { get; set; } = string.Empty;
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
     public MedicalInsuranceProviderDocumentType DocumentType { get; set; }
     public string DocumentTypeName => DocumentType.ToString();
     public string? Description { get; set; }
@@ -1006,8 +1019,24 @@ public class CreateMedicalInsuranceProviderDocumentDto : CreateDtoBase
     public Guid ProviderId { get; set; }
     [Required][MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
-    [Required][MaxLength(500)]
+
+    /// <summary>
+    /// Legacy storage path, no longer required and refused when an API caller supplies it — see
+    /// the controller. Files arrive through <c>POST provider-documents/upload</c>, which puts them
+    /// past the malware scanner into private storage and fills the three ids below instead.
+    /// </summary>
+    [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [Required]
     public MedicalInsuranceProviderDocumentType DocumentType { get; set; }
     [MaxLength(500)]
@@ -2102,6 +2131,17 @@ public class NHISClaimDocumentDto : BaseDto
     public Guid NHISClaimId { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Set on a row that came through the controlled boundary. A client uses this to tell a
+    /// downloadable document from a legacy row whose <c>FilePath</c> names a file the server never
+    /// received: offer the download only when it is set.
+    /// </summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
+
     public string? Description { get; set; }
     public DateTime UploadDate { get; set; }
 }
@@ -2112,8 +2152,24 @@ public class CreateNHISClaimDocumentDto : CreateDtoBase
     public Guid NHISClaimId { get; set; }
     [Required][MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
-    [Required][MaxLength(500)]
+
+    /// <summary>
+    /// Legacy storage path, no longer required and refused when an API caller supplies it — see
+    /// the controller. Files arrive through <c>POST nhis-claims/documents/upload</c>, which puts
+    /// them past the malware scanner into private storage and fills the three ids below instead.
+    /// </summary>
+    [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [MaxLength(500)]
     public string? Description { get; set; }
 }
@@ -2204,8 +2260,10 @@ public class MedicalExpenseClaimDetailDto : MedicalExpenseClaimDto
 public class CreateMedicalExpenseClaimDto : CreateDtoBase
 {
     /// <summary>
-    /// Optional. When omitted, the claim is filed for the authenticated caller.
-    /// HR/Admin may set this to file a claim on behalf of another employee.
+    /// The employee the claim is for. <b>Required</b> on the HR endpoint
+    /// (<c>POST api/medical-expense-claims</c>), which files on an employee's behalf.
+    /// <b>Ignored</b> on the employee self-service endpoint, which always files for the
+    /// authenticated caller and never accepts a caller-supplied subject.
     /// </summary>
     public Guid? EmployeeId { get; set; }
     public bool IsForDependent { get; set; }
@@ -2396,14 +2454,34 @@ public class MedicalExpenseDocumentDto : BaseDto
     public DateTime UploadDate { get; set; }
 }
 
+/// <summary>
+/// Internal carrier for a claim document that has already been through the controlled-upload gate.
+/// </summary>
+/// <remarks>
+/// <b>Not a request body.</b> Receipts arrive as multipart content on
+/// <c>POST api/medical-expense-claims/{claimId}/documents</c>, which scans and stores the bytes and
+/// then fills this in. <c>FilePath</c> is retained only for rows written before that gate existed and
+/// is left empty on new ones; it was previously accepted from the caller, which made it a
+/// path-injection sink.
+/// </remarks>
 public class CreateMedicalExpenseDocumentDto : CreateDtoBase
 {
     [Required]
     public Guid ClaimId { get; set; }
     [Required][MaxLength(255)]
     public string FileName { get; set; } = string.Empty;
-    [Required][MaxLength(500)]
+    [MaxLength(500)]
     public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [Required]
     public MedicalDocumentType Type { get; set; }
     [MaxLength(500)]

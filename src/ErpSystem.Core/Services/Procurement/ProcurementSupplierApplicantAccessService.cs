@@ -684,7 +684,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     access.VerifiedContact,
                     "Your supplier application token",
                     $"<p>{System.Net.WebUtility.HtmlEncode(message)}</p>",
-                    isHtml: true);
+                    isHtml: true,
+                    persistBody: false);
             }
             else
             {
@@ -2119,7 +2120,8 @@ public sealed class ProcurementSupplierApplicantAccessService :
                     $"<strong>Temporary password:</strong> {encodedPassword}<br/>" +
                     $"<strong>Expires:</strong> {encodedExpiry}</p>" +
                     "<p>You must change this password at first login.</p>",
-                    isHtml: true);
+                    isHtml: true,
+                    persistBody: false);
             }
             else
             {

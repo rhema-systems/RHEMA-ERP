@@ -5,6 +5,7 @@ import type {
   ProcurementTenderDocumentChange,
   ProcurementTenderDocumentChangeStatus,
   ProcurementTenderDocumentChangeType,
+  ProcurementTenderDocumentContentArtifactOption,
   ProcurementTenderDocumentFeeMode,
   ProcurementTenderDocumentRegister,
   ProcurementTenderDocumentTemplateStatus,
@@ -37,6 +38,7 @@ export const tenderDocumentChangeTypeLabel: Record<
   Addendum: 'Addendum',
   SubmissionDeadlineExtension: 'Submission deadline extension',
   BidValidityExtension: 'Bid-validity extension',
+  UnpublishedScheduleReschedule: 'Pre-publication schedule change',
 };
 
 export const procurementMethodLabel: Record<string, string> = {
@@ -67,7 +69,8 @@ export const hasAnyTenderDocumentAction = (
 ) => actions.some((action) => hasTenderDocumentAction(allowedActions, action));
 
 export const validateTenderDocumentTemplate = (
-  value: SaveProcurementTenderDocumentTemplate
+  value: SaveProcurementTenderDocumentTemplate,
+  options: { requireContent?: boolean } = {}
 ) => {
   if (!value.templateCode.trim()) return 'Template code is required.';
   if (!value.name.trim()) return 'Template name is required.';
@@ -80,10 +83,22 @@ export const validateTenderDocumentTemplate = (
   if (value.policySetVersion < 1) return 'Policy version is required.';
   if (!value.sourceConfigurationProfileId)
     return 'Source configuration profile is required.';
-  if (!value.contentReference.trim())
-    return 'Controlled content reference is required.';
-  if (!/^[A-Fa-f0-9]{64}$/.test(value.contentChecksumSha256.trim()))
-    return 'Content checksum must be a 64-character SHA-256 value.';
+  const hasAnyContent = Boolean(
+    value.contentWorkflowEvidenceDocumentId ||
+      value.contentFileUploadRecordId ||
+      value.contentReference.trim() ||
+      value.contentChecksumSha256.trim()
+  );
+  if (options.requireContent !== false || hasAnyContent) {
+    if (!value.contentWorkflowEvidenceDocumentId)
+      return 'Select a controlled workflow evidence document.';
+    if (value.contentFileUploadRecordId)
+      return 'Controlled content must use one workflow evidence document.';
+    if (!value.contentReference.trim())
+      return 'Controlled content reference is required.';
+    if (!/^[A-Fa-f0-9]{64}$/.test(value.contentChecksumSha256.trim()))
+      return 'Content checksum must be a 64-character SHA-256 value.';
+  }
   if (!value.workflowDefinitionId)
     return 'Exact Published workflow is required.';
   if (!value.effectiveFromUtc) return 'Effective-from date is required.';
@@ -102,6 +117,31 @@ export const validateTenderDocumentTemplate = (
     return 'Effective-to date must follow effective-from date.';
   return undefined;
 };
+
+/** Use only the server's source-specific recommendation; never guess from the first option. */
+export const suggestedTenderDocumentSelection = (
+  current: string,
+  suggestedId: string | undefined,
+  available: ReadonlyArray<{ id: string }>
+): string => current || (suggestedId && available.some(item => item.id === suggestedId) ? suggestedId : '');
+
+export const isTenderDocumentContentArtifactApproved = (
+  artifact: ProcurementTenderDocumentContentArtifactOption
+) =>
+  artifact.isCurrent &&
+  artifact.verificationStatus === 1 &&
+  artifact.malwareScanStatus === 1;
+
+export const applyTenderDocumentContentArtifact = (
+  value: SaveProcurementTenderDocumentTemplate,
+  artifact: ProcurementTenderDocumentContentArtifactOption
+): SaveProcurementTenderDocumentTemplate => ({
+  ...value,
+  contentWorkflowEvidenceDocumentId: artifact.id,
+  contentFileUploadRecordId: undefined,
+  contentReference: artifact.filePath,
+  contentChecksumSha256: artifact.sha256,
+});
 
 export const validateTenderDocumentIssue = (
   request: IssueProcurementTenderDocumentRegisterRequest,
@@ -128,7 +168,7 @@ export const validateTenderDocumentChange = (
   request: CreateProcurementTenderDocumentChangeRequest,
   register: Pick<
     ProcurementTenderDocumentRegister,
-    'effectiveSubmissionDeadlineUtc' | 'effectiveBidValidityUntilUtc'
+    'effectiveSubmissionDeadlineUtc' | 'effectiveBidValidityUntilUtc' | 'openingScheduledAtUtc'
   >,
   now = new Date()
 ) => {
@@ -139,6 +179,18 @@ export const validateTenderDocumentChange = (
     return 'Shared evidence reference is required.';
   if (request.changeType === 'Addendum' && !request.newTemplateVersionId)
     return 'Addendum requires an exact approved replacement version.';
+  if (request.changeType === 'UnpublishedScheduleReschedule') {
+    const deadline = new Date(request.newValueUtc ?? '');
+    const opening = new Date(request.newOpeningScheduledAtUtc ?? '');
+    if (Number.isNaN(deadline.getTime())) return 'A valid new submission deadline is required.';
+    if (deadline <= now || deadline <= new Date(register.effectiveSubmissionDeadlineUtc))
+      return 'The new submission deadline must be in the future and later than the current deadline.';
+    if (Number.isNaN(opening.getTime())) return 'A valid new opening time is required.';
+    if (opening <= deadline || (register.openingScheduledAtUtc && opening <= new Date(register.openingScheduledAtUtc)))
+      return 'The new opening time must be after the new submission deadline and the current opening time.';
+    if (deadline >= new Date(register.effectiveBidValidityUntilUtc))
+      return 'The new submission deadline must remain before the current bid-validity end.';
+  }
   if (request.changeType === 'SubmissionDeadlineExtension') {
     if (!request.newValueUtc) return 'New submission deadline is required.';
     const next = new Date(request.newValueUtc);

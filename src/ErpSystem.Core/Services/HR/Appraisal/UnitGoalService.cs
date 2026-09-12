@@ -294,22 +294,58 @@ public class UnitGoalService : IUnitGoalService
 
     // ─── Attachments ─────────────────────────────────────────────────────────
 
-    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(Guid goalId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Attaches a file to a unit goal.
+    ///
+    /// <para>Replaces a path that could never have run — see the note on
+    /// <c>CheckInService.AddAttachmentAsync</c>. This one additionally never set
+    /// <c>EntityType</c>, so even had the FK held, the row would have carried the default
+    /// discriminator rather than <c>Goal</c>.</para>
+    /// </summary>
+    public async Task<AppraisalAttachmentDto> AddAttachmentAsync(
+        Guid goalId, Guid uploadedById, string fileName, long? fileSizeBytes, string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
         await GetOwnedAsync(goalId, cancellationToken);
         var tenantId = GetTenantId();
 
-        var entity = dto.ToEntity();
-        entity.TenantId = tenantId;
-        entity.UnitGoalId = goalId;
-
-        entity.UploadDate = DateTime.UtcNow;
+        var entity = new AppraisalAttachment
+        {
+            TenantId           = tenantId,
+            UnitGoalId         = goalId,
+            EntityType         = AppraisalAttachmentEntityType.Goal,
+            FileName           = fileName,
+            FilePath           = string.Empty,
+            FileSizeBytes      = fileSizeBytes,
+            Description        = description,
+            UploadDate         = DateTime.UtcNow,
+            UploadedById       = uploadedById,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
+        };
 
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        var saved = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == entity.Id && a.TenantId == tenantId, cancellationToken);
+
         _logger.LogInformation("Attachment added to unit goal {GoalId}: {AttachmentId}", goalId, entity.Id);
-        return entity.ToDto();
+        return saved!.ToDto();
+    }
+
+    public async Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid goalId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.UnitGoalId == goalId && a.TenantId == tenantId, cancellationToken);
+        return entity?.ToDto();
     }
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid goalId, CancellationToken cancellationToken = default)

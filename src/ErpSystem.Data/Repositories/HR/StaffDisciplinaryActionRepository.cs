@@ -16,9 +16,40 @@ public class StaffDisciplinaryActionRepository
 {
     public StaffDisciplinaryActionRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<StaffDisciplinaryAction?> GetWithFullDetailsAsync(Guid id)
-    {
-        return await _dbSet
+    /// <summary>
+    /// The one query every list read starts from: tenant-scoped, soft-delete-filtered, and carrying
+    /// exactly the navigations <c>ToSummaryDto</c> touches.
+    /// </summary>
+    /// <remarks>
+    /// The include set is not a convenience. <c>StaffDisciplinaryActionSummaryDto</c> derives
+    /// HasWarning, HasSuspension, HasFine, HasTermination and AppealFiled from these navigations, and
+    /// before this helper only <c>GetByEmployeeAsync</c> loaded them — so on twelve of the fourteen
+    /// list endpoints all five flags came back false regardless of the truth, and the register's
+    /// sanction badges quietly lied about which cases carried a penalty.
+    /// </remarks>
+    private IQueryable<StaffDisciplinaryAction> SummaryScoped(Guid tenantId) =>
+        _dbSet
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted)
+            .Include(d => d.Employee).ThenInclude(e => e.Department)
+            .Include(d => d.StaffOffense)
+            .Include(d => d.ActionType)
+            .Include(d => d.Warning)
+            .Include(d => d.Suspension)
+            .Include(d => d.Fine)
+            .Include(d => d.Termination)
+            .Include(d => d.Appeal);
+
+    /// <remarks>
+    /// <c>AsSplitQuery</c> is required, not an optimisation. This is 32 includes spanning eight
+    /// collections; as a single query SQL Server builds one row per combination of children and the
+    /// plan exceeds the 8060-byte worktable row limit, so the read fails outright the moment a case
+    /// has more than a trivial number of children. The same shape was fixed on the SHE incident,
+    /// inspection and permit detail reads and on staff-movement create.
+    /// </remarks>
+    private IQueryable<StaffDisciplinaryAction> DetailScoped(Guid tenantId) =>
+        _dbSet
+            .Where(d => d.TenantId == tenantId && !d.IsDeleted)
+            .AsSplitQuery()
             .Include(d => d.Employee).ThenInclude(e => e.Department)
             .Include(d => d.StaffOffense)
             .Include(d => d.ReportedBy)
@@ -49,209 +80,181 @@ public class StaffDisciplinaryActionRepository
             .Include(d => d.Notes).ThenInclude(n => n.CreatedByEmployee)
             .Include(d => d.Notifications).ThenInclude(n => n.SentBy)
             .Include(d => d.LegalReviews).ThenInclude(lr => lr.ReferredBy)
-            .Include(d => d.LegalReviews).ThenInclude(lr => lr.ExternalCounsel)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted);
+            .Include(d => d.LegalReviews).ThenInclude(lr => lr.ExternalCounsel);
+
+    public async Task<StaffDisciplinaryAction?> GetWithFullDetailsAsync(Guid tenantId, Guid id)
+    {
+        return await DetailScoped(tenantId).FirstOrDefaultAsync(d => d.Id == id);
     }
 
-    public async Task<StaffDisciplinaryAction?> GetByCaseNumberAsync(string caseNumber)
+    public async Task<StaffDisciplinaryAction?> GetByCaseNumberAsync(Guid tenantId, string caseNumber)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
+        return await SummaryScoped(tenantId)
             .Include(d => d.ReportedBy)
-            .Include(d => d.ActionType)
-            .FirstOrDefaultAsync(d => d.CaseNumber == caseNumber && !d.IsDeleted);
+            .FirstOrDefaultAsync(d => d.CaseNumber == caseNumber);
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByEmployeeAsync(Guid employeeId)
+    /// <summary>
+    /// The register. Paged in the database, not in memory, and over the same include set as every
+    /// other list read — the service used to build this from a bare queryable with no includes at
+    /// all, so the main case list rendered blank employee and offense names.
+    /// </summary>
+    public async Task<(IEnumerable<StaffDisciplinaryAction> Items, int TotalCount)> GetPagedAsync(
+        Guid tenantId, int pageNumber, int pageSize)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Include(d => d.Warning)
-            .Include(d => d.Suspension)
-            .Include(d => d.Fine)
-            .Include(d => d.Termination)
-            .Include(d => d.Appeal)
-            .Where(d => d.EmployeeId == employeeId && !d.IsDeleted)
+        var query = SummaryScoped(tenantId);
+        var totalCount = await query.CountAsync();
+
+        var items = await query
+            .OrderByDescending(d => d.IncidentDate)
+            .ThenByDescending(d => d.ReportedDate)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return (items, totalCount);
+    }
+
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByEmployeeAsync(Guid tenantId, Guid employeeId)
+    {
+        return await SummaryScoped(tenantId)
+            .Where(d => d.EmployeeId == employeeId)
             .OrderByDescending(d => d.IncidentDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByStatusAsync(DisciplinaryStatus status)
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByStatusAsync(Guid tenantId, DisciplinaryStatus status)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Where(d => d.Status == status && !d.IsDeleted)
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Status == status)
             .OrderByDescending(d => d.IncidentDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByOffenseAsync(Guid offenseId)
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByOffenseAsync(Guid tenantId, Guid offenseId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Where(d => d.StaffOffenseId == offenseId && !d.IsDeleted)
+        return await SummaryScoped(tenantId)
+            .Where(d => d.StaffOffenseId == offenseId)
             .OrderByDescending(d => d.IncidentDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetBySeverityAsync(StaffOffenseSeverity minimumSeverity)
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetBySeverityAsync(Guid tenantId, StaffOffenseSeverity minimumSeverity)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Where(d => d.Severity >= minimumSeverity && !d.IsDeleted)
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Severity >= minimumSeverity)
             .OrderByDescending(d => d.Severity)
             .ThenByDescending(d => d.IncidentDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetOpenCasesAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetOpenCasesAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Where(d => !d.IsDeleted
-                     && d.Status != DisciplinaryStatus.Closed
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Status != DisciplinaryStatus.Closed
                      && d.Status != DisciplinaryStatus.Dismissed)
             .OrderByDescending(d => d.IncidentDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetPendingInvestigationAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetPendingInvestigationAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
+        return await SummaryScoped(tenantId)
             .Include(d => d.Investigation)
-            .Where(d => !d.IsDeleted && d.RequiresInvestigation && d.Investigation == null)
+            .Where(d => d.RequiresInvestigation && d.Investigation == null)
             .OrderBy(d => d.ReportedDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetPendingHearingAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetPendingHearingAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
+        return await SummaryScoped(tenantId)
             .Include(d => d.Hearing)
-            .Where(d => !d.IsDeleted && d.HearingRequired && d.Hearing == null)
+            .Where(d => d.HearingRequired && d.Hearing == null)
             .OrderBy(d => d.ReportedDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetPendingClosureAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetPendingClosureAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Include(d => d.ActionType)
-            .Where(d => !d.IsDeleted && d.Status == DisciplinaryStatus.DecisionMade)
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Status == DisciplinaryStatus.DecisionMade)
             .OrderBy(d => d.DecisionDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveWarningAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveWarningAsync(Guid tenantId)
     {
         var today = DateTime.UtcNow;
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Include(d => d.Warning)
-            .Where(d => !d.IsDeleted
-                     && d.Warning != null
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Warning != null
                      && (d.Warning.WarningExpiryDate == null || d.Warning.WarningExpiryDate > today))
             .OrderBy(d => d.Warning!.WarningExpiryDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveSuspensionAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveSuspensionAsync(Guid tenantId)
     {
         var today = DateTime.UtcNow;
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Include(d => d.Suspension)
-            .Where(d => !d.IsDeleted
-                     && d.Suspension != null
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Suspension != null
                      && (d.Suspension.SuspensionStartDate == null || d.Suspension.SuspensionStartDate <= today)
                      && (d.Suspension.SuspensionEndDate == null || d.Suspension.SuspensionEndDate >= today))
             .OrderBy(d => d.Suspension!.SuspensionEndDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithOutstandingFineAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithOutstandingFineAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Include(d => d.Fine)
-            .Where(d => !d.IsDeleted
-                     && d.Fine != null
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Fine != null
                      && d.Fine.FinePaymentStatus != DisciplinaryFinePaymentStatus.FullyPaid)
             .OrderBy(d => d.Fine!.FineDueDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithPendingTerminationAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithPendingTerminationAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Include(d => d.Termination)
+        return await SummaryScoped(tenantId)
             .Include(d => d.Separation)
-            .Where(d => !d.IsDeleted && d.Termination != null && d.Separation == null)
+            .Where(d => d.Termination != null && d.Separation == null)
             .OrderByDescending(d => d.DecisionDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveAppealAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveAppealAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Include(d => d.Appeal)
-            .Where(d => !d.IsDeleted
-                     && d.Appeal != null
+        return await SummaryScoped(tenantId)
+            .Where(d => d.Appeal != null
                      && d.Appeal.AppealStatus != DisciplineAppealStatus.DecisionMade
                      && d.Appeal.AppealStatus != DisciplineAppealStatus.Dismissed)
             .OrderByDescending(d => d.Appeal!.FiledDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveLegalReviewAsync()
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetWithActiveLegalReviewAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
+        return await SummaryScoped(tenantId)
             .Include(d => d.LegalReviews)
-            .Where(d => !d.IsDeleted
-                     && d.LegalReviews.Any(lr => !lr.IsDeleted && lr.LegalReviewCompleteDate == null))
+            .Where(d => d.LegalReviews.Any(lr => !lr.IsDeleted && lr.LegalReviewCompleteDate == null))
             .OrderByDescending(d => d.LegalReviews
                 .Where(lr => !lr.IsDeleted && lr.LegalReviewCompleteDate == null)
                 .Min(lr => lr.ReferredToLegalDate))
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByIncidentDateRangeAsync(DateTime from, DateTime to)
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByIncidentDateRangeAsync(Guid tenantId, DateTime from, DateTime to)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Where(d => !d.IsDeleted && d.IncidentDate >= from && d.IncidentDate <= to)
+        return await SummaryScoped(tenantId)
+            .Where(d => d.IncidentDate >= from && d.IncidentDate <= to)
             .OrderByDescending(d => d.IncidentDate)
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByReportedDateRangeAsync(DateTime from, DateTime to)
+    public async Task<IEnumerable<StaffDisciplinaryAction>> GetByReportedDateRangeAsync(Guid tenantId, DateTime from, DateTime to)
     {
-        return await _dbSet
-            .Include(d => d.Employee).ThenInclude(e => e.Department)
-            .Include(d => d.StaffOffense)
-            .Where(d => !d.IsDeleted && d.ReportedDate >= from && d.ReportedDate <= to)
+        return await SummaryScoped(tenantId)
+            .Where(d => d.ReportedDate >= from && d.ReportedDate <= to)
             .OrderByDescending(d => d.ReportedDate)
             .ToListAsync();
     }
@@ -262,10 +265,11 @@ public class StaffDisciplinaryActionRepository
             .AnyAsync(d => d.CaseNumber == caseNumber && d.TenantId == tenantId && !d.IsDeleted);
     }
 
-    public async Task<int> GetOpenCaseCountForEmployeeAsync(Guid employeeId)
+    public async Task<int> GetOpenCaseCountForEmployeeAsync(Guid tenantId, Guid employeeId)
     {
         return await _dbSet
-            .CountAsync(d => d.EmployeeId == employeeId
+            .CountAsync(d => d.TenantId == tenantId
+                          && d.EmployeeId == employeeId
                           && !d.IsDeleted
                           && d.Status != DisciplinaryStatus.Closed
                           && d.Status != DisciplinaryStatus.Dismissed);

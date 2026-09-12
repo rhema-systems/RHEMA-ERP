@@ -7,6 +7,7 @@ import type { ProcurementMethodType } from '@/types/procurement-policy';
 import { throwProcurementResponseError } from '@/lib/procurement-api-error';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+export const tenderDetailQueryKey = (id: string) => ['procurement', 'tender', id] as const;
 
 // Helper function to get auth headers
 const getAuthHeaders = () => {
@@ -38,6 +39,7 @@ export interface TenderDto {
   sourcingReleaseId?: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType;
+  usesControlledTenderLifecycle?: boolean;
   bidCount: number;
   invitationCount: number;
   createdAt: string;
@@ -59,6 +61,7 @@ export interface TenderDetailDto extends TenderDto {
   evaluationCriteriaJson?: string;
   notes?: string;
   termsAndConditions?: string;
+  bidValidityPeriodDays?: number | null;
   requiredDocuments?: string; // JSON array of required document types
   requiresAcceptanceDeclaration?: boolean;
   acceptanceDeclarationDocumentPath?: string;
@@ -112,6 +115,7 @@ export interface CreateTenderDto {
   evaluationCriteriaJson?: string;
   notes?: string;
   termsAndConditions?: string;
+  bidValidityPeriodDays?: number | null;
   requiredDocuments?: string; // JSON string of TenderDocumentRequirement[]
   requiresAcceptanceDeclaration?: boolean;
   evaluationTemplateId?: string;
@@ -140,6 +144,7 @@ export interface UpdateTenderDto {
   evaluationCriteriaJson?: string;
   notes?: string;
   termsAndConditions?: string;
+  bidValidityPeriodDays?: number | null;
   requiredDocuments?: string; // JSON string of TenderDocumentRequirement[]
   requiresAcceptanceDeclaration?: boolean;
   evaluationTemplateId?: string;
@@ -353,6 +358,8 @@ export interface CreateTenderRevisionDto {
 }
 
 export interface TenderBidSummaryDto {
+  isSealed?: boolean;
+  isFinancialProposalSealed?: boolean;
   id: string;
   tenderId: string;
   businessPartnerId: string;
@@ -549,8 +556,7 @@ class TenderService {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to create tender');
+      await throwProcurementResponseError(response, 'Failed to create tender');
     }
 
     return response.json();
@@ -567,8 +573,7 @@ class TenderService {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to update tender');
+      await throwProcurementResponseError(response, 'Failed to update tender');
     }
 
     return response.json();
@@ -587,8 +592,7 @@ class TenderService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to submit tender for approval');
+      await throwProcurementResponseError(response, 'Failed to submit tender for approval');
     }
   }
 
@@ -606,8 +610,7 @@ class TenderService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to approve tender');
+      await throwProcurementResponseError(response, 'Failed to approve tender');
     }
   }
 
@@ -644,8 +647,7 @@ class TenderService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to publish tender');
+      await throwProcurementResponseError(response, 'Failed to publish tender');
     }
 
     return response.json();

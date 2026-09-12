@@ -1,5 +1,6 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR.PromotionTransfer;
 
 namespace ErpSystem.Core.DTOs.HR;
 
@@ -93,6 +94,10 @@ public class SuccessionPlanSummaryDto
     public int PlanYear { get; set; }
     public int VersionNumber { get; set; }
     public bool IsActiveVersion { get; set; }
+
+    /// <summary>The position the plan is for. Present so a register row can link to it.</summary>
+    public Guid PositionId { get; set; }
+
     public string PositionTitle { get; set; } = string.Empty;
     public string? CurrentIncumbentName { get; set; }
     public SuccessionPlanStatus Status { get; set; }
@@ -202,32 +207,43 @@ public class UpdateSuccessionPlanDto : UpdateDtoBase
     public DateTime? NextReviewDate { get; set; }
 }
 
-public class ReviewSuccessionPlanDto
+/// <remarks>
+/// ⚠ <c>ReviewedById</c> and <c>ReviewDate</c> were removed deliberately. Both were caller-declared:
+/// the reviewer's identity came from the request body, so any caller could record a review under a
+/// colleague's name, and the date could be backdated at will. Who reviewed a succession plan and
+/// when are facts the server knows and the client cannot — the actor comes from the token and the
+/// date from the clock. See <c>plans/HR-Area-13-Succession-Build-Plan.md</c> §3.5.
+/// </remarks>
+/// <remarks>
+/// ⚠ Replaces <c>ReviewSuccessionPlanDto</c>, which carried a <c>NewStatus</c> the caller chose.
+/// That let a reviewer move a plan to any status they liked — including straight to Approved,
+/// around whatever approval the organisation had configured. A status the caller picks is not an
+/// approval decision, it is a way past one. Rejection is now the only non-approval outcome, and the
+/// engine owns the transition.
+/// </remarks>
+public class RejectSuccessionPlanDto
 {
     [Required]
     public Guid PlanId { get; set; }
 
     [Required]
-    public Guid ReviewedById { get; set; }
-
-    public DateTime ReviewDate { get; set; } = DateTime.UtcNow;
-
     [MaxLength(2000)]
-    public string? ReviewNotes { get; set; }
-
-    [Required]
-    public SuccessionPlanStatus NewStatus { get; set; }
+    public string RejectionReason { get; set; } = string.Empty;
 }
 
+/// <remarks>
+/// ⚠ <c>ApprovedById</c> and <c>ApprovalDate</c> were removed: approval names a person as the
+/// intended successor to a post, and an approver the caller chose for themselves is not an
+/// approval. The approver is the signed-in user and the date is the clock.
+///
+/// ⚠ Since slice 8 this is an **approval step on the generic workflow engine**, not a status write.
+/// A multi-step definition leaves the plan at <c>UnderReview</c> after an intermediate approval, so
+/// the caller must re-read rather than assume the plan is now Approved.
+/// </remarks>
 public class ApproveSuccessionPlanDto
 {
     [Required]
     public Guid PlanId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovalDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(2000)]
     public string? ApprovalNotes { get; set; }
@@ -518,15 +534,19 @@ public class UpdateSuccessionCandidateDto : UpdateDtoBase
     public string? RiskMitigationPlan { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>AssessedById</c> and <c>AssessmentDate</c> were removed deliberately, and this one mattered
+/// more than the others. Measured 2026-08-18: a desk actor posted an assessment naming an unrelated
+/// employee as the assessor, and it was stored — <c>assessedByName</c> came back as someone who had
+/// never seen the candidate. Worse, the same call sets <c>IsRecommended</c>, and being recommended
+/// is the gate on <c>SelectCandidateAsync</c>. So a caller could manufacture a recommendation under
+/// a colleague's name and then select the candidate on the strength of it. The assessor is the
+/// signed-in user and the date is the clock.
+/// </remarks>
 public class AssessCandidateDto
 {
     [Required]
     public Guid CandidateId { get; set; }
-
-    [Required]
-    public Guid AssessedById { get; set; }
-
-    public DateTime AssessmentDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(4000)]
     public string? AssessmentNotes { get; set; }
@@ -919,7 +939,9 @@ public class CreateSuccessionActionDto : CreateDtoBase
     public ActionPriority Priority { get; set; }
 
     public Guid? ResponsiblePersonId { get; set; }
-    public Guid? AssignedById { get; set; }
+
+    // AssignedById is deliberately absent — see UpdateSuccessionActionDto below. Adding an action
+    // to a plan IS the act of assigning it, so the assigner comes from the token.
 
     public DateTime? DueDate { get; set; }
 
@@ -939,8 +961,15 @@ public class UpdateSuccessionActionDto : UpdateDtoBase
     public ActionPriority Priority { get; set; }
 
     public Guid? ResponsiblePersonId { get; set; }
-    public Guid? AssignedById { get; set; }
 
+    /// <remarks>
+    /// <c>AssignedById</c> was here and was copied straight onto the entity's <c>Employee</c> FK,
+    /// while the token's id went only to <c>CreatedBy</c> — so any HR user could record a
+    /// colleague as the person who assigned an action. The sixth instance of the D-05 shape, and
+    /// cleared the same way: the assigner is stamped from the token on create and this route no
+    /// longer touches it, so the original assigner survives every later edit. Nothing had ever
+    /// sent the field, so no caller broke.
+    /// </remarks>
     public DateTime? DueDate { get; set; }
     public DateTime? StartedDate { get; set; }
 
@@ -1024,6 +1053,17 @@ public class SuccessionDocumentDto : BaseDto
     public DateTime UploadDate { get; set; }
     public Guid UploadedById { get; set; }
     public string UploadedByName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Set on a row that came through the controlled boundary. A client uses this to tell a
+    /// downloadable document from a legacy row whose <c>DocumentUrl</c> names a file the server
+    /// never received: offer the download only when it is set.
+    /// </summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
+
     public long FileSizeBytes { get; set; }
     public string? FileHash { get; set; }
     public bool IsConfidential { get; set; }
@@ -1044,15 +1084,31 @@ public class CreateSuccessionDocumentDto : CreateDtoBase
     [MaxLength(100)]
     public string DocumentType { get; set; } = string.Empty;
 
-    [Required]
+    /// <summary>
+    /// Legacy storage location, no longer required and refused when an API caller supplies it —
+    /// see the controllers. Files arrive through <c>POST api/succession-documents/upload</c>,
+    /// which puts them past the malware scanner into private storage and fills the three ids
+    /// below instead.
+    /// </summary>
     [MaxLength(1000)]
     public string DocumentUrl { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    [Required]
-    public Guid UploadedById { get; set; }
+    // D-15: UploadedById was [Required] here and copied straight onto the entity's Employee FK
+    // while the token's id went only to CreatedBy — so the person recorded as having produced a
+    // succession document was whoever the client said. It is now stamped by the service from the
+    // authenticated employee and has no place in the request body.
 
     public long FileSizeBytes { get; set; }
 
@@ -1106,6 +1162,7 @@ public class TalentPoolSummaryDto
     public DateTime? ValidTo { get; set; }
 }
 
+[CallerSuppliesIdentifiers]
 public class CreateTalentPoolDto : CreateDtoBase
 {
     [Required]
@@ -1192,6 +1249,7 @@ public class CreateTalentPoolTypeDefinitionDto : CreateDtoBase
     public string? Description { get; set; }
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     public int SortOrder { get; set; }
@@ -1208,6 +1266,7 @@ public class UpdateTalentPoolTypeDefinitionDto : UpdateDtoBase
     public string? Description { get; set; }
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     public int SortOrder { get; set; }
@@ -1316,10 +1375,15 @@ public class CreateTalentPoolMemberDto : CreateDtoBase
     [MaxLength(2000)]
     public string? DevelopmentGaps { get; set; }
 
+    /// <summary>
+    /// When the employee joined the pool. Caller-set on purpose — unlike the nominator, this is a
+    /// business fact the desk may legitimately be back-recording.
+    /// </summary>
     [Required]
     public DateTime EnrolledDate { get; set; }
 
-    public Guid? NominatedById { get; set; }
+    // ⚠ NominatedById was removed. It arrived on the body and was honoured, so a desk actor could
+    // record a nomination under a colleague's name. The nominator is the signed-in user.
 
     [MaxLength(2000)]
     public string? NominationNotes { get; set; }
@@ -1456,15 +1520,20 @@ public class UpdateTalentReviewSessionDto : UpdateDtoBase
     public Guid? OrganizationUnitId { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>FinalizedById</c> and <c>FinalizedDate</c> were removed, and this one was not merely
+/// spoofable — it was **the reason the endpoint crashed**. <c>FinalizedById</c> was a *required*
+/// Guid the client had no way to know, so a caller that omitted it sent <c>Guid.Empty</c> and the
+/// save died on <c>FK_TalentReviewSessions_Employees_FinalizedById</c> with a 500. Measured
+/// 2026-08-18.
+///
+/// The clearest statement of the rule this area keeps rediscovering: a value the client cannot know
+/// is a value the client should not be sending. Here the client could not even guess it.
+/// </remarks>
 public class FinalizeTalentReviewSessionDto
 {
     [Required]
     public Guid SessionId { get; set; }
-
-    [Required]
-    public Guid FinalizedById { get; set; }
-
-    public DateTime FinalizedDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(4000)]
     public string? SessionNotes { get; set; }
@@ -1587,15 +1656,79 @@ public class UpdateTalentReviewRatingDto : UpdateDtoBase
     public Guid? RatedById { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>ConfirmedById</c> and <c>ConfirmedDate</c> removed. Measured 2026-08-18: a confirmation
+/// naming an unrelated employee and dated <c>2020-01-01</c> was stored exactly as sent. Confirming
+/// calibration is what publishes a nine-box placement to the talent pool member, so a forged
+/// confirmer is a forged provenance on a rating that then feeds promotion decisions.
+///
+/// ⚠ Note what is deliberately KEPT caller-set on the neighbouring DTOs: <c>FacilitatedById</c> on a
+/// session and <c>RatedById</c> on a rating. Those are business facts being recorded — who chaired
+/// the meeting, which manager gave the score — and a desk may legitimately record them on someone
+/// else's behalf. The line is not "every Guid ending in Id", it is: **an act performed by the
+/// caller at the moment of the call comes from the token; a fact about someone else does not.**
+/// </remarks>
+/// <summary>
+/// What the nine-box grid can suggest for an employee before a rater types anything.
+/// </summary>
+/// <remarks>
+/// <para><b>Performance only, and only ever a suggestion.</b> Decision D-4: the review pre-fills
+/// Performance from the employee's latest scored appraisal and lets the rater override it with a
+/// justification. A calibration session exists precisely to disagree with what the paperwork says,
+/// so locking the axis would defeat it.</para>
+///
+/// <para>⚠ <b>Potential is absent by necessity, not oversight.</b> <c>PotentialRating</c> exists
+/// nowhere in area 5 — appraisals carry an <c>OverallScore</c> and nothing about potential — so one
+/// axis of the nine box simply cannot be derived. That fact is what settled D-4: the grid could not
+/// have been a projection of appraisal data even if we had wanted it to be.</para>
+/// </remarks>
+/// <summary>
+/// A staff movement raised against a succession plan — the plan's outcome, seen from the plan.
+/// </summary>
+/// <remarks>
+/// A deliberately thin projection of area 8's <c>StaffMovement</c>. Succession does not own these
+/// records and must not grow a second copy of them: what a plan needs to show is that a named
+/// successor is moving into the post, and enough to link through to the movement itself.
+/// </remarks>
+public class SuccessionPlanMovementDto
+{
+    public Guid Id { get; set; }
+    public string MovementNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public StaffMovementType MovementType { get; set; }
+    public string MovementTypeName => MovementType.ToString();
+    public string? NewPositionTitle { get; set; }
+    public DateTime RequestDate { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+
+    /// <summary>The movement's own status — succession does not interpret it, only shows it.</summary>
+    public string Status { get; set; } = string.Empty;
+}
+
+public class TalentRatingSuggestionDto
+{
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>Null when the employee has no scored appraisal — the grid then starts empty.</summary>
+    public PerformanceRating? SuggestedPerformance { get; set; }
+
+    /// <summary>The appraisal the suggestion came from, so the UI can say where it got it.</summary>
+    public Guid? SourceAppraisalId { get; set; }
+    public string? SourceAppraisalNumber { get; set; }
+    public decimal? SourceOverallScore { get; set; }
+    public DateTime? SourceAppraisalDate { get; set; }
+
+    /// <summary>The employee's last confirmed nine-box placement, if any, for trend context.</summary>
+    public PerformanceRating? PreviousPerformance { get; set; }
+    public PotentialRating? PreviousPotential { get; set; }
+    public string? PreviousSessionName { get; set; }
+}
+
 public class ConfirmCalibrationDto
 {
     [Required]
     public Guid RatingId { get; set; }
-
-    [Required]
-    public Guid ConfirmedById { get; set; }
-
-    public DateTime ConfirmedDate { get; set; } = DateTime.UtcNow;
 
     [MaxLength(2000)]
     public string? CalibrationNotes { get; set; }

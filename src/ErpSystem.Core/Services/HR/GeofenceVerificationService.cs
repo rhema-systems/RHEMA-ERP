@@ -98,31 +98,45 @@ public sealed class GeofenceVerificationService : IGeofenceVerificationService
                 message: "GPS coordinates were not supplied — punch accepted without location verification.");
         }
 
-        if (zone.Shape != GeofenceShape.Circle)
+        double distance;
+        bool withinZone;
+
+        if (zone.Shape == GeofenceShape.Polygon)
         {
-            return GeofenceVerificationResult.Skipped(
-                LocationVerificationStatus.Unverified,
-                hasConfiguredZone: true,
-                hasGpsCoordinates: true,
-                message: $"Geofence zone '{zone.ZoneName}' uses {zone.Shape}; only circle zones are verified automatically.");
+            // Until 2026-09-03 every polygon zone was skipped as "Unverified", so a polygon fence
+            // enforced nothing. Distance is to the nearest edge, inside or out.
+            if (!GeofencePolygon.TryParse(zone.PolygonCoordinatesJson, out var polygon, out var parseError))
+            {
+                return GeofenceVerificationResult.Skipped(
+                    LocationVerificationStatus.Unverified,
+                    hasConfiguredZone: true,
+                    hasGpsCoordinates: true,
+                    message: $"Geofence zone '{zone.ZoneName}' has unusable polygon coordinates: {parseError}");
+            }
+
+            withinZone = GeofencePolygon.Contains(polygon, latitude!.Value, longitude!.Value);
+            distance = GeofencePolygon.DistanceToBoundaryMetres(polygon, latitude.Value, longitude.Value);
+        }
+        else
+        {
+            if (!zone.CentreLatitude.HasValue || !zone.CentreLongitude.HasValue || !zone.RadiusMetres.HasValue)
+            {
+                return GeofenceVerificationResult.Skipped(
+                    LocationVerificationStatus.Unverified,
+                    hasConfiguredZone: true,
+                    hasGpsCoordinates: true,
+                    message: $"Geofence zone '{zone.ZoneName}' is missing circle coordinates.");
+            }
+
+            distance = CalculateDistanceMetres(
+                latitude!.Value,
+                longitude!.Value,
+                zone.CentreLatitude.Value,
+                zone.CentreLongitude.Value);
+
+            withinZone = distance <= zone.RadiusMetres.Value;
         }
 
-        if (!zone.CentreLatitude.HasValue || !zone.CentreLongitude.HasValue || !zone.RadiusMetres.HasValue)
-        {
-            return GeofenceVerificationResult.Skipped(
-                LocationVerificationStatus.Unverified,
-                hasConfiguredZone: true,
-                hasGpsCoordinates: true,
-                message: $"Geofence zone '{zone.ZoneName}' is missing circle coordinates.");
-        }
-
-        var distance = CalculateDistanceMetres(
-            latitude!.Value,
-            longitude!.Value,
-            zone.CentreLatitude.Value,
-            zone.CentreLongitude.Value);
-
-        var withinZone = distance <= zone.RadiusMetres.Value;
         var status = withinZone
             ? LocationVerificationStatus.WithinZone
             : LocationVerificationStatus.OutsideZone;
@@ -132,9 +146,10 @@ public sealed class GeofenceVerificationService : IGeofenceVerificationService
         if (!withinZone)
         {
             _logger.LogInformation(
-                "Geofence check for employee {EmployeeId}: {Distance:F1}m from zone {ZoneName} (radius {Radius}m) — {Status}",
+                "Geofence check for employee {EmployeeId}: {Distance:F1}m from {Shape} zone {ZoneName} (radius {Radius}m) — {Status}",
                 employeeId,
                 distance,
+                zone.Shape,
                 zone.ZoneName,
                 zone.RadiusMetres,
                 status);

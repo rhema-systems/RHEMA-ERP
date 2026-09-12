@@ -21,4 +21,15 @@ public interface ICompanyHrPolicyProvider
     /// Returns the tenant's settings, or a coded-defaults instance when none is persisted.
     /// </summary>
     Task<CompanyHrPolicySettings> GetAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the named tenant's settings, or a coded-defaults instance when none is persisted.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ For callers with no authenticated tenant to read from — the scheduled reminder sweeps,
+    /// which loop over every tenant with no HTTP context behind them. <see cref="GetAsync"/> resolves
+    /// the tenant from the current user and throws when there is none, so a sweep that reached it
+    /// died on every scheduled run while working perfectly from the run-now button.
+    /// </remarks>
+    Task<CompanyHrPolicySettings> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

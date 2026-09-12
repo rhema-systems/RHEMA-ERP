@@ -160,11 +160,21 @@ public class JobApplicationService : IJobApplicationService
     public async Task<IEnumerable<JobApplicationSummaryDto>> GetAllAsync(Guid? vacancyId = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        IEnumerable<JobApplication> entities = vacancyId.HasValue
-            ? await _applicationRepository.GetByVacancyIdAsync(vacancyId.Value)
-            : await _applicationRepository.GetAllAsync();
 
-        return entities.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
+        if (vacancyId.HasValue)
+        {
+            var byVacancy = await _applicationRepository.GetByVacancyIdAsync(vacancyId.Value);
+            return byVacancy.Where(a => a.TenantId == tenantId).ToSummaryDtoList();
+        }
+
+        // Filtered in SQL, not in memory: the untenanted GetAllAsync() pulled every tenant's applications
+        // back to the app server just to discard them.
+        var entities = await _applicationRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId)
+            .OrderByDescending(a => a.ApplicationDate)
+            .ToListAsync(cancellationToken);
+
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<JobApplicationSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? vacancyId = null, CancellationToken cancellationToken = default)
@@ -419,14 +429,22 @@ public class JobApplicationService : IJobApplicationService
         if (entity.Status == ApplicationStatus.Hired)
             throw new InvalidOperationException("A hired application cannot be withdrawn.");
 
+        bool wasShortlisted = entity.Status == ApplicationStatus.Shortlisted;
         entity.Status = ApplicationStatus.Withdrawn;
         entity.WithdrawalReason = dto.WithdrawalReason;
+        entity.WithdrawnDate = DateTime.UtcNow;
 
         await _applicationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Application {ApplicationNumber} withdrawn", entity.ApplicationNumber);
-        await UpdateVacancyCounterAsync(entity.JobVacancyId, v => v.ApplicationCount = Math.Max(0, v.ApplicationCount - 1), cancellationToken);
+        // Withdrawing a shortlisted candidate has to take them off the shortlist count too. Reject already
+        // did this; withdraw did not, so the vacancy kept counting a candidate who had walked away.
+        await UpdateVacancyCounterAsync(entity.JobVacancyId, v =>
+        {
+            v.ApplicationCount = Math.Max(0, v.ApplicationCount - 1);
+            if (wasShortlisted && v.ShortlistedCount > 0) v.ShortlistedCount--;
+        }, cancellationToken);
 
         // Close pipeline stage row: application has left the pipeline as withdrawn
         await _pipelineService.CloseCurrentStageForExitAsync(
@@ -435,46 +453,38 @@ public class JobApplicationService : IJobApplicationService
         return true;
     }
 
+    /// <summary>
+    /// Moves an application to a pipeline stage.
+    ///
+    /// <para>Delegates to <see cref="IApplicationPipelineService.MoveApplicationToStageAsync"/> rather
+    /// than moving the application itself. This endpoint and <c>POST api/applications/move-stage</c>
+    /// are two doors onto the same operation, and they had drifted badly: the pipeline service
+    /// enforces terminal status, pipeline membership, stage order, <c>CanRepeat</c> and
+    /// <c>MaxAttempts</c>, while this path enforced none of them — so a caller could put a rejected
+    /// application straight into an Offer stage, or into a stage belonging to another vacancy's
+    /// pipeline entirely, simply by choosing the older route. One writer, one state machine.</para>
+    ///
+    /// <para><c>dto.Notes</c> is kept as the entry note on the newly opened stage record. The old code
+    /// also wrote it over the <i>outgoing</i> record's notes, overwriting why the application had
+    /// entered the stage it was leaving.</para>
+    /// </summary>
     public async Task<bool> MoveToStageAsync(MoveApplicationToStageDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedApplicationAsync(dto.ApplicationId);
 
-        // Close current stage history
-        var currentHistory = await _stageHistoryRepository.GetCurrentStageAsync(dto.ApplicationId);
-        if (currentHistory != null)
+        await _pipelineService.MoveApplicationToStageAsync(
+            dto.ApplicationId, dto.PipelineStageId, updatedByUserId, cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(dto.Notes))
         {
-            currentHistory.IsCurrent = false;
-            currentHistory.ExitedAt = DateTime.UtcNow;
-            currentHistory.ExitReason = JobApplicationStageExitReason.Progressed;
-            currentHistory.Notes = dto.Notes;
-            await _stageHistoryRepository.UpdateAsync(currentHistory);
+            var opened = await _stageHistoryRepository.GetCurrentStageAsync(dto.ApplicationId);
+            if (opened != null)
+            {
+                opened.Notes = dto.Notes;
+                await _stageHistoryRepository.UpdateAsync(opened);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
         }
-
-        // Open new stage history
-        var newHistory = new JobApplicationStageHistory
-        {
-            Id = Guid.NewGuid(),
-            TenantId = entity.TenantId,
-            JobApplicationId = entity.Id,
-            PipelineStageId = dto.PipelineStageId,
-            EnteredAt = DateTime.UtcNow,
-            IsCurrent = true,
-            MovedById = updatedByUserId,
-            Notes = dto.Notes,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = updatedByUserId.ToString()
-        };
-
-        // Derive the correct ApplicationStatus from the stage's functional type
-        var targetStage = await _unitOfWork.Repository<RecruitmentPipelineStage>()
-            .GetByIdAsync(dto.PipelineStageId);
-        if (targetStage == null || targetStage.TenantId != GetTenantId())
-            throw new ArgumentException($"Pipeline stage '{dto.PipelineStageId}' not found.");
-        entity.Status = MapStageTypeToApplicationStatus(targetStage.StageType);
-
-        await _stageHistoryRepository.AddAsync(newHistory);
-        await _applicationRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Application {ApplicationNumber} moved to stage {StageId}", entity.ApplicationNumber, dto.PipelineStageId);
 
@@ -1416,11 +1426,51 @@ public class JobApplicationService : IJobApplicationService
 
     // ── Bulk operations ───────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Resolves the subset of <paramref name="applicationIds"/> that actually belongs to
+    /// <paramref name="vacancyId"/>, recording the rest as skipped.
+    ///
+    /// <para>The bulk routes are vacancy-scoped but their ids arrive in the body, and nothing checked the
+    /// two agreed — so "reject everyone I did not shortlist for vacancy A" would happily reject
+    /// applications on vacancy B if their ids were passed. Reported per item rather than failing the whole
+    /// batch, which is how every other item-level problem in these operations is reported.</para>
+    /// </summary>
+    private async Task<List<Guid>> ScopeToVacancyAsync(
+        Guid vacancyId, IEnumerable<Guid> applicationIds, RecruitmentBulkOperationResultDto result)
+    {
+        await GetOwnedVacancyAsync(vacancyId);
+
+        var tenantId = GetTenantId();
+        var owned = (await _applicationRepository.GetByVacancyIdAsync(vacancyId))
+            .Where(a => a.TenantId == tenantId)
+            .Select(a => a.Id)
+            .ToHashSet();
+
+        var scoped = new List<Guid>();
+        foreach (var appId in applicationIds)
+        {
+            if (owned.Contains(appId))
+            {
+                scoped.Add(appId);
+                continue;
+            }
+
+            result.Skipped++;
+            result.Results.Add(new RecruitmentBulkOperationItemResult
+            {
+                ApplicationId = appId,
+                Success = false,
+                Message = "This application does not belong to the vacancy named in the request.",
+            });
+        }
+        return scoped;
+    }
+
     public async Task<RecruitmentBulkOperationResultDto> BulkShortlistAsync(
-        BulkShortlistDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+        Guid vacancyId, BulkShortlistDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var result = new RecruitmentBulkOperationResultDto();
-        foreach (var appId in dto.ApplicationIds)
+        foreach (var appId in await ScopeToVacancyAsync(vacancyId, dto.ApplicationIds, result))
         {
             try
             {
@@ -1447,10 +1497,10 @@ public class JobApplicationService : IJobApplicationService
     }
 
     public async Task<RecruitmentBulkOperationResultDto> BulkRejectAsync(
-        BulkRejectDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+        Guid vacancyId, BulkRejectDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var result = new RecruitmentBulkOperationResultDto();
-        foreach (var appId in dto.ApplicationIds)
+        foreach (var appId in await ScopeToVacancyAsync(vacancyId, dto.ApplicationIds, result))
         {
             try
             {
@@ -1692,16 +1742,25 @@ public class JobApplicationService : IJobApplicationService
     public async Task<CandidateComparisonDto> GetCandidateComparisonAsync(
         Guid vacancyId, IEnumerable<Guid> applicationIds, CancellationToken cancellationToken = default)
     {
-        var vacancy = await GetOwnedVacancyAsync(vacancyId);
-
+        // GetOwnedVacancyAsync loads through GetByIdAsync, which does NOT include ShortlistingCriteria —
+        // only GetWithFullDetailsAsync does. Reading them off the wrong load left `criteria` empty, so the
+        // comparison matrix came back with no columns and every cell defaulted to "failed, 0.00": the whole
+        // screen rendered blank whatever the candidates had actually scored.
         var tenantId = GetTenantId();
+        var vacancy = await _vacancyRepository.GetWithFullDetailsAsync(vacancyId);
+        if (vacancy == null || vacancy.TenantId != tenantId)
+            throw new ArgumentException($"Vacancy '{vacancyId}' not found.");
+
         var appIdList = applicationIds.ToList();
         var allApps = await _applicationRepository.GetByVacancyIdAsync(vacancyId);
         var selectedApps = appIdList.Any()
             ? allApps.Where(a => a.TenantId == tenantId && appIdList.Contains(a.Id)).ToList()
             : allApps.Where(a => a.TenantId == tenantId && a.Status == ApplicationStatus.Shortlisted).ToList();
 
-        var criteria = vacancy.ShortlistingCriteria?.ToList() ?? new List<JobShortlistingCriteria>();
+        // The Include carries no IsDeleted filter, so a removed criterion would come back as a column
+        // scoring everyone zero.
+        var criteria = vacancy.ShortlistingCriteria?.Where(c => !c.IsDeleted).OrderBy(c => c.CriteriaName).ToList()
+                       ?? new List<JobShortlistingCriteria>();
         var criteriaMapping = criteria
             .Select(c => new JobShortlistingCriteriaDto
             {
@@ -1772,6 +1831,15 @@ public class JobApplicationService : IJobApplicationService
         if (vacancy.ShortlistApprovalStatus == ShortlistApprovalStatus.Approved)
             throw new InvalidOperationException("Shortlist is already approved.");
 
+        // There has to be something to approve. Without this an empty shortlist could be sent up,
+        // approved, and the vacancy would read as "shortlist approved" with nobody on it.
+        var tenantId = GetTenantId();
+        var shortlistedCount = (await _applicationRepository.GetByVacancyIdAsync(dto.VacancyId))
+            .Count(a => a.TenantId == tenantId && a.Status == ApplicationStatus.Shortlisted);
+        if (shortlistedCount == 0)
+            throw new InvalidOperationException(
+                "No applications have been shortlisted for this vacancy, so there is nothing to approve.");
+
         vacancy.ShortlistApprovalStatus = ShortlistApprovalStatus.PendingApproval;
         vacancy.ShortlistSubmittedAt = DateTime.UtcNow;
         vacancy.ShortlistSubmittedById = submittedByUserId;
@@ -1793,6 +1861,13 @@ public class JobApplicationService : IJobApplicationService
 
         if (vacancy.ShortlistApprovalStatus != ShortlistApprovalStatus.PendingApproval)
             throw new InvalidOperationException("Shortlist is not currently pending approval.");
+
+        // The recruiter who sent the shortlist up cannot be the one who signs it off. Same rule the
+        // workflow engine applies as `preventInitiatorApproval`; this approval predates the engine and
+        // is driven straight off the vacancy, so it has to enforce it itself.
+        if (vacancy.ShortlistSubmittedById.HasValue && vacancy.ShortlistSubmittedById.Value == reviewedByUserId)
+            throw new InvalidOperationException(
+                "You submitted this shortlist for approval, so you cannot approve or reject it yourself.");
 
         vacancy.ShortlistApprovalStatus = dto.Approved
             ? ShortlistApprovalStatus.Approved
@@ -1970,6 +2045,13 @@ public class JobApplicationService : IJobApplicationService
         Guid reviewId, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var review = await GetOwnedReviewAsync(reviewId);
+
+        // Finalising is the reviewer committing their own judgement — it is what makes the score count
+        // toward the aggregate. Anyone on the panel could previously finalise anyone else's draft review,
+        // including one the reviewer was still revising.
+        if (review.ReviewerId != updatedByUserId)
+            throw new UnauthorizedAccessException(
+                "Only the reviewer who wrote this review can finalize it.");
 
         if (review.IsFinalized)
             throw new InvalidOperationException("This review is already finalized.");
@@ -2232,6 +2314,13 @@ public class JobApplicationService : IJobApplicationService
         if (vacancy.VacancyStatus != JobVacancyStatus.Published)
             throw new InvalidOperationException("This vacancy is not currently published for applications.");
 
+        // The flag was enforced nowhere but the job-board screen's client-side filter, so posting
+        // straight to this endpoint got an internal application onto a vacancy that had explicitly
+        // excluded internal candidates. Publishing already models the rule properly — it creates an
+        // InternalPortal posting only when the flag is set — so the write path now agrees with it.
+        if (!vacancy.AllowInternalCandidates)
+            throw new InvalidOperationException("This vacancy is not open to internal candidates.");
+
         if (vacancy.ApplicationDeadline.HasValue && DateTime.UtcNow > vacancy.ApplicationDeadline.Value)
             throw new InvalidOperationException("The application deadline for this vacancy has passed.");
 
@@ -2246,16 +2335,21 @@ public class JobApplicationService : IJobApplicationService
             throw new InvalidOperationException(
                 $"You have already applied for this vacancy (Application #{existing.ApplicationNumber}).");
 
-        // 4. Resolve or create shadow JobCandidate keyed by employee email
-        var candidate = await _candidateRepository.GetByEmailAsync(employee.EmailAddress);
+        // 4. Resolve or create shadow JobCandidate keyed by employee email. Email is optional on
+        // the employee since 2026-09-03; a candidate without one cannot be tracked, so say so.
+        var employeeEmail = employee.EmailAddress;
+        if (string.IsNullOrWhiteSpace(employeeEmail))
+            throw new InvalidOperationException(
+                "Your employee profile has no email address. Applications are tracked by email — add one to your profile before applying.");
+
+        var candidate = await _candidateRepository.GetByEmailAsync(employeeEmail);
         if (candidate == null)
         {
-            // JobCandidate.CountryId is a non-nullable FK while Employee.CountryId is optional, so an
-            // employee with no country would be written as Guid.Empty and fail the FK with a 500.
-            if (employee.CountryId is null || employee.CountryId == Guid.Empty)
-                throw new ArgumentException(
-                    "This employee has no country set on their profile, which is required to apply. " +
-                    "Please complete the employee record first.");
+            // The country guard that used to stand here refused 8,072 of 8,077 live employees
+            // (measured 2026-08-27) and told them to "complete the employee record first" — a field
+            // only HR can change. JobCandidate.CountryId is optional as of slice 13b, so a shadow
+            // candidate simply carries the employee's country when there is one and none when
+            // there is not. See the remarks on JobCandidate.CountryId.
 
             candidate = new JobCandidate
             {
@@ -2263,14 +2357,14 @@ public class JobApplicationService : IJobApplicationService
                 FirstName           = employee.FirstName,
                 MiddleName          = employee.MiddleName,
                 LastName            = employee.LastName,
-                Email               = employee.EmailAddress,
+                Email               = employeeEmail,
                 Phone               = (employee.MobileNumber ?? employee.TelephoneNumber) ?? string.Empty,
                 Gender              = employee.Gender ?? Gender.PreferNotToSay,
                 DateOfBirth         = employee.DateOfBirth.HasValue
                                         ? employee.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
                                         : DateTime.MinValue,
                 City                = employee.City ?? string.Empty,
-                CountryId           = employee.CountryId!.Value,   // validated above
+                CountryId           = employee.CountryId,        // optional — see the note above
                 CandidateNumber     = await _candidateRepository.GetNextCandidateNumberAsync(),
                 IsInternalEmployee  = true,
                 InternalEmployeeId  = employeeId,
@@ -2346,6 +2440,9 @@ public class JobApplicationService : IJobApplicationService
         if (vacancy.VacancyStatus != JobVacancyStatus.Published)
             throw new InvalidOperationException("This vacancy is not currently published for applications.");
 
+        if (!vacancy.AllowInternalCandidates)
+            throw new InvalidOperationException("This vacancy is not open to internal candidates.");
+
         // Check for existing non-withdrawn application
         var existing = await _applicationRepository.GetQueryable()
             .FirstOrDefaultAsync(
@@ -2372,15 +2469,20 @@ public class JobApplicationService : IJobApplicationService
             return (updatedSaved ?? existing).ToDto();
         }
 
-        // Resolve or create shadow candidate
-        var candidate = await _candidateRepository.GetByEmailAsync(employee.EmailAddress);
+        // Resolve or create shadow candidate (email optional on the employee since 2026-09-03)
+        var employeeEmail = employee.EmailAddress;
+        if (string.IsNullOrWhiteSpace(employeeEmail))
+            throw new InvalidOperationException(
+                "Your employee profile has no email address. Applications are tracked by email — add one to your profile before applying.");
+
+        var candidate = await _candidateRepository.GetByEmailAsync(employeeEmail);
         if (candidate == null)
         {
-            // See the note in the internal-apply flow above: non-nullable FK vs optional source field.
-            if (employee.CountryId is null || employee.CountryId == Guid.Empty)
-                throw new ArgumentException(
-                    "This employee has no country set on their profile, which is required to apply. " +
-                    "Please complete the employee record first.");
+            // The country guard that used to stand here refused 8,072 of 8,077 live employees
+            // (measured 2026-08-27) and told them to "complete the employee record first" — a field
+            // only HR can change. JobCandidate.CountryId is optional as of slice 13b, so a shadow
+            // candidate simply carries the employee's country when there is one and none when
+            // there is not. See the remarks on JobCandidate.CountryId.
 
             candidate = new JobCandidate
             {
@@ -2388,14 +2490,14 @@ public class JobApplicationService : IJobApplicationService
                 FirstName          = employee.FirstName,
                 MiddleName         = employee.MiddleName,
                 LastName           = employee.LastName,
-                Email              = employee.EmailAddress,
+                Email              = employeeEmail,
                 Phone              = (employee.MobileNumber ?? employee.TelephoneNumber) ?? string.Empty,
                 Gender             = employee.Gender ?? Gender.PreferNotToSay,
                 DateOfBirth        = employee.DateOfBirth.HasValue
                                        ? employee.DateOfBirth.Value.ToDateTime(TimeOnly.MinValue)
                                        : DateTime.MinValue,
                 City               = employee.City ?? string.Empty,
-                CountryId          = employee.CountryId!.Value,   // validated above
+                CountryId          = employee.CountryId,        // optional — see the note above
                 CandidateNumber    = await _candidateRepository.GetNextCandidateNumberAsync(),
                 IsInternalEmployee = true,
                 InternalEmployeeId = employeeId,
@@ -2452,6 +2554,11 @@ public class JobApplicationService : IJobApplicationService
             ?? throw new InvalidOperationException("Job vacancy not found.");
         if (vacancy.VacancyStatus != JobVacancyStatus.Published)
             throw new InvalidOperationException("This vacancy is no longer accepting applications.");
+
+        // Checked again on submit, not just on save: the flag can be turned off while a draft sits
+        // unsent, and the draft is what would otherwise carry a stale permission into the pipeline.
+        if (!vacancy.AllowInternalCandidates)
+            throw new InvalidOperationException("This vacancy is no longer open to internal candidates.");
         if (vacancy.ApplicationDeadline.HasValue && DateTime.UtcNow > vacancy.ApplicationDeadline.Value)
             throw new InvalidOperationException("The application deadline for this vacancy has passed.");
 
@@ -2471,18 +2578,120 @@ public class JobApplicationService : IJobApplicationService
         return (saved ?? application).ToDto();
     }
 
-    public async Task<IEnumerable<JobApplicationSummaryDto>> GetByInternalEmployeeAsync(
+    /// <summary>
+    /// The caller's own internal applications.
+    /// </summary>
+    /// <remarks>
+    /// Returns the lean <see cref="MyJobApplicationDto"/>, the same shape as the single read.
+    /// It used to return <c>JobApplicationSummaryDto</c>, which carries <c>AutoScore</c>,
+    /// <c>ScoredAt</c>, <c>ScoreIsStale</c>, <c>AggregatedReviewScore</c> (the panel's verdict on
+    /// them), <c>SnapshotAvailable</c>, <c>JobCandidateId</c> and the current pipeline stage —
+    /// the assessment rather than the answer. Leaning only the detail read and leaving the list
+    /// alone would have moved the leak rather than closed it.
+    /// </remarks>
+    public async Task<IEnumerable<MyJobApplicationDto>> GetByInternalEmployeeAsync(
         Guid employeeId,
         CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _applicationRepository.GetQueryable()
             .Where(a => a.InternalEmployeeId == employeeId && a.TenantId == tenantId)
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
             .OrderByDescending(a => a.ApplicationDate)
             .ToListAsync(cancellationToken);
-        return entities.ToSummaryDtoList();
+
+        return entities.Select(ToMyApplicationDto).ToList();
+    }
+
+    /// <summary>The one projection the applicant's own list and detail both use.</summary>
+    private static MyJobApplicationDto ToMyApplicationDto(JobApplication entity) =>
+        new()
+        {
+            Id                  = entity.Id,
+            ApplicationNumber   = entity.ApplicationNumber,
+            JobVacancyId        = entity.JobVacancyId,
+            VacancyNumber       = entity.JobVacancy?.VacancyNumber ?? string.Empty,
+            JobTitle            = entity.JobVacancy?.JobTitle ?? string.Empty,
+            PositionTitle       = entity.JobVacancy?.Position?.Title ?? string.Empty,
+            OrgUnitName         = entity.JobVacancy?.Requisition?.OrganizationUnit?.Name,
+            ApplicationDeadline = entity.JobVacancy?.ApplicationDeadline,
+            Status              = entity.Status,
+            ApplicationDate     = entity.ApplicationDate,
+            YearsOfExperience   = entity.YearsOfExperience,
+            AvailableFrom       = entity.AvailableFrom,
+            CoverLetter         = entity.CoverLetter,
+            IsShortlisted       = entity.Status == ApplicationStatus.Shortlisted,
+            ShortlistedDate     = entity.ShortlistedDate,
+            WithdrawnDate       = entity.WithdrawnDate,
+            WithdrawalReason    = entity.WithdrawalReason,
+            RejectedDate        = entity.RejectedDate,
+            RejectionReason     = entity.RejectionReason,
+            CanWithdraw         = CanApplicantWithdraw(entity.Status),
+        };
+
+    public async Task<MyJobApplicationDto?> GetMyApplicationAsync(
+        Guid applicationId,
+        Guid employeeId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        // Ownership is part of the QUERY, not a check after the fact: the id is only ever resolved
+        // against the caller's own applications, so somebody else's is indistinguishable from one
+        // that does not exist. A 403 would confirm the row is real.
+        var owned = await _applicationRepository.GetQueryable()
+            .AnyAsync(a => a.Id == applicationId
+                        && a.TenantId == tenantId
+                        && a.InternalEmployeeId == employeeId,
+                      cancellationToken);
+        if (!owned) return null;
+
+        var entity = await _applicationRepository.GetQueryable()
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
+            .FirstOrDefaultAsync(a => a.Id == applicationId, cancellationToken);
+
+        return entity == null ? null : ToMyApplicationDto(entity);
+    }
+
+    /// <summary>
+    /// The states an applicant may still take their own application back from. Hired, rejected and
+    /// already-withdrawn are terminal; a draft is deleted rather than withdrawn.
+    /// </summary>
+    private static bool CanApplicantWithdraw(ApplicationStatus status) =>
+        status != ApplicationStatus.Hired
+        && status != ApplicationStatus.Rejected
+        && status != ApplicationStatus.Withdrawn;
+
+    public async Task<bool> WithdrawMyApplicationAsync(
+        Guid applicationId,
+        Guid employeeId,
+        string? reason,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var entity = await _applicationRepository.GetQueryable()
+            .FirstOrDefaultAsync(a => a.Id == applicationId
+                                   && a.TenantId == tenantId
+                                   && a.InternalEmployeeId == employeeId,
+                                 cancellationToken)
+            ?? throw new ArgumentException($"Job application with ID '{applicationId}' not found.");
+
+        if (entity.Status == ApplicationStatus.Withdrawn)
+            throw new InvalidOperationException("This application has already been withdrawn.");
+        if (!CanApplicantWithdraw(entity.Status))
+            throw new InvalidOperationException(
+                $"An application that has been {entity.Status.ToString().ToLowerInvariant()} cannot be withdrawn.");
+
+        // Reuse the desk path so the counters, the pipeline stage exit and the shortlist bookkeeping
+        // all happen exactly once and in one place. `updatedByUserId` is the employee: they are the
+        // actor, which is the whole point of the endpoint.
+        return await WithdrawAsync(
+            new WithdrawApplicationDto { ApplicationId = applicationId, WithdrawalReason = reason ?? "Withdrawn by the applicant." },
+            employeeId,
+            cancellationToken);
     }
 
     // ── External self-service portal ──────────────────────────────────────────
@@ -2513,9 +2722,12 @@ public class JobApplicationService : IJobApplicationService
         var cvTicket = await ResolveCvUploadTicketAsync(
             dto.CvUploadToken, tenantId, dto.VacancyId, cancellationToken);
 
-        // JobCandidate.CountryId is a non-nullable FK. A missing or cross-tenant country id would
-        // otherwise reach the database as an invalid key and surface as an opaque 500, so reject it
-        // here with a message the applicant can act on.
+        // Country stays REQUIRED on the external path — not because of the foreign key (which is
+        // optional since slice 13b), but because the public application form asks for it and an
+        // external candidate can answer. A cross-tenant or malformed id would otherwise reach the
+        // database as an invalid key and surface as an opaque 500, so reject it here with a message
+        // the applicant can act on. The internal path is the opposite case: the applicant is an
+        // employee who cannot edit their own country, so there it is optional.
         // Single-argument ArgumentException on purpose: the controller surfaces Message verbatim to an
         // anonymous caller, and the two-argument overload would append "(Parameter 'CountryId')".
         if (dto.CountryId is null || dto.CountryId == Guid.Empty)
@@ -3100,21 +3312,9 @@ public class JobApplicationService : IJobApplicationService
             RecruitmentEmailCatalog.Module, RecruitmentEmailCatalog.Events.ApplicationRejected, toEmail, tokens);
     }
 
-    // ── Stage type → ApplicationStatus mapping ────────────────────────────────
-    // Mirrors ApplicationPipelineService.MapStageTypeToStatus; kept here so that
-    // JobApplicationService.MoveToStageAsync does not depend on the pipeline service.
-
-    private static ApplicationStatus MapStageTypeToApplicationStatus(
-        RecruitmentPipelineStageType stageType) => stageType switch
-    {
-        RecruitmentPipelineStageType.ApplicationReview   => ApplicationStatus.UnderReview,
-        RecruitmentPipelineStageType.Screening            => ApplicationStatus.UnderReview,
-        RecruitmentPipelineStageType.HiringManagerReview  => ApplicationStatus.UnderReview,
-        RecruitmentPipelineStageType.Assessment           => ApplicationStatus.AssessmentPending,
-        RecruitmentPipelineStageType.Interview            => ApplicationStatus.InterviewScheduled,
-        RecruitmentPipelineStageType.PreEmploymentCheck   => ApplicationStatus.PreEmploymentCheck,
-        RecruitmentPipelineStageType.Offer                => ApplicationStatus.OfferExtended,
-        RecruitmentPipelineStageType.Hired                => ApplicationStatus.Hired,
-        _                                                 => ApplicationStatus.UnderReview,
-    };
+    // The stage-type → ApplicationStatus mapping used to be duplicated here, with a comment explaining
+    // that it existed "so that JobApplicationService.MoveToStageAsync does not depend on the pipeline
+    // service". Avoiding that dependency is precisely how the two paths drifted into one guarded
+    // transition and one unguarded one. MoveToStageAsync now delegates, and
+    // ApplicationPipelineService.MapStageTypeToStatus is the single definition.
 }

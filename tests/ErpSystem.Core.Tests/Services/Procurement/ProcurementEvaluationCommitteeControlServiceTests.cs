@@ -5,12 +5,15 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
+using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -18,6 +21,378 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
+    [Fact]
+    public async Task AttendanceAfterFailedQuorumReopensMeetingAndRequiresFreshConfirmation()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var meeting = await fixture.Service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical,
+                MeetingMode = "InPerson", MeetingChannel = "UAT room",
+                ScheduledAtUtc = DateTime.UtcNow,
+                CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "retry-meeting"
+            }, "retry-meeting");
+        var failed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
+            new ConfirmProcurementEvaluationQuorumRequest
+            {
+                RowVersion = meeting.RowVersion, IdempotencyKey = "premature-quorum"
+            }, "premature-quorum");
+        failed.Status.Should().Be(ProcurementEvaluationMeetingStatus.QuorumFailed);
+        failed.SignedVotingAttendanceCount.Should().Be(0);
+        var failedRecord = await fixture.Context.ProcurementEvaluationMeetings.AsNoTracking()
+            .SingleAsync(item => item.Id == meeting.Id);
+        var failedSnapshot = failedRecord.QuorumSnapshotJson;
+        var failedHash = failedRecord.QuorumIntegrityHash;
+
+        foreach (var member in control.Members)
+        {
+            fixture.SwitchUser(member.UserId);
+            var current = await fixture.Service.GetAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+            var request = new SignProcurementEvaluationAttendanceRequest
+            {
+                IsPresent = true,
+                MeetingRowVersion = current.Meetings.Single().RowVersion,
+                AppointmentRowVersion = current.Members.Single(item => item.Id == member.Id).RowVersion,
+                IdempotencyKey = $"retry-attendance-{member.Id}"
+            };
+            var signed = await fixture.Service.SignAttendanceAsync(meeting.Id, request, "retry-attendance");
+            var reopened = await fixture.Service.GetAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+            reopened.Meetings.Single().Status.Should().Be(ProcurementEvaluationMeetingStatus.Draft);
+            reopened.Meetings.Single().QuorumMet.Should().BeFalse();
+            request.MeetingRowVersion = reopened.Meetings.Single().RowVersion;
+            (await fixture.Service.SignAttendanceAsync(meeting.Id, request, "replay-attendance"))
+                .Id.Should().Be(signed.Id);
+            (await fixture.Service.EnsureScorerEligibleAsync(ProcurementEvaluationSourceType.Tender,
+                fixture.Tender.Id, ProcurementEvaluationPhase.Technical, "before-reconfirmation"))
+                .Allowed.Should().BeFalse();
+        }
+
+        var pending = await fixture.Context.ProcurementEvaluationMeetings.AsNoTracking()
+            .SingleAsync(item => item.Id == meeting.Id);
+        pending.QuorumSnapshotJson.Should().Be(failedSnapshot);
+        pending.QuorumIntegrityHash.Should().Be(failedHash);
+        (await fixture.Context.ProcurementEvaluationAttendanceRecords.CountAsync())
+            .Should().Be(control.Members.Count);
+
+        fixture.SwitchAdministrator();
+        var ready = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        var confirmed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
+            new ConfirmProcurementEvaluationQuorumRequest
+            {
+                RowVersion = ready.Meetings.Single().RowVersion, IdempotencyKey = "fresh-quorum"
+            }, "fresh-quorum");
+        confirmed.Status.Should().Be(ProcurementEvaluationMeetingStatus.QuorumConfirmed);
+        confirmed.QuorumMet.Should().BeTrue();
+        confirmed.SignedVotingAttendanceCount.Should().Be(control.Members.Count(item => item.IsVoting));
+        fixture.SwitchUser(control.Members[0].UserId);
+        var lateAttendance = () => fixture.Service.SignAttendanceAsync(meeting.Id,
+            new SignProcurementEvaluationAttendanceRequest { IdempotencyKey = "after-confirmation" }, "late");
+        await lateAttendance.Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(error => error.Code == "EVALUATION_ATTENDANCE_CLOSED");
+    }
+
+    [Fact]
+    public async Task TenderProjectionCreatesEveryVotingSeatOnceAndPreservesSignedCommittee()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeWithQuorumAsync();
+        var before = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        fixture.SwitchUser(control.Members[0].UserId);
+        var first = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "projection-first");
+        var repeated = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "projection-retry");
+        first.Should().NotBeNull();
+        repeated!.Id.Should().Be(first!.Id);
+        var assignments = await fixture.Context.TenderEvaluators.ToListAsync();
+        var votingMembers = control.Members.Where(item => item.IsVoting && item.MemberKind != ProcurementCommitteeMemberKind.Observer);
+        assignments.Should().HaveCount(votingMembers.Count());
+        assignments.Select(item => item.UserId).Should().BeEquivalentTo(votingMembers.Select(item => item.UserId));
+        assignments.Should().OnlyContain(item => item.TenantId == fixture.TenantId && item.TenderId == fixture.Tender.Id);
+        var after = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        after.Members.Should().BeEquivalentTo(before.Members);
+        after.Meetings.Should().BeEquivalentTo(before.Meetings);
+        after.ScoreSheets.Should().BeEmpty();
+        (await fixture.Context.TenderEvaluations.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AcceptedMemberCanPrepareDraftProjectionBeforeQuorumButCannotLock()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchUser(control.Members[0].UserId);
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "draft-before-quorum"))
+            .Should().NotBeNull();
+        (await fixture.Service.EnsureScorerEligibleAsync(ProcurementEvaluationSourceType.Tender,
+            fixture.Tender.Id, ProcurementEvaluationPhase.Combined, "still-no-quorum")).Allowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProjectionReusesExistingAssignmentAndKeepsPendingVotingSeatInRoster()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var actor = control.Members[0];
+        var existing = new TenderEvaluator
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = fixture.Tender.Id,
+            UserId = actor.UserId, Status = "Accepted", Notes = "Existing assignment retained."
+        };
+        fixture.Context.TenderEvaluators.Add(existing);
+        var pending = await fixture.Context.ProcurementEvaluationCommitteeAppointments.FindAsync(control.Members[1].Id);
+        pending!.Status = ProcurementEvaluationAppointmentStatus.Pending;
+        var observer = await fixture.Context.ProcurementEvaluationCommitteeAppointments.FindAsync(control.Members[2].Id);
+        observer!.MemberKind = ProcurementCommitteeMemberKind.Observer;
+        observer.IsVoting = false;
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        fixture.SwitchUser(actor.UserId);
+        var assignment = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "reuse-projection");
+        assignment!.Id.Should().Be(existing.Id);
+        assignment.Notes.Should().Be("Existing assignment retained.");
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(2);
+        (await fixture.Service.GetTenderScoringUserIdsAsync(fixture.Tender.Id))
+            .Should().BeEquivalentTo(new[] { actor.UserId, pending.UserId });
+    }
+
+    [Theory]
+    [InlineData("outsider")]
+    [InlineData("observer")]
+    [InlineData("nonvoting")]
+    [InlineData("deleted")]
+    [InlineData("declined")]
+    [InlineData("withdrawn")]
+    [InlineData("expired")]
+    [InlineData("conflict")]
+    [InlineData("inactive")]
+    public async Task TenderProjectionNeverGrantsScoringToIneligibleActor(string reason)
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var member = await fixture.Context.ProcurementEvaluationCommitteeAppointments
+            .Include(item => item.ConflictDeclarations).FirstAsync(item => item.CommitteeControlId == control.Id);
+        fixture.SwitchUser(reason == "outsider" ? Guid.NewGuid() : member.UserId);
+        switch (reason)
+        {
+            case "observer": member.MemberKind = ProcurementCommitteeMemberKind.Observer; break;
+            case "nonvoting": member.IsVoting = false; break;
+            case "deleted": member.IsDeleted = true; break;
+            case "declined": member.Status = ProcurementEvaluationAppointmentStatus.Declined; break;
+            case "withdrawn": member.Status = ProcurementEvaluationAppointmentStatus.Withdrawn; break;
+            case "expired": member.EffectiveToUtc = DateTime.UtcNow.AddDays(-1); break;
+            case "conflict": member.ConflictDeclarations.Single().Outcome = ProcurementEvaluationConflictOutcome.ConflictDeclared; break;
+            case "inactive": (await fixture.Context.ProcurementEvaluationCommitteeControls.FindAsync(control.Id))!.Status = ProcurementEvaluationCommitteeControlStatus.Closed; break;
+        }
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        Func<Task> action = () => fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "denied-projection");
+        await action.Should().ThrowAsync<Exception>().Where(exception =>
+            exception is ProcurementEvaluationCommitteeAuthorizationException ||
+            exception is ProcurementEvaluationCommitteeConflictException);
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProjectionDoesNotUseOtherTenantCommitteeOrCreateStandaloneAssignments()
+    {
+        await using var fixture = new Fixture();
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "no-committee")).Should().BeNull();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchUser(control.Members[0].UserId);
+        fixture.SwitchTenant(Guid.NewGuid());
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "other-tenant")).Should().BeNull();
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task StandardPublishedTenderWithOnTimeBidCanConstituteWithoutAdvancedControl()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var readiness = await fixture.Service.GetReadinessAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        readiness.AllowedActions.Should().Contain("bind");
+        var control = await fixture.BindDraftAsync();
+        control.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Draft);
+        (await fixture.Context.ProcurementTenderControls.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("Draft", -1, false)]
+    [InlineData("Withdrawn", -1, false)]
+    [InlineData("Submitted", 1, false)]
+    [InlineData("Submitted", -1, true)]
+    public async Task StandardTenderDoesNotAcceptDraftWithdrawnLateOrOtherTenantBid(string status, int minutes, bool otherTenant)
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1), status, minutes, otherTenant);
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync()).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED");
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.QualityBasedSelection, false)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection, false)]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering, true)]
+    public async Task MissingAdvancedControlCannotDowngradeToStandard(ProcurementMethodType method, bool partialAuthority)
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var source = fixture.Context.Set<ProcurementSourcingCase>().Single();
+        source.SelectedMethod = method;
+        if (partialAuthority) source.AuthorityRouteReference = "AUTH-REQUIRED";
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync()).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED");
+    }
+
+    [Fact]
+    public async Task StandardCommitteeStillCannotMeetBeforeClosing()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchAdministrator();
+        await fixture.Service.Invoking(service => service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical, MeetingMode = "InPerson",
+                MeetingChannel = "UAT room", ScheduledAtUtc = DateTime.UtcNow,
+                EvidenceReference = "LOCAL-UAT", CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "standard-early-meeting"
+            }, "standard-early-meeting")).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE");
+        (await fixture.Context.ProcurementEvaluationMeetings.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public void SqlCommitteeLineageGuardIsRecognisedForStructuredErrorMapping()
+    {
+        var exception = new DbUpdateException(
+            "Committee write failed.",
+            new InvalidOperationException(
+                "Evaluation committee source, template, policy, method, configuration, workflow, or tenant lineage is invalid."));
+
+        ProcurementEvaluationCommitteeControlService
+            .IsCommitteeLineagePersistenceFailure(exception)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void UnrelatedPersistenceFailureIsNotReclassifiedAsCommitteeLineage()
+    {
+        var exception = new DbUpdateException(
+            "Committee write failed.",
+            new InvalidOperationException("A different database rule rejected the write."));
+
+        ProcurementEvaluationCommitteeControlService
+            .IsCommitteeLineagePersistenceFailure(exception)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SupersededConfigurationSnapshotDoesNotInvalidateAnExistingSourcingCase()
+    {
+        await using var fixture = new Fixture();
+        fixture.RetireConfigurationAfterSourceCreation();
+
+        var committee = await fixture.BindDraftAsync();
+
+        committee.ConfigurationProfileId.Should().Be(fixture.Profile.Id);
+        committee.ConfigurationProfileVersion.Should().Be(fixture.Profile.Version);
+    }
+
+    [Theory]
+    [InlineData("SuperAdmin")]
+    [InlineData("TenantAdmin")]
+    public async Task PlatformAdministratorsDoNotBypassTenderCommitteeCapability(
+        string administratorRole)
+    {
+        await using var fixture = new Fixture();
+        fixture.SwitchAdministrator(administratorRole);
+        fixture.SetCapabilityAllowed(false);
+
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync())
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.IsAny<ProcurementAccessCapabilityRequest>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "committee mutation must require the registered TDC tender-administration capability instead of a generic administrator bypass");
+    }
+
+    [Fact]
+    public async Task ReadinessExposesBindOnlyForARegisteredTdcPermissionBearingRole()
+    {
+        await using var fixture = new Fixture();
+        fixture.SwitchRole("SuperAdmin");
+
+        await fixture.Service.Invoking(service => service.GetReadinessAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+
+        fixture.SwitchRole("TDC_PROCUREMENT_OFFICER");
+        var officerReadiness = await fixture.Service.GetReadinessAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+
+        officerReadiness.AllowedActions.Should().ContainSingle("bind");
+    }
+
+    [Fact]
+    public async Task CommitteeBindingRejectsAnApprovedTenderThatHasNotBeenPublished()
+    {
+        await using var fixture = new Fixture();
+        fixture.MarkTenderUnpublished();
+
+        var action = () => fixture.BindDraftAsync();
+
+        await action.Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception =>
+                exception.Code == "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED");
+        await fixture.AssertNoCommitteeSnapshotAsync();
+    }
+
+    [Fact]
+    public async Task CommitteeBindingWaitsForAnOnTimeSealedBid()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetAdvertisedTender(DateTime.UtcNow.AddHours(1));
+
+        var action = () => fixture.BindDraftAsync();
+
+        await action.Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception =>
+                exception.Code == "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED");
+        await fixture.AssertNoCommitteeSnapshotAsync();
+    }
+
+    [Fact]
+    public async Task PrematureDraftCanStillBeRetiredAfterItsSourceBecomesBlocked()
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.BindDraftAsync();
+        fixture.MarkTenderUnpublished();
+
+        var readiness = await fixture.Service.GetReadinessAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+
+        readiness.AllowedActions.Should().Contain("retireDraft");
+        readiness.AllowedActions.Should().NotContain("activate");
+        readiness.BlockedReasons.Should().Contain(reason =>
+            reason.Contains("Publish the approved tender"));
+        draft.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Draft);
+    }
+
     [Fact]
     public async Task MissingTenderCaseLinkIsRecoveredFromItsCurrentImmutableRelease()
     {
@@ -68,6 +443,202 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         bound.ConfigurationProfileId.Should().Be(fixture.Profile.Id);
         bound.ActivationEvidenceReference.Should().Be("evidence://constitution");
         bound.CompositionIntegrityHash.Should().HaveLength(64);
+    }
+
+    [Fact]
+    public async Task ExternalSupplierUserCannotBeCopiedIntoCommitteeSnapshot()
+    {
+        await using var fixture = new Fixture();
+        fixture.MarkCommitteeMemberAsExternalUser();
+
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync())
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeValidationException>()
+            .Where(exception => exception.Code ==
+                "EVALUATION_COMMITTEE_EXTERNAL_MEMBER_PROHIBITED");
+
+        await fixture.AssertNoCommitteeSnapshotAsync();
+    }
+
+    [Theory]
+    [InlineData(ProcurementEvaluationSourceType.Tender)]
+    [InlineData(ProcurementEvaluationSourceType.RequestForQuotation)]
+    public async Task UserLinkedToInvitedSupplierCannotBeCopiedIntoCommitteeSnapshot(
+        ProcurementEvaluationSourceType sourceType)
+    {
+        await using var fixture = new Fixture();
+        var sourceId = fixture.LinkCommitteeMemberToInvitedSupplier(sourceType);
+
+        await fixture.Service.Invoking(service => fixture.BindDraftAsync(
+                sourceType, sourceId, $"bind-invited-supplier-{sourceType}"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeValidationException>()
+            .Where(exception => exception.Code ==
+                "EVALUATION_COMMITTEE_INVITED_SUPPLIER_MEMBER_PROHIBITED");
+
+        await fixture.AssertNoCommitteeSnapshotAsync();
+    }
+
+    [Fact]
+    public async Task CommitteeAdministratorCanActivateWithoutBeingAnEvaluatorMember()
+    {
+        await using var fixture = new Fixture();
+        var bound = await fixture.BindDraftAsync();
+        fixture.MemberUserIds.Should().NotContain(fixture.AdministratorId);
+        fixture.Access.Invocations.Clear();
+
+        var activated = await fixture.Service.ActivateAsync(bound.Id,
+            new ActivateProcurementEvaluationCommitteeRequest
+            {
+                RowVersion = bound.RowVersion,
+                IdempotencyKey = "activate-by-independent-administrator"
+            }, "activate-by-independent-administrator");
+
+        activated.Status.Should()
+            .Be(ProcurementEvaluationCommitteeControlStatus.Active);
+        activated.ActivationEvidenceReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:committee-activation:evidence:");
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.administer" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "committee activation is an administrative action and must not require evaluator membership");
+    }
+
+    [Fact]
+    public async Task PristineUnactivatedDraftCanBeRetiredAndReplacedWithoutDeletingHistory()
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.BindDraftAsync();
+
+        var retired = await fixture.Service.RetireDraftAsync(draft.Id,
+            new RetireProcurementEvaluationCommitteeDraftRequest
+            {
+                RowVersion = draft.RowVersion,
+                Reason = "The selected master committee contained an ineligible member.",
+                IdempotencyKey = "retire-wrong-snapshot"
+            }, "retire-wrong-snapshot");
+
+        retired.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Retired);
+        retired.RetirementReason.Should().Be(
+            "The selected master committee contained an ineligible member.");
+        retired.RetiredAtUtc.Should().NotBeNull();
+        retired.RetiredByUserId.Should().Be(fixture.AdministratorId);
+        retired.RetirementEvidenceReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:draft-retirement:evidence:");
+        retired.AllowedActions.Should().Contain("bind");
+
+        var replacement = await fixture.BindDraftAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id,
+            "bind-corrected-evaluation");
+
+        replacement.Version.Should().Be(2);
+        replacement.Id.Should().NotBe(retired.Id);
+        (await fixture.Context.ProcurementEvaluationCommitteeControls
+                .AsNoTracking().CountAsync())
+            .Should().Be(2, "retirement retains the original snapshot");
+        (await fixture.Context.ProcurementEvaluationCommitteeAppointments
+                .AsNoTracking().CountAsync(item => item.CommitteeControlId == retired.Id))
+            .Should().Be(3, "the original pending appointments remain as audit history");
+    }
+
+    [Fact]
+    public async Task RetireDraftIsIdempotentBeforeApplyingAStaleRowVersionCheck()
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.BindDraftAsync();
+        var request = new RetireProcurementEvaluationCommitteeDraftRequest
+        {
+            RowVersion = draft.RowVersion,
+            Reason = "The wrong committee composition was selected.",
+            IdempotencyKey = "retire-replay"
+        };
+
+        var first = await fixture.Service.RetireDraftAsync(
+            draft.Id, request, "retire-replay");
+        request.RowVersion = Convert.ToBase64String(Guid.NewGuid().ToByteArray());
+        var replay = await fixture.Service.RetireDraftAsync(
+            draft.Id, request, "retire-replay");
+
+        replay.Id.Should().Be(first.Id);
+        replay.RetiredAtUtc.Should().Be(first.RetiredAtUtc);
+    }
+
+    [Fact]
+    public async Task ActivatedCommitteeCanNeverUseDraftRetirement()
+    {
+        await using var fixture = new Fixture();
+        var active = await fixture.BindAndActivateAsync();
+
+        await fixture.Service.Invoking(service => service.RetireDraftAsync(active.Id,
+                new RetireProcurementEvaluationCommitteeDraftRequest
+                {
+                    RowVersion = active.RowVersion,
+                    Reason = "Attempt to retire an activated committee.",
+                    IdempotencyKey = "retire-active"
+                }, "retire-active"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception => exception.Code ==
+                "EVALUATION_COMMITTEE_RETIREMENT_NOT_DRAFT");
+    }
+
+    [Theory]
+    [InlineData("appointment")]
+    [InlineData("declaration")]
+    [InlineData("meeting")]
+    [InlineData("score")]
+    [InlineData("workflow")]
+    public async Task AnySubstantiveDraftActivityBlocksRetirement(string activity)
+    {
+        await using var fixture = new Fixture();
+        var draft = await fixture.BindDraftAsync();
+        fixture.AddDraftActivity(draft.Id, activity);
+
+        await fixture.Service.Invoking(service => service.RetireDraftAsync(draft.Id,
+                new RetireProcurementEvaluationCommitteeDraftRequest
+                {
+                    RowVersion = draft.RowVersion,
+                    Reason = "Attempt to retire a draft after activity.",
+                    IdempotencyKey = $"retire-after-{activity}"
+                }, $"retire-after-{activity}"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception => exception.Code ==
+                "EVALUATION_COMMITTEE_RETIREMENT_ACTIVITY_EXISTS");
+    }
+
+    [Fact]
+    public async Task ActivationNotifiesEveryPendingMemberByEmailAndInAppDeepLink()
+    {
+        await using var fixture = new Fixture();
+
+        var bound = await fixture.BindDraftAsync();
+        fixture.Notifications.Verify(publisher => publisher.PublishAsync(
+            It.IsAny<NotificationTopicEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "draft appointments cannot be accepted and must not be presented as actionable invitations");
+
+        await fixture.Service.ActivateAsync(bound.Id,
+            new ActivateProcurementEvaluationCommitteeRequest
+            {
+                RowVersion = bound.RowVersion,
+                IdempotencyKey = "activate-and-notify"
+            }, "activate-and-notify");
+
+        var notifications = fixture.Notifications.Invocations
+            .Select(invocation => (NotificationTopicEvent)invocation.Arguments[0])
+            .ToList();
+        notifications.Should().HaveCount(fixture.MemberUserIds.Count);
+        notifications.Select(notification =>
+                (Guid)notification.Data["TargetUserId"])
+            .Should().BeEquivalentTo(fixture.MemberUserIds);
+        notifications.Should().OnlyContain(notification =>
+            notification.TopicKey ==
+            "ProcurementEvaluationCommittee.AppointmentCreated.Internal" &&
+            notification.Data["ActionUrl"].ToString() ==
+            $"https://erp.test/procurement/tenders/{fixture.Tender.Id:D}/committee-controls" &&
+            notification.Email != null &&
+            notification.Email.HtmlBodyTemplateOverride != null &&
+            notification.Email.HtmlBodyTemplateOverride.Contains("{{ActionUrl}}"));
     }
 
     [Fact]
@@ -130,7 +701,34 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
     }
 
     [Fact]
-    public async Task AcceptanceAndConflictDeclarationAreSelfOnlyAndSigned()
+    public async Task DraftCommitteeDoesNotAdvertiseOrAcceptAppointmentResponses()
+    {
+        await using var fixture = new Fixture();
+        var bound = await fixture.BindDraftAsync();
+        var member = bound.Members.First();
+        fixture.SwitchUser(member.UserId);
+
+        var draft = await fixture.Service.GetAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+
+        draft.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Draft);
+        draft.AllowedActions.Should().NotContain("respondToAppointment");
+        await fixture.Service.Invoking(service => service.RespondToAppointmentAsync(
+                member.Id,
+                new RespondProcurementEvaluationAppointmentRequest
+                {
+                    Accept = true,
+                    SignatureReference = "sig://draft-response",
+                    EvidenceReference = "evidence://draft-response",
+                    RowVersion = member.RowVersion,
+                    IdempotencyKey = "accept-draft"
+                }, "accept-draft"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception => exception.Code == "EVALUATION_COMMITTEE_NOT_ACTIVE");
+    }
+
+    [Fact]
+    public async Task AcceptanceAndNoConflictDeclarationGenerateImmutableAuditReferences()
     {
         await using var fixture = new Fixture();
         var bound = await fixture.BindAndActivateAsync();
@@ -151,28 +749,62 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
 
         fixture.SwitchUser(chair.UserId);
-        await fixture.Service.Invoking(service =>
-                service.RespondToAppointmentAsync(chair.Id,
-                    new RespondProcurementEvaluationAppointmentRequest
-                    {
-                        Accept = true,
-                        RowVersion = chair.RowVersion,
-                        IdempotencyKey = "accept-no-signature"
-                    }, "accept-no-signature"))
-            .Should().ThrowAsync<ProcurementEvaluationCommitteeValidationException>()
-            .Where(exception =>
-                exception.Code == "EVALUATION_APPOINTMENT_SIGNATURE_REQUIRED");
+        var accepted = await fixture.Service.RespondToAppointmentAsync(chair.Id,
+            new RespondProcurementEvaluationAppointmentRequest
+            {
+                Accept = true,
+                RowVersion = chair.RowVersion,
+                IdempotencyKey = "accept-with-system-reference"
+            }, "accept-with-system-reference");
+        accepted.AcceptanceSignatureReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:appointment-acceptance:signature:");
+        accepted.AcceptanceEvidenceReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:appointment-acceptance:evidence:");
 
-        var accepted = await fixture.AcceptAsync(chair);
-        var declared = await fixture.DeclareNoConflictAsync(accepted);
+        var declared = await fixture.Service.SubmitConflictDeclarationAsync(chair.Id,
+            new SubmitProcurementEvaluationConflictDeclarationRequest
+            {
+                Outcome = ProcurementEvaluationConflictOutcome.NoConflict,
+                Declaration = "I have no actual, potential, or perceived conflict.",
+                ValidFromUtc = DateTime.UtcNow.AddMinutes(-1),
+                ValidToUtc = DateTime.UtcNow.AddDays(30),
+                AppointmentRowVersion = accepted.RowVersion,
+                IdempotencyKey = "coi-with-system-reference"
+            }, "coi-with-system-reference");
 
         declared.Status.Should().Be(ProcurementEvaluationAppointmentStatus.Accepted);
         declared.CurrentDeclaration.Should().NotBeNull();
         declared.CurrentDeclaration!.Outcome.Should()
             .Be(ProcurementEvaluationConflictOutcome.NoConflict);
-        declared.CurrentDeclaration.SignatureReference.Should().StartWith("sig://");
+        declared.CurrentDeclaration.SignatureReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:conflict-declaration:signature:");
+        declared.CurrentDeclaration.EvidenceReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:conflict-declaration:evidence:");
         declared.CurrentDeclaration.IntegrityHash.Should().HaveLength(64);
         declared.EligibleToScore.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DeclaredConflictStillRequiresDetailsAndExplicitEvidence()
+    {
+        await using var fixture = new Fixture();
+        var bound = await fixture.BindAndActivateAsync();
+        var member = bound.Members.First();
+        var accepted = await fixture.AcceptAsync(member);
+
+        await fixture.Service.Invoking(service =>
+                service.SubmitConflictDeclarationAsync(member.Id,
+                    new SubmitProcurementEvaluationConflictDeclarationRequest
+                    {
+                        Outcome = ProcurementEvaluationConflictOutcome.ConflictDeclared,
+                        Declaration = "I declare a conflict.",
+                        ConflictDetails = "A bidder is a related party.",
+                        ValidFromUtc = DateTime.UtcNow.AddMinutes(-1),
+                        AppointmentRowVersion = accepted.RowVersion,
+                        IdempotencyKey = "coi-conflict-without-evidence"
+                    }, "coi-conflict-without-evidence"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeValidationException>()
+            .Where(exception => exception.Code == "EVALUATION_COI_SIGNATURE_REQUIRED");
     }
 
     [Fact]
@@ -181,6 +813,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         await using var fixture = new Fixture();
         var control = await fixture.PrepareEligibleCommitteeAsync();
         fixture.SwitchAdministrator();
+        fixture.Access.Invocations.Clear();
         var meeting = await fixture.Service.CreateMeetingAsync(control.Id,
             new CreateProcurementEvaluationMeetingRequest
             {
@@ -188,11 +821,17 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 MeetingMode = "Remote",
                 MeetingChannel = "Teams",
                 ScheduledAtUtc = DateTime.UtcNow.AddMinutes(5),
-                EvidenceReference = "evidence://agenda",
                 RemoteMeetingEvidenceReference = "evidence://remote-session",
                 CommitteeRowVersion = control.RowVersion,
                 IdempotencyKey = "meeting-technical"
             }, "meeting-technical");
+        meeting.EvidenceReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:meeting-scheduled:evidence:");
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.administer" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
 
         foreach (var member in control.Members)
         {
@@ -205,31 +844,44 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 new SignProcurementEvaluationAttendanceRequest
                 {
                     IsPresent = true,
-                    SignatureReference = $"sig://attendance/{member.UserId:N}",
-                    EvidenceReference = $"evidence://attendance/{member.UserId:N}",
                     MeetingRowVersion = currentMeeting.RowVersion,
                     AppointmentRowVersion = currentMember.RowVersion,
                     IdempotencyKey = $"attendance-{member.UserId:N}"
                 }, $"attendance-{member.UserId:N}");
+            var recorded = await fixture.Context.ProcurementEvaluationAttendanceRecords
+                .AsNoTracking()
+                .SingleAsync(item => item.MeetingId == meeting.Id &&
+                                     item.AppointmentId == member.Id);
+            recorded.SignatureReference.Should()
+                .StartWith("urn:tdc:procurement:evaluation-committee:attendance:signature:");
+            recorded.EvidenceReference.Should()
+                .StartWith("urn:tdc:procurement:evaluation-committee:attendance:evidence:");
         }
 
         fixture.SwitchAdministrator();
         var currentControl = await fixture.Service.GetAsync(
             ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        fixture.Access.Invocations.Clear();
         var confirmed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
             new ConfirmProcurementEvaluationQuorumRequest
             {
                 RowVersion = currentControl.Meetings.Single(item => item.Id == meeting.Id)
                     .RowVersion,
-                EvidenceReference = "evidence://quorum-register",
                 RemoteMeetingEvidenceReference = "evidence://remote-session",
                 IdempotencyKey = "quorum-technical"
             }, "quorum-technical");
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.administer" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
 
         confirmed.QuorumMet.Should().BeTrue();
         confirmed.ChairPresent.Should().BeTrue();
         confirmed.SecretaryPresent.Should().BeTrue();
         confirmed.SignedVotingAttendanceCount.Should().Be(2);
+        confirmed.EvidenceReference.Should()
+            .StartWith("urn:tdc:procurement:evaluation-committee:quorum-confirmation:evidence:");
         confirmed.QuorumIntegrityHash.Should().HaveLength(64);
 
         fixture.SwitchUser(control.Members.Single(item =>
@@ -279,8 +931,9 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         replay.Attempt.Should().Be(1);
         replay.Status.Should().Be(ProcurementEvaluationScoreSheetStatus.Locked);
         locked.IntegrityHash.Should().HaveLength(64);
-        fixture.TenderControl.Status =
-            ProcurementTenderControlStatus.FinancialEvaluated;
+        var tenderControl = await fixture.Context.ProcurementTenderControls
+            .SingleAsync(item => item.Id == fixture.TenderControl.Id);
+        tenderControl.Status = ProcurementTenderControlStatus.FinancialEvaluated;
         await fixture.Context.SaveChangesAsync();
 
         await fixture.Service.Invoking(service => service.RequestScoreRecallAsync(
@@ -340,11 +993,99 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
     }
 
     [Fact]
+    public async Task EvaluationMeetingWaitsUntilTheBiddingWindowCloses()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SetAdvertisedTender(DateTime.UtcNow.AddHours(1));
+        fixture.AddOnTimeSubmissionReceipt();
+        fixture.SwitchAdministrator();
+
+        var action = () => fixture.Service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical,
+                MeetingMode = "InPerson",
+                MeetingChannel = "Board room",
+                ScheduledAtUtc = DateTime.UtcNow.AddHours(2),
+                EvidenceReference = "evidence://agenda",
+                CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "meeting-before-close"
+            }, "meeting-before-close");
+
+        await action.Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception =>
+                exception.Code == "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE");
+        (await fixture.Context.ProcurementEvaluationMeetings.CountAsync())
+            .Should().Be(0);
+    }
+
+    [Fact]
+    public async Task LegacyMeetingCannotRecordAttendanceOrQuorumBeforeBiddingCloses()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchAdministrator();
+        var meeting = await fixture.Service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical,
+                MeetingMode = "InPerson",
+                MeetingChannel = "Board room",
+                ScheduledAtUtc = DateTime.UtcNow.AddMinutes(5),
+                EvidenceReference = "evidence://legacy-agenda",
+                CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "legacy-meeting"
+            }, "legacy-meeting");
+        fixture.SetAdvertisedTender(DateTime.UtcNow.AddHours(1));
+        fixture.AddOnTimeSubmissionReceipt();
+
+        var member = control.Members.First();
+        fixture.SwitchUser(member.UserId);
+        var current = await fixture.Service.GetAsync(
+            ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        var signAction = () => fixture.Service.SignAttendanceAsync(meeting.Id,
+            new SignProcurementEvaluationAttendanceRequest
+            {
+                IsPresent = true,
+                MeetingRowVersion = current.Meetings.Single(item =>
+                    item.Id == meeting.Id).RowVersion,
+                AppointmentRowVersion = current.Members.Single(item =>
+                    item.Id == member.Id).RowVersion,
+                IdempotencyKey = "legacy-attendance"
+            }, "legacy-attendance");
+
+        await signAction.Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception =>
+                exception.Code == "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE");
+
+        fixture.SwitchAdministrator();
+        var quorumAction = () => fixture.Service.ConfirmQuorumAsync(meeting.Id,
+            new ConfirmProcurementEvaluationQuorumRequest
+            {
+                RowVersion = current.Meetings.Single(item =>
+                    item.Id == meeting.Id).RowVersion,
+                EvidenceReference = "evidence://legacy-quorum",
+                IdempotencyKey = "legacy-quorum"
+            }, "legacy-quorum");
+
+        await quorumAction.Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(exception =>
+                exception.Code == "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE");
+        (await fixture.Context.ProcurementEvaluationAttendanceRecords.CountAsync())
+            .Should().Be(0);
+    }
+
+    [Fact]
     public async Task ExactCompletedWorkflowWithIndependentProcessorApprovesRecall()
     {
         await using var fixture = new Fixture();
         var seeded = await fixture.SeedRecallDecisionAsync(
             WorkflowInstanceStatus.Completed, Guid.NewGuid());
+        fixture.Access.Invocations.Clear();
 
         var decided = await fixture.Service.DecideScoreRecallAsync(seeded.Recall.Id,
             fixture.Decision(seeded.Recall, approve: true), "decide-recall");
@@ -352,6 +1093,56 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         decided.Status.Should().Be(ProcurementEvaluationScoreRecallStatus.Approved);
         decided.AuthorizedNewAttempt.Should().Be(2);
         decided.DecisionEvidenceReference.Should().Be("evidence://recall-decision");
+        var sodEvent = await fixture.Context.ProcurementControlEvents.SingleAsync(item =>
+            item.EventType == "SegregationOfDutiesDecision");
+        sodEvent.RuleCode.Should().Be("SOD-INITIATOR-APPROVER");
+        sodEvent.Result.Should().Be(ProcurementControlEventResult.Allowed);
+        sodEvent.ActorUserId.Should().Be(fixture.AdministratorId);
+        (await fixture.Context.ProcurementEvaluationScoreSheets.SingleAsync(item => item.Id == seeded.Locked.Id))
+            .ScoreSnapshotJson.Should().Be(seeded.Locked.ScoreSnapshotJson);
+        fixture.Access.Verify(service => service.EnforceCapabilityAsync(
+                It.Is<ProcurementAccessCapabilityRequest>(request =>
+                    request.PermissionCode == "procurement.tender.approve" &&
+                    request.CommitteeCode == null),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("scorer")]
+    [InlineData("requester")]
+    public async Task RealMakerCheckerGuardRejectsRecallDecisionByEitherPriorParticipant(string decidingParticipant)
+    {
+        await using var fixture = new Fixture();
+        var seeded = await fixture.SeedRecallDecisionAsync(
+            WorkflowInstanceStatus.Completed, Guid.NewGuid());
+        // Retain distinct prior identities to prove both caller-supplied actors
+        // remain prohibited, even when the workflow processor is independent.
+        var requesterId = Guid.NewGuid();
+        seeded.Recall.RequestedByUserId = requesterId;
+        await fixture.Context.SaveChangesAsync();
+        var actorId = decidingParticipant == "scorer" ? seeded.Locked.SubmittedByUserId : requesterId;
+        fixture.SwitchUser(actorId);
+
+        await fixture.Service.Invoking(service => service.DecideScoreRecallAsync(
+                seeded.Recall.Id, fixture.Decision(seeded.Recall, approve: true), "conflicting-recall-decision"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+
+        var retained = await fixture.Context.ProcurementEvaluationScoreRecalls.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.Recall.Id);
+        retained.Status.Should().Be(ProcurementEvaluationScoreRecallStatus.PendingApproval);
+        retained.AuthorizedNewAttempt.Should().BeNull();
+        retained.DecidedByUserId.Should().BeNull();
+        var sheet = await fixture.Context.ProcurementEvaluationScoreSheets.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.Locked.Id);
+        sheet.ScoreSnapshotJson.Should().Be(seeded.Locked.ScoreSnapshotJson);
+        sheet.IntegrityHash.Should().Be(seeded.Locked.IntegrityHash);
+        var sodEvent = await fixture.Context.ProcurementControlEvents.SingleAsync(item =>
+            item.EventType == "SegregationOfDutiesDecision");
+        sodEvent.RuleCode.Should().Be("SOD-INITIATOR-APPROVER");
+        sodEvent.Result.Should().Be(ProcurementControlEventResult.Denied);
+        sodEvent.ActorUserId.Should().Be(actorId);
+        sodEvent.InputValuesJson.Should().Contain(requesterId.ToString()).And.Contain(seeded.Locked.SubmittedByUserId.ToString());
+        (await fixture.Context.AuditLogs.SingleAsync()).Action.Should().Be("SOD_BYPASS_BLOCKED");
     }
 
     [Fact]
@@ -410,6 +1201,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         private Guid _currentTenantId;
         private Guid _currentUserId;
         private bool _administrator = true;
+        private string _administratorRole = "TDC_HEAD_OF_PROCUREMENT";
 
         public Fixture()
         {
@@ -503,6 +1295,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 Title = "Evaluation-controlled tender",
                 TenderType = "NCT",
                 Status = "Closed",
+                SubmissionDeadline = DateTime.UtcNow.AddDays(-1),
                 SourcePurchaseRequisitionId = SourcingCase.PurchaseRequisitionId,
                 SourcingReleaseId = SourcingCase.SourcingReleaseId,
                 SourcingCaseId = SourcingCase.Id
@@ -524,9 +1317,24 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 TenderDocumentReference = "DOC-001",
                 TenderDocumentVersion = "1",
                 AdvertisementEvidenceReference = "evidence://advert",
+                SubmissionDeadlineUtc = Tender.SubmissionDeadline.Value,
                 LifecycleSnapshotJson = "{}",
                 IntegrityHash = new string('d', 64),
                 RowVersion = Guid.NewGuid().ToByteArray()
+            };
+            var submissionReceipt = new ProcurementTenderSubmissionReceipt
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                TenderControlId = TenderControl.Id,
+                TenderBidId = Guid.NewGuid(),
+                BusinessPartnerId = Guid.NewGuid(),
+                ReceiptNumber = "TND-EVAL-001-B0001",
+                ReceivedAtUtc = TenderControl.SubmissionDeadlineUtc.AddMinutes(-5),
+                SubmissionDeadlineUtc = TenderControl.SubmissionDeadlineUtc,
+                Disposition = ProcurementTenderSubmissionDisposition.OnTimeAccepted,
+                SealedSnapshotJson = "{}",
+                IntegrityHash = new string('e', 64)
             };
             var role = new ApplicationRole
             {
@@ -612,7 +1420,8 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 IsActive = true
             };
             Context.AddRange(Profile, Policy, rule, SourcingCase, Tender,
-                TenderControl, role, Committee, workflowEntityType, Workflow);
+                TenderControl, submissionReceipt, role, Committee,
+                workflowEntityType, Workflow);
             Context.SaveChanges();
             Context.ChangeTracker.Clear();
 
@@ -627,29 +1436,20 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                 $"{_currentUserId:N}@tdc.test");
             _current.SetupGet(item => item.FullName).Returns("TDC Evaluator");
             _current.SetupGet(item => item.Roles).Returns(() =>
-                _administrator ? ["Administrator"] : ["TDC_EVALUATOR"]);
+                _administrator ? [_administratorRole] : ["TDC_EVALUATOR"]);
             _current.Setup(item => item.HasRole(It.IsAny<string>()))
                 .Returns((string role) =>
                     _administrator &&
-                    string.Equals(role, Constants.Roles.SuperAdmin,
+                    string.Equals(role, _administratorRole,
                         StringComparison.OrdinalIgnoreCase));
-            var access = new Mock<IProcurementAccessControlService>();
-            access.Setup(item => item.EnforceCapabilityAsync(
-                    It.IsAny<ProcurementAccessCapabilityRequest>(),
-                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
-                {
-                    Allowed = true,
-                    Message = "Allowed"
-                });
-            var sod = new Mock<IProcurementSodGuardService>();
-            sod.Setup(item => item.EnforceAsync(
-                    It.IsAny<ProcurementSodGuardRequest>(),
-                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new ProcurementSodGuardDecisionDto
-                {
-                    Allowed = true
-                });
+            Access = new Mock<IProcurementAccessControlService>();
+            SetCapabilityAllowed(true);
+            var access = Access;
+            var sod = new ProcurementSodGuardService(
+                _unitOfWork, _current.Object, Mock.Of<IProcurementPolicyService>(), Mock.Of<IRoleService>(),
+                new ProcurementControlEventService(_unitOfWork, _current.Object,
+                    NullLogger<ProcurementControlEventService>.Instance),
+                NullLogger<ProcurementSodGuardService>.Instance);
             var events = new Mock<IProcurementControlEventService>();
             events.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
@@ -665,7 +1465,10 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                     Id = Guid.NewGuid(),
                     TenantId = TenantId
                 });
-            var notifications = new Mock<INotificationTopicPublisher>();
+            Notifications = new Mock<INotificationTopicPublisher>();
+            var configuration = new Mock<IConfiguration>();
+            configuration.Setup(item => item["FrontendUrl"])
+                .Returns("https://erp.test");
             SourcingCases.Setup(service => service.RecoverTenderSourceEntryAsync(
                     Tender.SourcePurchaseRequisitionId!.Value,
                     SourcingCase.SourcingReleaseId,
@@ -682,9 +1485,9 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                     CurrencyCode = SourcingCase.CurrencyCode
                 });
             Service = new ProcurementEvaluationCommitteeControlService(
-                _unitOfWork, _current.Object, access.Object, sod.Object,
+                _unitOfWork, _current.Object, access.Object, sod,
                 events.Object, SourcingCases.Object, workflowInstances.Object,
-                notifications.Object);
+                Notifications.Object, configuration.Object);
         }
 
         public Guid TenantId { get; }
@@ -699,12 +1502,85 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         public ErpSystem.Core.Entities.Workflow.WorkflowDefinition Workflow { get; }
         public List<Guid> MemberUserIds { get; } = new();
         public Mock<IProcurementSourcingCaseService> SourcingCases { get; } = new();
+        public Mock<INotificationTopicPublisher> Notifications { get; }
         public ProcurementEvaluationCommitteeControlService Service { get; }
+        public Mock<IProcurementAccessControlService> Access { get; }
 
         public void RemoveTenderCaseLink()
         {
             var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
             tender.SourcingCaseId = null;
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void MarkTenderUnpublished()
+        {
+            var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
+            tender.Status = "Approved";
+            Context.ProcurementTenderControls.RemoveRange(
+                Context.ProcurementTenderControls.Where(item =>
+                    item.TenderId == Tender.Id));
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void SetStandardTender(DateTime deadline, string bidStatus = "Submitted", int minutes = -1, bool otherTenant = false)
+        {
+            Context.ProcurementTenderSubmissionReceipts.RemoveRange(Context.ProcurementTenderSubmissionReceipts);
+            Context.ProcurementTenderControls.RemoveRange(Context.ProcurementTenderControls);
+            var source = Context.Set<ProcurementSourcingCase>().Single(item => item.Id == SourcingCase.Id);
+            source.AuthorityRouteId = null;
+            source.AuthorityRouteReference = null;
+            var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
+            tender.Status = "Published";
+            tender.PublishDate = DateTime.UtcNow.AddDays(-1);
+            tender.SubmissionDeadline = deadline;
+            Context.Set<TenderBid>().Add(new TenderBid
+            {
+                Id = Guid.NewGuid(), TenantId = otherTenant ? Guid.NewGuid() : TenantId,
+                TenderId = tender.Id, BusinessPartnerId = Guid.NewGuid(), BidNumber = "BID-STANDARD-1",
+                Status = bidStatus, SubmittedDate = minutes < 0 ? DateTime.UtcNow.AddMinutes(minutes) : deadline.AddMinutes(minutes), Currency = "GHS"
+            });
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void SetAdvertisedTender(DateTime submissionDeadlineUtc)
+        {
+            var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
+            tender.Status = "Published";
+            tender.SubmissionDeadline = submissionDeadlineUtc;
+            var control = Context.ProcurementTenderControls.Single(item =>
+                item.TenderId == Tender.Id);
+            control.Status = ProcurementTenderControlStatus.Advertised;
+            control.SubmissionDeadlineUtc = submissionDeadlineUtc;
+            Context.ProcurementTenderSubmissionReceipts.RemoveRange(
+                Context.ProcurementTenderSubmissionReceipts.Where(item =>
+                    item.TenderControlId == control.Id));
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void AddOnTimeSubmissionReceipt()
+        {
+            var tenderControl = Context.ProcurementTenderControls.Single(item =>
+                item.TenderId == Tender.Id);
+            Context.ProcurementTenderSubmissionReceipts.Add(
+                new ProcurementTenderSubmissionReceipt
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    TenderControlId = tenderControl.Id,
+                    TenderBidId = Guid.NewGuid(),
+                    BusinessPartnerId = Guid.NewGuid(),
+                    ReceiptNumber = "TND-EVAL-001-B0001",
+                    ReceivedAtUtc = tenderControl.SubmissionDeadlineUtc.AddMinutes(-5),
+                    SubmissionDeadlineUtc = tenderControl.SubmissionDeadlineUtc,
+                    Disposition = ProcurementTenderSubmissionDisposition.OnTimeAccepted,
+                    SealedSnapshotJson = "{}",
+                    IntegrityHash = new string('e', 64)
+                });
             Context.SaveChanges();
             Context.ChangeTracker.Clear();
         }
@@ -717,24 +1593,207 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             _administrator = false;
         }
 
-        public void SwitchAdministrator()
+        public void SwitchRole(string role)
         {
             _currentUserId = AdministratorId;
             _administrator = true;
+            _administratorRole = role;
+        }
+
+        public void SwitchAdministrator(string administratorRole = "TDC_HEAD_OF_PROCUREMENT")
+        {
+            _currentUserId = AdministratorId;
+            _administrator = true;
+            _administratorRole = administratorRole;
+        }
+
+        public void SetCapabilityAllowed(bool allowed) =>
+            Access.Setup(item => item.EnforceCapabilityAsync(
+                    It.IsAny<ProcurementAccessCapabilityRequest>(),
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcurementAccessCapabilityDecisionDto
+                {
+                    Allowed = allowed,
+                    Message = allowed ? "Allowed" : "Denied"
+                });
+
+        public void RetireConfigurationAfterSourceCreation()
+        {
+            var profile = Context.ProcurementConfigurationProfiles
+                .Single(item => item.Id == Profile.Id);
+            profile.PublishedAt ??= profile.CreatedAt.AddMinutes(-1);
+            profile.LifecycleStatus = ProcurementConfigurationProfileStatus.Retired;
+            profile.RetiredAt = SourcingCase.CreatedAt.AddMinutes(1);
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void MarkCommitteeMemberAsExternalUser()
+        {
+            var externalRole = new ApplicationRole
+            {
+                Id = Guid.NewGuid(),
+                Name = Constants.Roles.ExternalUser,
+                NormalizedName = Constants.Roles.ExternalUser.ToUpperInvariant()
+            };
+            Context.AddRange(externalRole, new ApplicationUserRole
+            {
+                UserId = MemberUserIds[0],
+                RoleId = externalRole.Id
+            });
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void AddDraftActivity(Guid controlId, string activity)
+        {
+            var control = Context.ProcurementEvaluationCommitteeControls
+                .Single(item => item.Id == controlId);
+            var appointment = Context.ProcurementEvaluationCommitteeAppointments
+                .First(item => item.CommitteeControlId == controlId);
+            switch (activity)
+            {
+                case "appointment":
+                    appointment.Status = ProcurementEvaluationAppointmentStatus.Declined;
+                    appointment.StatusReason = "Member declined.";
+                    break;
+                case "declaration":
+                    Context.Add(new ProcurementEvaluationConflictDeclaration
+                    {
+                        Id = Guid.NewGuid(), TenantId = TenantId,
+                        AppointmentId = appointment.Id, Version = 1,
+                        Outcome = ProcurementEvaluationConflictOutcome.NoConflict,
+                        Declaration = "No conflict.", SignatureReference = "sig://coi",
+                        EvidenceReference = "evidence://coi", ValidFromUtc = DateTime.UtcNow,
+                        DeclaredAtUtc = DateTime.UtcNow, DeclaredByUserId = appointment.UserId,
+                        IdempotencyKey = "coi-on-draft", SnapshotJson = "{}",
+                        IntegrityHash = new string('a', 64)
+                    });
+                    break;
+                case "meeting":
+                    Context.Add(new ProcurementEvaluationMeeting
+                    {
+                        Id = Guid.NewGuid(), TenantId = TenantId,
+                        CommitteeControlId = controlId, Sequence = 1,
+                        Phase = ProcurementEvaluationPhase.Technical,
+                        MeetingMode = "InPerson", MeetingChannel = "Boardroom",
+                        ScheduledAtUtc = DateTime.UtcNow, EvidenceReference = "evidence://meeting",
+                        QuorumSnapshotJson = "{}", QuorumIntegrityHash = new string('b', 64),
+                        IdempotencyKey = "meeting-on-draft", RowVersion = Guid.NewGuid().ToByteArray()
+                    });
+                    break;
+                case "score":
+                    Context.Add(new ProcurementEvaluationScoreSheet
+                    {
+                        Id = Guid.NewGuid(), TenantId = TenantId,
+                        CommitteeControlId = controlId, AppointmentId = appointment.Id,
+                        MeetingId = Guid.NewGuid(), Phase = ProcurementEvaluationPhase.Technical,
+                        ScoreSubjectType = "TenderBid", ScoreSubjectId = Guid.NewGuid(),
+                        SubmittedAtUtc = DateTime.UtcNow, SubmittedByUserId = appointment.UserId,
+                        SubmittedByName = appointment.UserDisplayName, ScoreSnapshotJson = "{}",
+                        SignatureReference = "sig://score", EvidenceReference = "evidence://score",
+                        IntegrityHash = new string('c', 64), IdempotencyKey = "score-on-draft",
+                        RowVersion = Guid.NewGuid().ToByteArray()
+                    });
+                    break;
+                case "workflow":
+                    control.WorkflowInstanceId = Guid.NewGuid();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(activity));
+            }
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public Guid LinkCommitteeMemberToInvitedSupplier(
+            ProcurementEvaluationSourceType sourceType)
+        {
+            var partner = new BusinessPartner
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                PartnerCode = $"SUP-{Guid.NewGuid():N}",
+                PartnerName = "Invited supplier",
+                PartnerType = "Supplier",
+                RegistrationStatus = "Approved",
+                IsActive = true
+            };
+            var link = new BusinessPartnerUser
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                BusinessPartnerId = partner.Id,
+                UserId = MemberUserIds[0],
+                Role = "User",
+                IsActive = true
+            };
+
+            if (sourceType == ProcurementEvaluationSourceType.Tender)
+            {
+                Context.AddRange(partner, link, new TenderInvitation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    TenderId = Tender.Id,
+                    BusinessPartnerId = partner.Id
+                });
+                Context.SaveChanges();
+                Context.ChangeTracker.Clear();
+                return Tender.Id;
+            }
+
+            var rfq = new RequestForQuotation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = TenantId,
+                RfqNumber = "RFQ-EVAL-001",
+                Title = "Evaluation-controlled RFQ",
+                Status = "Closed",
+                SourcePurchaseRequisitionId = SourcingCase.PurchaseRequisitionId,
+                SourcingReleaseId = SourcingCase.SourcingReleaseId,
+                SourcingCaseId = SourcingCase.Id
+            };
+            Context.AddRange(rfq, partner, link,
+                new RequestForQuotationInvitation
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = TenantId,
+                    RfqId = rfq.Id,
+                    BusinessPartnerId = partner.Id
+                });
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+            return rfq.Id;
+        }
+
+        public async Task AssertNoCommitteeSnapshotAsync()
+        {
+            (await Context.ProcurementEvaluationCommitteeControls.CountAsync())
+                .Should().Be(0);
+            (await Context.ProcurementEvaluationCommitteeAppointments.CountAsync())
+                .Should().Be(0);
         }
 
         public Task<ProcurementEvaluationCommitteeDto> BindDraftAsync() =>
+            BindDraftAsync(ProcurementEvaluationSourceType.Tender, Tender.Id,
+                "bind-evaluation");
+
+        public Task<ProcurementEvaluationCommitteeDto> BindDraftAsync(
+            ProcurementEvaluationSourceType sourceType,
+            Guid sourceId,
+            string idempotencyKey) =>
             Service.BindAsync(
                 new BindProcurementEvaluationCommitteeRequest
                 {
-                    SourceType = ProcurementEvaluationSourceType.Tender,
-                    SourceId = Tender.Id,
+                    SourceType = sourceType,
+                    SourceId = sourceId,
                     CommitteeTemplateId = Committee.Id,
                     Purpose = "Evaluate all responsive bids.",
                     EffectiveFromUtc = DateTime.UtcNow.AddHours(-1),
                     RequiredRoles = [],
-                    IdempotencyKey = "bind-evaluation"
-                }, "bind-evaluation");
+                    IdempotencyKey = idempotencyKey
+                }, idempotencyKey);
 
         public async Task<ProcurementEvaluationCommitteeDto> BindAndActivateAsync()
         {

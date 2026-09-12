@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "runId": "fresh-sql-fixture-run-id",
+  "tenantCode": "TENANT-CODE",
+  "prePublication": {
+    "approvedRequisitionId": "00000000-0000-0000-0000-000000000100",
+    "requisitionNumber": "PR-E2E-0001",
+    "title": "E2E pre-publication tender",
+    "description": "Fresh two-line tender created from an approved requisition for lifecycle verification.",
+    "tenderType": "ITB",
+    "evaluationTemplateName": "E2E Goods ITB template",
+    "expectedItemDescriptions": ["E2E line one", "E2E line two"],
+    "submissionDeadline": "2026-12-01T12:00",
+    "openingDate": "2026-12-01T13:00",
+    "publication": {
+      "prerequisitesPrepared": false,
+      "pendingReason": "The browser-created tender has not yet received authoritative invitations, controlled documents, and publication controls.",
+      "advertisementReference": "E2E-ADVERT-001",
+      "publicationChannel": "Acceptance portal",
+      "tenderDocumentReference": "E2E-DOC-001",
+      "tenderDocumentVersion": "1",
+      "advertisementEvidenceReference": "E2E-ADVERT-EVIDENCE-001"
+    }
+  },
+  "supplierLifecycle": {
+    "tenderId": "00000000-0000-0000-0000-000000000001",
+    "tenderNumber": "TND-E2E-0001",
+    "lotId": "00000000-0000-0000-0000-000000000002",
+    "lotLabel": "LOT-01",
+    "expectedItemDescription": "Deterministic lifecycle test item",
+    "offeredQuantity": 10,
+    "unitPrice": 125.5,
+    "deliveryDays": 14,
+    "brand": "E2E Brand",
+    "model": "E2E Model",
+    "technicalProposal": "This deterministic technical proposal is intentionally longer than one hundred characters and is unique to a disposable SQL Server lifecycle fixture.",
+    "commercialProposal": "This deterministic commercial proposal is intentionally longer than one hundred characters and is unique to a disposable SQL Server lifecycle fixture.",
+    "paymentReference": "E2E-PAYMENT-REFERENCE",
+    "requiredDocumentPaths": {}
+  },
+  "committee": {
+    "absent": {
+      "tenderId": "00000000-0000-0000-0000-000000000010",
+      "tenderNumber": "TND-E2E-NO-COMMITTEE",
+      "bidId": "00000000-0000-0000-0000-000000000011",
+      "bidNumber": "BID-E2E-NO-COMMITTEE"
+    },
+    "draft": {
+      "tenderId": "00000000-0000-0000-0000-000000000020",
+      "tenderNumber": "TND-E2E-DRAFT-COMMITTEE",
+      "bidId": "00000000-0000-0000-0000-000000000021",
+      "bidNumber": "BID-E2E-DRAFT-COMMITTEE"
+    },
+    "active": {
+      "tenderId": "00000000-0000-0000-0000-000000000030",
+      "tenderNumber": "TND-E2E-CLOSED-CONTROLLED",
+      "bidId": "00000000-0000-0000-0000-000000000031",
+      "bidNumber": "BID-E2E-SUPPLIER-A"
+    }
+  },
+  "competition": {
+    "tenderId": "00000000-0000-0000-0000-000000000030",
+    "tenderNumber": "TND-E2E-CLOSED-CONTROLLED",
+    "firstSupplierBidId": "00000000-0000-0000-0000-000000000031",
+    "firstSupplierBidNumber": "BID-E2E-SUPPLIER-A",
+    "secondSupplierBidId": "00000000-0000-0000-0000-000000000032",
+    "secondSupplierBidNumber": "BID-E2E-SUPPLIER-B",
+    "expectedWinnerBidNumber": "BID-E2E-SUPPLIER-A",
+    "opening": {
+      "mode": "Controlled",
+      "evidenceReference": "E2E-SIGNED-PUBLIC-OPENING",
+      "officerSignatureReference": "E2E-OPENING-OFFICER-SIGNATURE",
+      "observerName": "E2E Independent Observer",
+      "observerSignatureReference": "E2E-OBSERVER-SIGNATURE"
+    }
+  },
+  "evaluation": {
+    "signatureReference": "E2E-EVALUATOR-SIGNATURE",
+    "evidenceReference": "E2E-SIGNED-SCORE-SHEET",
+    "technicalComments": "The technical response satisfies the deterministic acceptance criteria.",
+    "commercialComments": "The commercial response is complete and within the approved test budget.",
+    "overallComments": "Recommended after independent evaluation of the disposable test bid.",
+    "recommendation": "Recommended on the basis of the recorded technical and commercial evaluation."
+  },
+  "award": {
+    "justification": "Highest ranked compliant bid in the deterministic lifecycle fixture.",
+    "approvalNotes": "Independent award approval completed by the configured approver."
+  },
+  "handoff": {
+    "mode": "PO",
+    "alternateApprovedAwardId": "00000000-0000-0000-0000-000000000040",
+    "alternateMode": "Contract",
+    "contractStartDate": "2026-12-02",
+    "contractEndDate": "2027-12-01"
+  },
+  "regression": {
+    "tenderAmendmentDescription": "E2E immutable amendment for supplier clarification.",
+    "tenderAmendmentChanges": "Clarifies delivery evidence without changing evaluated scope.",
+    "crossTenantTenderId": "00000000-0000-0000-0000-000000000099"
+  }
+}

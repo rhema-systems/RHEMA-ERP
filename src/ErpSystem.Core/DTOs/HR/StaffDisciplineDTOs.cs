@@ -141,6 +141,10 @@ public class StaffDisciplinaryActionTypeDto : BaseDto
     public bool IsActive { get; set; }
     public int? DefaultSuspensionDays { get; set; }
     public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>Who may issue this action — FR-HR-080 / FR-HR-092.</summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
+    public string MinimumAuthorityName => MinimumAuthority.ToString();
 }
 
 public class StaffDisciplinaryActionTypeSummaryDto
@@ -149,6 +153,13 @@ public class StaffDisciplinaryActionTypeSummaryDto
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Carried on the summary as well as the detail: the decision dialog picks from summaries, and
+    /// it needs to know which sanctions the caller is entitled to offer.
+    /// </summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; }
+    public string MinimumAuthorityName => MinimumAuthority.ToString();
 }
 
 public class CreateStaffDisciplinaryActionTypeDto : CreateDtoBase
@@ -168,6 +179,9 @@ public class CreateStaffDisciplinaryActionTypeDto : CreateDtoBase
 
     [Range(0, double.MaxValue)]
     public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>Who may issue this action. Defaults to HR — restrictive rather than permissive.</summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
 }
 
 public class UpdateStaffDisciplinaryActionTypeDto : UpdateDtoBase
@@ -187,6 +201,9 @@ public class UpdateStaffDisciplinaryActionTypeDto : UpdateDtoBase
 
     [Range(0, double.MaxValue)]
     public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>Who may issue this action — FR-HR-080 / FR-HR-092.</summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
 }
 
 #endregion
@@ -256,7 +273,18 @@ public class StaffDisciplinaryActionDto : BaseDto
     public bool HasSuspension { get; set; }
     public bool HasFine { get; set; }
     public bool HasTermination { get; set; }
+    /// <summary>
+    /// Whether a reduction in rank cites this case. FR-HR-179's ladder includes it, but a demotion
+    /// is not a sub-entity of the case — it is a staff movement, because reducing someone's rank
+    /// means moving them to a different post with its own grade, unit and salary, and only the
+    /// movement carries that. The case is cited as the REASON via
+    /// <c>StaffDemotion.DisciplinaryActionId</c>, and area 8's implement path is what actually
+    /// changes the employee record.
+    /// </summary>
     public bool HasDemotion { get; set; }
+
+    /// <summary>The demotions citing this case, for the link on the sanctions tab.</summary>
+    public List<DisciplinaryLinkedDemotionDto> LinkedDemotions { get; set; } = new();
 
     // One-to-one sub-entity details (null when not applicable)
     public StaffDisciplineInvestigationDto? Investigation { get; set; }
@@ -319,7 +347,10 @@ public class CreateStaffDisciplinaryActionDto : CreateDtoBase
     [MaxLength(4000)]
     public string IncidentDescription { get; set; } = string.Empty;
 
-    [Required]
+    /// <summary>
+    /// Who reported the allegation. Optional: the server fills it from the caller's token, and only
+    /// HR may name someone else (recording a report made to them). Left unset by every other caller.
+    /// </summary>
     public Guid ReportedById { get; set; }
 
     [Required]
@@ -349,7 +380,10 @@ public class UpdateStaffDisciplinaryActionDto : UpdateDtoBase
     [MaxLength(4000)]
     public string IncidentDescription { get; set; } = string.Empty;
 
-    [Required]
+    /// <summary>
+    /// See <see cref="CreateStaffDisciplinaryActionDto.ReportedById"/> — server-filled from the
+    /// token unless HR names someone else.
+    /// </summary>
     public Guid ReportedById { get; set; }
 
     [Required]
@@ -360,7 +394,14 @@ public class UpdateStaffDisciplinaryActionDto : UpdateDtoBase
     public bool HearingRequired { get; set; }
 }
 
-/// <summary>Records the final decision and action type for a case.</summary>
+/// <summary>
+/// Records the final decision and action type for a case.
+/// </summary>
+/// <remarks>
+/// <c>DecisionById</c> is deliberately absent: who decided a disciplinary case is testimony, and the
+/// server takes it from the caller's token. Accepting it here let any authenticated caller record a
+/// decision in someone else's name.
+/// </remarks>
 public class RecordDisciplinaryDecisionDto
 {
     [Required]
@@ -376,19 +417,146 @@ public class RecordDisciplinaryDecisionDto
     public string? DecisionRationale { get; set; }
 
     public DateTime DecisionDate { get; set; } = DateTime.UtcNow;
-
-    [Required]
-    public Guid DecisionById { get; set; }
 }
 
-/// <summary>Transitions a case to Closed status.</summary>
+/// <summary>
+/// A reduction in rank citing a disciplinary case — enough to show it and link to it, not a copy of
+/// the movement.
+/// </summary>
+/// <remarks>
+/// Read-only by design. The movement is area 8's record: it owns the destination post, the approval
+/// route and the write to the employee. Duplicating any of that here would be two records of the same
+/// fact, which is exactly what area 8 refused to do when it chose to write both history stores from
+/// one code path.
+/// </remarks>
+public class DisciplinaryLinkedDemotionDto
+{
+    public Guid DemotionId { get; set; }
+    public Guid MovementId { get; set; }
+    public string MovementNumber { get; set; } = string.Empty;
+    public string MovementStatus { get; set; } = string.Empty;
+    public int GradeLevelDecrease { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+    public string? NewPositionTitle { get; set; }
+}
+
+/// <summary>
+/// How a case stands against the two statutory clocks: FR-HR-177's 48-hour written query and
+/// FR-HR-178's four-week investigation.
+/// </summary>
+/// <remarks>
+/// Reported, not enforced. A breach is a fact about what already happened and refusing the next step
+/// cannot undo it — see <c>DisciplineProcessDeadlines</c> for why both clocks advise rather than
+/// block. The figures are computed from the record on every read, so they cannot drift from the rule.
+/// </remarks>
+public class DisciplineProcessClockDto
+{
+    // ── FR-HR-177: the written query ──
+    public DateTime QueryDueAt { get; set; }
+    public DateTime? QueryIssuedAt { get; set; }
+    public bool QueryIssued { get; set; }
+    public bool QueryAcknowledged { get; set; }
+    public DateTime? QueryAcknowledgedAt { get; set; }
+
+    /// <summary>True once the deadline has passed with no query issued, or it was issued late.</summary>
+    public bool QueryBreached { get; set; }
+
+    /// <summary>
+    /// Hours late, when breached. Measured to issuance where a query was issued late, and to now
+    /// where none has been issued at all — an open breach keeps growing, which is the point.
+    /// </summary>
+    public double? QueryHoursLate { get; set; }
+
+    // ── FR-HR-178: the investigation ──
+    public bool InvestigationRequired { get; set; }
+    public bool InvestigationOpened { get; set; }
+    public DateTime? InvestigationStartedAt { get; set; }
+    public DateTime? InvestigationDueAt { get; set; }
+    public DateTime? InvestigationCompletedAt { get; set; }
+    public bool InvestigationBreached { get; set; }
+    public int? InvestigationDaysLate { get; set; }
+
+    // ── Natural justice: has the employee been heard? ──
+    //
+    // Unlike the two clocks above, this one BLOCKS. It is surfaced here so the screen can explain
+    // why the decision button will be refused, rather than letting the user find out by pressing it.
+
+    /// <summary>When the employee's chance to answer the written query closes.</summary>
+    public DateTime? QueryResponseClosesAt { get; set; }
+
+    public bool QueryOpportunityWaived { get; set; }
+    public DateTime? QueryOpportunityWaivedAt { get; set; }
+    public string? QueryOpportunityWaivedReason { get; set; }
+    public string? QueryOpportunityWaivedByName { get; set; }
+
+    /// <summary>False while the employee has not yet been queried, or still has time to answer.</summary>
+    public bool CanProposeDecision { get; set; }
+
+    /// <summary>The reason a decision cannot be proposed yet, in the words the server would refuse with.</summary>
+    public string? DecisionBlockedReason { get; set; }
+
+    // ── FR-HR-180: the appeal windows ──
+    //
+    // The FILING window is enforced — an appeal out of time is one the employer may refuse to hear,
+    // and letting it through would misrepresent the position to both sides. The DECISION window is
+    // advisory, like the two clocks above: an appeal decided late is still a decision, and refusing
+    // to record it would leave the employee with no answer at all.
+
+    public bool DecisionMade { get; set; }
+    public DateTime? AppealFilingClosesAt { get; set; }
+    public bool AppealFilingWindowOpen { get; set; }
+    public bool AppealFiled { get; set; }
+    public DateTime? AppealFiledAt { get; set; }
+
+    public DateTime? AppealDecisionDueAt { get; set; }
+    public bool AppealDecisionBreached { get; set; }
+    public int? AppealDecisionWorkingDaysLate { get; set; }
+
+    /// <summary>A short sentence per live breach, for the banner. Empty when the case is on time.</summary>
+    public List<string> Advisories { get; set; } = new();
+}
+
+/// <summary>
+/// Comments carried with an approve, refuse or recall of a proposed decision.
+/// </summary>
+/// <remarks>
+/// The actor is not on here for the same reason it is not on the decision payload: the engine takes
+/// it from the token, and it is the engine — not the caller — that decides whether they are assigned
+/// to the current step.
+/// </remarks>
+public class DisciplinaryDecisionActionDto
+{
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+}
+
+/// <summary>
+/// Records that the employee's chance to answer the written query could not be given.
+/// </summary>
+/// <remarks>
+/// The reason is required, not optional. This override exists for absconded, detained or unreachable
+/// employees; making it costless would turn the natural-justice gate into a formality it can be
+/// clicked past.
+/// </remarks>
+public class WaiveQueryOpportunityDto
+{
+    [Required]
+    [MaxLength(1000)]
+    [MinLength(10)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Transitions a case to Closed status.
+/// </summary>
+/// <remarks>
+/// <c>ClosedById</c> is deliberately absent — server-stamped from the token, for the same reason as
+/// <see cref="RecordDisciplinaryDecisionDto"/>.
+/// </remarks>
 public class CloseDisciplinaryCaseDto
 {
     [Required]
     public Guid CaseId { get; set; }
-
-    [Required]
-    public Guid ClosedById { get; set; }
 
     public DateTime ClosedDate { get; set; } = DateTime.UtcNow;
 
@@ -857,8 +1025,10 @@ public class CreateStaffDisciplineDocumentDto : CreateDtoBase
     [MaxLength(500)]
     public string? Description { get; set; }
 
-    [Required]
-    public Guid UploadedById { get; set; }
+    // UploadedById is deliberately absent — stamped from the caller's token in the mapper. The
+    // upload endpoint had always passed its own token-derived id, but the metadata-only route
+    // accepted whatever the body named, so a document could be attributed to someone who never
+    // touched it. Same defect class as the legal-review referrer (ledger D-05).
 
     public DateTime UploadDate { get; set; } = DateTime.UtcNow;
 }
@@ -897,8 +1067,10 @@ public class CreateStaffDisciplineNoteDto : CreateDtoBase
     [Required]
     public Guid DisciplinaryActionId { get; set; }
 
-    [Required]
-    public Guid CreatedByEmployeeId { get; set; }
+    // CreatedByEmployeeId is deliberately absent — stamped from the caller's token in the mapper.
+    // It was accepted here and copied onto the entity verbatim while the token's employee id went
+    // only to CreatedBy, so a case note could be attributed to a colleague. No caller ever sent it
+    // (section E of the closure ledger listed it as unreachable). Ledger D-08.
 
     [Required]
     [MaxLength(4000)]
@@ -951,7 +1123,16 @@ public class StaffDisciplineNotificationSummaryDto
     public DisciplinaryNotificationType NotificationType { get; set; }
     public string NotificationTypeName => NotificationType.ToString();
     public DateTime SentDate { get; set; }
+
+    /// <summary>
+    /// The text of the notice. Added in area 25 slice 9: these rows ride the case detail — the one
+    /// read the case's SUBJECT can make — and the acknowledge act is theirs. Asking somebody to
+    /// acknowledge a notice whose words they cannot read defeats the notice.
+    /// </summary>
+    public string Content { get; set; } = string.Empty;
+
     public bool IsAcknowledged { get; set; }
+    public DateTime? AcknowledgedDate { get; set; }
     public bool IsFollowupSent { get; set; }
 }
 
@@ -970,16 +1151,24 @@ public class CreateStaffDisciplineNotificationDto : CreateDtoBase
     [MaxLength(4000)]
     public string Content { get; set; } = string.Empty;
 
-    [Required]
-    public Guid SentById { get; set; }
+    /// <remarks>
+    /// <c>SentById</c> is deliberately absent — server-stamped from the caller's token. Whoever
+    /// issues a notice is its sender, and a disciplinary notice is a document whose authorship must
+    /// not be forgeable.
+    /// </remarks>
 }
 
+/// <summary>
+/// Records that the subject of a case received a disciplinary notice.
+/// </summary>
+/// <remarks>
+/// <c>AcknowledgedDate</c> is deliberately absent — server-stamped, because the response clocks run
+/// from it and a client-supplied date would let them be set to whatever suits.
+/// </remarks>
 public class AcknowledgeNotificationDto
 {
     [Required]
     public Guid NotificationId { get; set; }
-
-    public DateTime AcknowledgedDate { get; set; } = DateTime.UtcNow;
 }
 
 public class SendFollowupNotificationDto
@@ -1023,15 +1212,20 @@ public class StaffDisciplineAppealDto : BaseDto
     public List<StaffDisciplineDocumentSummaryDto> Documents { get; set; } = new();
 }
 
+/// <summary>
+/// Files an appeal against a decided case.
+/// </summary>
+/// <remarks>
+/// <c>EmployeeId</c> is deliberately absent: an appeal is the subject's own act, so the appellant is
+/// the case's employee and the service refuses the call from anyone else — HR included. Accepting an
+/// appellant here let any authenticated caller file an appeal in someone else's name.
+/// <c>FiledDate</c> is server-stamped for the same reason it is in the demotion-response path: the
+/// FR-HR-180 five-working-day window is measured against it, so it cannot come from the client.
+/// </remarks>
 public class FileAppealDto
 {
     [Required]
     public Guid CaseId { get; set; }
-
-    [Required]
-    public Guid EmployeeId { get; set; }
-
-    public DateTime FiledDate { get; set; } = DateTime.UtcNow;
 
     [Required]
     [MaxLength(2000)]
@@ -1065,9 +1259,10 @@ public class RecordAppealOutcomeDto
 
     public DateTime AppealOutcomeDate { get; set; } = DateTime.UtcNow;
 
-    [Required]
-    public Guid AppealOutcomeById { get; set; }
-
+    /// <remarks>
+    /// <c>AppealOutcomeById</c> is deliberately absent — who decided an appeal is testimony, taken
+    /// from the caller's token.
+    /// </remarks>
     [MaxLength(3000)]
     public string? HearingNotes { get; set; }
 }
@@ -1251,7 +1446,12 @@ public class CreateStaffDisciplineLegalReviewDto : CreateDtoBase
     [Required]
     public DateTime ReferredToLegalDate { get; set; }
 
-    public Guid? ReferredById { get; set; }
+    // ReferredById is deliberately absent. It is stamped from the caller's token in
+    // StaffDisciplineLegalReviewService.ReferAsync, because "who referred this case to legal" is a
+    // statement about the actor and must not be assertable by the request body. It used to be
+    // accepted here and copied straight onto the entity while the token's employee id went only to
+    // CreatedBy — so any HR user could record a colleague as the referrer. No caller ever sent it
+    // (the field is in the closure ledger's "no form can set" table), so removing it breaks nothing.
 
     [Required]
     public DisciplineLegalRiskLevel LegalRiskLevel { get; set; }

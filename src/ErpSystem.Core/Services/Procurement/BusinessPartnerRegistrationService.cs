@@ -293,7 +293,9 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
         if (dtos.Count == 0)
         {
-            _logger.LogWarning("No registrations found for user {UserId}. This might indicate CreatedById was not set correctly during creation.", userId);
+            _logger.LogWarning(
+                "No owned or active business-partner-linked registrations were found for user {UserId}.",
+                userId);
         }
 
         return dtos;
@@ -541,8 +543,23 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
                 if (registration.Status == "Approved" && registration.BusinessPartnerId.HasValue)
                 {
+                    var existingRegistrationData = ParseRegistrationDataJson(
+                        registration.RegistrationDataJson);
+                    var existingRegistrationBankAccounts = BuildRegistrationBankAccounts(
+                        existingRegistrationData);
+                    await EnsureRegistrationContactsAsync(
+                        registration,
+                        registration.BusinessPartnerId.Value,
+                        approvedById,
+                        BuildRegistrationContacts(registration, existingRegistrationData));
+                    await EnsureRegistrationBankAccountsAsync(
+                        registration,
+                        registration.BusinessPartnerId.Value,
+                        approvedById,
+                        existingRegistrationBankAccounts);
+                    await _unitOfWork.SaveChangesAsync();
                     _logger.LogInformation(
-                        "Registration {RegistrationId} is already approved as business partner {BusinessPartnerId}; treating the repeated approval as complete",
+                        "Registration {RegistrationId} is already approved as business partner {BusinessPartnerId}; contact and bank-account reconciliation completed and the repeated approval is otherwise complete",
                         id,
                         registration.BusinessPartnerId);
                     await _unitOfWork.CommitAsync();
@@ -1372,9 +1389,6 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             throw new InvalidOperationException("Registration data is missing");
         }
 
-        _logger.LogInformation("RegistrationDataJson for registration {RegistrationId}: {Json}",
-            registrationId, registration.RegistrationDataJson);
-
         // Deserialize registration data - handle nested structure
         CreateBusinessPartnerRegistrationDto? registrationData = null;
 
@@ -1424,11 +1438,17 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
 
         // Parse the nested RegistrationData JSON to get additional fields
         var additionalData = ParseRegistrationDataJson(registration.RegistrationDataJson);
+        var registrationContacts = BuildRegistrationContacts(registration, additionalData);
+        var primaryRegistrationContact = registrationContacts.FirstOrDefault(contact => contact.IsPrimary);
+        var registrationBankAccounts = BuildRegistrationBankAccounts(additionalData);
+        var primaryRegistrationBankAccount = registrationBankAccounts
+            .FirstOrDefault(account => account.IsPrimary);
 
-        _logger.LogInformation("Creating business partner with data - CompanyName: {CompanyName}, Email: {Email}, Phone: {Phone}, " +
-            "BankName: {BankName}, BankAccountNumber: {BankAccountNumber}, ContactPersonName: {ContactPersonName}",
-            additionalData.CompanyName, additionalData.Email, additionalData.Phone,
-            additionalData.BankName, additionalData.BankAccountNumber, additionalData.ContactPersonName);
+        _logger.LogInformation(
+            "Creating business partner for registration {RegistrationId} with {ContactCount} contacts and {BankAccountCount} bank accounts",
+            registrationId,
+            registrationContacts.Count,
+            registrationBankAccounts.Count);
 
         // Create business partner - use additionalData which has all fields properly parsed
         var partner = new Entities.Procurement.BusinessPartner
@@ -1453,12 +1473,16 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             IndustryClassification = additionalData.IndustryType,
             AnnualTurnover = additionalData.AnnualRevenue,
             // Banking Information
-            BankName = additionalData.BankName,
-            BankAccountNumber = additionalData.BankAccountNumber,
-            BankBranch = additionalData.BankBranchCode,
+            BankName = primaryRegistrationBankAccount?.BankName,
+            BankAccountName = primaryRegistrationBankAccount?.AccountName,
+            BankAccountNumber = primaryRegistrationBankAccount?.AccountNumber,
+            BankBranch = primaryRegistrationBankAccount?.BranchName,
+            BankSwiftCode = primaryRegistrationBankAccount?.SwiftCode,
+            BankIBAN = primaryRegistrationBankAccount?.Iban,
+            Currency = primaryRegistrationBankAccount?.Currency,
             // Primary Contact Information (from contact person)
-            PrimaryContactName = additionalData.ContactPersonName,
-            PrimaryContactTitle = additionalData.ContactPersonTitle,
+            PrimaryContactName = primaryRegistrationContact?.ContactName,
+            PrimaryContactTitle = primaryRegistrationContact?.ContactTitle,
             // The registration creator is audit provenance, not necessarily an
             // ApplicationUser. Token-gated applications are created by an
             // applicant-session subject, so copying CreatedById into this foreign
@@ -1476,6 +1500,28 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             CreatedAt = DateTime.UtcNow,
             CreatedById = approvedById
         };
+
+        foreach (var registrationBankAccount in registrationBankAccounts)
+        {
+            partner.BankAccounts.Add(new Entities.Procurement.BusinessPartnerBankAccount
+            {
+                Id = Guid.NewGuid(),
+                TenantId = registration.TenantId,
+                BusinessPartnerId = partner.Id,
+                BusinessPartner = partner,
+                BankName = registrationBankAccount.BankName,
+                BranchName = registrationBankAccount.BranchName,
+                AccountName = registrationBankAccount.AccountName,
+                AccountNumber = registrationBankAccount.AccountNumber,
+                SwiftCode = registrationBankAccount.SwiftCode,
+                Iban = registrationBankAccount.Iban,
+                Currency = registrationBankAccount.Currency,
+                IsPrimary = registrationBankAccount.IsPrimary,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = approvedById
+            });
+        }
 
         // The public registration category is the supplier's initial controlled
         // procurement classification. Keep this in the same approval unit of
@@ -1525,33 +1571,14 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                 createdPartner.PartnerCode);
         }
 
-        // Create primary contact if contact person data exists
-        if (!string.IsNullOrEmpty(additionalData.ContactPersonName))
-        {
-            var contact = new Entities.Procurement.BusinessPartnerContact
-            {
-                Id = Guid.NewGuid(),
-                TenantId = registration.TenantId,
-                BusinessPartnerId = createdPartner.Id,
-                ContactName = additionalData.ContactPersonName,
-                ContactTitle = additionalData.ContactPersonTitle,
-                Email = additionalData.ContactPersonEmail,
-                Phone = additionalData.ContactPersonPhone,
-                IsPrimary = true,
-                CreatedAt = DateTime.UtcNow,
-                CreatedById = approvedById
-            };
-            await _contactRepository.CreateAsync(contact);
-            _logger.LogInformation("Created primary contact for business partner {PartnerCode}: {ContactName}",
-                createdPartner.PartnerCode, additionalData.ContactPersonName);
-        }
-        else
-        {
-            _logger.LogWarning("No contact person data found for registration {RegistrationId}", registrationId);
-        }
+        await EnsureRegistrationContactsAsync(
+            registration,
+            createdPartner.Id,
+            approvedById,
+            registrationContacts);
 
         // Create financial record if banking data exists
-        if (!string.IsNullOrEmpty(additionalData.BankName) || !string.IsNullOrEmpty(additionalData.BankAccountNumber))
+        if (registrationBankAccounts.Count > 0)
         {
             var currentYear = DateTime.UtcNow.Year;
             var financial = new Entities.Procurement.BusinessPartnerFinancial
@@ -2291,10 +2318,70 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             result.ContactPersonEmail = TryGetStringProperty(dataElement, "ContactPersonEmail", "contactPersonEmail");
             result.ContactPersonPhone = TryGetStringProperty(dataElement, "ContactPersonPhone", "contactPersonPhone");
 
+            // New registrations can submit multiple contacts. The singular
+            // contact-person fields above remain supported for registrations
+            // created before the collection was introduced.
+            if ((dataElement.TryGetProperty("contacts", out var contactsElement) ||
+                 dataElement.TryGetProperty("Contacts", out contactsElement)) &&
+                contactsElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var contactElement in contactsElement.EnumerateArray())
+                {
+                    result.Contacts.Add(new RegistrationContactData
+                    {
+                        ContactName = TryGetStringProperty(contactElement, "ContactName", "contactName"),
+                        ContactTitle = TryGetStringProperty(contactElement, "ContactTitle", "contactTitle", "Title", "title"),
+                        Department = TryGetStringProperty(contactElement, "Department", "department"),
+                        Email = TryGetStringProperty(contactElement, "Email", "email"),
+                        Phone = TryGetStringProperty(contactElement, "Phone", "phone"),
+                        Mobile = TryGetStringProperty(contactElement, "Mobile", "mobile"),
+                        IsPrimary = TryGetBooleanProperty(contactElement, "IsPrimary", "isPrimary")
+                    });
+                }
+            }
+
             // Banking Information
             result.BankName = TryGetStringProperty(dataElement, "BankName", "bankName");
             result.BankAccountNumber = TryGetStringProperty(dataElement, "BankAccountNumber", "bankAccountNumber");
-            result.BankBranchCode = TryGetStringProperty(dataElement, "BankBranchCode", "bankBranchCode");
+            result.BankBranchCode = TryGetStringProperty(
+                dataElement,
+                "BankBranchCode",
+                "bankBranchCode",
+                "BankBranch",
+                "bankBranch",
+                "BranchName",
+                "branchName");
+            result.BankAccountName = TryGetStringProperty(dataElement, "BankAccountName", "bankAccountName", "AccountName", "accountName");
+            result.BankSwiftCode = TryGetStringProperty(dataElement, "BankSwiftCode", "bankSwiftCode", "SwiftCode", "swiftCode");
+            result.BankIban = TryGetStringProperty(dataElement, "BankIBAN", "bankIBAN", "Iban", "iban");
+            result.BankCurrency = TryGetStringProperty(dataElement, "Currency", "currency", "CurrencyCode", "currencyCode");
+
+            if ((dataElement.TryGetProperty("bankAccounts", out var bankAccountsElement) ||
+                 dataElement.TryGetProperty("BankAccounts", out bankAccountsElement)) &&
+                bankAccountsElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var bankAccountElement in bankAccountsElement.EnumerateArray())
+                {
+                    result.BankAccounts.Add(new RegistrationBankAccountData
+                    {
+                        BankName = TryGetStringProperty(bankAccountElement, "BankName", "bankName"),
+                        BranchName = TryGetStringProperty(
+                            bankAccountElement,
+                            "BranchName",
+                            "branchName",
+                            "BankBranch",
+                            "bankBranch",
+                            "BankBranchCode",
+                            "bankBranchCode"),
+                        AccountName = TryGetStringProperty(bankAccountElement, "AccountName", "accountName"),
+                        AccountNumber = TryGetStringProperty(bankAccountElement, "AccountNumber", "accountNumber", "BankAccountNumber", "bankAccountNumber"),
+                        SwiftCode = TryGetStringProperty(bankAccountElement, "SwiftCode", "swiftCode"),
+                        Iban = TryGetStringProperty(bankAccountElement, "Iban", "iban", "IBAN"),
+                        Currency = TryGetStringProperty(bankAccountElement, "Currency", "currency", "CurrencyCode", "currencyCode"),
+                        IsPrimary = TryGetBooleanProperty(bankAccountElement, "IsPrimary", "isPrimary")
+                    });
+                }
+            }
 
             // Licenses
             _logger.LogInformation("DEBUG: Checking for licenses property in dataElement");
@@ -2410,6 +2497,458 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             }
         }
         return null;
+    }
+
+    private bool TryGetBooleanProperty(System.Text.Json.JsonElement element, params string[] propertyNames)
+    {
+        foreach (var propName in propertyNames)
+        {
+            if (!element.TryGetProperty(propName, out var prop))
+            {
+                continue;
+            }
+
+            if (prop.ValueKind == System.Text.Json.JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (prop.ValueKind == System.Text.Json.JsonValueKind.False)
+            {
+                return false;
+            }
+
+            if (prop.ValueKind == System.Text.Json.JsonValueKind.String &&
+                bool.TryParse(prop.GetString(), out var value))
+            {
+                return value;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<RegistrationContactData> BuildRegistrationContacts(
+        Entities.Procurement.BusinessPartnerRegistration registration,
+        RegistrationAdditionalData additionalData)
+    {
+        var submittedContacts = additionalData.Contacts
+            .Where(contact => !string.IsNullOrWhiteSpace(contact.ContactName))
+            .Select(NormalizeRegistrationContact)
+            .ToList();
+
+        if (submittedContacts.Count == 0 &&
+            !string.IsNullOrWhiteSpace(additionalData.ContactPersonName))
+        {
+            submittedContacts.Add(NormalizeRegistrationContact(new RegistrationContactData
+            {
+                ContactName = additionalData.ContactPersonName,
+                ContactTitle = additionalData.ContactPersonTitle,
+                Email = additionalData.ContactPersonEmail,
+                Phone = additionalData.ContactPersonPhone,
+                IsPrimary = true
+            }));
+        }
+
+        // Some legacy registrations predate both contact representations. The
+        // verified applicant identity is the safest available primary contact
+        // for those completed applications.
+        if (submittedContacts.Count == 0 &&
+            !string.IsNullOrWhiteSpace(registration.ApplicantName))
+        {
+            submittedContacts.Add(NormalizeRegistrationContact(new RegistrationContactData
+            {
+                ContactName = registration.ApplicantName,
+                Email = registration.ApplicantEmail ?? additionalData.Email,
+                Phone = registration.ApplicantPhone ?? additionalData.Phone,
+                IsPrimary = true
+            }));
+        }
+
+        var uniqueContacts = new List<RegistrationContactData>();
+        foreach (var contact in submittedContacts)
+        {
+            if (!uniqueContacts.Any(existing => AreEquivalentContacts(existing, contact)))
+            {
+                uniqueContacts.Add(contact);
+            }
+        }
+
+        var primaryIndex = uniqueContacts.FindIndex(contact => contact.IsPrimary);
+        if (primaryIndex < 0 && uniqueContacts.Count > 0)
+        {
+            primaryIndex = 0;
+        }
+
+        for (var index = 0; index < uniqueContacts.Count; index++)
+        {
+            uniqueContacts[index].IsPrimary = index == primaryIndex;
+        }
+
+        return uniqueContacts;
+    }
+
+    private async Task EnsureRegistrationContactsAsync(
+        Entities.Procurement.BusinessPartnerRegistration registration,
+        Guid businessPartnerId,
+        Guid actorUserId,
+        IReadOnlyCollection<RegistrationContactData> registrationContacts)
+    {
+        var existingContacts = ((await _contactRepository
+                .GetContactsByPartnerAsync(businessPartnerId)) ??
+            Array.Empty<Entities.Procurement.BusinessPartnerContact>())
+            .Where(contact =>
+                contact.TenantId == registration.TenantId &&
+                !contact.IsDeleted)
+            .ToList();
+        var resolvedContacts = new List<(
+            RegistrationContactData Registration,
+            Entities.Procurement.BusinessPartnerContact Contact,
+            bool IsNew)>();
+
+        foreach (var registrationContact in registrationContacts)
+        {
+            var equivalent = existingContacts.FirstOrDefault(existing =>
+                AreEquivalentContacts(existing, registrationContact));
+            if (equivalent is not null)
+            {
+                resolvedContacts.Add((registrationContact, equivalent, false));
+                continue;
+            }
+
+            var contact = new Entities.Procurement.BusinessPartnerContact
+            {
+                Id = Guid.NewGuid(),
+                TenantId = registration.TenantId,
+                BusinessPartnerId = businessPartnerId,
+                ContactName = registrationContact.ContactName!,
+                ContactTitle = registrationContact.ContactTitle,
+                Department = registrationContact.Department,
+                Email = registrationContact.Email,
+                Phone = registrationContact.Phone,
+                Mobile = registrationContact.Mobile,
+                IsPrimary = false,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = actorUserId
+            };
+            await _contactRepository.CreateAsync(contact);
+            existingContacts.Add(contact);
+            resolvedContacts.Add((registrationContact, contact, true));
+        }
+
+        var currentPrimaries = existingContacts.Where(contact => contact.IsPrimary).ToList();
+        var selectedPrimary = currentPrimaries.FirstOrDefault() ??
+            resolvedContacts.FirstOrDefault(item => item.Registration.IsPrimary).Contact ??
+            resolvedContacts.FirstOrDefault().Contact;
+
+        if (selectedPrimary is not null)
+        {
+            if (selectedPrimary.Id != Guid.Empty &&
+                resolvedContacts.Any(item => item.Contact.Id == selectedPrimary.Id && item.IsNew))
+            {
+                foreach (var contact in existingContacts)
+                {
+                    contact.IsPrimary = contact.Id == selectedPrimary.Id;
+                }
+            }
+            else if (currentPrimaries.Count != 1 || !selectedPrimary.IsPrimary)
+            {
+                await _contactRepository.SetPrimaryContactAsync(
+                    businessPartnerId,
+                    selectedPrimary.Id);
+            }
+        }
+
+        _logger.LogInformation(
+            "Reconciled {SubmittedContactCount} submitted contacts to {ResolvedContactCount} supplier contacts for registration {RegistrationId}",
+            registrationContacts.Count,
+            resolvedContacts.Count,
+            registration.Id);
+    }
+
+    private static RegistrationContactData NormalizeRegistrationContact(
+        RegistrationContactData contact)
+    {
+        return new RegistrationContactData
+        {
+            ContactName = CleanContactValue(contact.ContactName),
+            ContactTitle = CleanContactValue(contact.ContactTitle),
+            Department = CleanContactValue(contact.Department),
+            Email = CleanContactValue(contact.Email),
+            Phone = CleanContactValue(contact.Phone),
+            Mobile = CleanContactValue(contact.Mobile),
+            IsPrimary = contact.IsPrimary
+        };
+    }
+
+    private static bool AreEquivalentContacts(
+        Entities.Procurement.BusinessPartnerContact existing,
+        RegistrationContactData candidate)
+    {
+        return AreEquivalentContacts(
+            new RegistrationContactData
+            {
+                ContactName = existing.ContactName,
+                Email = existing.Email,
+                Phone = existing.Phone,
+                Mobile = existing.Mobile
+            },
+            candidate);
+    }
+
+    private static bool AreEquivalentContacts(
+        RegistrationContactData first,
+        RegistrationContactData second)
+    {
+        if (!string.IsNullOrWhiteSpace(first.Email) &&
+            !string.IsNullOrWhiteSpace(second.Email) &&
+            string.Equals(first.Email.Trim(), second.Email.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var firstPhones = new[] { first.Phone, first.Mobile }
+            .Select(NormalizeContactPhone)
+            .Where(value => value.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var secondPhones = new[] { second.Phone, second.Mobile }
+            .Select(NormalizeContactPhone)
+            .Where(value => value.Length > 0)
+            .ToList();
+        if (secondPhones.Any(firstPhones.Contains))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(first.Email) ||
+            !string.IsNullOrWhiteSpace(second.Email) ||
+            firstPhones.Count > 0 ||
+            secondPhones.Count > 0)
+        {
+            return false;
+        }
+
+        return !string.IsNullOrWhiteSpace(first.ContactName) &&
+            !string.IsNullOrWhiteSpace(second.ContactName) &&
+            string.Equals(
+                first.ContactName.Trim(),
+                second.ContactName.Trim(),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeContactPhone(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
+    }
+
+    private static string? CleanContactValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static List<RegistrationBankAccountData> BuildRegistrationBankAccounts(
+        RegistrationAdditionalData additionalData)
+    {
+        if (additionalData.BankAccounts.Count > 10)
+        {
+            throw new InvalidOperationException(
+                "A supplier application can contain at most 10 bank accounts.");
+        }
+
+        var submittedAccounts = new List<RegistrationBankAccountData>();
+        foreach (var account in additionalData.BankAccounts)
+        {
+            var normalized = NormalizeRegistrationBankAccount(account);
+            if (string.IsNullOrWhiteSpace(normalized.BankName) ||
+                string.IsNullOrWhiteSpace(normalized.AccountNumber))
+            {
+                throw new InvalidOperationException(
+                    "Every supplier bank account requires a bank name and account number.");
+            }
+
+            submittedAccounts.Add(normalized);
+        }
+
+        if (submittedAccounts.Count == 0 &&
+            (!string.IsNullOrWhiteSpace(additionalData.BankName) ||
+             !string.IsNullOrWhiteSpace(additionalData.BankAccountNumber)))
+        {
+            submittedAccounts.Add(NormalizeRegistrationBankAccount(
+                new RegistrationBankAccountData
+                {
+                    BankName = additionalData.BankName,
+                    BranchName = additionalData.BankBranchCode,
+                    AccountName = additionalData.BankAccountName,
+                    AccountNumber = additionalData.BankAccountNumber,
+                    SwiftCode = additionalData.BankSwiftCode,
+                    Iban = additionalData.BankIban,
+                    Currency = additionalData.BankCurrency,
+                    IsPrimary = true
+                }));
+        }
+
+        var uniqueAccounts = new List<RegistrationBankAccountData>();
+        foreach (var account in submittedAccounts)
+        {
+            if (!uniqueAccounts.Any(existing =>
+                    AreEquivalentBankAccounts(existing, account)))
+            {
+                uniqueAccounts.Add(account);
+            }
+        }
+
+        var primaryIndex = uniqueAccounts.FindIndex(account => account.IsPrimary);
+        if (primaryIndex < 0 && uniqueAccounts.Count > 0)
+        {
+            primaryIndex = 0;
+        }
+
+        for (var index = 0; index < uniqueAccounts.Count; index++)
+        {
+            uniqueAccounts[index].IsPrimary = index == primaryIndex;
+        }
+
+        return uniqueAccounts;
+    }
+
+    private async Task EnsureRegistrationBankAccountsAsync(
+        Entities.Procurement.BusinessPartnerRegistration registration,
+        Guid businessPartnerId,
+        Guid actorUserId,
+        IReadOnlyCollection<RegistrationBankAccountData> registrationBankAccounts)
+    {
+        if (registrationBankAccounts.Count == 0)
+        {
+            return;
+        }
+
+        var partner = await _partnerRepository.GetWithBankAccountsAsync(businessPartnerId)
+            ?? throw new InvalidOperationException(
+                $"Approved business partner {businessPartnerId} was not found for bank-account reconciliation.");
+        var existingAccounts = partner.BankAccounts
+            .Where(account =>
+                account.TenantId == registration.TenantId &&
+                !account.IsDeleted)
+            .ToList();
+        var resolvedAccounts = new List<(
+            RegistrationBankAccountData Registration,
+            Entities.Procurement.BusinessPartnerBankAccount Account)>();
+
+        foreach (var registrationBankAccount in registrationBankAccounts)
+        {
+            var equivalent = existingAccounts.FirstOrDefault(existing =>
+                AreEquivalentBankAccounts(existing, registrationBankAccount));
+            if (equivalent is null)
+            {
+                equivalent = new Entities.Procurement.BusinessPartnerBankAccount
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = registration.TenantId,
+                    BusinessPartnerId = businessPartnerId,
+                    BusinessPartner = partner,
+                    BankName = registrationBankAccount.BankName,
+                    BranchName = registrationBankAccount.BranchName,
+                    AccountName = registrationBankAccount.AccountName,
+                    AccountNumber = registrationBankAccount.AccountNumber,
+                    SwiftCode = registrationBankAccount.SwiftCode,
+                    Iban = registrationBankAccount.Iban,
+                    Currency = registrationBankAccount.Currency,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedById = actorUserId
+                };
+                partner.BankAccounts.Add(equivalent);
+                existingAccounts.Add(equivalent);
+            }
+
+            resolvedAccounts.Add((registrationBankAccount, equivalent));
+        }
+
+        var currentPrimary = existingAccounts.FirstOrDefault(account => account.IsPrimary);
+        var selectedPrimary = currentPrimary ??
+            resolvedAccounts.FirstOrDefault(item => item.Registration.IsPrimary).Account ??
+            resolvedAccounts.First().Account;
+        foreach (var account in existingAccounts)
+        {
+            account.IsPrimary = account.Id == selectedPrimary.Id;
+        }
+
+        partner.BankName = selectedPrimary.BankName;
+        partner.BankAccountName = selectedPrimary.AccountName;
+        partner.BankAccountNumber = selectedPrimary.AccountNumber;
+        partner.BankBranch = selectedPrimary.BranchName;
+        partner.BankSwiftCode = selectedPrimary.SwiftCode;
+        partner.BankIBAN = selectedPrimary.Iban;
+        partner.Currency = selectedPrimary.Currency;
+        partner.UpdatedAt = DateTime.UtcNow;
+
+        _logger.LogInformation(
+            "Reconciled {SubmittedBankAccountCount} submitted bank accounts to {ResolvedBankAccountCount} supplier bank accounts for registration {RegistrationId}",
+            registrationBankAccounts.Count,
+            resolvedAccounts.Count,
+            registration.Id);
+    }
+
+    private static RegistrationBankAccountData NormalizeRegistrationBankAccount(
+        RegistrationBankAccountData account)
+    {
+        return new RegistrationBankAccountData
+        {
+            BankName = CleanContactValue(account.BankName),
+            BranchName = CleanContactValue(account.BranchName),
+            AccountName = CleanContactValue(account.AccountName),
+            AccountNumber = CleanContactValue(account.AccountNumber),
+            SwiftCode = CleanContactValue(account.SwiftCode),
+            Iban = CleanContactValue(account.Iban),
+            Currency = CleanContactValue(account.Currency),
+            IsPrimary = account.IsPrimary
+        };
+    }
+
+    private static bool AreEquivalentBankAccounts(
+        Entities.Procurement.BusinessPartnerBankAccount existing,
+        RegistrationBankAccountData candidate)
+    {
+        return AreEquivalentBankAccounts(
+            new RegistrationBankAccountData
+            {
+                BankName = existing.BankName,
+                AccountNumber = existing.AccountNumber,
+                Iban = existing.Iban
+            },
+            candidate);
+    }
+
+    private static bool AreEquivalentBankAccounts(
+        RegistrationBankAccountData first,
+        RegistrationBankAccountData second)
+    {
+        if (!string.IsNullOrWhiteSpace(first.Iban) &&
+            !string.IsNullOrWhiteSpace(second.Iban) &&
+            string.Equals(
+                NormalizeBankAccountIdentity(first.Iban),
+                NormalizeBankAccountIdentity(second.Iban),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(first.BankName) &&
+            !string.IsNullOrWhiteSpace(second.BankName) &&
+            !string.IsNullOrWhiteSpace(first.AccountNumber) &&
+            !string.IsNullOrWhiteSpace(second.AccountNumber) &&
+            string.Equals(first.BankName.Trim(), second.BankName.Trim(), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                NormalizeBankAccountIdentity(first.AccountNumber),
+                NormalizeBankAccountIdentity(second.AccountNumber),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeBankAccountIdentity(string value)
+    {
+        return new string(value.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
     }
 
     private async Task EnsureInternalCapabilityAsync(
@@ -2532,14 +3071,43 @@ internal class RegistrationAdditionalData
     public string? ContactPersonTitle { get; set; }
     public string? ContactPersonEmail { get; set; }
     public string? ContactPersonPhone { get; set; }
+    public List<RegistrationContactData> Contacts { get; set; } = new();
 
     // Banking Information
     public string? BankName { get; set; }
     public string? BankAccountNumber { get; set; }
     public string? BankBranchCode { get; set; }
+    public string? BankAccountName { get; set; }
+    public string? BankSwiftCode { get; set; }
+    public string? BankIban { get; set; }
+    public string? BankCurrency { get; set; }
+    public List<RegistrationBankAccountData> BankAccounts { get; set; } = new();
 
     // Licenses
     public List<LicenseData>? Licenses { get; set; }
+}
+
+internal class RegistrationContactData
+{
+    public string? ContactName { get; set; }
+    public string? ContactTitle { get; set; }
+    public string? Department { get; set; }
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string? Mobile { get; set; }
+    public bool IsPrimary { get; set; }
+}
+
+internal class RegistrationBankAccountData
+{
+    public string? BankName { get; set; }
+    public string? BranchName { get; set; }
+    public string? AccountName { get; set; }
+    public string? AccountNumber { get; set; }
+    public string? SwiftCode { get; set; }
+    public string? Iban { get; set; }
+    public string? Currency { get; set; }
+    public bool IsPrimary { get; set; }
 }
 
 /// <summary>

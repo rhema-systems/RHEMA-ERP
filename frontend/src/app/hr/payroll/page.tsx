@@ -40,6 +40,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   Dialog,
   DialogContent,
@@ -433,7 +434,7 @@ export default function PayrollPage() {
       | PayrollEmployeeProfile
       | unknown
     >
-  ) => {
+  ): Promise<boolean> => {
     setBusy(label);
     setError(null);
     try {
@@ -477,6 +478,7 @@ export default function PayrollPage() {
       if (refreshRunId) {
         setSelectedRun(await payrollService.getRun(refreshRunId));
       }
+      return true;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Payroll operation failed.';
@@ -486,6 +488,7 @@ export default function PayrollPage() {
         description: message,
         variant: 'destructive',
       });
+      return false;
     } finally {
       setBusy(null);
     }
@@ -527,13 +530,12 @@ export default function PayrollPage() {
       return;
     }
 
-    await runOperation('Post payroll', async () => {
+    return runOperation('Post payroll', async () => {
       const posting = await payrollService.postJournal(
         selectedRun.id,
         'Posted from payroll desk'
       );
       setJournalPosting(posting);
-      setPostDialogOpen(false);
       return posting;
     });
   };
@@ -2085,123 +2087,102 @@ export default function PayrollPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={postDialogOpen} onOpenChange={setPostDialogOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Post Payroll?</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 text-sm">
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
-              Posting will finalize this payroll run and close the payroll
-              period for this run.
-            </div>
-            <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
-              <div>
-                <div className="text-xs text-muted-foreground">Run</div>
-                <div className="font-medium">
-                  {selectedRun?.runNumber || '-'}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Employees</div>
-                <div className="font-medium">
-                  {selectedRun?.employeeCount ?? 0}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Gross</div>
-                <div className="font-medium">
-                  {money(selectedRun?.grossAmount, selectedCurrency)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Net</div>
-                <div className="font-medium">
-                  {money(selectedRun?.netAmount, selectedCurrency)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Journal</div>
-                <div className="font-medium">
-                  {expectedJournalNumber || '-'}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Lines</div>
-                <div className="font-medium">
-                  {selectedJournalLineCount > 0
-                    ? selectedJournalLineCount
-                    : 'Built on post'}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Debit</div>
-                <div className="font-medium">
-                  {selectedJournalLineCount > 0
-                    ? money(selectedJournalDebit, selectedCurrency)
-                    : '-'}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Credit</div>
-                <div className="font-medium">
-                  {selectedJournalLineCount > 0
-                    ? money(selectedJournalCredit, selectedCurrency)
-                    : '-'}
-                </div>
-              </div>
-              <div className="sm:col-span-2">
-                <div className="text-xs text-muted-foreground">
-                  Balance Status
-                </div>
-                <div
-                  className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${selectedJournalBalanceClassName}`}
-                >
-                  {selectedJournalBalanceLabel}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {selectedJournalBalanceDetail}
-                </div>
-              </div>
-            </div>
-            {postPayrollBlocker && (
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
-                {postPayrollBlocker}
-              </div>
-            )}
-            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-              <li>A balanced finance journal will be created and posted.</li>
-              <li>The payroll run status will change to Closed.</li>
-              <li>Loan repayments in the run will be marked as paid.</li>
-              <li>Payslip snapshots will be saved for the posted run.</li>
-              <li>The active payroll period can advance after posting.</li>
-            </ul>
+      <ConfirmationDialog
+        open={postDialogOpen}
+        onOpenChange={setPostDialogOpen}
+        title="Post Payroll?"
+        description={
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
+            Posting will finalize this payroll run and close the payroll period
+            for this run.
           </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setPostDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="warning"
-              disabled={!canPostPayroll}
-              title={postPayrollBlocker ?? undefined}
-              onClick={() => void postSelectedRun()}
-            >
-              {busy === 'Post payroll' ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-              )}
-              Confirm Post
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        }
+        confirmText="Confirm Post"
+        onConfirm={postSelectedRun}
+        isLoading={busy === 'Post payroll'}
+        confirmDisabled={!canPostPayroll}
+        maxWidth="36rem"
+      >
+        <div className="space-y-3 text-sm">
+          <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
+            <div>
+              <div className="text-xs text-muted-foreground">Run</div>
+              <div className="font-medium">{selectedRun?.runNumber || '-'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Employees</div>
+              <div className="font-medium">
+                {selectedRun?.employeeCount ?? 0}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Gross</div>
+              <div className="font-medium">
+                {money(selectedRun?.grossAmount, selectedCurrency)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Net</div>
+              <div className="font-medium">
+                {money(selectedRun?.netAmount, selectedCurrency)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Journal</div>
+              <div className="font-medium">{expectedJournalNumber || '-'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Lines</div>
+              <div className="font-medium">
+                {selectedJournalLineCount > 0
+                  ? selectedJournalLineCount
+                  : 'Built on post'}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Debit</div>
+              <div className="font-medium">
+                {selectedJournalLineCount > 0
+                  ? money(selectedJournalDebit, selectedCurrency)
+                  : '-'}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Credit</div>
+              <div className="font-medium">
+                {selectedJournalLineCount > 0
+                  ? money(selectedJournalCredit, selectedCurrency)
+                  : '-'}
+              </div>
+            </div>
+            <div className="sm:col-span-2">
+              <div className="text-xs text-muted-foreground">
+                Balance Status
+              </div>
+              <div
+                className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${selectedJournalBalanceClassName}`}
+              >
+                {selectedJournalBalanceLabel}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {selectedJournalBalanceDetail}
+              </div>
+            </div>
+          </div>
+          {postPayrollBlocker && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
+              {postPayrollBlocker}
+            </div>
+          )}
+          <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+            <li>A balanced finance journal will be created and posted.</li>
+            <li>The payroll run status will change to Closed.</li>
+            <li>Loan repayments in the run will be marked as paid.</li>
+            <li>Payslip snapshots will be saved for the posted run.</li>
+            <li>The active payroll period can advance after posting.</li>
+          </ul>
+        </div>
+      </ConfirmationDialog>
 
       <PayrollPayslipPreviewDialog
         open={Boolean(previewPayslip)}

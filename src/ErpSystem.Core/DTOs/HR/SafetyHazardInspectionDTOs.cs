@@ -43,6 +43,9 @@ public class SheHazardDto : BaseDto
     public DateTime? LastReviewedDate { get; set; }
     public Guid? LastReviewedById { get; set; }
     public string? LastReviewedByName { get; set; }
+    public Guid? ReportedById { get; set; }
+    public string? ReportedByName { get; set; }
+    public DateTime? ReportedDate { get; set; }
     public bool IsActive { get; set; }
 
     public List<SheHazardControlDto> Controls { get; set; } = new();
@@ -64,6 +67,7 @@ public class SheHazardSummaryDto
     public SheHazardStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public string? OwnerName { get; set; }
+    public string? ReportedByName { get; set; }
     public DateTime? ReviewDueDate { get; set; }
     public bool IsActive { get; set; }
 }
@@ -102,6 +106,10 @@ public class CreateSheHazardDto : CreateDtoBase
     public Guid? OwnerId { get; set; }
     public DateTime? ReviewDueDate { get; set; }
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Honoured only for a SHE Write holder (the desk recording on behalf); everyone
+    /// else is stamped with the token's employee by the controller.</summary>
+    public Guid? ReportedById { get; set; }
 }
 
 public class UpdateSheHazardDto : UpdateDtoBase

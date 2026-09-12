@@ -552,7 +552,7 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
 
     private async Task EnsureManagerAsync(string sourceReference, string causationId, CancellationToken cancellationToken)
     {
-        if (HasPlatformSuperAdministratorBypass()) return;
+        if (HasAdministratorBypass()) return;
         var decision = await _accessControl.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
         {
             PermissionCode = PlanPermission,
@@ -566,7 +566,7 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
     private void EnsureReader()
     {
         EnsureAuthenticatedTenant();
-        if (HasPlatformSuperAdministratorBypass() ||
+        if (HasAdministratorBypass() ||
             _currentUser.HasRegisteredProcurementPermission("procurement.records.read")) return;
         throw new ProcurementAppSubmissionAuthorizationException("The procurement records read permission is required.");
     }
@@ -577,7 +577,9 @@ public sealed class ProcurementAppSubmissionService : IProcurementAppSubmissionS
             throw new ProcurementAppSubmissionAuthorizationException("An authenticated tenant context is required.");
     }
 
-    private bool HasPlatformSuperAdministratorBypass() => _currentUser.HasRole(Constants.Roles.SuperAdmin);
+    private bool HasAdministratorBypass() =>
+        _currentUser.HasRole(Constants.Roles.SuperAdmin) ||
+        _currentUser.HasRole(Constants.Roles.TenantAdmin);
     private string ActorName => Truncate(string.IsNullOrWhiteSpace(_currentUser.FullName) ? _currentUser.Username : _currentUser.FullName, 300);
 
     private static void EnsurePublishedPlan(ProcurementPlan plan)

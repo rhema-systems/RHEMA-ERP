@@ -1,4 +1,5 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -61,6 +62,9 @@ public class JobVacancyDto : BaseDto
     public Guid? RecruitmentPipelineId { get; set; }
     public string? PipelineName { get; set; }
 
+    public bool AllowInternalCandidates { get; set; }
+    public bool AllowExternalCandidates { get; set; }
+
     public int ApplicationCount { get; set; }
     public int ShortlistedCount { get; set; }
     public int InterviewCount { get; set; }
@@ -110,6 +114,8 @@ public class JobVacancySummaryDto
     public int NumberOfPositions { get; set; }
     public string? HiringManagerName { get; set; }
     public string? RecruiterName { get; set; }
+    public bool AllowInternalCandidates { get; set; }
+    public bool AllowExternalCandidates { get; set; }
     public int ApplicationCount { get; set; }
     public int ShortlistedCount { get; set; }
     public int OfferCount { get; set; }
@@ -157,6 +163,19 @@ public class CreateJobVacancyDto : CreateDtoBase
 
     public bool RequiresWrittenTest { get; set; }
     public bool RequiresPracticalTest { get; set; }
+
+    /// <summary>
+    /// Whether reviewers screen this vacancy's applications with the candidate's name, gender, age,
+    /// location and contact details withheld.
+    ///
+    /// <para>Present on <see cref="UpdateJobVacancyDto"/> and <see cref="TransitionJobVacancyDto"/>
+    /// but missing here, which made the whole blind-screening feature unreachable: it could not be
+    /// set when the vacancy was opened, and no edit form sent it either, so
+    /// <c>GET api/job-applications/vacancy/{id}/blind-applications</c> answered 422 for every
+    /// vacancy that had ever existed.</para>
+    /// </summary>
+    public bool IsBlindScreeningEnabled { get; set; }
+
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
     public bool AutoShortlistRequireAllMandatory { get; set; } = true;
@@ -305,22 +324,10 @@ public class JobVacancyAttachmentDto : BaseDto
     public string UploadedByName { get; set; } = string.Empty;
 }
 
-public class CreateJobVacancyAttachmentDto : CreateDtoBase
-{
-    [Required]
-    public Guid JobVacancyId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-}
+// CreateJobVacancyAttachmentDto was deleted deliberately, not left unused. It carried a
+// caller-supplied FilePath, so the endpoint recorded a path to a file it had never received or
+// scanned. Attachments now arrive as multipart through the controlled-upload gate and the row is
+// written from the stored document's own metadata — see IJobVacancyService.AddAttachmentAsync.
 
 #endregion
 
@@ -560,22 +567,8 @@ public class JobPostingAttachmentDto : BaseDto
     public string UploadedByName { get; set; } = string.Empty;
 }
 
-public class CreateJobPostingAttachmentDto : CreateDtoBase
-{
-    [Required]
-    public Guid JobPostingId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-}
+// CreateJobPostingAttachmentDto was deleted deliberately — same reason as its vacancy sibling
+// above. See IJobPostingService.AddAttachmentAsync.
 
 public class PublishJobPostingDto
 {
@@ -847,7 +840,8 @@ public class JobCandidateDto : BaseDto
     public string? DigitalAddress { get; set; }
     public string City { get; set; } = string.Empty;
     public string? Nationality { get; set; }
-    public Guid CountryId { get; set; }
+    /// <summary>Optional since slice 13b — an internal candidate may have no country on file.</summary>
+    public Guid? CountryId { get; set; }
     public string CountryName { get; set; } = string.Empty;
     public bool IsInTalentPool { get; set; }
     public DateTime? TalentPoolAddedDate { get; set; }
@@ -1326,22 +1320,12 @@ public class JobCandidateDocumentDto : BaseDto
     public DateTime UploadDate { get; set; }
 }
 
-public class CreateJobCandidateDocumentDto : CreateDtoBase
-{
-    [Required]
-    public Guid JobCandidateId { get; set; }
-
-    [Required]
-    public JobCandidateDocumentType DocumentType { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-}
+// CreateJobCandidateDocumentDto is deliberately absent. It carried a caller-supplied FilePath, so the
+// endpoint that took it stored no file, scanned nothing, and wrote a row pointing at a path the server
+// had never received. Candidate documents are now posted as multipart to
+// POST api/job-candidates/{candidateId}/documents and go through the controlled-upload gate, exactly
+// like the requisition, vacancy and posting attachments. Deleted rather than left unused so the shape
+// cannot drift back.
 
 #endregion
 
@@ -1568,6 +1552,65 @@ public class RejectApplicationDto
     [Required]
     [MaxLength(2000)]
     public string RejectionReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One internal application, as the APPLICANT sees it (area 25 slice 13b).
+/// </summary>
+/// <remarks>
+/// <para>Deliberately not <see cref="JobApplicationDetailDto"/>. That is the recruiter's view and
+/// carries the auto-score and its criterion-by-criterion breakdown, the shortlisting notes, the
+/// names of whoever shortlisted or rejected them, the applicant-communication log and the test
+/// results. Handing a candidate the scoring they were assessed under — and the internal notes
+/// written about them — is a different act from telling them where their application stands.</para>
+///
+/// <para>What IS here: their own submission back, the vacancy they applied to, the status and its
+/// dates, and the outcome reason when there is one. The rejection reason is included on purpose,
+/// following the module's own precedent from area 25 slice 6, where a training request's rejection
+/// reason was finally made to reach the person who asked.</para>
+/// </remarks>
+public class MyJobApplicationDto
+{
+    public Guid Id { get; set; }
+    public string ApplicationNumber { get; set; } = string.Empty;
+
+    public Guid JobVacancyId { get; set; }
+    public string VacancyNumber { get; set; } = string.Empty;
+    public string JobTitle { get; set; } = string.Empty;
+    public string PositionTitle { get; set; } = string.Empty;
+    public string? OrgUnitName { get; set; }
+    public DateTime? ApplicationDeadline { get; set; }
+
+    public ApplicationStatus Status { get; set; }
+    public string StatusName => JobApplicationDto.FormatApplicationStatus(Status);
+    public DateTime ApplicationDate { get; set; }
+
+    // ── What the applicant themselves sent ───────────────────────────────────
+    public int? YearsOfExperience { get; set; }
+    public DateTime? AvailableFrom { get; set; }
+    public string? CoverLetter { get; set; }
+
+    // ── Where it got to ──────────────────────────────────────────────────────
+    public bool IsShortlisted { get; set; }
+    public DateTime? ShortlistedDate { get; set; }
+    public DateTime? WithdrawnDate { get; set; }
+    public string? WithdrawalReason { get; set; }
+    public DateTime? RejectedDate { get; set; }
+    public string? RejectionReason { get; set; }
+
+    /// <summary>Whether the applicant may still take it back — computed here so the screen need not guess.</summary>
+    public bool CanWithdraw { get; set; }
+}
+
+/// <summary>
+/// The applicant's own withdrawal. The reason is optional here — unlike the desk
+/// <see cref="WithdrawApplicationDto"/>, where a recruiter withdrawing on somebody's behalf must
+/// say why — because a candidate who no longer wants the job owes no explanation.
+/// </summary>
+public class WithdrawMyApplicationDto
+{
+    [MaxLength(1000)]
+    public string? WithdrawalReason { get; set; }
 }
 
 public class WithdrawApplicationDto
@@ -2097,6 +2140,16 @@ public sealed class ApplicationSlotEntry
     public TimeSpan? SlotEndTime   { get; set; }
 }
 
+/// <summary>
+/// Edits the schedule and setup of an interview.
+///
+/// <para><b>Status is deliberately absent.</b> It used to be copied straight onto the entity, so a plain
+/// PUT could cancel an interview without a cancellation reason, complete one that never happened, or
+/// mark one "Rescheduled" without moving the date, rotating the candidates' confirmation tokens or
+/// re-sending a single invitation. Status belongs to <c>reschedule</c>, <c>cancel</c> and
+/// <c>complete</c>, which carry those side effects — the same reasoning that took <c>Status</c> off
+/// <c>UpdateAppraisalCycleDto</c>.</para>
+/// </summary>
 public class UpdateJobInterviewDto : UpdateDtoBase
 {
     [Range(1, 20)]
@@ -2104,7 +2157,6 @@ public class UpdateJobInterviewDto : UpdateDtoBase
 
     public JobInterviewType Type { get; set; }
     public InterviewMode Mode { get; set; }
-    public JobInterviewStatus Status { get; set; }
 
     [Required]
     public DateOnly ScheduledDate { get; set; }
@@ -2708,6 +2760,17 @@ public class QuestionPlanPreviewDto
     public int    RequiredQuestionCount { get; set; }
     public int    AllowedPoolSize       { get; set; }
     public int    DisplayOrder          { get; set; }
+
+    /// <summary>
+    /// Active questions of this type in the bank. The draw is capped at <c>AllowedPoolSize</c>, but the
+    /// bank may hold fewer than the plan requires — nothing surfaced that, so the shortfall only showed
+    /// up when the panel ran out of questions in the room.
+    /// </summary>
+    public int    AvailableQuestionCount { get; set; }
+
+    /// <summary>False when the bank cannot supply <c>RequiredQuestionCount</c> questions of this type.</summary>
+    public bool   MeetsRequiredCount     { get; set; }
+
     public List<QuestionPreviewItemDto> Questions { get; set; } = new();
 }
 
@@ -2827,31 +2890,28 @@ public class JobOfferSummaryDto
     public DateTime CreatedAt { get; set; }
 }
 
+/// <summary>
+/// Raising an offer against an application. Carries the <b>negotiated terms only</b>.
+///
+/// <para>⚠ <c>PositionId</c>, <c>PositionTitle</c>, <c>ReportsToTitle</c>, <c>GradeTitle</c> and
+/// <c>EmploymentType</c> have been REMOVED. All five were <c>[Required]</c>, and
+/// <c>CreateAsync</c> overwrote every one of them from the application's vacancy and position as
+/// "always server-authoritative" — so a caller was forced to supply values that were guaranteed to
+/// be discarded. A vacancy's <c>PositionId</c> is non-nullable and the seeding query includes it,
+/// so the fallback branch that would have used these never runs.</para>
+///
+/// <para>That is the same failure as naming the approver in <c>ApproveJobOfferDto</c>: a field the
+/// caller believes is doing something and which is silently ignored. Removed rather than merely
+/// un-required, and with unmapped members disallowed, so anyone still sending them is told.</para>
+/// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class CreateJobOfferDto : CreateDtoBase
 {
     [Required]
     public Guid JobApplicationId { get; set; }
 
-    [Required]
-    public Guid PositionId { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string PositionTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string ReportsToTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string GradeTitle { get; set; } = string.Empty;
-
     public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
-
-    [Required]
-    public EmploymentType EmploymentType { get; set; }
 
     public int? ContractDurationMonths { get; set; }
     public int? ProbationPeriodMonths { get; set; }
@@ -2886,27 +2946,24 @@ public class CreateJobOfferDto : CreateDtoBase
     public string? AdditionalTerms { get; set; }
 }
 
+/// <summary>
+/// Editing a draft or pending-approval offer. Like <see cref="CreateJobOfferDto"/>, the
+/// <b>negotiated terms only</b>.
+///
+/// <para>⚠ <c>PositionTitle</c>, <c>ReportsToTitle</c>, <c>GradeTitle</c>, <c>EmploymentType</c> and
+/// <c>WorkMode</c> have been REMOVED — and here they were worse than on create. Create discarded
+/// them and took the role snapshot from the position; <b>update wrote them straight onto the
+/// entity</b>, so an editor could rewrite the position title, the reporting line, the grade and the
+/// employment type of an offer to anything at all, and the record would no longer describe the role
+/// it was raised against. The two paths contradicted each other about who owns these values; the
+/// position owns them.</para>
+/// </summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class UpdateJobOfferDto : UpdateDtoBase
 {
-    [Required]
-    [MaxLength(200)]
-    public string PositionTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string ReportsToTitle { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(200)]
-    public string GradeTitle { get; set; } = string.Empty;
-
     public Guid? LocationLevelId { get; set; }
     public Guid? LocationId { get; set; }
 
-    [Required]
-    public EmploymentType EmploymentType { get; set; }
-
-    public WorkMode WorkMode { get; set; }
     public int? ContractDurationMonths { get; set; }
     public int? ProbationPeriodMonths { get; set; }
     public int? NoticePeriodMonths { get; set; }
@@ -2940,6 +2997,23 @@ public class UpdateJobOfferDto : UpdateDtoBase
     public string? AdditionalTerms { get; set; }
 }
 
+/// <summary>
+/// Issuing an approved offer to the candidate: sets the dates, mints their single-use response
+/// token and emails them the link.
+///
+/// <para>⚠ <c>OfferLetterPath</c> is gone. It let the caller write an arbitrary server path onto the
+/// offer, which is the same shape the seven recruitment attachment paths were fixed out of — the
+/// letter is uploaded through <c>upload-letter</c>, which runs the controlled-upload gate and
+/// registers the file in the DMS.</para>
+/// </summary>
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class IssueJobOfferDto
 {
     [Required]
@@ -2947,9 +3021,6 @@ public class IssueJobOfferDto
 
     public DateTime OfferDate { get; set; } = DateTime.UtcNow;
     public DateTime? ExpiryDate { get; set; }
-
-    [MaxLength(500)]
-    public string? OfferLetterPath { get; set; }
 }
 
 public class RecordOfferResponseDto
@@ -2974,15 +3045,30 @@ public class RevokeJobOfferDto
     public string RevocationReason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Approving an offer that is out for approval.
+///
+/// <para>⚠ <c>ApprovedById</c> and <c>ApprovedDate</c> are gone. The approver used to be named in
+/// the body — so a caller could record someone else as having approved — and the date came with it,
+/// letting an approval be dated to whenever suited. Both now come from the token and the server
+/// clock. What remains is the approver's own comment, which the workflow engine records on the
+/// history row.</para>
+/// </summary>
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class ApproveJobOfferDto
 {
     [Required]
     public Guid OfferId { get; set; }
 
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovedDate { get; set; } = DateTime.UtcNow;
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 public class SubmitForApprovalDto
@@ -3228,7 +3314,13 @@ public class PreEmploymentCheckItemDto : BaseDto
     public bool? Passed { get; set; }
     public string? Instructions { get; set; }
     public string? Remarks { get; set; }
-    public string? DocumentPath { get; set; }
+    // ⚠ The raw storage path is deliberately not exposed. It is a server filesystem location, of no
+    // use to a client and of some use to an attacker; the file is fetched from the download route.
+    /// <summary>True once evidence has been uploaded through the controlled-upload gate.</summary>
+    public bool HasDocument { get; set; }
+
+    /// <summary>Original file name of the uploaded evidence, for display and download.</summary>
+    public string? DocumentFileName { get; set; }
     public int? ExpectedDays { get; set; }
     public bool IsMandatory { get; set; }
     public bool IsBlockingOnFail { get; set; }
@@ -3259,6 +3351,14 @@ public class CreatePreEmploymentCheckItemDto : CreateDtoBase
     public int? ExpectedDays { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class UpdatePreEmploymentCheckItemDto : UpdateDtoBase
 {
     [MaxLength(200)]
@@ -3279,8 +3379,8 @@ public class UpdatePreEmploymentCheckItemDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? Remarks { get; set; }
 
-    [MaxLength(500)]
-    public string? DocumentPath { get; set; }
+    // ⚠ DocumentPath removed: evidence is uploaded through the controlled-upload gate, not named by
+    // the caller. See PreEmploymentCheckItem.DocumentPath.
 
     public int? ExpectedDays { get; set; }
     public Guid? ReviewedById { get; set; }
@@ -3311,9 +3411,21 @@ public class ReferenceCheckResponseDto : BaseDto
     public bool? ConfirmedDatesOfEmployment { get; set; }
     public bool? ConfirmedPositionHeld { get; set; }
     public bool? ConfirmedReasonForLeaving { get; set; }
-    public string? DocumentPath { get; set; }
+    /// <summary>True once evidence has been uploaded through the controlled-upload gate.</summary>
+    public bool HasDocument { get; set; }
+
+    /// <summary>Original file name of the uploaded evidence, for display and download.</summary>
+    public string? DocumentFileName { get; set; }
 }
 
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class CreateReferenceCheckResponseDto : CreateDtoBase
 {
     [Required]
@@ -3354,10 +3466,17 @@ public class CreateReferenceCheckResponseDto : CreateDtoBase
     public bool? ConfirmedPositionHeld { get; set; }
     public bool? ConfirmedReasonForLeaving { get; set; }
 
-    [MaxLength(500)]
-    public string? DocumentPath { get; set; }
+    // ⚠ DocumentPath removed — a written reference is uploaded through the gate.
 }
 
+/// <remarks>
+/// ⚠ <c>[JsonUnmappedMemberHandling(Disallow)]</c>: a field that was REMOVED from this payload
+/// because it let the caller decide something they should not is refused with a 400 rather than
+/// quietly dropped. Silently ignoring it is worse than rejecting it — the caller believes the value
+/// took effect, which for an approver, a date or an attachment is precisely the misunderstanding
+/// that hides a bug.
+/// </remarks>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public class UpdateReferenceCheckResponseDto : UpdateDtoBase
 {
     public ReferenceRating? OverallRating { get; set; }
@@ -3370,13 +3489,28 @@ public class UpdateReferenceCheckResponseDto : UpdateDtoBase
     public bool? ConfirmedPositionHeld { get; set; }
     public bool? ConfirmedReasonForLeaving { get; set; }
 
-    [MaxLength(500)]
-    public string? DocumentPath { get; set; }
+    // ⚠ DocumentPath removed — a written reference is uploaded through the gate.
 }
 
 #endregion
 
 #region Pre-Employment Check Templates
+
+/// <summary>
+/// The stored-document handles behind one piece of pre-employment evidence, for the download route.
+/// Not a client-facing shape — the controller turns it into a file stream.
+/// </summary>
+public class PreEmploymentDocumentHandleDto
+{
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>Legacy path, for documents stored before the controlled-upload gate.</summary>
+    public string? LegacyPath { get; set; }
+
+    public string FileName { get; set; } = string.Empty;
+}
 
 public class PreEmploymentCheckTemplateDto : BaseDto
 {
@@ -3713,9 +3847,20 @@ public class OnboardingTaskDto : BaseDto
     public string? AssignedToName { get; set; }
     public Guid? AssignedOrganizationUnitId { get; set; }
     public string? AssignedOrganizationUnitName { get; set; }
+
+    /// <summary>The role that owes this task, carried over from the template at instantiation.</summary>
+    public Guid? OwnerPositionId { get; set; }
+    public string? OwnerPositionTitle { get; set; }
+
+    public Guid? CompletedById { get; set; }
+    public string? CompletedByName { get; set; }
     public string? CompletionNotes { get; set; }
     public string? EvidenceFilePath { get; set; }
     public bool RequiresVerification { get; set; }
+
+    /// <summary>True once the task is done and, where required, signed off by a second party.</summary>
+    public bool AwaitingVerification => Status == OnboardingTaskStatus.PendingVerification;
+
     public Guid? VerifiedById { get; set; }
     public string? VerifiedByName { get; set; }
     public DateTime? VerifiedDate { get; set; }
@@ -3789,8 +3934,9 @@ public class CompleteOnboardingTaskDto
     [Required]
     public Guid TaskId { get; set; }
 
-    [Required]
-    public Guid CompletedById { get; set; }
+    // The actor is taken from the authenticated user's employee record, not the payload — a [Required]
+    // attribute on a non-nullable Guid is satisfied by Guid.Empty, so an omitted id would reach the
+    // database as an unmatched FK and come back as a 500 with raw SQL in it.
 
     [MaxLength(2000)]
     public string? CompletionNotes { get; set; }
@@ -3804,8 +3950,7 @@ public class VerifyOnboardingTaskDto
     [Required]
     public Guid TaskId { get; set; }
 
-    [Required]
-    public Guid VerifiedById { get; set; }
+    // Verifier is taken from the authenticated user's employee record — see the note above.
 }
 
 #endregion
@@ -3966,11 +4111,78 @@ public class CreateProbationPeriodDto : CreateDtoBase
     [Required]
     public DateOnly StartDate { get; set; }
 
+    /// <summary>
+    /// How long the probation runs. <b>Omit it</b> and the length is resolved from the employee's
+    /// staff category, which is what FR-HR-031 asks for (senior 6 months, junior 3).
+    /// </summary>
+    /// <remarks>
+    /// Nullable since slice 4. A supplied value that contradicts the category is refused for
+    /// permanent staff — see <c>GET api/probations/policy/{employeeId}</c>, which returns the
+    /// resolved length and where it came from, and is what a create form should call.
+    /// </remarks>
     [Range(1, 24)]
-    public int DurationMonths { get; set; }
+    public int? DurationMonths { get; set; }
 
     [MaxLength(2000)]
     public string? OutcomeNotes { get; set; }
+}
+
+/// <summary>
+/// The probation length that applies to one employee, and where it was resolved from.
+/// </summary>
+/// <remarks>
+/// FR-HR-031: "The system shall apply probation periods by staff category (senior 6 months; junior
+/// 3 months)." Measured on the reference tenant 2026-08-18, the position master already encodes
+/// exactly that — JNR 3 months across 47 positions, SNR 6 across 60, MGT 6 across 16 — so the rule
+/// is <b>read from maintained data</b> rather than hard-coded against tenant-specific level codes.
+/// If TDC ever wants the rule stated independently of positions, its home is a
+/// <c>ProbationMonths</c> column on <c>StaffLevel</c>.
+/// </remarks>
+public class ProbationPolicyDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
+
+    public Guid? StaffLevelId { get; set; }
+    public string? StaffLevelName { get; set; }
+    public string? StaffLevelCode { get; set; }
+
+    public EmploymentType EmploymentType { get; set; }
+    public string EmploymentTypeName => EmploymentType.ToString();
+
+    /// <summary>The length that will be applied when the caller does not supply one.</summary>
+    public int ExpectedDurationMonths { get; set; }
+
+    /// <summary>Where <see cref="ExpectedDurationMonths"/> came from: Position, PolicyDefault.</summary>
+    public string Source { get; set; } = string.Empty;
+
+    /// <summary>The position's own probation length, when it carries one.</summary>
+    public int? PositionProbationMonths { get; set; }
+
+    /// <summary>The tenant-wide fallback from CompanyHrPolicySettings.</summary>
+    public int PolicyDefaultMonths { get; set; }
+
+    /// <summary>
+    /// Whether the length is enforced. Only permanent staff are bound by FR-HR-031; a contract or
+    /// temporary appointment is governed by its own contract, so a supplied length is accepted.
+    /// </summary>
+    public bool IsEnforced { get; set; }
+
+    /// <summary>How many days before the end date the expiry alerts start (FR-HR-140).</summary>
+    public int EndLeadDays { get; set; }
+
+    /// <summary>
+    /// Who will confirm this probation (FR-HR-032), or null when no rule covers the employee.
+    /// </summary>
+    /// <remarks>
+    /// Carried here so a create form can show, before the probation is even opened, who is going to
+    /// have to act on it — and so an unconfigured tenant is visible at the point of creation rather
+    /// than a month later when the reminder has nobody to go to.
+    /// </remarks>
+    public Guid? ConfirmingAuthorityEmployeeId { get; set; }
+    public string? ConfirmingAuthorityName { get; set; }
+    public string? ConfirmingAuthorityScope { get; set; }
 }
 
 public class ExtendProbationPeriodDto
@@ -4107,15 +4319,20 @@ public class AcknowledgeProbationReviewDto
     public string? EmployeeResponse { get; set; }
 }
 
+/// <summary>
+/// HR sign-off on a completed probation review.
+/// </summary>
+/// <remarks>
+/// ⚠ This DTO used to carry <c>HrApprovedById</c> and <c>HrApprovalDate</c>, both supplied by the
+/// caller — so a request could name someone else as the approver and back-date the approval. The
+/// approver is now taken from the authenticated token and the date is stamped server-side; there
+/// is deliberately nothing left here to spoof. See the actor rule in
+/// <c>plans/HR-Area-15b-Probation-Confirmation-Build-Plan.md</c> §5 D-5.
+/// </remarks>
 public class ApproveProbationReviewDto
 {
-    [Required]
-    public Guid ReviewId { get; set; }
-
-    [Required]
-    public Guid HrApprovedById { get; set; }
-
-    public DateTime HrApprovalDate { get; set; } = DateTime.UtcNow;
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 public class TerminateProbationPeriodDto
@@ -4141,6 +4358,23 @@ public class UpdateProbationReviewDto : UpdateDtoBase
 // ============================================================================
 
 #region Probation Extension DTOs
+
+/// <summary>The rendered FR-HR-032 confirmation letter, ready to display or print to PDF.</summary>
+public class ProbationConfirmationLetterDto
+{
+    public Guid ProbationId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string EmployeeNumber { get; set; } = string.Empty;
+    public string PositionTitle { get; set; } = string.Empty;
+    public DateOnly ConfirmationDate { get; set; }
+
+    /// <summary>Rendered subject line, used when the letter is emailed.</summary>
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>Self-contained HTML document body, suitable for display and print-to-PDF.</summary>
+    public string HtmlBody { get; set; } = string.Empty;
+}
 
 public class ProbationExtensionDto : BaseDto
 {
@@ -4510,6 +4744,9 @@ public class RecruitmentBulkOperationResultDto
 public class RecruitmentBulkOperationItemResult
 {
     public Guid ApplicationId { get; set; }
+    /// <summary>Set by talent-pool bulk operations, whose subject is a candidate, not an application.
+    /// Additive rather than a rename — the shortlist/reject callers key on ApplicationId.</summary>
+    public Guid? CandidateId { get; set; }
     public bool Success { get; set; }
     public string? Message { get; set; }
 }
@@ -4919,8 +5156,9 @@ public class ExternalApplicationDto
     public string? City { get; set; }
 
     /// <summary>
-    /// Required: JobCandidate.CountryId is a non-nullable FK, so an omitted value would be written as
-    /// Guid.Empty and fail the foreign key with an opaque 500. The public portal exposes
+    /// Required on the PUBLIC form, and only there. <c>JobCandidate.CountryId</c> itself is optional
+    /// (slice 13b) so that an internal applicant with no country on file can still apply; an external
+    /// candidate, by contrast, is asked directly and can answer. The public portal exposes
     /// GET /api/public/countries specifically to populate this field.
     /// </summary>
     [Required(ErrorMessage = "Country is required.")]
@@ -5181,73 +5419,12 @@ public class ExternalWithdrawDto
 
 #endregion
 
-#region Candidate Portal Account — Auth & Profile DTOs
+#region Candidate Portal Account — Profile DTOs
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-public class CandidatePortalRegisterDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-    [Required, MinLength(8), MaxLength(100)]
-    public string Password { get; set; } = string.Empty;
-    [Required, Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
-
-public class CandidatePortalLoginDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-    [Required]
-    public string Password { get; set; } = string.Empty;
-}
-
-public class CandidatePortalAuthResultDto
-{
-    public string Token { get; set; } = string.Empty;
-    public DateTime ExpiresAt { get; set; }
-    public Guid AccountId { get; set; }
-    public string Email { get; set; } = string.Empty;
-    public string FirstName { get; set; } = string.Empty;
-    public string? LastName { get; set; }
-    public bool IsEmailVerified { get; set; }
-    /// <summary>True when the account is linked to a JobCandidate profile.</summary>
-    public bool HasProfile { get; set; }
-    public Guid? CandidateId { get; set; }
-}
-
-public class CandidatePortalVerifyEmailDto
-{
-    [Required]
-    public string Token { get; set; } = string.Empty;
-}
-
-public class CandidatePortalForgotPasswordDto
-{
-    [Required, EmailAddress, MaxLength(200)]
-    public string Email { get; set; } = string.Empty;
-}
-
-public class CandidatePortalResetPasswordDto
-{
-    [Required]
-    public string Token { get; set; } = string.Empty;
-    [Required, MinLength(8), MaxLength(100)]
-    public string NewPassword { get; set; } = string.Empty;
-    [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
-
-public class CandidatePortalChangePasswordDto
-{
-    [Required]
-    public string CurrentPassword { get; set; } = string.Empty;
-    [Required, MinLength(8), MaxLength(100)]
-    public string NewPassword { get; set; } = string.Empty;
-    [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
-    public string ConfirmPassword { get; set; } = string.Empty;
-}
+// The auth DTOs (register/login/verify/forgot/reset/change-password) were deleted 2026-08-30
+// with the candidate portal's own auth surface — candidates now self-register on the main JWT
+// scheme with the Candidate role, through the standard AuthController flows. The profile,
+// application and dashboard DTOs below survive: the main-scheme candidate surface reuses them.
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 
@@ -5354,8 +5531,9 @@ public class UpdateCandidatePortalProfileDto
     // Compliance
     public ErpSystem.Core.Enums.WorkAuthorizationStatus WorkAuthorizationStatus { get; set; }
     // Documents
-    [MaxLength(500)]
-    public string? ProfilePhotoUrl { get; set; }
+    // ⚠ No ProfilePhotoUrl. The candidate sets their photo by uploading it through the gate,
+    // which stores a scanned upload record and leaves the legacy public URL null. Accepting a
+    // URL here let an external user write an arbitrary string onto a record HR then reads.
     public bool IsInTalentPool { get; set; }
     public List<ExternalWorkHistoryDto> WorkHistories { get; set; } = new();
     public List<ExternalQualificationDto> Qualifications { get; set; } = new();
@@ -5478,6 +5656,7 @@ public class UpdateCandidateTalentSegmentDto
 public class CandidateSegmentMembershipDto : BaseDto
 {
     public Guid    TenantId    { get; set; }
+    public Guid    JobCandidateId { get; set; }
     public Guid    SegmentId   { get; set; }
     public string  SegmentName { get; set; } = string.Empty;
     public string? SegmentColor { get; set; }
@@ -5542,6 +5721,8 @@ public class TalentPoolCandidateDto : JobCandidateDto
     public string   TalentPoolStatusName  => TalentPoolStatus.ToString();
     public string?  TalentPoolNotes       { get; set; }
     public DateTime? TalentPoolReviewDate { get; set; }
+    /// <summary>Why they last left the pool — shown when a removed candidate is looked up again.</summary>
+    public string?  TalentPoolRemovalReason { get; set; }
     public DateTime? LastEngagedDate      { get; set; }
     public int      DaysInPool            { get; set; }
     public int      EngagementCount       { get; set; }
@@ -5615,6 +5796,23 @@ public class RemoveFromTalentPoolDto
     public string? Reason { get; set; }
     [MaxLength(2000)]
     public string? Notes  { get; set; }
+}
+
+/// <summary>
+/// Wrapped body for the pool-status PATCH. A raw JSON enum scalar worked but was easy to get
+/// wrong from a typed client and left nowhere to hang a future reason field.
+/// </summary>
+public class UpdateTalentPoolStatusDto
+{
+    [Required]
+    public ErpSystem.Core.Enums.TalentPoolCandidateStatus Status { get; set; }
+}
+
+/// <summary>Wrapped body for the review-date PATCH; same reasoning as the status wrapper.</summary>
+public class UpdateTalentPoolReviewDateDto
+{
+    [Required]
+    public DateTime ReviewDate { get; set; }
 }
 
 /// <summary>Bulk operation against multiple talent pool candidates.</summary>

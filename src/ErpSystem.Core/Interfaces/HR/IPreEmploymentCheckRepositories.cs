@@ -71,11 +71,17 @@ public interface IReferenceCheckResponseRepository : IGenericRepository<Referenc
 
 public interface IPreEmploymentCheckTemplateRepository : IGenericRepository<PreEmploymentCheckTemplate>
 {
-    /// <summary>Returns all active templates for the current tenant, with items included.</summary>
-    Task<IEnumerable<PreEmploymentCheckTemplate>> GetAllActiveAsync();
+    /// <summary>
+    /// Returns all active templates for the given tenant, with items included.
+    ///
+    /// <para>⚠ The tenant is a parameter rather than an assumption. This method's summary already
+    /// said "for the current tenant" while neither it nor its caller applied any tenant predicate —
+    /// the documentation was aspirational and the read spanned every tenant in the database.</para>
+    /// </summary>
+    Task<IEnumerable<PreEmploymentCheckTemplate>> GetAllActiveAsync(Guid tenantId);
 
-    /// <summary>Returns a template with all its items loaded.</summary>
-    Task<PreEmploymentCheckTemplate?> GetByIdWithItemsAsync(Guid id);
+    /// <summary>Returns a template with all its items loaded, scoped to the given tenant.</summary>
+    Task<PreEmploymentCheckTemplate?> GetByIdWithItemsAsync(Guid id, Guid tenantId);
 
     /// <summary>Explicitly adds a new template item to the EF context as Added, guaranteeing an INSERT on SaveChanges.</summary>
     Task AddTemplateItemAsync(PreEmploymentCheckTemplateItem item);

@@ -468,3 +468,39 @@ export interface RecordInvoicePayment {
   paidDate: string;
   notes?: string | null;
 }
+
+// ── Client portal (the consultant-client contact's own surface) ──────────────────
+// api/client-portal — main-scheme ConsultantClient role since 2026-08-31 (the bespoke
+// PortalBearer portal retired). Shapes read from the C# DTOs, not guessed from names.
+
+export interface ClientTimesheetConfirmationPublic {
+  timesheetNumber: string;
+  consultantName: string;
+  clientName: string;
+  /** DateOnly */
+  periodStartDate: string;
+  periodEndDate: string;
+  totalHours: number;
+  status: TimesheetConfirmationStatus;
+  isExpired: boolean;
+  canRespond: boolean;
+  tokenExpiryDate: string;
+  entries: ConsultantTimesheetEntry[];
+}
+
+export interface ClientPortalClientSection {
+  consultantClientId: string;
+  clientName: string;
+  clientCode: string;
+  contactRole?: string | null;
+  pendingConfirmationCount: number;
+  pendingTimesheets: ConsultantTimesheetSummary[];
+}
+
+/** A contact invited by several clients holds one section per client. */
+export interface ClientPortalDashboard {
+  email: string;
+  contactName?: string | null;
+  pendingConfirmationCount: number;
+  clients: ClientPortalClientSection[];
+}

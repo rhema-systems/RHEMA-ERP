@@ -36,6 +36,9 @@ export default function EditQualificationPage() {
         description: values.description || null,
         type: values.type,
         issuingAuthority: values.issuingAuthority || null,
+        // Empty means unranked, and must reach the API as null: an empty string is not a Guid and
+        // would be refused, while omitting it would leave the level unchanged on an edit.
+        qualificationLevelId: values.qualificationLevelId || null,
         isActive: values.isActive,
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'qualifications'] });
@@ -77,6 +80,9 @@ export default function EditQualificationPage() {
             type: qualification.type,
             issuingAuthority: qualification.issuingAuthority ?? '',
             description: qualification.description ?? '',
+            // ⚠ Seeded from the record, not left blank. A form field that starts empty and is then
+            // saved silently CLEARS the value — the D-09/D-12 shape this module has met repeatedly.
+            qualificationLevelId: qualification.qualificationLevelId ?? '',
             isActive: qualification.isActive,
           }}
           onSubmit={handleSubmit}

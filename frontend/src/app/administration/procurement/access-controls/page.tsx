@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ExternalLink, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react';
 
@@ -17,7 +17,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { canActivateCommittee, canCheckAccessCapability, roleRequiresWarehouseScope, validateResponsibilityAssignment } from '@/lib/procurement-access-control';
+import {
+  canActivateCommittee, canCheckAccessCapability, committeeAssignmentEligibilityIssue,
+  roleRequiresWarehouseScope, validateResponsibilityAssignment,
+} from '@/lib/procurement-access-control';
 import { procurementAccessControlService } from '@/services/procurement-access-control.service';
 import type {
   ProcurementAccessCapabilityRequest, ProcurementCommittee, ProcurementCommitteeMember,
@@ -53,20 +56,23 @@ export default function ProcurementAccessControlsPage() {
   const [capability, setCapability] = useState<ProcurementAccessCapabilityRequest>(emptyCapability);
 
   const readiness = useQuery({ queryKey: ['procurement-access-readiness'], queryFn: procurementAccessControlService.readiness });
-  const roles = useQuery({ queryKey: ['procurement-access-roles'], queryFn: procurementAccessControlService.roles });
-  const permissions = useQuery({ queryKey: ['procurement-access-permissions'], queryFn: procurementAccessControlService.permissions });
-  const users = useQuery({ queryKey: ['procurement-access-users'], queryFn: procurementAccessControlService.users });
-  const warehouses = useQuery({ queryKey: ['procurement-access-warehouses'], queryFn: procurementAccessControlService.warehouses });
-  const locations = useQuery({ queryKey: ['procurement-access-locations'], queryFn: procurementAccessControlService.locations });
-  const assignments = useQuery({ queryKey: ['procurement-access-assignments'], queryFn: procurementAccessControlService.assignments });
-  const committees = useQuery({ queryKey: ['procurement-access-committees'], queryFn: procurementAccessControlService.committees });
-  const workflows = useQuery({ queryKey: ['procurement-access-workflows'], queryFn: procurementAccessControlService.workflows });
-  const audit = useQuery({ queryKey: ['procurement-access-audit'], queryFn: () => procurementAccessControlService.audit(100) });
+  const canLoadAdministration = readiness.isSuccess;
+  const roles = useQuery({ queryKey: ['procurement-access-roles'], queryFn: procurementAccessControlService.roles, enabled: canLoadAdministration });
+  const permissions = useQuery({ queryKey: ['procurement-access-permissions'], queryFn: procurementAccessControlService.permissions, enabled: canLoadAdministration });
+  const users = useQuery({ queryKey: ['procurement-access-users'], queryFn: procurementAccessControlService.users, enabled: canLoadAdministration });
+  const warehouses = useQuery({ queryKey: ['procurement-access-warehouses'], queryFn: procurementAccessControlService.warehouses, enabled: canLoadAdministration });
+  const locations = useQuery({ queryKey: ['procurement-access-locations'], queryFn: procurementAccessControlService.locations, enabled: canLoadAdministration });
+  const assignments = useQuery({ queryKey: ['procurement-access-assignments'], queryFn: procurementAccessControlService.assignments, enabled: canLoadAdministration });
+  const committees = useQuery({ queryKey: ['procurement-access-committees'], queryFn: procurementAccessControlService.committees, enabled: canLoadAdministration });
+  const workflows = useQuery({ queryKey: ['procurement-access-workflows'], queryFn: procurementAccessControlService.workflows, enabled: canLoadAdministration });
+  const audit = useQuery({ queryKey: ['procurement-access-audit'], queryFn: () => procurementAccessControlService.audit(100), enabled: canLoadAdministration });
 
-  const refresh = () => Promise.all([
-    readiness.refetch(), roles.refetch(), permissions.refetch(), users.refetch(), warehouses.refetch(), locations.refetch(),
-    assignments.refetch(), committees.refetch(), workflows.refetch(), audit.refetch(),
-  ]);
+  const refresh = () => readiness.isSuccess
+    ? Promise.all([
+      readiness.refetch(), roles.refetch(), permissions.refetch(), users.refetch(), warehouses.refetch(), locations.refetch(),
+      assignments.refetch(), committees.refetch(), workflows.refetch(), audit.refetch(),
+    ])
+    : readiness.refetch();
   const invalidateControls = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['procurement-access-readiness'] }),
@@ -128,8 +134,16 @@ export default function ProcurementAccessControlsPage() {
   });
 
   const eligibleAssignments = useMemo(() => (assignments.data ?? []).filter(item => !memberCommittee ||
-    item.roleName === memberCommittee.requiredRoleName || item.roleName === 'TDC_OBSERVER' || item.roleName === 'TDC_INTERNAL_AUDIT'),
-  [assignments.data, memberCommittee]);
+    !committeeAssignmentEligibilityIssue(
+      item, memberCommittee.requiredRoleName, memberForm.memberKind,
+      memberForm.effectiveFrom, memberForm.effectiveTo)),
+  [assignments.data, memberCommittee, memberForm.effectiveFrom, memberForm.effectiveTo, memberForm.memberKind]);
+  const selectedMemberAssignment = assignments.data?.find(item => item.id === memberForm.assignmentId);
+  const memberAssignmentError = memberCommittee && selectedMemberAssignment
+    ? committeeAssignmentEligibilityIssue(
+      selectedMemberAssignment, memberCommittee.requiredRoleName, memberForm.memberKind,
+      memberForm.effectiveFrom, memberForm.effectiveTo)
+    : undefined;
 
   const openAssignment = (item?: ProcurementResponsibilityAssignment) => {
     setAssignmentId(item?.id);
@@ -154,8 +168,12 @@ export default function ProcurementAccessControlsPage() {
     setMemberForm({ assignmentId: '', memberKind: 'VotingMember', isVoting: true, effectiveFrom: today(), reason: '' });
   };
 
-  const loadingFailed = [readiness, roles, permissions, users, warehouses, locations, assignments, committees, workflows, audit].some(query => query.isError);
+  const loadingFailed = readiness.isSuccess &&
+    [roles, permissions, users, warehouses, locations, assignments, committees, workflows, audit].some(query => query.isError);
   const summary = readiness.data;
+  const readinessError = readiness.error as (Error & { status?: number }) | null;
+  const readinessDenied = readiness.isError &&
+    (readinessError?.status === 401 || readinessError?.status === 403);
 
   return (
     <div className="space-y-6">
@@ -166,9 +184,12 @@ export default function ProcurementAccessControlsPage() {
 
       <Alert className="border-blue-500/40 bg-blue-500/5"><ShieldCheck className="h-4 w-4" /><AlertTitle>Security is the access authority</AlertTitle><AlertDescription className="space-y-3"><p>Assign users to roles and grant role privileges only in the shared Security workspace. This page cannot grant a base privilege; it only narrows an existing Security role by warehouse/location or attaches it to a procurement committee.</p><div className="flex flex-wrap gap-2"><Button asChild size="sm" variant="outline"><Link href="/administration/identity-management/users">Manage users</Link></Button><Button asChild size="sm" variant="outline"><Link href="/administration/identity-management/roles">Manage roles & privileges</Link></Button></div></AlertDescription></Alert>
       <Alert className="border-amber-500/40 bg-amber-500/5"><ShieldCheck className="h-4 w-4" /><AlertTitle>Configuration boundary</AlertTitle><AlertDescription>Workflow routes are unapproved Draft templates. Publish them only through the shared workflow designer after DEC-003 and DEC-004 approval. This workspace does not execute PR, PO, receiving, or inventory transactions.</AlertDescription></Alert>
-      {loadingFailed && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Some access data could not be loaded</AlertTitle><AlertDescription>Refresh after checking API connectivity and administrator authorization.</AlertDescription></Alert>}
+      {readiness.isPending && <Alert><RefreshCw className="h-4 w-4 animate-spin" /><AlertTitle>Checking administration access</AlertTitle><AlertDescription>Loading the authoritative procurement security configuration. Counts and committee actions will appear only after access is confirmed.</AlertDescription></Alert>}
+      {readinessDenied && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Procurement access administration is not assigned</AlertTitle><AlertDescription className="space-y-2"><p>This settings workspace requires <strong>SuperAdmin</strong> or the <strong>TDC ICT Administrator</strong> role. TenantAdmin, Manager, Employee, and operational procurement roles do not grant security-configuration access by themselves.</p><p>Ask a Security administrator to add the appropriate administrative role, then refresh your sign-in and return here.</p></AlertDescription></Alert>}
+      {readiness.isError && !readinessDenied && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Unable to load procurement access administration</AlertTitle><AlertDescription>{readinessError?.message || 'The authoritative security configuration could not be loaded. Refresh and retry.'}</AlertDescription></Alert>}
+      {loadingFailed && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Some procurement access data could not be loaded</AlertTitle><AlertDescription>The TDC ICT Administrator permission was accepted, but a later request failed. Refresh the page; if it persists, use the displayed server error when contacting support.</AlertDescription></Alert>}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      {readiness.isSuccess && <><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <Metric label="Security roles" value={`${summary?.configuredRoleCount ?? 0}/${summary?.requiredRoleCount ?? 19}`} detail="central role definitions" ok={summary?.configuredRoleCount === summary?.requiredRoleCount} />
         <Metric label="Security privileges" value={`${summary?.configuredPermissionCount ?? 0}/${summary?.requiredPermissionCount ?? 39}`} detail="central privilege registry" ok={summary?.configuredPermissionCount === summary?.requiredPermissionCount} />
         <Metric label="Context scopes" value={String(summary?.activeAssignmentCount ?? 0)} detail="warehouse or committee duties" ok={(summary?.activeAssignmentCount ?? 0) > 0} />
@@ -196,7 +217,7 @@ export default function ProcurementAccessControlsPage() {
 
           <TabsContent value="audit" className="pt-4"><div className="divide-y rounded-lg border">{(audit.data ?? []).map(item => <div key={item.id} className="grid gap-2 p-4 text-sm lg:grid-cols-[180px_230px_minmax(0,1fr)]"><div><p className="font-medium">{item.actorName}</p><p className="text-xs text-muted-foreground">{dateTime(item.timestamp)}</p></div><div><Badge variant="outline">{item.action}</Badge><p className="mt-2">{item.resource} · {item.resourceId}</p></div><details><summary className="cursor-pointer text-muted-foreground">Audit payload</summary><pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{item.newValues ?? item.oldValues ?? 'No payload'}</pre></details></div>)}{!audit.isLoading && !(audit.data?.length) && <Empty text="No access-control audit entries have been recorded." />}</div></TabsContent>
         </Tabs>
-      </CardContent></Card>
+      </CardContent></Card></>}
 
       <Dialog open={assignmentOpen} onOpenChange={setAssignmentOpen}>
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
@@ -220,7 +241,7 @@ export default function ProcurementAccessControlsPage() {
 
       <Dialog open={Boolean(committeeEdit)} onOpenChange={open => !open && setCommitteeEdit(undefined)}><DialogContent><DialogHeader><DialogTitle>Configure {committeeEdit?.name}</DialogTitle><DialogDescription>Activation is rejected until effective voting membership reaches quorum.</DialogDescription></DialogHeader>{committeeForm && <div className="space-y-4"><div className="space-y-2"><Label>Name *</Label><Input value={committeeForm.name} onChange={event => setCommitteeForm(current => current && ({ ...current, name: event.target.value }))} /></div><div className="space-y-2"><Label>Description</Label><Textarea value={committeeForm.description ?? ''} onChange={event => setCommitteeForm(current => current && ({ ...current, description: event.target.value }))} /></div><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Required quorum *</Label><Input type="number" min={1} max={50} value={committeeForm.requiredQuorum} onChange={event => setCommitteeForm(current => current && ({ ...current, requiredQuorum: Number(event.target.value) }))} /></div><div className="space-y-2"><Label>Status *</Label><Select value={committeeForm.status} onValueChange={value => setCommitteeForm(current => current && ({ ...current, status: value as ProcurementCommitteeStatus }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Draft">Draft</SelectItem><SelectItem value="Active" disabled={!committeeEdit || !canActivateCommittee({ activeVotingMemberCount: committeeEdit.activeVotingMemberCount, requiredQuorum: committeeForm.requiredQuorum })}>Active</SelectItem><SelectItem value="Retired">Retired</SelectItem></SelectContent></Select></div><div className="space-y-2"><Label>Effective from *</Label><Input type="date" value={committeeForm.effectiveFrom} onChange={event => setCommitteeForm(current => current && ({ ...current, effectiveFrom: event.target.value }))} /></div><div className="space-y-2"><Label>Effective to</Label><Input type="date" value={committeeForm.effectiveTo ?? ''} onChange={event => setCommitteeForm(current => current && ({ ...current, effectiveTo: event.target.value || undefined }))} /></div></div><div className="space-y-2"><Label>Audit reason *</Label><Textarea value={committeeForm.reason} onChange={event => setCommitteeForm(current => current && ({ ...current, reason: event.target.value }))} /></div></div>}<DialogFooter><Button variant="outline" onClick={() => setCommitteeEdit(undefined)}>Cancel</Button><Button onClick={() => saveCommittee.mutate()} disabled={!committeeForm?.name.trim() || !committeeForm?.reason.trim() || saveCommittee.isPending}>Save committee</Button></DialogFooter></DialogContent></Dialog>
 
-      <Dialog open={Boolean(memberCommittee)} onOpenChange={open => !open && setMemberCommittee(undefined)}><DialogContent><DialogHeader><DialogTitle>Add {memberCommittee?.name} member</DialogTitle><DialogDescription>Voting and administrative members require {memberCommittee?.requiredRoleName}. TDC observers and Internal Audit may be added only as observers.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-2"><Label>Responsibility assignment *</Label><Select value={memberForm.assignmentId || 'none'} onValueChange={value => setMemberForm(current => ({ ...current, assignmentId: value === 'none' ? '' : value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Select assigned user</SelectItem>{eligibleAssignments.map(item => <SelectItem key={item.id} value={item.id}>{item.userDisplayName || item.username} · {item.roleDisplayName}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Member kind *</Label><Select value={memberForm.memberKind} onValueChange={value => { const kind = value as ProcurementCommitteeMemberKind; setMemberForm(current => ({ ...current, memberKind: kind, isVoting: kind !== 'Observer' && current.isVoting })); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(['Chair','VotingMember','NonVotingMember','Observer','Secretary'] as ProcurementCommitteeMemberKind[]).map(kind => <SelectItem key={kind} value={kind}>{kind.replace(/([A-Z])/g, ' $1').trim()}</SelectItem>)}</SelectContent></Select></div><label className="flex items-center gap-2 text-sm"><Checkbox checked={memberForm.isVoting} disabled={memberForm.memberKind === 'Observer'} onCheckedChange={checked => setMemberForm(current => ({ ...current, isVoting: checked === true }))} />Voting member</label><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Effective from *</Label><Input type="date" value={memberForm.effectiveFrom} onChange={event => setMemberForm(current => ({ ...current, effectiveFrom: event.target.value }))} /></div><div className="space-y-2"><Label>Effective to</Label><Input type="date" value={memberForm.effectiveTo ?? ''} onChange={event => setMemberForm(current => ({ ...current, effectiveTo: event.target.value || undefined }))} /></div></div><div className="space-y-2"><Label>Audit reason *</Label><Textarea value={memberForm.reason} onChange={event => setMemberForm(current => ({ ...current, reason: event.target.value }))} /></div></div><DialogFooter><Button variant="outline" onClick={() => setMemberCommittee(undefined)}>Cancel</Button><Button onClick={() => addMember.mutate()} disabled={!memberForm.assignmentId || !memberForm.reason.trim() || addMember.isPending}>Add member</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={Boolean(memberCommittee)} onOpenChange={open => !open && setMemberCommittee(undefined)}><DialogContent><DialogHeader><DialogTitle>Add {memberCommittee?.name} member</DialogTitle><DialogDescription>Voting and administrative members require an active {memberCommittee?.requiredRoleName} responsibility. TDC observers and Internal Audit may be added only as observers.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-2"><Label>Active responsibility assignment *</Label><Select value={memberForm.assignmentId || 'none'} onValueChange={value => setMemberForm(current => ({ ...current, assignmentId: value === 'none' ? '' : value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Select eligible user</SelectItem>{eligibleAssignments.map(item => <SelectItem key={item.id} value={item.id}>{item.userDisplayName || item.username} · {item.roleDisplayName}</SelectItem>)}</SelectContent></Select>{!eligibleAssignments.length && <p className="text-xs text-amber-700">No active responsibility covers this member kind and effective period. Create or reactivate it under Scopes &amp; duties first.</p>}{memberAssignmentError && <p className="text-xs text-destructive">{memberAssignmentError}</p>}</div><div className="space-y-2"><Label>Member kind *</Label><Select value={memberForm.memberKind} onValueChange={value => { const kind = value as ProcurementCommitteeMemberKind; setMemberForm(current => ({ ...current, memberKind: kind, isVoting: kind !== 'Observer' && current.isVoting })); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(['Chair','VotingMember','NonVotingMember','Observer','Secretary'] as ProcurementCommitteeMemberKind[]).map(kind => <SelectItem key={kind} value={kind}>{kind.replace(/([A-Z])/g, ' $1').trim()}</SelectItem>)}</SelectContent></Select></div><label className="flex items-center gap-2 text-sm"><Checkbox checked={memberForm.isVoting} disabled={memberForm.memberKind === 'Observer'} onCheckedChange={checked => setMemberForm(current => ({ ...current, isVoting: checked === true }))} />Voting member</label><div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Effective from *</Label><Input type="date" value={memberForm.effectiveFrom} onChange={event => setMemberForm(current => ({ ...current, effectiveFrom: event.target.value }))} /></div><div className="space-y-2"><Label>Effective to</Label><Input type="date" value={memberForm.effectiveTo ?? ''} onChange={event => setMemberForm(current => ({ ...current, effectiveTo: event.target.value || undefined }))} /></div></div><div className="space-y-2"><Label>Reason *</Label><Textarea value={memberForm.reason} onChange={event => setMemberForm(current => ({ ...current, reason: event.target.value }))} placeholder="Example: Appointed under memo TDC/PROC/2026/014 for this evaluation term" /><p className="text-xs text-muted-foreground">Required for audit purposes and retained in the committee membership history.</p></div></div><DialogFooter><Button variant="outline" onClick={() => setMemberCommittee(undefined)}>Cancel</Button><Button onClick={() => addMember.mutate()} disabled={!memberForm.assignmentId || Boolean(memberAssignmentError) || !memberForm.reason.trim() || addMember.isPending}>Add member</Button></DialogFooter></DialogContent></Dialog>
 
       <Dialog open={Boolean(removeTarget)} onOpenChange={open => !open && setRemoveTarget(undefined)}><DialogContent><DialogHeader><DialogTitle>Remove committee member?</DialogTitle><DialogDescription>The API will reject removal from an active committee when it would place voting membership below quorum.</DialogDescription></DialogHeader><div className="space-y-2"><Label>Audit reason *</Label><Textarea value={removeReason} onChange={event => setRemoveReason(event.target.value)} /></div><DialogFooter><Button variant="outline" onClick={() => setRemoveTarget(undefined)}>Cancel</Button><Button variant="destructive" onClick={() => removeMember.mutate()} disabled={!removeReason.trim() || removeMember.isPending}>Remove member</Button></DialogFooter></DialogContent></Dialog>
     </div>

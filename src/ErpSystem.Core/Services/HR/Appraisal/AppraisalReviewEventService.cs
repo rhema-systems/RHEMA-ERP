@@ -17,6 +17,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     private readonly IGenericRepository<GoalProgressEntry> _progressEntryRepository;
     private readonly IGenericRepository<AppraisalAttachment> _attachmentRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
+    private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<AppraisalReviewEventService> _logger;
@@ -26,6 +27,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         IGenericRepository<GoalProgressEntry> progressEntryRepository,
         IGenericRepository<AppraisalAttachment> attachmentRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
+        IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<AppraisalReviewEventService> logger)
@@ -34,9 +36,95 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         _progressEntryRepository = progressEntryRepository;
         _attachmentRepository = attachmentRepository;
         _goalRepository = goalRepository;
+        _appraisalRepository = appraisalRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Statuses a goal may receive progress in — approved and still running. Mirrors
+    /// <c>EmployeeGoalService.LiveExecutionStatuses</c>; a goal that is draft, awaiting approval,
+    /// rejected or already complete keeps its status and the entry is still recorded against the
+    /// review as a note.
+    /// </summary>
+    private static readonly HashSet<GoalStatus> LiveExecutionStatuses = new()
+    {
+        GoalStatus.Approved,
+        GoalStatus.InProgress,
+        GoalStatus.OnTrack,
+        GoalStatus.AtRisk,
+    };
+
+    /// <summary>
+    /// Carries an entry's percent and reported status onto the goal.
+    ///
+    /// <para>Deliberately identical to <c>EmployeeGoalService.ApplyProgressToGoal</c> and
+    /// <c>CheckInService.ApplyGoalUpdateAsync</c> so all three channels leave a goal in the same
+    /// state. Without this, progress recorded <em>at a review event</em> was written to the entry
+    /// and dropped: the goal kept its old percentage and execution status, so a mid-year review
+    /// could satisfy <c>RequireGoalProgressUpdateAtReview</c> while every goal still read as it had
+    /// at goal-setting, and nothing on this path could ever mark a goal at risk.</para>
+    /// </summary>
+    private static void ApplyProgressToGoal(EmployeeGoal goal, decimal? progressPercent, GoalProgressStatus entryStatus)
+    {
+        if (progressPercent.HasValue)
+            goal.ProgressPercent = progressPercent.Value;
+
+        if (progressPercent >= 100)
+        {
+            goal.Status = GoalStatus.Completed;
+            return;
+        }
+
+        goal.Status = entryStatus switch
+        {
+            GoalProgressStatus.InProgress => GoalStatus.InProgress,
+            GoalProgressStatus.OnTrack    => GoalStatus.OnTrack,
+            GoalProgressStatus.AtRisk     => GoalStatus.AtRisk,
+            GoalProgressStatus.Completed  => GoalStatus.Completed,
+            _                             => goal.Status,
+        };
+    }
+
+    /// <summary>
+    /// The appraisee behind a review event, used to confirm a goal being scored is actually theirs.
+    /// </summary>
+    private async Task<Guid> GetSubjectEmployeeIdAsync(AppraisalReviewEvent ev, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        return await _reviewEventRepository.GetQueryable(e => e.Id == ev.Id && e.TenantId == tenantId)
+            .Select(e => e.Appraisal.EmployeeId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Loads the goals named by a review-event write, refusing any that do not belong to the
+    /// appraisee and this cycle. The goal ids arrive from the payload, so without this a caller
+    /// could log progress against — or score — someone else's goal through their own review.
+    /// </summary>
+    private async Task<Dictionary<Guid, EmployeeGoal>> GetScorableGoalsAsync(
+        AppraisalReviewEvent ev, IReadOnlyCollection<Guid> goalIds, CancellationToken cancellationToken)
+    {
+        if (goalIds.Count == 0)
+            return new Dictionary<Guid, EmployeeGoal>();
+
+        var tenantId = GetTenantId();
+        var employeeId = await GetSubjectEmployeeIdAsync(ev, cancellationToken);
+
+        var goals = await _goalRepository
+            .GetQueryable(g => g.TenantId == tenantId
+                            && g.EmployeeId == employeeId
+                            && g.AppraisalCycleId == ev.AppraisalCycleId
+                            && goalIds.Contains(g.Id))
+            .ToListAsync(cancellationToken);
+
+        var missing = goalIds.Where(id => goals.All(g => g.Id != id)).ToList();
+        if (missing.Count > 0)
+            throw new ArgumentException(
+                $"{missing.Count} goal(s) named here do not belong to this review's employee and cycle.");
+
+        return goals.ToDictionary(g => g.Id);
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -79,9 +167,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     private async Task EnsureGoalProgressRecordedAsync(AppraisalReviewEvent ev, CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
-        var employeeId = await _reviewEventRepository.GetQueryable(e => e.Id == ev.Id && e.TenantId == tenantId)
-            .Select(e => e.Appraisal.EmployeeId)
-            .FirstOrDefaultAsync(cancellationToken);
+        var employeeId = await GetSubjectEmployeeIdAsync(ev, cancellationToken);
 
         var activeGoals = await _goalRepository
             .GetQueryable(g => g.TenantId == tenantId
@@ -160,35 +246,51 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
         if (!ev.IsFullAppraisal)
             throw new InvalidOperationException("This review event is not configured as a full appraisal.");
+        if (ev.Status == AppraisalReviewStatus.Completed)
+            throw new InvalidOperationException("This review event is already completed.");
 
         var tenantId = GetTenantId();
-        // Record a score per goal as a GoalProgressEntry tied to this review event.
+
+        // The goal ids come from the payload; confirm every one belongs to this review's employee
+        // and cycle before scoring it. This also gives us the weights without a second query.
+        var scoredGoals = await GetScorableGoalsAsync(
+            ev, dto.Scores.Select(s => s.EmployeeGoalId).Distinct().ToList(), cancellationToken);
+
+        // Record a score per goal as a GoalProgressEntry tied to this review event, and carry it
+        // onto the goal — a full interim appraisal is the period's verdict on those goals, so
+        // leaving them reading their pre-review percentage made the scores invisible everywhere
+        // outside this one event.
         foreach (var s in dto.Scores)
         {
+            var entryStatus = s.Score >= 100 ? GoalProgressStatus.Completed : GoalProgressStatus.OnTrack;
+
             await _progressEntryRepository.AddAsync(new GoalProgressEntry
             {
                 TenantId = tenantId,
                 EmployeeGoalId = s.EmployeeGoalId,
                 ProgressPercent = s.Score,
-                Status = s.Score >= 100 ? GoalProgressStatus.Completed : GoalProgressStatus.OnTrack,
+                Status = entryStatus,
                 Notes = s.Note,
                 RecordedById = recordedById,
                 EntryDate = DateTime.UtcNow,
                 ReviewEventId = eventId
             });
+
+            var goal = scoredGoals[s.EmployeeGoalId];
+            if (LiveExecutionStatuses.Contains(goal.Status) && !goal.IsLocked)
+            {
+                ApplyProgressToGoal(goal, s.Score, entryStatus);
+                await _goalRepository.UpdateAsync(goal);
+            }
         }
 
         // Weighted period score (fall back to a simple average when no weights are set).
         decimal periodScore = 0;
         if (dto.Scores.Any())
         {
-            var goalIds = dto.Scores.Select(s => s.EmployeeGoalId).ToList();
-            var weightById = (await _goalRepository.GetQueryable(g => g.TenantId == tenantId && goalIds.Contains(g.Id)).ToListAsync(cancellationToken))
-                .ToDictionary(g => g.Id, g => g.Weight);
-
-            var totalWeight = dto.Scores.Sum(s => weightById.GetValueOrDefault(s.EmployeeGoalId, 0));
+            var totalWeight = dto.Scores.Sum(s => scoredGoals[s.EmployeeGoalId].Weight);
             periodScore = totalWeight > 0
-                ? dto.Scores.Sum(s => s.Score * weightById.GetValueOrDefault(s.EmployeeGoalId, 0)) / totalWeight
+                ? dto.Scores.Sum(s => s.Score * scoredGoals[s.EmployeeGoalId].Weight) / totalWeight
                 : dto.Scores.Average(s => s.Score);
         }
 
@@ -252,6 +354,31 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         return entities.ToDtoList();
     }
 
+    public async Task<IEnumerable<AppraisalReviewEventDto>> GetForEmployeeAsync(
+        Guid employeeId, Guid? cycleId = null, CancellationToken cancellationToken = default)
+    {
+        var query = BaseQuery.Where(e => e.Appraisal.EmployeeId == employeeId);
+        if (cycleId.HasValue)
+            query = query.Where(e => e.AppraisalCycleId == cycleId.Value);
+
+        var entities = await query.OrderByDescending(e => e.EventDate).ToListAsync(cancellationToken);
+        return entities.ToDtoList();
+    }
+
+    public async Task<IEnumerable<AppraisalReviewEventDto>> GetForManagerAsync(
+        Guid managerId, Guid? cycleId = null, CancellationToken cancellationToken = default)
+    {
+        var query = BaseQuery.Where(e => e.Appraisal.Employee.ManagerId == managerId);
+        if (cycleId.HasValue)
+            query = query.Where(e => e.AppraisalCycleId == cycleId.Value);
+
+        var entities = await query
+            .OrderByDescending(e => e.EventDate)
+            .ThenBy(e => e.Appraisal.Employee.FirstName)
+            .ToListAsync(cancellationToken);
+        return entities.ToDtoList();
+    }
+
     public async Task<PagedResult<AppraisalReviewEventDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         var query = BaseQuery.OrderByDescending(e => e.EventDate);
@@ -268,8 +395,23 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
     public async Task<AppraisalReviewEventDto> CreateAsync(CreateAppraisalReviewEventDto createDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
+
+        // Both FKs arrive from the payload. Without this the row could be pointed at another
+        // tenant's appraisal (an FK violation at best, a cross-tenant link at worst) or at a cycle
+        // the appraisal does not belong to, which would make the event show up on the wrong cycle's
+        // list while reading correctly on the appraisal's own.
+        var appraisal = await _appraisalRepository
+            .GetQueryable(a => a.Id == createDto.PerformanceAppraisalId && a.TenantId == tenantId)
+            .Select(a => new { a.Id, a.AppraisalCycleId })
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new ArgumentException($"Appraisal with ID '{createDto.PerformanceAppraisalId}' not found.");
+
+        if (appraisal.AppraisalCycleId != createDto.AppraisalCycleId)
+            throw new InvalidOperationException("The review event's cycle must be the cycle the appraisal belongs to.");
+
         var entity = createDto.ToEntity();
-        entity.TenantId = GetTenantId();
+        entity.TenantId = tenantId;
         entity.Status = AppraisalReviewStatus.Pending;
 
         await _reviewEventRepository.AddAsync(entity);
@@ -361,26 +503,50 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
     // ─── Goal Progress Entries ────────────────────────────────────────────────
 
     public async Task<GoalProgressEntryDto> RecordProgressEntryAsync(
-        Guid eventId, CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
+        Guid eventId, CreateGoalProgressEntryDto dto, Guid recordedById, CancellationToken cancellationToken = default)
     {
-        await GetOwnedReviewEventAsync(eventId, cancellationToken);
+        // GoalProgressEntry.RecordedById is a required Employee FK.
+        if (recordedById == Guid.Empty)
+            throw new InvalidOperationException("Unable to determine the recording employee. Please ensure your account is linked to an employee record.");
+
+        var ev = await GetOwnedReviewEventAsync(eventId, cancellationToken);
+
+        if (ev.Status == AppraisalReviewStatus.Completed)
+            throw new InvalidOperationException("This review event is closed; progress can no longer be recorded against it.");
+
+        var goals = await GetScorableGoalsAsync(ev, new[] { dto.EmployeeGoalId }, cancellationToken);
+        var goal = goals[dto.EmployeeGoalId];
 
         var tenantId = GetTenantId();
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         entity.ReviewEventId = eventId;
         entity.EntryDate = DateTime.UtcNow;
+        // Attribution comes from the token, not the payload.
+        entity.RecordedById = recordedById;
 
         await _progressEntryRepository.AddAsync(entity);
+
+        // The entry is only half the write — the goal itself has to move. See ApplyProgressToGoal.
+        if (LiveExecutionStatuses.Contains(goal.Status) && !goal.IsLocked)
+        {
+            ApplyProgressToGoal(goal, entity.ProgressPercent, entity.Status);
+            await _goalRepository.UpdateAsync(goal);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Progress entry recorded for review event {EventId}: {EntryId}", eventId, entity.Id);
 
-        entity = await _progressEntryRepository.GetQueryable()
+        // Re-read rather than mapping the tracked instance: RecordedBy and EmployeeGoal were never
+        // loaded on it, so the response would carry a blank recorder and goal title.
+        var saved = await _progressEntryRepository.GetQueryable()
+            .AsNoTracking()
             .Include(p => p.EmployeeGoal)
-            .FirstOrDefaultAsync(p => p.Id == entity.Id, cancellationToken);
+            .Include(p => p.RecordedBy)
+            .FirstOrDefaultAsync(p => p.Id == entity.Id && p.TenantId == tenantId, cancellationToken);
 
-        return entity!.ToDto();
+        return saved!.ToDto();
     }
 
     public async Task<IEnumerable<GoalProgressEntryDto>> GetProgressEntriesAsync(Guid eventId, CancellationToken cancellationToken = default)
@@ -390,6 +556,7 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
         var tenantId = GetTenantId();
         var entities = await _progressEntryRepository.GetQueryable(p => p.ReviewEventId == eventId && p.TenantId == tenantId)
             .Include(p => p.EmployeeGoal)
+            .Include(p => p.RecordedBy)
             .OrderByDescending(p => p.EntryDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -397,22 +564,53 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
 
     // ─── Attachments ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Attaches evidence to a review event.
+    ///
+    /// <para>This replaces a path that could never have run: it mapped a
+    /// <c>CreateAppraisalAttachmentDto</c>, which carries no uploader, onto an entity whose
+    /// <c>UploadedById</c> is a required Employee FK — so every call died on a foreign-key
+    /// violation against a <c>Guid.Empty</c> employee. It also set <c>PerformanceAppraisalId</c>
+    /// from the payload while setting <c>ReviewEventId</c> here, populating two of the polymorphic
+    /// FKs that are documented as mutually exclusive, and never set the <c>EntityType</c>
+    /// discriminator (which had no <c>ReviewEvent</c> member to set it to).</para>
+    /// </summary>
     public async Task<AppraisalAttachmentDto> AddAttachmentAsync(
-        Guid eventId, CreateAppraisalAttachmentDto dto, CancellationToken cancellationToken = default)
+        Guid eventId, Guid uploadedById, string fileName, long? fileSizeBytes, string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null)
     {
         await GetOwnedReviewEventAsync(eventId, cancellationToken);
 
         var tenantId = GetTenantId();
-        var entity = dto.ToEntity();
-        entity.TenantId = tenantId;
-        entity.ReviewEventId = eventId;
-        entity.UploadDate = DateTime.UtcNow;
+        var entity = new AppraisalAttachment
+        {
+            TenantId           = tenantId,
+            ReviewEventId      = eventId,
+            EntityType         = AppraisalAttachmentEntityType.ReviewEvent,
+            FileName           = fileName,
+            // The file lives outside the web root and is reachable only through the authorizing
+            // download endpoint, so there is no servable path to record.
+            FilePath           = string.Empty,
+            FileSizeBytes      = fileSizeBytes,
+            Description        = description,
+            UploadDate         = DateTime.UtcNow,
+            UploadedById       = uploadedById,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
+        };
 
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        var saved = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == entity.Id && a.TenantId == tenantId, cancellationToken);
+
         _logger.LogInformation("Attachment added to review event {EventId}: {AttachmentId}", eventId, entity.Id);
-        return entity.ToDto();
+        return saved!.ToDto();
     }
 
     public async Task<IEnumerable<AppraisalAttachmentDto>> GetAttachmentsAsync(Guid eventId, CancellationToken cancellationToken = default)
@@ -423,6 +621,16 @@ public class AppraisalReviewEventService : IAppraisalReviewEventService
             .OrderByDescending(a => a.UploadDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
+    }
+
+    public async Task<AppraisalAttachmentDto?> GetAttachmentAsync(Guid eventId, Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _attachmentRepository.GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.UploadedBy)
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.ReviewEventId == eventId && a.TenantId == tenantId, cancellationToken);
+        return entity?.ToDto();
     }
 
     public async Task<bool> DeleteAttachmentAsync(Guid eventId, Guid attachmentId, CancellationToken cancellationToken = default)

@@ -139,19 +139,25 @@ public class LeaveEncashmentService : ILeaveEncashmentService
             Status = LeaveEncashmentStatus.Submitted
         };
 
-        await _encashmentRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
-
-        // Submit to workflow
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
-
-        if (workflowResult.ExecutionResult.Success)
+        // Create and submit in ONE transaction: a workflow submit that throws (e.g. no active
+        // definition for the tenant) must roll the insert back too, or the caller gets an error
+        // while an orphaned Submitted row survives — and every retry then refuses with
+        // "already been encashed". Found live in area 25 slice 4.
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
-            var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-            adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
-            await _encashmentRepository.UpdateAsync(entity);
-            await _unitOfWork.SaveChangesAsync();
-        }
+            await _encashmentRepository.AddAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+
+            if (workflowResult.ExecutionResult.Success)
+            {
+                var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
+                adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
+                await _encashmentRepository.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }
+        });
 
         _logger.LogInformation("Leave encashment requested for employee {employeeId}: {days} days",
             dto.EmployeeId, dto.DaysEncashed);

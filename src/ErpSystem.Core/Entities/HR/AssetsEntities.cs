@@ -1,6 +1,18 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
+
+// ⚠ An ALIAS, not `using ErpSystem.Core.Entities.Finance.FixedAssets`. That namespace declares its
+// own `AssetTransfer`, and this file declares HR's — the collision recorded in build plan §3.3.
+// C#'s local-declaration-wins rule would in fact resolve it correctly here, but relying on that
+// puts a silent trap one edit away from firing, and this exact collision has already bitten twice.
+using FixedAsset = ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset;
+
+// ⚠ An ALIAS again, and the reason is sharper here than above: the Maintenance namespace
+// declares its OWN `AssetType`, and so does this file. A plain
+// `using ErpSystem.Core.Entities.Maintenance` would put two `AssetType`s in scope in the one
+// file that defines HR's — build plan §3.3, collision 1.
+using MaintenanceAsset = ErpSystem.Core.Entities.Maintenance.MaintenanceAsset;
 
 namespace ErpSystem.Core.Entities.HR.Assets;
 
@@ -63,7 +75,79 @@ public class CompanyAsset : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// AST-7 — the field TDC calls "Additional Remarks".
+    /// </summary>
+    /// <remarks>
+    /// A new column rather than a rename. The change document asks to rename "Additional
+    /// Description" to "Additional Remarks", but no field of that name exists anywhere in this
+    /// model — the only <c>AdditionalDescription</c> in the repository is on a payroll component.
+    /// <see cref="Description"/> and <see cref="Specifications"/> are both already spoken for and
+    /// mean different things, so renaming either would have made two fields wrong to fix a label.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? AdditionalRemarks { get; set; }
+
     public Guid AssetTypeId { get; set; }
+
+    /// <summary>
+    /// AST-11 — whether HR created this entry or picked it from the Finance fixed-asset register.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not decoration. It decides ownership: see <see cref="FixedAssetId"/>.
+    /// </remarks>
+    public AssetSource Source { get; set; } = AssetSource.HrCreated;
+
+    /// <summary>
+    /// AST-11 — the Finance fixed asset this entry stands for, where it stands for one.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null on an HR-created asset, set on one picked from Fixed Assets. The pattern is the
+    /// one <b>Finance itself already uses</b> to reach into Operations —
+    /// <c>FixedAsset.MaintenanceAssetId</c>, a nullable FK plus a navigation — so this is the
+    /// house convention rather than a new idea.</para>
+    ///
+    /// <para><b>HR reads across this link and never writes.</b> Capitalisation, depreciation,
+    /// valuation and disposal accounting stay in Finance (area-16 decision D1); HR owns custody —
+    /// who holds the thing. On a linked asset the service refuses edits to the purchase figures and
+    /// refuses disposal outright, and says so, rather than keeping a second copy of the truth that
+    /// drifts.</para>
+    /// </remarks>
+    public Guid? FixedAssetId { get; set; }
+
+    /// <summary>
+    /// This asset's counterpart in the Maintenance module's register — the handle HR sends work
+    /// out on. Slice 9.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>It is a handle, not an abdication.</b> Everything in the Maintenance module targets
+    /// an asset by <c>MaintenanceAsset.Id</c> — an admission to the workshop, a job card, a work
+    /// order — so without this column there is no way for HR to name the thing it wants worked on.
+    /// Slice 9b uses it to push: HR sends an asset in for repair and gets a reference back.</para>
+    ///
+    /// <para><b>HR keeps its own schedule regardless.</b> A linked asset still appears on HR's
+    /// maintenance watchlists and is still chased by HR's reminder sweep. The opposite rule was
+    /// written first and reversed on the same day it was written: standing HR down on link would
+    /// mean that sending a laptop out for a one-off repair silently switched off its servicing
+    /// reminders, which is the precise opposite of what a push is for. The Maintenance module
+    /// schedules the plant <i>it</i> owns; HR schedules what HR issues to people, and an asset can
+    /// be both known to that module and watched by this one.</para>
+    ///
+    /// <para><b>The live precedent is Projects, not Finance.</b> <c>ProjectAssetLink</c> carries this
+    /// same column beside a <c>CompanyAssetId</c> and a <c>JobCardId</c>, has a real picker behind it
+    /// (the project Access tab), and <c>ProjectService.MaintenanceFollowThrough</c> raises job cards
+    /// and work orders on it — 432 lines of exactly the push slice 9b needs, worth copying rather
+    /// than reinventing. Finance's <c>FixedAsset.MaintenanceAssetId</c> is the same shape but has
+    /// never carried a value on any row, because no screen renders an input for it (cross-module
+    /// defect 8) — so cite it for the shape and not as evidence that the integration works.</para>
+    ///
+    /// <para>⚠ Projects' pushes cannot execute on this database: its resolvers throw when
+    /// <c>MaintenanceType</c>, <c>PriorityLevel</c> or <c>WorkOrderType</c> has no rows, and all
+    /// three are empty (cross-module defect 9). That is why slice 9b pushes via
+    /// <c>AssetAdmission</c>, which needs none of them, and adds the work-order path only once those
+    /// masters are seeded.</para>
+    /// </remarks>
+    public Guid? MaintenanceAssetId { get; set; }
 
     // Identification
     [MaxLength(100)]
@@ -136,6 +220,30 @@ public class CompanyAsset : TenantEntity
 
     public DateOnly? NextMaintenanceDate { get; set; }
 
+    // Rental — AST-9, decision D2
+    /// <summary>
+    /// Whether this asset is one an employee can be <b>charged for holding</b> — staff housing, a
+    /// company vehicle used privately, a serviced flat.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="IsAssignable"/>, which asks whether it can be issued at all. Every
+    /// rentable asset is assignable; almost no assignable asset is rentable. The flag exists so
+    /// that rental terms cannot be attached to a stapler, and so the register can answer "what
+    /// property do we let to staff" without inferring it from whatever happens to carry a rent.
+    /// </remarks>
+    public bool IsRentable { get; set; }
+
+    /// <summary>The going rate for this asset, per period. A <b>default</b> the assignment copies.</summary>
+    /// <remarks>
+    /// Kept on the asset because it is a property of the thing, not of who holds it: the flat is
+    /// worth what it is worth whoever lives in it. The assignment may charge less — a subsidy — and
+    /// the difference between the two is what makes the arrangement a taxable benefit.
+    /// </remarks>
+    public decimal? StandardRentalAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? RentalCurrencyCode { get; set; }
+
     // Insurance
     public bool IsInsured { get; set; }
 
@@ -143,6 +251,13 @@ public class CompanyAsset : TenantEntity
     public string? InsurancePolicyNumber { get; set; }
 
     public decimal? InsuredValue { get; set; }
+
+    /// <summary>AST-4 — when the cover lapses. Null where the asset is not insured, or not known.</summary>
+    /// <remarks>
+    /// A <c>DateOnly</c>, like every other date on this entity: cover expires on a day, not at an
+    /// instant, and storing a time would invent a precision the policy document does not have.
+    /// </remarks>
+    public DateOnly? InsuranceExpiryDate { get; set; }
 
     // Disposal
     public DateOnly? DisposalDate { get; set; }
@@ -163,6 +278,12 @@ public class CompanyAsset : TenantEntity
 
     [ForeignKey(nameof(CurrentAssignedToId))]
     public virtual Employee? CurrentAssignedTo { get; set; }
+
+    [ForeignKey(nameof(FixedAssetId))]
+    public virtual FixedAsset? FixedAsset { get; set; }
+
+    [ForeignKey(nameof(MaintenanceAssetId))]
+    public virtual MaintenanceAsset? MaintenanceAsset { get; set; }
 
     public virtual ICollection<AssetAssignment> AssignmentHistory { get; set; } = new List<AssetAssignment>();
 
@@ -201,8 +322,25 @@ public class AssetImage : TenantEntity
     public string FilePath { get; set; } = string.Empty;
     
     public string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the photograph is of — "as issued", "damage to the lid", "serial plate". Added with the
+    /// upload gate in slice 12b: a wall of thumbnails nobody captioned is not a record of anything.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? Caption { get; set; }
     
     public DateTime UploadDate { get; set; }
+
+    // ── the controlled upload gate — area 16 slice 12b. See AssetAttachment for the reasoning. ──
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Who took or filed it, as an Employee id from the token.</summary>
+    public Guid? UploadedById { get; set; }
+
+    public Guid? FileUploadRecordId { get; set; }
+    public Guid? DocumentRecordId { get; set; }
+    public Guid? DocumentVersionId { get; set; }
 
     [ForeignKey(nameof(AssetId))]
     public virtual CompanyAsset Asset { get; set; } = null!;
@@ -219,6 +357,27 @@ public class AssetAssignment : TenantEntity
     public Guid AssetId { get; set; }
 
     public Guid EmployeeId { get; set; }
+
+    /// <summary>
+    /// The requisition this assignment fulfils, where it came from one — D-e.
+    /// </summary>
+    /// <remarks>
+    /// Null for an assignment HR raises directly, which is most of them. Set by
+    /// <c>AssetRequisitionService.FulfillAsync</c>, and it is the only record of what a requisition
+    /// produced now that the single <c>AssignedAssetId</c> column is gone.
+    /// </remarks>
+    public Guid? RequisitionId { get; set; }
+
+    /// <summary>
+    /// The transfer this custody came from, where it came from one — area 16, slice 4.
+    /// </summary>
+    /// <remarks>
+    /// The twin of <see cref="RequisitionId"/>, and it exists for the same reason: an assignment
+    /// that appears from nowhere cannot be traced back to what authorised it. Set by
+    /// <c>AssetTransferService.CompleteAsync</c> when an employee-to-employee move hands the asset
+    /// to its new holder. Null for every assignment HR raises directly, which is most of them.
+    /// </remarks>
+    public Guid? TransferId { get; set; }
 
     // Assignment Details
     public DateOnly AssignmentDate { get; set; }
@@ -258,6 +417,23 @@ public class AssetAssignment : TenantEntity
     [MaxLength(2000)]
     public string? TermsAndConditions { get; set; }
 
+    /// <summary>
+    /// When the responsibility-and-terms document was last emailed to the holder — AST-5b.
+    /// </summary>
+    /// <remarks>
+    /// Three columns rather than a boolean, because "was it sent?" is really three questions and a
+    /// flag answers none of them well: <b>when</b>, <b>to which address</b> (an employee's recorded
+    /// email changes, and the copy went to whatever it was that day) and <b>by whom</b>. The
+    /// download route deliberately does not stamp these: printing a copy is not serving it on
+    /// somebody, and recording it as though it were would let an unsent form look sent.
+    /// </remarks>
+    public DateTime? TermsDocumentSentAt { get; set; }
+
+    [MaxLength(256)]
+    public string? TermsDocumentSentTo { get; set; }
+
+    public Guid? TermsDocumentSentById { get; set; }
+
     // Return
     public AssignmentStatus Status { get; set; }
     
@@ -271,6 +447,55 @@ public class AssetAssignment : TenantEntity
     public bool ReturnedInGoodCondition { get; set; }
 
     public Guid? ReturnedToId { get; set; }
+
+    // Rental — AST-10, decision D2
+    /// <summary>
+    /// What this employee is charged for holding the asset, per <see cref="RentalFrequency"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null where no rent is charged. Zero is different from null and is allowed on purpose:
+    /// zero means <i>provided free</i>, which is a stated arrangement — and usually a taxable one —
+    /// whereas null means nobody has said. A screen that treated them alike would lose the
+    /// difference between "free accommodation" and "we have not set this up yet".</para>
+    ///
+    /// <para>⚠ Nothing deducts this. It is declared here and read by payroll through
+    /// <c>GET Assets/payroll/rental-deductions</c>. Decision D2.</para>
+    /// </remarks>
+    public decimal? RentalAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? RentalCurrencyCode { get; set; }
+
+    public RentalDeductionFrequency? RentalFrequency { get; set; }
+
+    /// <summary>When the rent starts running. Defaults to the assignment date when terms are set.</summary>
+    public DateOnly? RentalEffectiveFrom { get; set; }
+
+    /// <summary>
+    /// When it stops. Null means open-ended, and <b>closing the custody closes this</b>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Set automatically by every act that ends a custody — a return, a loss or damage report,
+    /// and a completed transfer. Without that, payroll would keep deducting rent for a house the
+    /// employee moved out of, which is the kind of defect nobody notices until a payslip is wrong.
+    /// Three doors close a custody in this module and all three close the rent.
+    /// </remarks>
+    public DateOnly? RentalEffectiveTo { get; set; }
+
+    /// <summary>Whether the arrangement is taxable as a benefit in kind — AST-10.</summary>
+    public bool IsBenefitInKind { get; set; }
+
+    /// <summary>
+    /// The taxable value of the benefit per period, where it is not simply the rent charged.
+    /// </summary>
+    /// <remarks>
+    /// <para>Decision D2 said "a benefit-in-kind flag", and a flag alone turned out not to be
+    /// enough: the taxable value of subsidised accommodation is the <b>market rate less what the
+    /// employee pays</b>, and the flag cannot carry that number. Left null it is computed from the
+    /// asset's <c>StandardRentalAmount</c> minus <see cref="RentalAmount"/>, which is a fact HR
+    /// holds; assessing tax on it stays payroll's.</para>
+    /// </remarks>
+    public decimal? BenefitInKindValue { get; set; }
 
     // Damages/Loss
     public bool DamageReported { get; set; }
@@ -295,6 +520,15 @@ public class AssetAssignment : TenantEntity
 
     [ForeignKey(nameof(ReturnedToId))]
     public virtual Employee? ReturnedTo { get; set; }
+
+    [ForeignKey(nameof(RequisitionId))]
+    public virtual AssetRequisition? Requisition { get; set; }
+
+    [ForeignKey(nameof(TransferId))]
+    public virtual AssetTransfer? Transfer { get; set; }
+
+    [ForeignKey(nameof(TermsDocumentSentById))]
+    public virtual Employee? TermsDocumentSentBy { get; set; }
 }
 
 /// <summary>
@@ -341,6 +575,44 @@ public class AssetMaintenance : TenantEntity
     [MaxLength(1000)]
     public string? Notes { get; set; }
 
+    // ── the push into the Maintenance module — slice 9b, decision D10 ──────────────────────
+    //
+    // ⚠ Deliberately NOT foreign keys. These name rows in another module's transaction tables, and
+    // an FK from here would block that team's deletes and tie an HR migration to the shape of
+    // AssetAdmissions. The register link (CompanyAsset.MaintenanceAssetId) IS an FK, because that
+    // points at a master; these point at events. Same distinction the reminder dispatch log draws
+    // with its bare EntityId.
+
+    /// <summary>
+    /// The <c>AssetAdmission</c> raised in the Maintenance module when this asset was sent in.
+    /// </summary>
+    /// <remarks>
+    /// Null on a maintenance record HR kept to itself — a battery changed at the desk needs no
+    /// workshop. Set means the asset is physically somewhere else, which is the fact HR most needs
+    /// on this record and could not previously state at all.
+    /// </remarks>
+    public Guid? MaintenanceAdmissionId { get; set; }
+
+    /// <summary>
+    /// The admission's human-readable number, copied at the moment of sending.
+    /// </summary>
+    /// <remarks>
+    /// A copy, on purpose. It is what somebody quotes on the phone to the workshop, and it must
+    /// still read on an HR screen when the other module is unreachable or the row has been archived.
+    /// The id is the join; this is the reference.
+    /// </remarks>
+    [MaxLength(50)]
+    public string? MaintenanceAdmissionNumber { get; set; }
+
+    /// <summary>
+    /// The <c>AssetDischarge</c> that closed the admission, written when HR completes this record.
+    /// </summary>
+    /// <remarks>
+    /// Completing an HR maintenance record that carries an open admission discharges it, so the two
+    /// modules cannot disagree about whether the asset is back. Null while the asset is still out.
+    /// </remarks>
+    public Guid? MaintenanceDischargeId { get; set; }
+
     [ForeignKey(nameof(AssetId))]
     public virtual CompanyAsset Asset { get; set; } = null!;
 
@@ -364,6 +636,32 @@ public class AssetAttachment : TenantEntity
     
     public DateTime UploadDate { get; set; }
 
+    // ── the controlled upload gate — area 16 slice 12b ────────────────────────────────────
+    //
+    // Before this, the create endpoint took `FileName` and `FilePath` as JSON: the caller named a
+    // path and the server wrote it down. Nothing scanned anything, nothing stored anything, and
+    // the "attachment" was a string. These five columns are what an actual file needs, and they
+    // are the same five every other HR attachment carries.
+
+    /// <summary>Size of the stored file. Null on a row written before the gate existed.</summary>
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>
+    /// Who filed it, as an <b>Employee</b> id from the token. Nullable rather than required: rows
+    /// that predate the gate genuinely do not know, and inventing <c>Guid.Empty</c> for them is the
+    /// mistake four performance call sites made before <c>HrAttachmentUpload</c> existed.
+    /// </summary>
+    public Guid? UploadedById { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     [ForeignKey(nameof(AssetId))]
     public virtual CompanyAsset Asset { get; set; } = null!;
 }
@@ -376,8 +674,24 @@ public class AssetRequisition : TenantEntity
     [MaxLength(70)]
     public string RequisitionNumber { get; set; } = string.Empty;
 
+    /// <summary>Who raised the request. Always taken from the token, never from the payload.</summary>
     [Required]
     public Guid RequestedById { get; set; }
+
+    /// <summary>
+    /// AST-6b — who the asset is actually <b>for</b>, when that is not the person who asked.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null means "me": the requester is the beneficiary. Set only when someone raises a
+    /// request on another employee's behalf, which HR may always do and a recorded line manager may
+    /// do for their own reports.</para>
+    ///
+    /// <para><b>Two columns, because one cannot answer "who did this, and to whom".</b> That is the
+    /// area-9 lesson: a record with a single actor column silently attributes the act to its
+    /// subject, or the subject to its actor, and neither can be recovered afterwards. Fulfilment
+    /// reads this one — the asset is assigned to the beneficiary, not to whoever typed the form.</para>
+    /// </remarks>
+    public Guid? BeneficiaryEmployeeId { get; set; }
 
     public DateTime RequestDate { get; set; }
     
@@ -419,8 +733,6 @@ public class AssetRequisition : TenantEntity
     
     public Guid? FulfilledById { get; set; }
 
-    public Guid? AssignedAssetId { get; set; }
-
     [ForeignKey(nameof(RequestedById))]
     public virtual Employee RequestedBy { get; set; } = null!;
 
@@ -433,8 +745,21 @@ public class AssetRequisition : TenantEntity
     [ForeignKey(nameof(FulfilledById))]
     public virtual Employee? FulfilledBy { get; set; }
 
-    [ForeignKey(nameof(AssignedAssetId))]
-    public virtual CompanyAsset? AssignedAsset { get; set; }
+    [ForeignKey(nameof(BeneficiaryEmployeeId))]
+    public virtual Employee? BeneficiaryEmployee { get; set; }
+
+    /// <summary>
+    /// What this requisition actually produced — D-e.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This replaces a single <c>AssignedAssetId</c> column. A requisition carries a
+    /// <c>Quantity</c> and <c>FulfillAssetRequisitionDto</c> has always accepted a <b>list</b> of
+    /// assets, so fulfilling one request with three assets created three assignments and then
+    /// remembered exactly one of them. Rather than add a join table, the assignments themselves are
+    /// the record: each one cites the requisition it came from, so "what did this yield" is a query
+    /// and there is only one place the answer lives.
+    /// </remarks>
+    public virtual ICollection<AssetAssignment> FulfilledAssignments { get; set; } = new List<AssetAssignment>();
 }
 
 /// <summary>
@@ -509,3 +834,214 @@ public class AssetTransfer : TenantEntity
     [ForeignKey(nameof(ApprovedById))]
     public virtual Employee? ApprovedBy { get; set; }
 }
+
+#region Asset Surcharges — area 16 slice 7 (AST-3, defect D-d, decision D9)
+
+/// <summary>
+/// A charge raised against an employee for a company asset they damaged, lost or never returned —
+/// <b>AST-3</b>, and the reader that <b>defect D-d</b> had been waiting for.
+/// </summary>
+/// <remarks>
+/// <para><b>Why this is an entity and not five more columns on the assignment.</b>
+/// <c>EmployeeLiable</c>, <c>RepairCost</c> and <c>ReplacementCost</c> already sit on
+/// <see cref="AssetAssignment"/>, and slice 4 made them coherent — they cannot be set on a return
+/// that reports no damage. But they are <i>facts about the asset</i>: what it would cost to mend or
+/// replace. A surcharge is a <i>decision about a person</i>: that this employee owes this amount,
+/// taken by somebody, on a date, after they were given a chance to answer. The two are not the same
+/// and one is not derivable from the other — an employer routinely charges less than the repair
+/// cost, or nothing at all. Recording the decision as though it were the cost is how a record ends
+/// up unable to explain a number somebody was actually asked to pay.</para>
+///
+/// <para><b>The right of reply is load-bearing.</b> A surcharge cannot go for approval until it has
+/// been put to the employee: <c>Draft → AwaitingEmployeeResponse → Submitted → Approved</c>. The
+/// answer is data on this record rather than a status, because accepting and disputing lead to the
+/// same next step and differ only in what the approver is reading (decision D9).</para>
+///
+/// <para><b>What this does NOT do.</b> It does not deduct anything. <c>RecoveryMethod</c>,
+/// <c>InstalmentCount</c> and <c>RecoveryStartDate</c> are a <i>declaration to payroll</i>, and
+/// <see cref="AssetSurchargeRecovery"/> records what was actually collected. Payroll owns the
+/// deduction; the exit settlement (FR-HR-184) applies whatever is still outstanding. No GL posting
+/// happens here — it is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the one
+/// comprehensive sweep after the module.</para>
+/// </remarks>
+public class AssetSurcharge : TenantEntity
+{
+    [MaxLength(70)]
+    public string SurchargeNumber { get; set; } = string.Empty;
+
+    /// <summary>The custody this arises from. Always present — a charge with no custody is a claim about nobody.</summary>
+    public Guid AssignmentId { get; set; }
+
+    /// <summary>
+    /// The employee being charged.
+    /// </summary>
+    /// <remarks>
+    /// Derivable from the assignment and stamped anyway. The subject of a financial claim is not a
+    /// thing to infer through a join two years later, and area 9's lesson stands: a record with one
+    /// actor column cannot answer "who did this to whom".
+    /// </remarks>
+    public Guid EmployeeId { get; set; }
+
+    public AssetSurchargeReason Reason { get; set; }
+
+    [MaxLength(2000)]
+    public string Description { get; set; } = string.Empty;
+
+    // ── The money ────────────────────────────────────────────────────────────
+
+    /// <summary>What the employee is being asked to pay. A decision, not a cost.</summary>
+    public decimal AssessedAmount { get; set; }
+
+    /// <summary>
+    /// The currency of every amount on this record.
+    /// </summary>
+    /// <remarks>
+    /// Validated against Finance's canonical currency list on the write path. That is the read-side
+    /// integration this module is allowed to do now (area 13 recorded what happens without it:
+    /// <c>"ZZZ"</c> was accepted and stored). GL posting is what waits for the sweep, not this.
+    /// </remarks>
+    [MaxLength(3)]
+    public string CurrencyCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The repair and replacement costs on the assignment when the charge was raised.
+    /// </summary>
+    /// <remarks>
+    /// Copied rather than read through, so that the decision can still be compared to what it was
+    /// based on after somebody edits the assignment. This is the whole of what D-d's inert fields
+    /// now feed: they seed a default and they are kept as the basis, and the amount charged remains
+    /// the employer's to set.
+    /// </remarks>
+    public decimal? BasisRepairCost { get; set; }
+
+    public decimal? BasisReplacementCost { get; set; }
+
+    /// <summary>What has actually been collected, accumulated from the recovery rows.</summary>
+    public decimal AmountRecovered { get; set; }
+
+    // ── State ────────────────────────────────────────────────────────────────
+
+    public AssetSurchargeStatus Status { get; set; } = AssetSurchargeStatus.Draft;
+
+    public Guid? RaisedById { get; set; }
+
+    public DateTime RaisedAt { get; set; }
+
+    // ── The employee's side (decision D9) ────────────────────────────────────
+
+    /// <summary>When the charge was put to the employee. Null until it has been.</summary>
+    public DateTime? NotifiedAt { get; set; }
+
+    public AssetSurchargeEmployeeResponse EmployeeResponse { get; set; }
+        = AssetSurchargeEmployeeResponse.NotYetGiven;
+
+    public DateTime? EmployeeRespondedAt { get; set; }
+
+    [MaxLength(2000)]
+    public string? EmployeeResponseComments { get; set; }
+
+    /// <summary>
+    /// Why the charge went for approval although the employee never answered.
+    /// </summary>
+    /// <remarks>
+    /// The right of reply is a right to be <b>asked</b>, not a veto exercised by silence. Without
+    /// this, an employee who simply never responds blocks the charge for ever; with it, HR can
+    /// proceed but must say why, on the record, where the approver reads it. Required by
+    /// <c>SubmitAsync</c> exactly when <c>EmployeeResponse</c> is still <c>NotYetGiven</c>.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? ProceededWithoutResponseReason { get; set; }
+
+    // ── The decision ─────────────────────────────────────────────────────────
+
+    public Guid? ApprovedById { get; set; }
+
+    public DateTime? ApprovalDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? ApprovalComments { get; set; }
+
+    public DateTime? RejectedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
+    // ── Recovery — declared, not computed ────────────────────────────────────
+
+    public AssetSurchargeRecoveryMethod? RecoveryMethod { get; set; }
+
+    /// <summary>How many pay periods the deduction is to be spread over, where that is the method.</summary>
+    public int? InstalmentCount { get; set; }
+
+    public DateOnly? RecoveryStartDate { get; set; }
+
+    // ── Endings other than recovery ──────────────────────────────────────────
+
+    public Guid? WaivedById { get; set; }
+
+    public DateTime? WaivedAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? WaiverReason { get; set; }
+
+    public DateTime? CancelledAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
+    [ForeignKey(nameof(AssignmentId))]
+    public virtual AssetAssignment Assignment { get; set; } = null!;
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
+
+    [ForeignKey(nameof(RaisedById))]
+    public virtual Employee? RaisedBy { get; set; }
+
+    [ForeignKey(nameof(ApprovedById))]
+    public virtual Employee? ApprovedBy { get; set; }
+
+    [ForeignKey(nameof(WaivedById))]
+    public virtual Employee? WaivedBy { get; set; }
+
+    public virtual ICollection<AssetSurchargeRecovery> Recoveries { get; set; }
+        = new List<AssetSurchargeRecovery>();
+}
+
+/// <summary>
+/// One instalment or payment actually collected against a surcharge.
+/// </summary>
+/// <remarks>
+/// A record of what happened, not an instruction for what should. HR needs it to know the
+/// outstanding balance — which the exit settlement then deducts — and a single accumulating column
+/// could not say when, how much or against what payroll period, which is exactly what somebody
+/// disputing a deduction asks.
+/// </remarks>
+public class AssetSurchargeRecovery : TenantEntity
+{
+    public Guid SurchargeId { get; set; }
+
+    public decimal Amount { get; set; }
+
+    public DateOnly RecoveredOn { get; set; }
+
+    public AssetSurchargeRecoveryMethod Method { get; set; }
+
+    /// <summary>The payroll period, receipt number or settlement this came through.</summary>
+    [MaxLength(200)]
+    public string? Reference { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    public Guid? RecordedById { get; set; }
+
+    [ForeignKey(nameof(SurchargeId))]
+    public virtual AssetSurcharge Surcharge { get; set; } = null!;
+
+    [ForeignKey(nameof(RecordedById))]
+    public virtual Employee? RecordedBy { get; set; }
+}
+
+#endregion
+

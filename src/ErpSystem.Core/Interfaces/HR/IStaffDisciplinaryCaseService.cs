@@ -60,10 +60,52 @@ public interface IStaffDisciplinaryCaseService
     /// advances the case to AwaitingDecision. Penalty sub-entities are created via their
     /// own services after this call.
     /// </summary>
-    Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, CancellationToken cancellationToken = default);
+    /// <param name="decidedByEmployeeId">
+    /// The deciding officer, taken from the caller's token — never from the request body. Who decided
+    /// a disciplinary case is testimony.
+    /// </param>
+    /// <remarks>
+    /// Proposes the sanction and starts the approval instance. The case sits at AwaitingDecision
+    /// until an approver confirms it. Enforces FR-HR-080: a non-HR caller may only issue an action
+    /// whose MinimumAuthority is HeadOfDepartment.
+    /// </remarks>
+    Task<bool> RecordDecisionAsync(RecordDisciplinaryDecisionDto dto, Guid decidedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// How a case stands against FR-HR-177's 48-hour written query and FR-HR-178's four-week
+    /// investigation — both advisory — and whether the natural-justice gate currently permits a
+    /// decision, which is not advisory.
+    /// </summary>
+    Task<DisciplineProcessClockDto> GetProcessClockAsync(Guid caseId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records that the employee could not be given a chance to answer the written query — absconded,
+    /// detained, refused service — so a decision may proceed without it. Requires a reason, which
+    /// goes on the case record.
+    /// </summary>
+    Task<bool> WaiveQueryOpportunityAsync(Guid caseId, Guid waivedByEmployeeId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The cases whose proposed decision the caller can confirm right now. Token-derived; the engine
+    /// decides what is in it.
+    /// </summary>
+    Task<IEnumerable<StaffDisciplinaryActionSummaryDto>> GetAwaitingMyApprovalAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Confirms the proposed decision, advancing the case to DecisionMade when the route completes.</summary>
+    Task<bool> ApproveDecisionAsync(Guid caseId, Guid approvingEmployeeId, string? comments = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Refuses the proposed decision. The case returns to UnderReview with the proposed sanction
+    /// cleared — refusing a sanction does not refuse the allegation.
+    /// </summary>
+    Task<bool> RejectDecisionAsync(Guid caseId, Guid rejectingEmployeeId, string? reason = null, CancellationToken cancellationToken = default);
+
+    /// <summary>The proposing officer takes their own decision back before anyone rules on it.</summary>
+    Task<bool> RecallDecisionAsync(Guid caseId, Guid recallingEmployeeId, string? reason = null, CancellationToken cancellationToken = default);
 
     /// <summary>Closes a case that is in AwaitingDecision or DecisionMade status.</summary>
-    Task<bool> CloseCaseAsync(CloseDisciplinaryCaseDto dto, CancellationToken cancellationToken = default);
+    /// <param name="closedByEmployeeId">Taken from the caller's token, never from the request body.</param>
+    Task<bool> CloseCaseAsync(CloseDisciplinaryCaseDto dto, Guid closedByEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Transitions any non-terminal case to OnHold.</summary>
     Task<bool> PutOnHoldAsync(Guid caseId, Guid userId, CancellationToken cancellationToken = default);

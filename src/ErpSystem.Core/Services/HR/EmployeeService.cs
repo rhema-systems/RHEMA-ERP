@@ -1,10 +1,11 @@
-using ErpSystem.Core.Services.HR.Extensions;
+﻿using ErpSystem.Core.Services.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -30,8 +31,16 @@ public class EmployeeService : IEmployeeService
         ILocationRepository locationRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        HrCurrencyBridge currencies,
+        IStaffNumberService staffNumbers,
+        IPayrollMembershipService payrollMembership,
+        IGeographyService geography,
         ILogger<EmployeeService> logger)
     {
+        _currencies = currencies;
+        _staffNumbers = staffNumbers;
+        _payrollMembership = payrollMembership;
+        _geography = geography;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
         _positionRepository = positionRepository;
@@ -44,6 +53,56 @@ public class EmployeeService : IEmployeeService
     // The ApplicationDbContext is registered without a tenant, so its global tenant
     // query-filter and TenantId auto-stamp are inert. Following the RHEMA convention,
     // this service scopes reads/writes to the current tenant explicitly.
+    // Finance owns what a currency IS; HR says which one it uses. A bare three-letter code nothing
+    // validates is how travel became able to file a claim in "XYZ" and total it.
+    private readonly HrCurrencyBridge _currencies;
+
+    // Which staff number a new employee gets is the REGISTER's decision, not this service's, and
+    // not a compiled-in format. See StaffNumberService.
+    private readonly IStaffNumberService _staffNumbers;
+
+    // Whether the person is paid through the payroll run is HR's statement; whether payroll runs
+    // them is payroll's. This is the bridge, and the only place HR reaches into payroll.
+    private readonly IPayrollMembershipService _payrollMembership;
+
+    // Shared reference data, not HR's: the administrative-geography tree that Estate, Sales and
+    // Procurement will read too. HR only asks it to resolve an area into the region/town names the
+    // snapshot columns carry, so the two can never disagree.
+    private readonly IGeographyService _geography;
+
+    /// <summary>
+    /// Rewrites <c>State</c> and <c>City</c> from the employee's area, so the free-text snapshot
+    /// always agrees with the structured link.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ The tree wins. If a caller sends both a <c>GeoAreaId</c> and its own spelling of
+    /// State, the tree's spelling replaces it — otherwise the two drift and nobody can tell which
+    /// is right, which is the state the whole geography module exists to end.</para>
+    ///
+    /// <para>A <c>null</c> area leaves both columns exactly as they were. Most of the register
+    /// predates the tree and has only the free text; blanking it here would destroy the only
+    /// address those rows have.</para>
+    /// </remarks>
+    private async Task ApplyGeoAreaSnapshotAsync(Employee employee, CancellationToken cancellationToken)
+    {
+        if (employee.GeoAreaId is not { } areaId) return;
+
+        var (region, city) = await _geography.GetAddressSnapshotAsync(areaId, cancellationToken);
+
+        // (null, null) means the area could not be read — another tenant's, or deleted between the
+        // form loading and the save. Leave what the record said rather than blanking it.
+        if (region is null && city is null)
+        {
+            _logger.LogWarning(
+                "Employee {EmployeeId} references geo area {GeoAreaId}, which could not be resolved; "
+                + "the address snapshot was left unchanged.", employee.Id, areaId);
+            return;
+        }
+
+        if (region is not null) employee.State = region;
+        if (city is not null) employee.City = city;
+    }
+
     private Guid GetTenantId()
     {
         var tenantId = _currentUserProvider.TenantId;
@@ -58,16 +117,56 @@ public class EmployeeService : IEmployeeService
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        var employeeNumber = string.IsNullOrWhiteSpace(dto.EmployeeNumber)
-            ? await _employeeRepository.GenerateEmployeeNumberAsync()
-            : dto.EmployeeNumber.Trim();
+        // ⚠ There is no longer a "blank means generate" rule. Whether a number is issued or typed
+        // is the REGISTER's decision, held in StaffNumberFormat — previously it was decided per
+        // request by whether this field happened to be filled, which is behaviour masquerading as
+        // configuration. A register with no rule is manual and REFUSES a blank number rather than
+        // inventing one in a format nobody chose.
+        var employeeNumber = await _staffNumbers.ResolveForCreateAsync(
+            dto.EmploymentType, dto.EmployeeNumber, cancellationToken);
 
+        return await CreateWithNumberAsync(dto, employeeNumber, cancellationToken);
+    }
+
+    public async Task<EmployeeDetailDto> ImportEmployeeAsync(CreateEmployeeDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+
+        var supplied = dto.EmployeeNumber?.Trim();
+        if (string.IsNullOrWhiteSpace(supplied))
+            throw new ArgumentException(
+                "An imported employee must carry the staff number they already have. Use the normal create "
+                + "for a new hire, which issues one from the register's own numbering rule.");
+
+        // Everything else about an import is an ordinary create — the same validation, the same
+        // position history. The ONE difference is where the number comes from, so this shares the
+        // body rather than reimplementing it: a second copy of employee validation would drift.
+        var created = await CreateWithNumberAsync(dto, supplied, cancellationToken);
+
+        // ⚠ Deliberately AFTER the row is committed. The counter is a watermark over numbers that
+        // are actually in the register, and advancing it for an import that then failed validation
+        // would burn numbers nobody holds. The other order is only recoverable by reconciling.
+        await _staffNumbers.AcceptImportedAsync(dto.EmploymentType, supplied, cancellationToken);
+
+        _logger.LogInformation(
+            "Employee imported with their existing number: {EmployeeNumber} ({EmployeeId})", supplied, created.Id);
+
+        return created;
+    }
+
+    /// <summary>
+    /// Everything a create does once the staff number has been settled, whichever way it was settled.
+    /// </summary>
+    private async Task<EmployeeDetailDto> CreateWithNumberAsync(
+        CreateEmployeeDto dto, string employeeNumber, CancellationToken cancellationToken)
+    {
+        // Null when blank: email is optional, and the unique index is filtered on NOT NULL.
         var email = NormalizeEmail(dto.EmailAddress);
 
         if (!await IsEmployeeNumberUniqueAsync(employeeNumber, null, cancellationToken))
             throw new InvalidOperationException($"Employee number '{employeeNumber}' already exists.");
 
-        if (!await IsEmailUniqueAsync(email, null, cancellationToken))
+        if (email != null && !await IsEmailUniqueAsync(email, null, cancellationToken))
             throw new InvalidOperationException($"Email address '{email}' already exists.");
 
         if (!string.IsNullOrWhiteSpace(dto.BadgeNumber) &&
@@ -134,6 +233,9 @@ public class EmployeeService : IEmployeeService
             throw new ArgumentException("Location not found or inactive.");
 
         await ValidatePayrollFlagsAsync(dto.PayTax, dto.SSFund, dto.GrossUp, dto.Tier2Only, dto.Overtime, cancellationToken);
+        ValidatePayrollMembership(
+            dto.IsOnPayroll, dto.OffPayrollReason, dto.Salary,
+            dto.PayTax || dto.SSFund || dto.GrossUp || dto.Tier2Only || dto.Overtime);
 
         if (dto.ManagerId.HasValue)
         {
@@ -143,6 +245,10 @@ public class EmployeeService : IEmployeeService
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
         employeeEntity.TenantId = GetTenantId();
+
+        // Before the insert: State and City are written from the tree so the row is never
+        // persisted with a snapshot that disagrees with its own GeoAreaId, not even briefly.
+        await ApplyGeoAreaSnapshotAsync(employeeEntity, cancellationToken);
 
         // Persist the employee and its initial position-history row atomically:
         // both commit together, or neither does. Prevents an orphaned employee
@@ -155,6 +261,11 @@ public class EmployeeService : IEmployeeService
         }, cancellationToken);
 
         _logger.LogInformation("Employee created: {EmployeeNumber} ({EmployeeId})", employeeEntity.EmployeeNumber, employeeEntity.Id);
+
+        // After the commit, on purpose: the employee exists whether or not payroll can take them
+        // today, and a failed enrolment is reported by the reconciliation read, not by failing
+        // the hire. Create-only — see PayrollMembershipService.
+        await _payrollMembership.EnsurePayrollProfileAsync(employeeEntity, cancellationToken);
 
         var created = await _employeeRepository.GetByIdWithDetailsAsync(employeeEntity.Id);
         if (created == null) throw new InvalidOperationException("Employee created but could not be reloaded.");
@@ -288,13 +399,33 @@ public class EmployeeService : IEmployeeService
         var overtime = dto.Overtime ?? employee.Overtime;
         await ValidatePayrollFlagsAsync(payTax, ssFund, grossUp, tier2Only, overtime, cancellationToken);
 
+        // Payroll membership. The rule is checked against what the record will look like AFTER
+        // this update, so an off-payroll employee cannot be handed a salary by a payload that
+        // simply omits the flag.
+        var wasOnPayroll = employee.IsOnPayroll;
+        var willBeOnPayroll = dto.IsOnPayroll ?? employee.IsOnPayroll;
+        var reasonAfter = dto.OffPayrollReason ?? employee.OffPayrollReason;
+        ValidatePayrollMembership(
+            willBeOnPayroll, reasonAfter,
+            dto.Salary ?? (willBeOnPayroll ? employee.Salary : null),
+            (dto.PayTax ?? false) || (dto.SSFund ?? false) || (dto.GrossUp ?? false)
+                || (dto.Tier2Only ?? false) || (dto.Overtime ?? false));
+
         // Track position changes for history
         var oldPositionId = employee.PositionId;
         var isPositionChanging = dto.PositionId.HasValue && dto.PositionId.Value != oldPositionId;
 
         dto.Apply(employee, newOrgLevelId, newLocationLevelId);
-        if (!string.IsNullOrWhiteSpace(dto.EmailAddress))
+        // null = not supplied; "" = clear. Before 2026-09-03 an email could never be removed.
+        if (dto.EmailAddress != null)
             employee.EmailAddress = NormalizeEmail(dto.EmailAddress);
+
+        // ⚠ AFTER Apply, on purpose. Apply has just written whatever State/City the caller sent;
+        // this overwrites them from the area so the snapshot cannot be left disagreeing with the
+        // link. Running it before Apply would let a stale form field win.
+        await ApplyGeoAreaSnapshotAsync(employee, cancellationToken);
+
+        await ApplyPayrollMembershipAsync(employee, dto, wasOnPayroll, willBeOnPayroll, cancellationToken);
 
         await _employeeRepository.UpdateAsync(employee);
 
@@ -320,11 +451,17 @@ public class EmployeeService : IEmployeeService
             var newPosition = await _positionRepository.GetByIdAsync(dto.PositionId.Value);
             if (newPosition != null)
             {
+                // ⚠ TenantId was missing here until 2026-09-03: the create path stamps it (the
+                // DbContext auto-stamp is inert), this path did not, and every position change made
+                // through an update failed on FK_EmployeePositionHistories_Tenants_TenantId. Found by
+                // the employee-import update harness; the edit form had the same hole.
                 var newHistory = new EmployeePositionHistory
                 {
                     EmployeeId = employeeId,
+                    TenantId = employee.TenantId,
                     PositionId = dto.PositionId.Value,
-                    LocationLevelId = (newLocationLevelId ?? employee.LocationLevelId) ?? Guid.Empty,
+                    // Nullable on both sides — leave it null rather than inventing an empty FK (as on create).
+                    LocationLevelId = newLocationLevelId ?? employee.LocationLevelId,
                     LocationId = dto.LocationId ?? employee.LocationId,
                     OrganizationLevelId = (newOrgLevelId ?? employee.OrganizationLevelId) ?? Guid.Empty,
                     OrganizationUnitId = dto.OrganizationUnitId ?? employee.OrganizationUnitId,
@@ -340,6 +477,11 @@ public class EmployeeService : IEmployeeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Employee updated: {EmployeeId}", employeeId);
+
+        // Only when the caller SAID on-payroll (the form always does; an API caller that omits the
+        // flag is editing something else and should not create payroll rows as a side effect).
+        if (dto.IsOnPayroll == true && employee.IsOnPayroll)
+            await _payrollMembership.EnsurePayrollProfileAsync(employee, cancellationToken);
 
         var updated = await _employeeRepository.GetByIdWithDetailsAsync(employeeId);
         if (updated == null) throw new InvalidOperationException("Employee updated but could not be reloaded.");
@@ -398,11 +540,45 @@ public class EmployeeService : IEmployeeService
         if (!await CanTerminateEmployeeAsync(employeeId, cancellationToken))
             throw new InvalidOperationException("Employee cannot be terminated due to active dependencies/constraints.");
 
+        // ⚠ This is the DIRECT path, and area 9b made it the exception rather than the rule. Where a
+        // separation is in flight for this employee, terminating them here would walk straight past
+        // the FR-HR-091 clearance gate, the FR-HR-092 signature and the FR-HR-185 settlement review
+        // — every control the exit process exists to apply. Refused, with the way in named.
+        var openSeparation = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .Where(s => s.EmployeeId == employeeId && s.TenantId == employee.TenantId && !s.IsDeleted
+                        && s.Status != SeparationStatus.Cancelled
+                        && s.Status != SeparationStatus.Rejected
+                        && s.Status != SeparationStatus.Completed)
+            .Select(s => new { s.SeparationNumber, s.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openSeparation is not null)
+            throw new InvalidOperationException(
+                $"Separation {openSeparation.SeparationNumber} is in progress for this employee "
+                + $"({openSeparation.Status}). Complete it through the separation process — terminating "
+                + "the employee directly would bypass clearance, approval and the settlement review.");
+
         employee.StaffStatus = StaffStatus.Terminated;
         employee.IsActive = false;
         employee.TerminationDate = dto.TerminationDate;
-        employee.TerminationReason = Enum.TryParse<TerminationReason>(dto.TerminationReason, out var tr) ? tr : null;
         employee.TerminationNotes = dto.TerminationNotes;
+
+        // ⚠ Was: TryParse ? value : null — an unknown or misspelled reason wrote NULL and the caller
+        // still got a 200. Knowing why somebody left is the whole point of FR-HR-090, and a silently
+        // discarded reason is unrecoverable once the person has gone.
+        if (!string.IsNullOrWhiteSpace(dto.TerminationReason))
+        {
+            if (!Enum.TryParse<TerminationReason>(dto.TerminationReason, ignoreCase: true, out var parsedReason))
+                throw new InvalidOperationException(
+                    $"'{dto.TerminationReason}' is not a termination reason. Use one of: "
+                    + string.Join(", ", Enum.GetNames<TerminationReason>()) + ".");
+
+            employee.TerminationReason = parsedReason;
+        }
+        else
+        {
+            employee.TerminationReason = null;
+        }
 
         // Terminate active contracts
         var contractRepo = _unitOfWork.Repository<EmployeeContractDetail>();
@@ -445,11 +621,33 @@ public class EmployeeService : IEmployeeService
         if (employee.StaffStatus != StaffStatus.Terminated)
             throw new InvalidOperationException("Only terminated employees can be reinstated.");
 
+        // ⚠ Was: all three termination fields nulled and the notes overwritten, so the fact that
+        // somebody had been terminated and reinstated became unrecoverable. Reinstatement is an
+        // event in an employment history, not an eraser. The dates and reason are cleared because
+        // the person is employed again — but what they were is written into the notes first.
+        var priorTermination = employee.TerminationDate is { } was
+            ? $"[Reinstated {DateTime.UtcNow:yyyy-MM-dd}] Previously terminated {was:yyyy-MM-dd}"
+              + (employee.TerminationReason is { } reason ? $" ({reason})" : string.Empty)
+              + (string.IsNullOrWhiteSpace(employee.TerminationNotes) ? "." : $": {employee.TerminationNotes}")
+            : null;
+
+        var reinstatementNote = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+
         employee.StaffStatus = StaffStatus.Active;
         employee.IsActive = true;
         employee.TerminationDate = null;
         employee.TerminationReason = null;
-        employee.TerminationNotes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        employee.TerminationNotes = string.Join(
+            "\n\n",
+            new[] { priorTermination, reinstatementNote }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+        if (string.IsNullOrWhiteSpace(employee.TerminationNotes))
+            employee.TerminationNotes = null;
+
+        // ⚠ Contracts and position history closed by the termination are NOT reopened, deliberately.
+        // A reinstated employee needs a new contract with its own start date — silently reviving a
+        // contract that was terminated would make the record say they were employed throughout a
+        // period when they were not. Stated here because the asymmetry looks like an oversight.
 
         await _employeeRepository.UpdateAsync(employee);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -566,6 +764,7 @@ public class EmployeeService : IEmployeeService
         if (searchCriteria.IsActive.HasValue) q = q.Where(e => e.IsActive == searchCriteria.IsActive);
         if (searchCriteria.IsFullTime.HasValue) q = q.Where(e => e.IsFullTime == searchCriteria.IsFullTime);
         if (searchCriteria.MaintenanceTechniciansOnly == true) q = q.Where(e => e.CanBeAssignedToMaintenance);
+        if (searchCriteria.IsOnPayroll.HasValue) q = q.Where(e => e.IsOnPayroll == searchCriteria.IsOnPayroll);
         if (searchCriteria.HiredAfter.HasValue) q = q.Where(e => e.DateEmployed >= searchCriteria.HiredAfter);
         if (searchCriteria.HiredBefore.HasValue) q = q.Where(e => e.DateEmployed <= searchCriteria.HiredBefore);
 
@@ -1082,6 +1281,9 @@ public class EmployeeService : IEmployeeService
         var repo = _unitOfWork.Repository<EmployeeSkill>();
         var items = await repo.GetQueryable()
             .Include(s => s.Skill)
+            // ⚠ The DTO reports the catalogued certifier's NAME, so every read that builds one has to
+            // load it — including the re-reads after a write, or the response contradicts the list.
+            .Include(s => s.CertifyingBodyRef)
             .Where(s => s.EmployeeId == employeeId)
             .OrderByDescending(s => s.IsVerified)
             .ThenByDescending(s => s.SkillLevel)
@@ -1108,7 +1310,7 @@ public class EmployeeService : IEmployeeService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 
@@ -1124,7 +1326,7 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 
@@ -1151,7 +1353,7 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 
@@ -1166,7 +1368,7 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(s => s.Skill).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable().Include(s => s.Skill).Include(s => s.CertifyingBodyRef).FirstOrDefaultAsync(s => s.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDto();
     }
 
@@ -1358,6 +1560,11 @@ public class EmployeeService : IEmployeeService
 
         ValidateContractTaxRules(dto.TaxTreatmentType, dto.WithholdingTaxRate);
 
+        // ⚠ The same gate the guarantor amount goes through. A salary currency is money's unit;
+        // an unvalidated one lets "XYZ" onto a contract and every figure derived from it. 3a
+        // established the pattern against Finance's master — not a second HR-side list.
+        await _currencies.RequireKnownCurrencyAsync(dto.CurrencyCode, cancellationToken, optional: true);
+
         var repo = _unitOfWork.Repository<EmployeeContractDetail>();
         var entity = new EmployeeContractDetail
         {
@@ -1378,6 +1585,10 @@ public class EmployeeService : IEmployeeService
             SickDaysPerYear = dto.SickDaysPerYear,
             ProbationPeriodDays = dto.ProbationPeriodDays,
             ConfirmationDate = dto.ConfirmationDate,
+            CurrencyCode = dto.CurrencyCode,
+            WorkSchedule = dto.WorkSchedule,
+            SpecialConditions = dto.SpecialConditions,
+            Notes = dto.Notes,
             Terms = dto.Terms,
             IsActive = dto.IsActive,
             ContractPath = dto.ContractPath,
@@ -1390,6 +1601,28 @@ public class EmployeeService : IEmployeeService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Refuses a change to a contract's probation terms once the employee has been confirmed.
+    /// </summary>
+    /// <remarks>
+    /// <para>Only the two probation fields are gated. Salary, hours and leave are ordinary terms
+    /// that change over an employment; the probation term and the date it was passed are a record
+    /// of something that already happened, and a probation letter has been issued against them.</para>
+    ///
+    /// <para>⚠ In the service, not on the screen — the D-03 lesson. A client-side check protects
+    /// one form; an import, another screen or a direct call would still rewrite it.</para>
+    /// </remarks>
+    private async Task RequireUnconfirmedProbationAsync(EmployeeContractDetail contract, CancellationToken cancellationToken)
+    {
+        var employee = await _unitOfWork.Repository<Employee>().GetByIdAsync(contract.EmployeeId);
+        if (employee == null || employee.ConfirmationDate == null) return;
+
+        throw new InvalidOperationException(
+            $"This employee was confirmed on {employee.ConfirmationDate:yyyy-MM-dd}, so the probation term "
+            + "on their contract can no longer be changed. Correct the confirmation through the probation "
+            + "record, which is what issued the letter.");
     }
 
     public async Task<EmployeeContractDetailDto> UpdateContractAsync(UpdateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default)
@@ -1411,8 +1644,29 @@ public class EmployeeService : IEmployeeService
         if (dto.WorkingHoursPerWeek.HasValue) entity.WorkingHoursPerWeek = dto.WorkingHoursPerWeek.Value;
         if (dto.VacationDaysPerYear.HasValue) entity.VacationDaysPerYear = dto.VacationDaysPerYear.Value;
         if (dto.SickDaysPerYear.HasValue) entity.SickDaysPerYear = dto.SickDaysPerYear.Value;
+        // ⚠ Ledger lane 3d. Probation terms stayed editable after the employee was confirmed:
+        // the term could be stretched, or the confirmation date moved, on a contract whose probation
+        // had already been decided and a letter issued against it. The same shape as D-03, where an
+        // APPROVED job description's content could still be rewritten.
+        //
+        // The rule keys off the EMPLOYEE, not the contract. Confirmation is recorded by
+        // ProbationService.MarkEmployeeConfirmed, which sets Employee.ConfirmationDate and moves
+        // StaffStatus off Probation; EmployeeContractDetail.ConfirmationDate is a separate,
+        // hand-typed copy that nothing else writes. Guarding the contract's own copy against
+        // itself would let the real confirmation be contradicted.
+        if (dto.ProbationPeriodDays.HasValue || dto.ConfirmationDate.HasValue)
+            await RequireUnconfirmedProbationAsync(entity, cancellationToken);
+
         if (dto.ProbationPeriodDays.HasValue) entity.ProbationPeriodDays = dto.ProbationPeriodDays;
         if (dto.ConfirmationDate.HasValue) entity.ConfirmationDate = dto.ConfirmationDate;
+        if (dto.CurrencyCode != null)
+        {
+            await _currencies.RequireKnownCurrencyAsync(dto.CurrencyCode, cancellationToken, optional: true);
+            entity.CurrencyCode = dto.CurrencyCode;
+        }
+        if (dto.WorkSchedule.HasValue) entity.WorkSchedule = dto.WorkSchedule.Value;
+        if (dto.SpecialConditions != null) entity.SpecialConditions = dto.SpecialConditions;
+        if (dto.Notes != null) entity.Notes = dto.Notes;
         if (dto.Terms != null) entity.Terms = dto.Terms;
         if (dto.IsActive.HasValue) entity.IsActive = dto.IsActive.Value;
         if (dto.ContractPath != null) entity.ContractPath = dto.ContractPath;
@@ -1507,7 +1761,13 @@ public class EmployeeService : IEmployeeService
     public async Task<ExpatriateAssignmentDetailDto?> GetExpatriateAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<ExpatriateAssignment>();
-        var entity = await repo.GetQueryable().Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        var entity = await repo.GetQueryable()
+            .Include(x => x.Country)
+            // ⚠ Without this the detail read returns an EMPTY family for an assignment that has
+            // one, and the panel says "nobody accompanied them". A detail read that drops the very
+            // collection its screen exists to show is the D-09 shape, met eight times in this module.
+            .Include(x => x.FamilyMembers)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         return entity?.ToDetailDto();
     }
 
@@ -1527,7 +1787,10 @@ public class EmployeeService : IEmployeeService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
+        var reloaded = await repo.GetQueryable()
+            .Include(x => x.Country)
+            .Include(x => x.FamilyMembers)
+            .FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDetailDto();
     }
 
@@ -1542,8 +1805,91 @@ public class EmployeeService : IEmployeeService
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var reloaded = await repo.GetQueryable().Include(x => x.Country).FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
+        // ⚠ FamilyMembers included here too, or the UPDATE response reports an empty family while
+        // the read beside it resolves one — the stale-navigation-on-a-write-response shape, which
+        // has been found five times in this module and never once by reading the code.
+        var reloaded = await repo.GetQueryable()
+            .Include(x => x.Country)
+            .Include(x => x.FamilyMembers)
+            .FirstOrDefaultAsync(x => x.Id == entity.Id, cancellationToken);
         return (reloaded ?? entity).ToDetailDto();
+    }
+
+    // ── Expatriate family members ────────────────────────────────────────────
+    //
+    // ⚠ `FamilyAccompanying` was a bare bool: the record could assert a family had come and never
+    // say who. Each accompanying person needs their own residence permit on their own clock.
+
+    public async Task<IEnumerable<ExpatriateFamilyMemberDto>> GetExpatriateFamilyMembersAsync(
+        Guid assignmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var items = await _unitOfWork.Repository<ExpatriateFamilyMember>().GetQueryable()
+            .Where(m => m.ExpatriateAssignmentId == assignmentId && m.TenantId == tenantId)
+            .OrderBy(m => m.FullName)
+            .ToListAsync(cancellationToken);
+        return items.Select(m => m.ToDto()).ToList();
+    }
+
+    public async Task<ExpatriateFamilyMemberDto> AddExpatriateFamilyMemberAsync(
+        CreateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+
+        var assignment = await _unitOfWork.Repository<ExpatriateAssignment>().GetQueryable()
+            .FirstOrDefaultAsync(a => a.Id == dto.ExpatriateAssignmentId && a.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException("Expatriate assignment not found.");
+
+        var entity = dto.ToEntity();
+        // ToEntity() does not stamp the tenant and the DbContext auto-stamp is inert.
+        entity.TenantId = tenantId;
+
+        await _unitOfWork.Repository<ExpatriateFamilyMember>().AddAsync(entity);
+
+        // Recording a family member IS the statement that family accompanied them, so the flag
+        // follows the facts rather than waiting for somebody to tick it separately and disagree.
+        if (!assignment.FamilyAccompanying)
+        {
+            assignment.FamilyAccompanying = true;
+            await _unitOfWork.Repository<ExpatriateAssignment>().UpdateAsync(assignment);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<ExpatriateFamilyMemberDto> UpdateExpatriateFamilyMemberAsync(
+        UpdateExpatriateFamilyMemberDto dto, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dto);
+        var tenantId = GetTenantId();
+        var repo = _unitOfWork.Repository<ExpatriateFamilyMember>();
+        var entity = await repo.GetQueryable()
+            .FirstOrDefaultAsync(m => m.Id == dto.Id && m.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException("Family member not found.");
+
+        dto.Apply(entity);
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> RemoveExpatriateFamilyMemberAsync(
+        Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var repo = _unitOfWork.Repository<ExpatriateFamilyMember>();
+        var entity = await repo.GetQueryable()
+            .FirstOrDefaultAsync(m => m.Id == id && m.TenantId == tenantId, cancellationToken);
+        if (entity == null) return false;
+
+        // ⚠ The FamilyAccompanying flag is NOT cleared when the last member is removed. Somebody
+        // whose family went home still travelled with one, and the assignment record should keep
+        // saying so; the members list is what answers "who is here now".
+        await repo.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<bool> RemoveExpatriateAssignmentAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1671,6 +2017,7 @@ public class EmployeeService : IEmployeeService
     {
         ArgumentNullException.ThrowIfNull(dto);
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
+        await RequireOnPayrollAsync(dto.EmployeeId, cancellationToken);
 
         if (dto.EffectiveDate == default) throw new ArgumentException("EffectiveDate is required.");
 
@@ -1705,6 +2052,7 @@ public class EmployeeService : IEmployeeService
         var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Salary assignment not found.");
+        await RequireOnPayrollAsync(entity.EmployeeId, cancellationToken);
 
         dto.Apply(entity);
         await repo.UpdateAsync(entity);
@@ -1861,6 +2209,9 @@ public class EmployeeService : IEmployeeService
     {
         ArgumentNullException.ThrowIfNull(dto);
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
+        // optional: a guarantor may be recorded with no amount, and then no currency either.
+        await _currencies.RequireKnownCurrencyAsync(
+            dto.AmountGuaranteedCurrencyCode, cancellationToken, optional: true);
 
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = dto.ToEntity();
@@ -1886,6 +2237,8 @@ public class EmployeeService : IEmployeeService
     public async Task<EmployeeGuarantorDetailDto> UpdateGuarantorAsync(UpdateEmployeeGuarantorDto dto, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dto);
+        await _currencies.RequireKnownCurrencyAsync(
+            dto.AmountGuaranteedCurrencyCode, cancellationToken, optional: true);
         var repo = _unitOfWork.Repository<EmployeeGuarantor>();
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException("Guarantor not found.");
@@ -2227,6 +2580,98 @@ public class EmployeeService : IEmployeeService
 
     #region 5) Payroll, Tax & Contract Logic
 
+    // ── Payroll membership ─────────────────────────────────────────────────────────────────
+    //
+    // "On payroll" gates the salary, the five payroll switches and the grade/notch assignment. The
+    // gate is refusal, not silent dropping: a caller that says "off payroll" and sends a salary is
+    // told so, because dropping the figure would let the form and the record disagree without
+    // anyone noticing. The mirror rule — on payroll REQUIRES a salary — is deliberately NOT
+    // enforced here: the hire path, imports and every fixture create employees before their pay
+    // basis is known, and the run-time consequence (a run skips a zero basis silently) is what the
+    // reconciliation read exists to catch as NoPayBasis.
+
+    private static void ValidatePayrollMembership(
+        bool isOnPayroll, OffPayrollReason? reason, decimal? salary, bool anySwitchOn)
+    {
+        if (isOnPayroll) return;
+
+        if (reason == null)
+            throw new InvalidOperationException(
+                "An employee who is not on payroll needs a reason (paid by invoice, allowance, parent organisation, unpaid, board or committee, other).");
+        if (!Enum.IsDefined(reason.Value))
+            throw new ArgumentException("That is not a recognised off-payroll reason.");
+        if (salary is > 0)
+            throw new InvalidOperationException(
+                "This employee is not on payroll, so a salary cannot be recorded. Put them on payroll first, or leave the salary blank.");
+        if (anySwitchOn)
+            throw new InvalidOperationException(
+                "This employee is not on payroll, so the payroll switches (pay tax, SS fund, gross up, tier 2 only, overtime) do not apply.");
+    }
+
+    /// <summary>
+    /// Applies the membership fields the mapping deliberately leaves alone, and the consequences of
+    /// a flip. Off: the pay figures are cleared and any open grade/notch assignment is closed as of
+    /// today (an "active" placement on a grade for somebody the run does not pay is a contradiction
+    /// the salary tab would otherwise display). The figures survive in position history, movement
+    /// history and the contract line, so nothing is lost that a letter or a settlement needs. On:
+    /// the reason is cleared; enrolment in payroll happens after the save.
+    /// </summary>
+    private async Task ApplyPayrollMembershipAsync(
+        Employee employee, UpdateEmployeeDto dto, bool wasOnPayroll, bool willBeOnPayroll, CancellationToken cancellationToken)
+    {
+        employee.IsOnPayroll = willBeOnPayroll;
+
+        if (willBeOnPayroll)
+        {
+            employee.OffPayrollReason = null;
+            employee.OffPayrollNote = null;
+            return;
+        }
+
+        if (dto.OffPayrollReason.HasValue) employee.OffPayrollReason = dto.OffPayrollReason;
+        if (dto.OffPayrollNote != null)
+            employee.OffPayrollNote = string.IsNullOrWhiteSpace(dto.OffPayrollNote) ? null : dto.OffPayrollNote.Trim();
+
+        employee.Salary = null;
+        employee.PayTax = false;
+        employee.SSFund = false;
+        employee.GrossUp = false;
+        employee.Tier2Only = false;
+        employee.Overtime = false;
+
+        if (!wasOnPayroll) return;
+
+        var today = DateTime.UtcNow.Date;
+        var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
+        var open = await repo.GetQueryable()
+            .Where(a => a.EmployeeId == employee.Id && !a.IsDeleted
+                     && (a.EffectiveTo == null || a.EffectiveTo >= today))
+            .ToListAsync(cancellationToken);
+        foreach (var assignment in open)
+        {
+            // Close, never delete: the row is the record of where they were graded while paid.
+            // A placement that starts today or later is closed on its own start date so the
+            // window stays valid (EffectiveTo >= EffectiveDate) instead of going negative.
+            assignment.EffectiveTo = assignment.EffectiveDate > today.AddDays(-1)
+                ? assignment.EffectiveDate
+                : today.AddDays(-1);
+            await repo.UpdateAsync(assignment);
+        }
+        if (open.Count > 0)
+            _logger.LogInformation(
+                "Closed {Count} open salary assignment(s) for {EmployeeId}: taken off payroll.", open.Count, employee.Id);
+    }
+
+    /// <summary>The grade/notch gate: a placement on the pay structure is meaningless for someone the run does not pay.</summary>
+    private async Task RequireOnPayrollAsync(Guid employeeId, CancellationToken cancellationToken)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+        if (!employee.IsOnPayroll)
+            throw new InvalidOperationException(
+                $"{employee.EmployeeNumber} is not on payroll, so they cannot be placed on a salary grade. Put them on payroll first.");
+    }
+
     public Task ValidatePayrollFlagsAsync(bool payTax, bool ssFund, bool grossUp, bool tier2Only, bool overtime, CancellationToken cancellationToken = default)
     {
         // Coherence rules (policy-level; can be expanded safely without changing persistence):
@@ -2256,10 +2701,11 @@ public class EmployeeService : IEmployeeService
             : !await _employeeRepository.EmployeeNumberExistsAsync(num);
     }
 
-    public async Task<bool> IsEmailUniqueAsync(string email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default)
+    public async Task<bool> IsEmailUniqueAsync(string? email, Guid? excludeEmployeeId = null, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeEmail(email);
-        if (string.IsNullOrWhiteSpace(normalized)) return false;
+        // No email is not a duplicate of anything (was `false`, which refused every emailless create).
+        if (normalized == null) return true;
 
         return excludeEmployeeId.HasValue
             ? !await _employeeRepository.EmailExistsAsync(normalized, excludeEmployeeId.Value)
@@ -2329,14 +2775,101 @@ public class EmployeeService : IEmployeeService
         return employee.IsActive && employee.StaffStatus != StaffStatus.Terminated;
     }
 
+    /// <summary>
+    /// Whether this employee could be terminated at all — not whether a particular caller may do it.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This used to return <c>true</c> after re-checking only "already terminated", under a
+    /// comment reading <i>"no active guarantor verification pending? (simplified)"</i> — a check
+    /// that had never been written. It now answers the question it is named for. The gate that
+    /// matters most, FR-HR-091's clearance, lives in <c>TerminateEmployeeAsync</c> as a refusal
+    /// naming the separation in flight, because a bare false here could not say why.
+    /// </remarks>
     public async Task<bool> CanTerminateEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
         if (employee == null) return false;
         if (employee.StaffStatus == StaffStatus.Terminated) return false;
+        if (employee.IsDeleted) return false;
 
-        // Termination is allowed, but we enforce: no active guarantor verification pending? (simplified)
         return true;
+    }
+
+    /// <summary>
+    /// Applies a completed separation to the employee's master record — the step that was missing
+    /// entirely before area 9b.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This exists because of a measured defect.</b> On 2026-08-20 the live tenant held
+    /// <b>29 disciplinary terminations whose employees were all still <c>StaffStatus = Active</c></b>:
+    /// the outcome was recorded somewhere nobody read, so dismissed people stayed in headcount, in
+    /// establishment counts and on every roster. Recording an exit and applying it are two different
+    /// acts, and only one of them had ever been built.</para>
+    ///
+    /// <para>Separate from <see cref="TerminateEmployeeAsync"/> on purpose. That path now refuses
+    /// when a separation is in flight, because using it would bypass clearance, approval and the
+    /// settlement review. This one <i>is</i> the separation completing, so it carries the
+    /// separation's id and skips that check — the one legitimate way through.</para>
+    /// </remarks>
+    public async Task<EmployeeDetailDto> ApplySeparationOutcomeAsync(
+        Guid employeeId,
+        Guid separationId,
+        DateTime effectiveDate,
+        TerminationReason? reason,
+        string? notes,
+        CancellationToken cancellationToken = default)
+    {
+        var employee = await _employeeRepository.GetByIdAsync(employeeId)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        if (employee.StaffStatus == StaffStatus.Terminated)
+            throw new InvalidOperationException(
+                $"{employee.FirstName} {employee.LastName} is already recorded as terminated.");
+
+        employee.StaffStatus = StaffStatus.Terminated;
+        employee.IsActive = false;
+        employee.TerminationDate = effectiveDate;
+        employee.TerminationReason = reason;
+        employee.TerminationNotes = notes;
+
+        // Close every active contract, as the direct path does.
+        var contractRepo = _unitOfWork.Repository<EmployeeContractDetail>();
+        var activeContracts = await contractRepo.FindAsync(
+            c => c.EmployeeId == employeeId && c.IsActive && !c.IsDeleted);
+
+        foreach (var contract in activeContracts)
+        {
+            contract.IsActive = false;
+            contract.ContractStatus = ContractStatus.Terminated;
+            contract.TerminationDate = DateOnly.FromDateTime(effectiveDate);
+            contract.TerminationReason = reason?.ToString();
+            contract.EndDate ??= DateOnly.FromDateTime(effectiveDate);
+            await contractRepo.UpdateAsync(contract);
+        }
+
+        // Close the open position-history row, so the establishment counts area 17/18 made
+        // load-bearing stop counting somebody who has left.
+        var posHistoryRepo = _unitOfWork.Repository<EmployeePositionHistory>();
+        var current = await posHistoryRepo.FirstOrDefaultAsync(
+            ph => ph.EmployeeId == employeeId && (ph.EndDate == null || ph.EndDate > effectiveDate));
+
+        if (current != null)
+        {
+            current.EndDate = effectiveDate;
+            current.ChangeReason = PositionChangeReason.Termination;
+            await posHistoryRepo.UpdateAsync(current);
+        }
+
+        await _employeeRepository.UpdateAsync(employee);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Separation {SeparationId} applied to employee {EmployeeId}: terminated {Date:yyyy-MM-dd}",
+            separationId, employeeId, effectiveDate);
+
+        var updated = await _employeeRepository.GetByIdWithDetailsAsync(employeeId)
+            ?? throw new InvalidOperationException("Employee updated but could not be reloaded.");
+        return updated.ToDetailDto();
     }
 
     #endregion
@@ -2454,20 +2987,69 @@ public class EmployeeService : IEmployeeService
     public Task<bool> EmailExistsAsync(string email) => _employeeRepository.EmailExistsAsync(NormalizeEmail(email));
     public Task<string> GenerateEmployeeNumberAsync() => _employeeRepository.GenerateEmployeeNumberAsync();
 
-    public async Task<int> GetTotalEmployeeCountAsync() => await _employeeRepository.CountAsync();
-    public async Task<int> GetActiveEmployeeCountAsync() => await _employeeRepository.CountAsync(e => e.IsActive);
+    // ── Headline counts ─────────────────────────────────────────────────────────
+    //
+    // These four feed the `/hr` landing page and nothing else. All four were wrong in the same
+    // way and one of them was wrong twice.
+    //
+    // ⚠ TENANT. Every one of them read `CountAsync()` / `GetAllAsync()`, which scope on
+    // `!IsDeleted` and nothing else. The comment on `GetTenantId()` at the top of this file says
+    // why that is not enough — the DbContext is registered without a tenant, so its global tenant
+    // filter is INERT — and `SearchAsync` twenty lines up already scopes explicitly for exactly
+    // that reason. Measured before this fix, with one employee planted under a second tenant:
+    // `stats/total` answered 6591 where the caller's own tenant held 6590. A landing page was
+    // publishing another company's headcount. Every query below now names the tenant.
+    //
+    // ⚠ MEANING. `GetActiveEmployeeCountAsync` counted `IsActive` — the record-enabled flag —
+    // while its three neighbours group `StaffStatus`, the employment status. The home renders the
+    // four side by side under one heading, so "Active 6474" and "On probation 53" read as
+    // disjoint when the 53 were inside the 6474, and the two numbers were answers to two
+    // different questions. It now counts the status its label names, which also makes the tiles
+    // a genuine partition of the total.
+    //
+    // ⚠ COST. The two dictionaries materialised every employee row — 6,588 of them, and the
+    // department one dragged its navigation along — to produce a handful of integers: 274 ms and
+    // 387 ms against 21–32 ms for the two that counted in SQL. Both now group in SQL.
+
+    public async Task<int> GetTotalEmployeeCountAsync()
+    {
+        var tenantId = GetTenantId();
+        return await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .CountAsync();
+    }
+
+    public async Task<int> GetActiveEmployeeCountAsync()
+    {
+        var tenantId = GetTenantId();
+        return await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.StaffStatus == StaffStatus.Active)
+            .CountAsync();
+    }
 
     public async Task<Dictionary<StaffStatus, int>> GetEmployeeCountByStatusAsync()
     {
-        var employees = await _employeeRepository.GetAllAsync();
-        return employees.GroupBy(e => e.StaffStatus).ToDictionary(g => g.Key, g => g.Count());
+        var tenantId = GetTenantId();
+        var rows = await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId)
+            .GroupBy(e => e.StaffStatus)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync();
+        return rows.ToDictionary(r => r.Status, r => r.Count);
     }
 
-    public async Task<Dictionary<string, int>> GetEmployeeCountByDepartmentAsync()
-    {
-        var employees = await _employeeRepository.GetAllAsync(e => e.Department!);
-        return employees.GroupBy(e => e.Department?.Name ?? "Unassigned").ToDictionary(g => g.Key, g => g.Count());
-    }
+    // ⚠ `GetEmployeeCountByDepartmentAsync` was removed in slice 10, along with its endpoint and
+    // its uncalled frontend method. It grouped the workforce on `Department`, which the create
+    // path a few hundred lines above already calls deprecated: `OrganizationUnitId` is REQUIRED on
+    // an employee and `DepartmentId` is not, and the live data says the same — 42 organisation
+    // units against 7 departments, and 6,566 of 6,590 employees carrying a unit against 6,076
+    // carrying a department, so 514 people filed under "Unassigned".
+    //
+    // It had no caller anywhere in the solution. Re-pointing it at `OrganizationUnitId` was the
+    // obvious repair and is the wrong one: `GET api/Organogram/units` already returns per-unit
+    // `EmployeeCount` **and** a subtree rollup, so a second by-unit count here would be the same
+    // rule stated twice with no rollup and nothing reading it. Headcount by organisation unit has
+    // one home, and it is the organogram.
 
     #endregion
 
@@ -2479,8 +3061,9 @@ public class EmployeeService : IEmployeeService
         if (employee == null) throw new ArgumentException($"Employee '{employeeId}' not found.");
     }
 
-    private static string NormalizeEmail(string? email)
-        => string.IsNullOrWhiteSpace(email) ? string.Empty : email.Trim().ToLowerInvariant();
+    /// <summary>Trimmed and lower-cased, or <c>null</c> for blank — never an empty string.</summary>
+    private static string? NormalizeEmail(string? email)
+        => string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToLowerInvariant();
 
     private async Task ValidateManagerAssignmentAsync(Guid employeeId, Guid managerId, CancellationToken cancellationToken)
     {

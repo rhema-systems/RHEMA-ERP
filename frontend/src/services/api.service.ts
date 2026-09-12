@@ -68,6 +68,8 @@ export interface UserInfo {
   authenticationProvider?: 'Local' | 'LDAP';
   mustChangePassword?: boolean;
   temporaryPasswordExpiresAtUtc?: string;
+  /** The user↔employee link; null/absent = not linked. The /me portal gate reads this. */
+  employeeId?: string | null;
 }
 
 export interface UserTenantInfo {
@@ -107,6 +109,13 @@ export interface TenantUserMapping {
   isDefault: boolean;
   grantedAt: string;
   user: TenantUserInfo;
+}
+
+export interface SaveTenantUserMappingRequest {
+  userId: string;
+  tenantId: string;
+  expiresAt?: string | null;
+  reason?: string;
 }
 
 export interface TenantUserInfo {
@@ -731,7 +740,29 @@ class ApiService {
     if (this.isServerSide()) {
       throw new Error('getTenantUsers cannot be called during server-side rendering');
     }
-    return this.privateRequest<TenantUserMapping[]>(`/auth/tenant/${encodeURIComponent(tenantId)}/users`);
+    return this.privateRequest<TenantUserMapping[]>(
+      `/administration/user-tenant-mappings/${encodeURIComponent(tenantId)}/users`
+    );
+  }
+
+  public async addUserToTenant(request: SaveTenantUserMappingRequest): Promise<TenantUserMapping> {
+    if (this.isServerSide()) {
+      throw new Error('addUserToTenant cannot be called during server-side rendering');
+    }
+    return this.privateRequest<TenantUserMapping>('/administration/user-tenant-mappings', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  public async removeUserFromTenant(userId: string, tenantId: string): Promise<void> {
+    if (this.isServerSide()) {
+      throw new Error('removeUserFromTenant cannot be called during server-side rendering');
+    }
+    return this.privateRequest<void>(
+      `/administration/user-tenant-mappings/${encodeURIComponent(tenantId)}/users/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' }
+    );
   }
 
   /**
@@ -786,8 +817,8 @@ class ApiService {
     return this.privateRequest<T>(this.appendQueryParams(endpoint, query), { method: 'GET' }, true, true);
   }
 
-  public async post<T = any>(endpoint: string, data?: any): Promise<T> {
-    const options: RequestInit = { method: 'POST' };
+  public async post<T = any>(endpoint: string, data?: any, signal?: AbortSignal): Promise<T> {
+    const options: RequestInit = { method: 'POST', signal };
     if (data instanceof FormData) {
       options.body = data;
     } else if (data !== undefined && data !== null) {

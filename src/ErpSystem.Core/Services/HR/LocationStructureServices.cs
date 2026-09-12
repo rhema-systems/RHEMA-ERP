@@ -381,22 +381,52 @@ public class LocationService : ILocationService
 {
     private readonly ILocationRepository _repository;
     private readonly ILocationLevelRepository _levelRepository;
+    private readonly IGeofenceZoneRepository _geofenceZoneRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationService> _logger;
 
+    // Shared reference data, not HR's. A site says which administrative area it stands in; this
+    // resolves that into the City text the address prints, so the two cannot disagree.
+    private readonly ErpSystem.Core.Services.Reference.IGeographyService _geography;
+
     public LocationService(
         ILocationRepository repository,
         ILocationLevelRepository levelRepository,
+        IGeofenceZoneRepository geofenceZoneRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ErpSystem.Core.Services.Reference.IGeographyService geography,
         ILogger<LocationService> logger)
     {
         _repository = repository;
         _levelRepository = levelRepository;
+        _geofenceZoneRepository = geofenceZoneRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
+        _geography = geography;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The map pin and the attendance zone. Both coordinates travel together, and the zone must be one
+    /// of this tenant's. Until 2026-09-03 none of the three reached the entity from any DTO, so
+    /// GeofenceVerificationService could never find a zone for any employee: the geofence feature
+    /// had no door.
+    /// </summary>
+    private async Task ValidateGeoAsync(double? latitude, double? longitude, Guid? geofenceZoneId, Guid tenantId)
+    {
+        // A rule, not a lookup: InvalidOperationException reaches the client as a 400 with this message.
+        // ArgumentException is the service's "not found" idiom and the update endpoint answers it 404.
+        if (latitude.HasValue != longitude.HasValue)
+            throw new InvalidOperationException("Latitude and longitude must be supplied together.");
+
+        if (geofenceZoneId.HasValue)
+        {
+            var zone = await _geofenceZoneRepository.GetByIdAsync(geofenceZoneId.Value);
+            if (zone == null || zone.IsDeleted || zone.TenantId != tenantId)
+                throw new ArgumentException($"Geofence zone with ID '{geofenceZoneId}' not found.");
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
@@ -445,6 +475,7 @@ public class LocationService : ILocationService
             .Include(e => e.Structure)
             .Include(e => e.LocationLevel)
             .Include(e => e.ParentLocation)
+            .Include(e => e.GeofenceZone)
             .OrderBy(e => e.Name)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -577,6 +608,8 @@ public class LocationService : ILocationService
         if (await _repository.ExistsByNameInLevelAsync(createDto.LocationLevelId, createDto.Name))
             throw new InvalidOperationException($"Location with name '{createDto.Name}' already exists in this level.");
 
+        await ValidateGeoAsync(createDto.Latitude, createDto.Longitude, createDto.GeofenceZoneId, tenantId);
+
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
 
@@ -594,12 +627,38 @@ public class LocationService : ILocationService
             entity.Path = $"/{entity.Id}";
         }
 
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
+
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Location created: {Id}", entity.Id);
 
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Rewrites <c>City</c> from the site's administrative area, so the printed address and the
+    /// structured link cannot disagree. A null area leaves the text exactly as it was — most sites
+    /// predate the tree and that text is the only address they have.
+    /// </summary>
+    private async Task ApplyGeoAreaSnapshotAsync(Location entity, CancellationToken cancellationToken)
+    {
+        if (entity.GeoAreaId is not { } areaId) return;
+
+        var (_, city) = await _geography.GetAddressSnapshotAsync(areaId, cancellationToken);
+
+        // (null, null) means the area could not be read — another tenant's, or removed between the
+        // form loading and the save. Leave what the record said rather than blanking it.
+        if (city is null)
+        {
+            _logger.LogWarning(
+                "Location {LocationId} references geo area {GeoAreaId}, which could not be resolved to a "
+                + "city; the address was left unchanged.", entity.Id, areaId);
+            return;
+        }
+
+        entity.City = city;
     }
 
     public async Task<LocationDto> UpdateAsync(UpdateLocationDto updateDto, CancellationToken cancellationToken = default)
@@ -672,7 +731,12 @@ public class LocationService : ILocationService
         if (await _repository.ExistsByNameInLevelAsync(updateDto.LocationLevelId, updateDto.Name, updateDto.Id))
             throw new InvalidOperationException($"Location with name '{updateDto.Name}' already exists in this level.");
 
+        await ValidateGeoAsync(updateDto.Latitude, updateDto.Longitude, updateDto.GeofenceZoneId, entity.TenantId);
+
         updateDto.UpdateEntity(entity);
+
+        // ⚠ AFTER UpdateEntity, which has just written whatever City the caller sent. The tree wins.
+        await ApplyGeoAreaSnapshotAsync(entity, cancellationToken);
 
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -779,18 +843,32 @@ public class LocationContactService : ILocationContactService
     private readonly ILocationContactRepository _repository;
     private readonly ILocationRepository _locationRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LocationContactService> _logger;
 
     public LocationContactService(
         ILocationContactRepository repository,
         ILocationRepository locationRepository,
         IUnitOfWork unitOfWork,
+        ICurrentUserProvider currentUserProvider,
         ILogger<LocationContactService> logger)
     {
         _repository = repository;
         _locationRepository = locationRepository;
         _unitOfWork = unitOfWork;
+        _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
+    // TenantId auto-stamp are inert. Every sibling service in this file scopes explicitly; this one
+    // did not, which is why its create had never worked. See CreateAsync.
+    private Guid GetTenantId()
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException("No tenant is associated with the current user.");
+        return tenantId;
     }
 
     public async Task<LocationContactDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -871,6 +949,13 @@ public class LocationContactService : ILocationContactService
         }
 
         var entity = createDto.ToEntity();
+
+        // ⚠ **This endpoint had never once succeeded.** The entity went in with no TenantId, so the
+        // insert died on FK_LocationContacts_Tenants_TenantId (error 547) and the controller turned
+        // that into a bare 500 naming nothing. Nothing in the frontend has ever called it, which is
+        // exactly why the defect survived the port — a dead path cannot fail visibly. Found by the
+        // lane-2 payload probe running it for the first time.
+        entity.TenantId = GetTenantId();
 
         await _repository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

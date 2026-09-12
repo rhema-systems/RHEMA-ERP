@@ -30,9 +30,16 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     dateOfBirth: d.dateOfBirth ?? '',
     maritalStatus: d.maritalStatus ?? '',
     religion: d.religion ?? '',
+    // ⚠ Read from /details, never the summary: GET api/hr/Employees/{id} is
+    // GetEmployeeSummaryByIdAsync and carries none of these, so binding the form to it would
+    // render every one blank and blank them on save.
+    genderDescription: d.genderDescription ?? '',
+    hometown: d.hometown ?? '',
+    hasDisability: d.hasDisability ?? false,
+    disabilityDescription: d.disabilityDescription ?? '',
     bloodType: d.bloodType ?? '',
     isExpatriate: d.isExpatriate,
-    emailAddress: d.emailAddress,
+    emailAddress: d.emailAddress ?? '',
     mobileNumber: d.mobileNumber ?? '',
     telephoneNumber: d.telephoneNumber ?? '',
     address: d.address ?? '',
@@ -40,6 +47,10 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     state: d.state ?? '',
     postalCode: d.postalCode ?? '',
     digitalAddress: d.digitalAddress ?? '',
+    // The cascade re-opens itself from this one id by asking the geography service for its
+    // ancestors — which is why the DTO carries no per-tier ids to seed it with.
+    countryId: d.countryId ?? '',
+    geoAreaId: d.geoAreaId ?? '',
     positionId: d.positionId,
     organizationUnitId: d.organizationUnitId ?? '',
     locationId: d.locationId ?? '',
@@ -49,6 +60,9 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     dateEmployed: d.dateEmployed ?? '',
     probationPeriodDays: d.probationPeriodDays,
     isFullTime: d.isFullTime,
+    isOnPayroll: d.isOnPayroll ?? true,
+    offPayrollReason: d.offPayrollReason ?? '',
+    offPayrollNote: d.offPayrollNote ?? '',
     salary: d.salary != null ? String(d.salary) : '',
     taxNumber: d.taxNumber ?? '',
     socialSecurityNumber: d.socialSecurityNumber ?? '',

@@ -97,6 +97,37 @@ namespace ErpSystem.Core.DTOs.Auth
     }
 
     /// <summary>
+    /// Completes an HR-invited consultant-client contact's account setup: consumes the setup
+    /// token (an Identity password-reset token that only ever travelled by email — consuming
+    /// it IS the mailbox proof), sets the contact's own password, and activates the account.
+    /// Only accounts holding the ConsultantClient role are eligible.
+    /// </summary>
+    public class CompleteClientSetupRequest
+    {
+        /// <summary>The setup token from the invite email</summary>
+        [Required(ErrorMessage = "Setup token is required")]
+        public string Token { get; set; } = string.Empty;
+
+        /// <summary>Email address of the invited contact</summary>
+        [Required(ErrorMessage = "Email is required")]
+        [EmailAddress(ErrorMessage = "Valid email is required")]
+        public string Email { get; set; } = string.Empty;
+
+        /// <summary>The password the contact chooses</summary>
+        [Required(ErrorMessage = "New password is required")]
+        [StringLength(100, MinimumLength = 8, ErrorMessage = "Password must be between 8 and 100 characters")]
+        public string NewPassword { get; set; } = string.Empty;
+
+        /// <summary>Confirmation of the new password</summary>
+        [Required(ErrorMessage = "Password confirmation is required")]
+        [Compare("NewPassword", ErrorMessage = "Passwords do not match")]
+        public string ConfirmPassword { get; set; } = string.Empty;
+
+        /// <summary>CAPTCHA token (required when tenant security settings enable CAPTCHA)</summary>
+        public string? CaptchaToken { get; set; }
+    }
+
+    /// <summary>
     /// Request to validate password reset token
     /// </summary>
     public class ValidateResetTokenRequest

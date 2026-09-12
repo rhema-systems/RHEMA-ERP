@@ -59,11 +59,17 @@ public class JobInterviewQuestionDetailRepository : GenericRepository<JobIntervi
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Every question of a type, active or not — this backs the bank's per-type admin list, and an
+    /// <c>IsActive</c> filter here hid deactivated questions from the only screen that could bring them
+    /// back. The randomisers apply their own <c>IsActive</c> filter; <see cref="GetActiveQuestionsAsync"/>
+    /// remains the active-only read.
+    /// </summary>
     public async Task<IEnumerable<JobInterviewQuestionDetail>> GetByQuestionTypeIdAsync(Guid questionTypeId)
     {
         return await _dbSet
             .Include(q => q.QuestionType)
-            .Where(q => q.QuestionTypeId == questionTypeId && q.IsActive && !q.IsDeleted)
+            .Where(q => q.QuestionTypeId == questionTypeId && !q.IsDeleted)
             .OrderBy(q => q.Weight)
             .ToListAsync();
     }
@@ -96,30 +102,57 @@ public class JobInterviewRepository : GenericRepository<JobInterview>, IJobInter
 {
     public JobInterviewRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Everything <c>ToDto</c>, <c>ToSummaryDto</c> and the invitation emails read through a navigation.
+    ///
+    /// <para>Factored out for the same reason as <c>JobApplicationRepository.WithSummaryNavigations</c>:
+    /// these six reads each included a different subset, so the same interview came back with a job
+    /// title on one endpoint and an empty one on the next — and <c>GetByIdAsync</c> (which backs
+    /// <c>GET /{id}</c> <b>and</b> every create/update response) inherited the bare generic repository
+    /// and included nothing at all.</para>
+    ///
+    /// <para><c>JobVacancy.Requisition.JobDescription</c> is the load-bearing one.
+    /// <c>JobVacancy.JobTitle</c> is <c>[NotMapped]</c> and resolves as
+    /// <c>CustomAdvertTitle ?? Requisition.JobDescription.JobTitle</c>. Without the chain every
+    /// interview read returned an empty <c>jobTitle</c>, and — worse — the candidate invitation, the
+    /// reschedule notice and the panelist assignment email all fell back to the literal
+    /// <i>"the position"</i>.</para>
+    /// </summary>
+    private IQueryable<JobInterview> WithSummaryNavigations() =>
+        _dbSet
+            .Include(i => i.JobVacancy).ThenInclude(v => v.Position)
+            .Include(i => i.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
+            .Include(i => i.Interviewees).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+            .Include(i => i.Panelists).ThenInclude(p => p.Employee)
+            .Include(i => i.ExternalPanelists).ThenInclude(ep => ep.ExternalAssociate);
+
+    // GET /{id} and every write response map through ToDto, which reads VacancyNumber and JobTitle off
+    // the vacancy navigation — the generic base loaded neither.
+    public override async Task<JobInterview?> GetByIdAsync(Guid id)
+    {
+        return await WithSummaryNavigations()
+            .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
+    }
+
     public async Task<JobInterview?> GetByInterviewNumberAsync(string interviewNumber)
     {
-        return await _dbSet
-            .Include(i => i.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(i => i.InterviewNumber == interviewNumber && !i.IsDeleted);
     }
 
     public async Task<JobInterview?> GetWithFullDetailsAsync(Guid id)
     {
-        return await _dbSet
-            .Include(i => i.JobVacancy).ThenInclude(v => v.Position)
-            .Include(i => i.Interviewees).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
-            .Include(i => i.Panelists).ThenInclude(p => p.Employee)
-            .Include(i => i.ExternalPanelists).ThenInclude(ep => ep.ExternalAssociate)
+        return await WithSummaryNavigations()
+            .Include(i => i.Panelists).ThenInclude(p => p.Employee).ThenInclude(e => e.Position)
             .Include(i => i.Questions).ThenInclude(q => q.QuestionType)
-            .Include(i => i.Questions).ThenInclude(q => q.SelectedQuestions).ThenInclude(sq => sq.Question)
+            .Include(i => i.Questions).ThenInclude(q => q.SelectedQuestions.OrderBy(sq => sq.DisplayOrder))
+                .ThenInclude(sq => sq.Question)
             .FirstOrDefaultAsync(i => i.Id == id && !i.IsDeleted);
     }
 
     public async Task<IEnumerable<JobInterview>> GetByVacancyIdAsync(Guid vacancyId)
     {
-        return await _dbSet
-            .Include(i => i.Interviewees).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
-            .Include(i => i.Panelists).ThenInclude(p => p.Employee)
+        return await WithSummaryNavigations()
             .Where(i => i.JobVacancyId == vacancyId && !i.IsDeleted)
             .OrderBy(i => i.Round)
             .ThenBy(i => i.ScheduledDate)
@@ -128,8 +161,7 @@ public class JobInterviewRepository : GenericRepository<JobInterview>, IJobInter
 
     public async Task<IEnumerable<JobInterview>> GetByStatusAsync(JobInterviewStatus status)
     {
-        return await _dbSet
-            .Include(i => i.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .Where(i => i.Status == status && !i.IsDeleted)
             .OrderBy(i => i.ScheduledDate)
             .ToListAsync();
@@ -137,11 +169,7 @@ public class JobInterviewRepository : GenericRepository<JobInterview>, IJobInter
 
     public async Task<IEnumerable<JobInterview>> GetByDateRangeAsync(DateOnly from, DateOnly to)
     {
-        return await _dbSet
-            .Include(i => i.JobVacancy).ThenInclude(v => v.Position)
-            .Include(i => i.Interviewees).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
-            .Include(i => i.Panelists).ThenInclude(p => p.Employee)
-            .Include(i => i.ExternalPanelists).ThenInclude(ep => ep.ExternalAssociate)
+        return await WithSummaryNavigations()
             .Where(i => !i.IsDeleted
                      && i.ScheduledDate >= from
                      && i.ScheduledDate <= to)
@@ -152,8 +180,7 @@ public class JobInterviewRepository : GenericRepository<JobInterview>, IJobInter
 
     public async Task<IEnumerable<JobInterview>> GetByRoundAsync(Guid vacancyId, int round)
     {
-        return await _dbSet
-            .Include(i => i.Interviewees).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+        return await WithSummaryNavigations()
             .Where(i => i.JobVacancyId == vacancyId && i.Round == round && !i.IsDeleted)
             .OrderBy(i => i.ScheduledDate)
             .ToListAsync();
@@ -187,10 +214,24 @@ public class JobInterviewPanelistRepository : GenericRepository<JobInterviewPane
 {
     public JobInterviewPanelistRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// <c>ToDto</c> reads the interview number, the employee's name and the employee's position title.
+    /// Only the employee was ever included, so <c>interviewNumber</c> came back empty and
+    /// <c>employeePositionTitle</c> — the column that tells a recruiter who is on the panel and in what
+    /// capacity — was null on every row.
+    /// </summary>
+    private IQueryable<JobInterviewPanelist> WithSummaryNavigations() =>
+        _dbSet
+            .Include(p => p.Employee).ThenInclude(e => e.Position)
+            .Include(p => p.JobInterview).ThenInclude(i => i.JobVacancy)
+                .ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription);
+
+    public override async Task<JobInterviewPanelist?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+
     public async Task<IEnumerable<JobInterviewPanelist>> GetByInterviewIdAsync(Guid interviewId)
     {
-        return await _dbSet
-            .Include(p => p.Employee)
+        return await WithSummaryNavigations()
             .Where(p => p.JobInterviewId == interviewId && !p.IsDeleted)
             .OrderBy(p => p.Employee.LastName)
             .ToListAsync();
@@ -198,7 +239,7 @@ public class JobInterviewPanelistRepository : GenericRepository<JobInterviewPane
 
     public async Task<IEnumerable<JobInterviewPanelist>> GetByEmployeeIdAsync(Guid employeeId)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Include(p => p.JobInterview).ThenInclude(i => i.JobVacancy).ThenInclude(v => v.Position)
             .Where(p => p.EmployeeId == employeeId && !p.IsDeleted)
             .OrderByDescending(p => p.JobInterview.ScheduledDate)
@@ -206,9 +247,7 @@ public class JobInterviewPanelistRepository : GenericRepository<JobInterviewPane
     }
 
     public async Task<JobInterviewPanelist?> GetByConfirmationTokenAsync(string token)
-        => await _dbSet
-            .Include(p => p.Employee)
-            .Include(p => p.JobInterview).ThenInclude(i => i.JobVacancy)
+        => await WithSummaryNavigations()
             .FirstOrDefaultAsync(p => p.ConfirmationToken == token && !p.IsDeleted);
 }
 
@@ -224,19 +263,25 @@ public class JobInterviewExternalPanelistRepository : GenericRepository<JobInter
 {
     public JobInterviewExternalPanelistRepository(ApplicationDbContext context) : base(context) { }
 
+    private IQueryable<JobInterviewExternalPanelist> WithSummaryNavigations() =>
+        _dbSet
+            .Include(p => p.ExternalAssociate)
+            .Include(p => p.JobInterview).ThenInclude(i => i.JobVacancy)
+                .ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription);
+
+    public override async Task<JobInterviewExternalPanelist?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+
     public async Task<IEnumerable<JobInterviewExternalPanelist>> GetByInterviewIdAsync(Guid interviewId)
     {
-        return await _dbSet
-            .Include(p => p.ExternalAssociate)
+        return await WithSummaryNavigations()
             .Where(p => p.JobInterviewId == interviewId && !p.IsDeleted)
             .OrderBy(p => p.ExternalAssociate.LastName)
             .ToListAsync();
     }
 
     public async Task<JobInterviewExternalPanelist?> GetByConfirmationTokenAsync(string token)
-        => await _dbSet
-            .Include(p => p.ExternalAssociate)
-            .Include(p => p.JobInterview).ThenInclude(i => i.JobVacancy)
+        => await WithSummaryNavigations()
             .FirstOrDefaultAsync(p => p.ConfirmationToken == token && !p.IsDeleted);
 }
 
@@ -252,18 +297,31 @@ public class JobIntervieweeRepository : GenericRepository<JobInterviewee>, IJobI
 {
     public JobIntervieweeRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// <c>ToDto</c> reads the candidate's name and email off <c>JobApplication.JobCandidate</c> and the
+    /// interview number off <c>JobInterview</c>; <c>ToSummaryDto</c> also reads the interview's date and
+    /// status. Each read included a different half, and the invitation emails need the vacancy's job
+    /// title through the requisition chain.
+    /// </summary>
+    private IQueryable<JobInterviewee> WithSummaryNavigations() =>
+        _dbSet
+            .Include(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+            .Include(ie => ie.JobInterview).ThenInclude(i => i.JobVacancy)
+                .ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription);
+
+    public override async Task<JobInterviewee?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(ie => ie.Id == id && !ie.IsDeleted);
+
     public async Task<IEnumerable<JobInterviewee>> GetByInterviewIdAsync(Guid interviewId)
     {
-        return await _dbSet
-            .Include(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+        return await WithSummaryNavigations()
             .Where(ie => ie.JobInterviewId == interviewId && !ie.IsDeleted)
             .ToListAsync();
     }
 
     public async Task<IEnumerable<JobInterviewee>> GetByApplicationIdAsync(Guid applicationId)
     {
-        return await _dbSet
-            .Include(ie => ie.JobInterview)
+        return await WithSummaryNavigations()
             .Where(ie => ie.JobApplicationId == applicationId && !ie.IsDeleted)
             .OrderByDescending(ie => ie.JobInterview.ScheduledDate)
             .ToListAsync();
@@ -271,9 +329,7 @@ public class JobIntervieweeRepository : GenericRepository<JobInterviewee>, IJobI
 
     public async Task<JobInterviewee?> GetByConfirmationTokenAsync(string token)
     {
-        return await _dbSet
-            .Include(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
-            .Include(ie => ie.JobInterview).ThenInclude(i => i.JobVacancy)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(ie => ie.ConfirmationToken == token && !ie.IsDeleted);
     }
 }
@@ -290,13 +346,24 @@ public class JobInterviewQuestionRepository : GenericRepository<JobInterviewQues
 {
     public JobInterviewQuestionRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// Plans in the order the preset laid them out, each with its questions in the order they were
+    /// committed.
+    ///
+    /// <para>Both orderings were being discarded. The plans were sorted by question-type name rather
+    /// than <c>DisplayOrder</c>, and the selected questions had no ordering at all — an unordered
+    /// <c>Include</c> returns whatever order the database happens to give, so the sequence the panel
+    /// agreed in the commit step survived only by luck. <c>DisplayOrder</c> is written on both tables
+    /// and was read by nothing.</para>
+    /// </summary>
     public async Task<IEnumerable<JobInterviewQuestion>> GetByInterviewIdAsync(Guid interviewId)
     {
         return await _dbSet
             .Include(q => q.QuestionType)
-            .Include(q => q.SelectedQuestions).ThenInclude(sq => sq.Question)
+            .Include(q => q.SelectedQuestions.OrderBy(sq => sq.DisplayOrder)).ThenInclude(sq => sq.Question)
             .Where(q => q.JobInterviewId == interviewId && !q.IsDeleted)
-            .OrderBy(q => q.QuestionType.TypeName)
+            .OrderBy(q => q.DisplayOrder)
+            .ThenBy(q => q.QuestionType.TypeName)
             .ToListAsync();
     }
 }
@@ -335,11 +402,26 @@ public class JobInterviewScoreSummaryRepository : GenericRepository<JobInterview
 {
     public JobInterviewScoreSummaryRepository(ApplicationDbContext context) : base(context) { }
 
+    /// <summary>
+    /// <c>ToDto</c> reads the candidate's name and application number off the interviewee, the internal
+    /// panelist's name off <c>InternalPanelist.Employee</c>, and the external panelist's name off
+    /// <c>ExternalPanelist.ExternalAssociate</c>. No single read loaded all three: the by-interviewee
+    /// reads had the panelists but not the candidate, the by-panelist reads had the candidate but not
+    /// the panelists, and <c>ExternalAssociate</c> was never included anywhere — so an external
+    /// panelist's scorecard always came back with a blank name on every endpoint.
+    /// </summary>
+    private IQueryable<JobInterviewScoreSummary> WithSummaryNavigations() =>
+        _dbSet
+            .Include(s => s.JobInterviewee).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+            .Include(s => s.InternalPanelist).ThenInclude(p => p!.Employee)
+            .Include(s => s.ExternalPanelist).ThenInclude(p => p!.ExternalAssociate);
+
+    public override async Task<JobInterviewScoreSummary?> GetByIdAsync(Guid id)
+        => await WithSummaryNavigations().FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
+
     public async Task<IEnumerable<JobInterviewScoreSummary>> GetByIntervieweeIdAsync(Guid intervieweeId)
     {
-        return await _dbSet
-            .Include(s => s.InternalPanelist).ThenInclude(p => p!.Employee)
-            .Include(s => s.ExternalPanelist)
+        return await WithSummaryNavigations()
             .Where(s => s.JobIntervieweeId == intervieweeId && !s.IsDeleted)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync();
@@ -347,8 +429,7 @@ public class JobInterviewScoreSummaryRepository : GenericRepository<JobInterview
 
     public async Task<IEnumerable<JobInterviewScoreSummary>> GetByInternalPanelistIdAsync(Guid panelistId)
     {
-        return await _dbSet
-            .Include(s => s.JobInterviewee).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+        return await WithSummaryNavigations()
             .Where(s => s.InternalPanelistId == panelistId && !s.IsDeleted)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
@@ -356,8 +437,7 @@ public class JobInterviewScoreSummaryRepository : GenericRepository<JobInterview
 
     public async Task<IEnumerable<JobInterviewScoreSummary>> GetByExternalPanelistIdAsync(Guid externalPanelistId)
     {
-        return await _dbSet
-            .Include(s => s.JobInterviewee).ThenInclude(ie => ie.JobApplication).ThenInclude(a => a.JobCandidate)
+        return await WithSummaryNavigations()
             .Where(s => s.ExternalPanelistId == externalPanelistId && !s.IsDeleted)
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
@@ -365,16 +445,14 @@ public class JobInterviewScoreSummaryRepository : GenericRepository<JobInterview
 
     public async Task<JobInterviewScoreSummary?> GetWithScoreEntriesAsync(Guid id)
     {
-        return await _dbSet
+        return await WithSummaryNavigations()
             .Include(s => s.ScoreEntries).ThenInclude(e => e.Question)
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
     }
 
     public async Task<IEnumerable<JobInterviewScoreSummary>> GetFinalizedForIntervieweeAsync(Guid intervieweeId)
     {
-        return await _dbSet
-            .Include(s => s.InternalPanelist).ThenInclude(p => p!.Employee)
-            .Include(s => s.ExternalPanelist)
+        return await WithSummaryNavigations()
             .Where(s => s.JobIntervieweeId == intervieweeId && s.IsFinalized && !s.IsDeleted)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync();

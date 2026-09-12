@@ -43,9 +43,16 @@ public sealed class CompanyHrPolicyProvider : ICompanyHrPolicyProvider
     }
 
     /// <inheritdoc />
-    public async Task<CompanyHrPolicySettings> GetAsync(CancellationToken cancellationToken = default)
+    public Task<CompanyHrPolicySettings> GetAsync(CancellationToken cancellationToken = default)
+        => GetForTenantAsync(GetTenantId(), cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<CompanyHrPolicySettings> GetForTenantAsync(
+        Guid tenantId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant is required to read the HR policy settings.", nameof(tenantId));
+
         var settings = await _repo
             .GetQueryable()
             .AsNoTracking()

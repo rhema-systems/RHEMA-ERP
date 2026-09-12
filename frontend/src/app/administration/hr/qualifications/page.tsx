@@ -116,6 +116,10 @@ export default function QualificationsPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Code</TableHead>
                   <TableHead>Type</TableHead>
+                  {/* The level is a separate fact from the type: one is the category, the other the
+                      rank. A field that can be set but not seen cannot be checked, which is how a
+                      write-only column stays wrong without anyone noticing. */}
+                  <TableHead>Level</TableHead>
                   <TableHead>Issuing authority</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="w-[70px]"></TableHead>
@@ -128,6 +132,7 @@ export default function QualificationsPage() {
                       <TableCell><Skeleton className="h-4 w-[180px]" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
+                      <TableCell><Skeleton className="h-4 w-[100px]" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-[140px]" /></TableCell>
                       <TableCell><Skeleton className="h-4 w-[70px]" /></TableCell>
                       <TableCell><Skeleton className="h-8 w-8" /></TableCell>
@@ -135,7 +140,7 @@ export default function QualificationsPage() {
                   ))
                 ) : qualifications.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6}>
+                    <TableCell colSpan={7}>
                       <EmptyState
                         icon={GraduationCap}
                         title={search ? 'No matching qualifications' : 'No qualifications yet'}
@@ -165,6 +170,9 @@ export default function QualificationsPage() {
                       <TableCell className="font-medium">{q.name}</TableCell>
                       <TableCell className="text-muted-foreground">{q.shortCode || '—'}</TableCell>
                       <TableCell>{typeLabel(q.type)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {q.qualificationLevelName || 'Unranked'}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">
                         {q.issuingAuthority || '—'}
                       </TableCell>

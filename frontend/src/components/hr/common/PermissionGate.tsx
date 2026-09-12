@@ -18,10 +18,16 @@ interface PermissionGateProps {
  * complements `AuthGuard`, which gates whole routes; it is not a security boundary on its
  * own (the API authorizes every call regardless).
  *
- * ⚠ HR permissions are not seeded yet. Only the occupational-health slice has real
- * permission names (`HR.Medical.*`); everything else in HR is still gated by role. Prefer
- * `roles` here until HR permissions exist, and note that the HR role is seeded as
- * "HR User" while several controllers authorize a bare "HR" — pass both spellings.
+ * ⚠ HR is part role-gated and part permission-gated, so pick per area rather than by habit.
+ * `HR.Medical.*` is real, seeded, and enforced — the whole medical module authorizes on it, and
+ * an HR-role user holds Read and Write but **not** Admin, so deletes there refuse by design. Every
+ * other HR area is still gated by role, so `roles` remains correct for those until the W3
+ * permission sweep lands.
+ *
+ * Two exceptions worth knowing inside medical: the facility, physician and facility-service
+ * registers keep their READS open to any authenticated user (an employee filing a claim has to
+ * name a facility), and the employee self-service surfaces are scoped by token rather than by
+ * permission — neither needs a gate here at all.
  *
  * With neither `permissions` nor `roles`, the children render: an unconfigured gate must
  * never silently hide functionality.
@@ -42,7 +48,11 @@ export function PermissionGate({ permissions, roles, fallback = null, children }
 export const HR_ADMIN_ROLES = ['admin', 'SuperAdmin', 'TenantAdmin'];
 
 /**
- * Roles with HR access. Both spellings are listed deliberately: the seeder creates
- * "HR User" but several HR controllers authorize a bare "HR".
+ * Roles with HR access.
+ *
+ * "HR User" was the pre-rename name and no longer exists on a migrated tenant (the reference
+ * database has only "HR"). It stays listed so a tenant that has not yet run
+ * `MigrateLegacyHrRoleNameAsync` keeps access — the same reason the backend's role fallback still
+ * carries it. Drop both together once every environment is known to be migrated.
  */
 export const HR_ROLES = [...HR_ADMIN_ROLES, 'HR', 'HR User'];

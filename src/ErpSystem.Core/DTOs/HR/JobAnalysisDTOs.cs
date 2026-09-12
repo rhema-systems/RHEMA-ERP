@@ -163,6 +163,7 @@ public class UpdateJobDutyItemDto : UpdateDtoBase
 /// <summary>
 /// DTO for creating a job description
 /// </summary>
+[CallerSuppliesIdentifiers]
 public class CreateJobDescriptionDto : CreateDtoBase
 {
     [Required]
@@ -190,6 +191,54 @@ public class CreateJobDescriptionDto : CreateDtoBase
     public List<CreateJobPhysicalDemandDto>? PhysicalDemands { get; set; }
     public List<CreateJobWorkingConditionDto>? WorkingConditions { get; set; }
     public List<CreateJobEquipmentToolDto>? EquipmentTools { get; set; }
+    // ── classification, valuation and authority ──────────────────────────────
+    // ⚠ These existed on the entity and on UpdateJobDescriptionDto but not here, so a job
+    // description could only be created bare and classified on a second call — a create form had
+    // to save twice, and anything that skipped the second save left the taxonomy tables with no
+    // consumer at all. Measured 2026-08-19 by run-slice2.mjs.
+
+    /// <summary>Job family this role belongs to. See <c>JobArchitectureController</c>.</summary>
+    public Guid? JobFamilyId { get; set; }
+
+    /// <summary>Sub-family within <see cref="JobFamilyId"/>.</summary>
+    public Guid? JobSubFamilyId { get; set; }
+
+    /// <summary>Job level (rank) this role sits at.</summary>
+    public Guid? JobLevelId { get; set; }
+
+    /// <summary>Staff level (MGT / SNR / JNR) the role is graded against.</summary>
+    public Guid? StaffLevelId { get; set; }
+
+    /// <summary>Payroll-owned salary grade suggested by the valuation. Read-only reference.</summary>
+    public Guid? SuggestedSalaryGradeId { get; set; }
+
+    /// <summary>Union the role falls under when <see cref="IsBargainingUnitRole"/> is set.</summary>
+    public Guid? UnionId { get; set; }
+
+    public bool IsBargainingUnitRole { get; set; }
+
+    public string? OccupationCode { get; set; }
+
+    public string? EssentialFunctionsSummary { get; set; }
+
+    public EmploymentType? IntendedEmploymentType { get; set; }
+
+    public RoleCriticalityLevel? RoleCriticality { get; set; }
+
+    public decimal? RoleIntrinsicValue { get; set; }
+
+    public decimal? IndustryBenchmarkSalary { get; set; }
+
+    public string? ValuationNotes { get; set; }
+
+    public DecisionAuthorityLevel? AutonomyLevel { get; set; }
+
+    public string? DecisionMakingScope { get; set; }
+
+    public decimal? FinancialAuthorityLimit { get; set; }
+
+    public string? ApprovalAuthorityNotes { get; set; }
+
     public List<CreateJobReportingRelationshipDto>? ReportingRelationships { get; set; }
 }
 
@@ -283,6 +332,12 @@ public class ReviewJobDescriptionDto
 /// <summary>
 /// DTO for approving a job description
 /// </summary>
+/// <summary>Why a job description was sent back to its author on the workflow route.</summary>
+public class RejectJobDescriptionDto
+{
+    public string? Reason { get; set; }
+}
+
 public class ApproveJobDescriptionDto
 {
     [Required]
@@ -641,6 +696,9 @@ public class ManpowerBudgetDto : BaseDto
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovalDate { get; set; }
+
+    /// <summary>Why the budget was sent back, when it was. See the entity for why this exists.</summary>
+    public string? RejectionReason { get; set; }
 }
 
 /// <summary>
@@ -798,6 +856,93 @@ public class UpdateManpowerBudgetDto : UpdateDtoBase
 /// <summary>
 /// DTO for approving a manpower budget
 /// </summary>
+/// <summary>A position with no approved job description — the work list behind FR-HR-134.</summary>
+public class UncoveredPositionDto
+{
+    public Guid PositionId { get; set; }
+
+    public string PositionTitle { get; set; } = string.Empty;
+
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary>Live count of people doing a job nobody has described.</summary>
+    public int CurrentlyFilled { get; set; }
+
+    /// <summary>True when a draft or pending job description exists but has not been approved.</summary>
+    public bool HasUnapprovedDraft { get; set; }
+}
+
+/// <summary>Where the organisation is short against the competencies its positions require.</summary>
+/// <remarks>
+/// Aggregates the per-employee gap analysis across everyone in a position that requires the
+/// competency. This is the training-needs question — FR-HR-004's planning link in its most concrete
+/// form — and it is the reason the competency framework is worth maintaining at all.
+/// </remarks>
+public class OrganisationCompetencyGapDto
+{
+    public Guid CompetencyId { get; set; }
+
+    public string CompetencyCode { get; set; } = string.Empty;
+
+    public string CompetencyName { get; set; } = string.Empty;
+
+    public string CompetencyCategory { get; set; } = string.Empty;
+
+    /// <summary>Employees in a position that requires this competency.</summary>
+    public int EmployeesRequiring { get; set; }
+
+    /// <summary>Of those, how many have been assessed at or above the required level.</summary>
+    public int MeetingRequirement { get; set; }
+
+    /// <summary>Assessed below the required level.</summary>
+    public int BelowRequirement { get; set; }
+
+    /// <summary>⚠ Never assessed. Distinct from "below" — an unknown is not a shortfall.</summary>
+    public int NotAssessed { get; set; }
+}
+
+/// <summary>Sets a position's approved establishment without going through a manpower budget.</summary>
+public class SetPositionEstablishmentDto
+{
+    [Range(0, 10000)]
+    public int ExpectedHeadcount { get; set; }
+
+    /// <summary>Why this number, for the audit trail a budget approval would otherwise provide.</summary>
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>A position's establishment, and where the number came from.</summary>
+public class PositionEstablishmentResultDto
+{
+    public Guid PositionId { get; set; }
+
+    public string PositionTitle { get; set; } = string.Empty;
+
+    public int ExpectedHeadcount { get; set; }
+
+    /// <summary>Live count of active employees in the post — not a figure anyone typed.</summary>
+    public int CurrentlyFilled { get; set; }
+
+    /// <summary>Null when nobody has ever authorised a headcount for this post.</summary>
+    public DateTime? EstablishmentApprovedOn { get; set; }
+
+    /// <summary>The budget that authorised it; null when HR set it directly.</summary>
+    public Guid? EstablishmentSourceBudgetId { get; set; }
+
+    public string? EstablishmentSourceBudgetNumber { get; set; }
+
+    /// <summary>False when the post is unestablished, in which case no rule constrains it.</summary>
+    public bool IsEstablished { get; set; }
+}
+
+/// <summary>Why a manpower budget was refused.</summary>
+public class RejectManpowerBudgetDto
+{
+    public string? Reason { get; set; }
+}
+
 public class ApproveManpowerBudgetDto
 {
     [Required]
@@ -1389,6 +1534,27 @@ public class JobAnalyticsDto
     public int ActiveCount { get; set; }
     public int DueForReviewCount { get; set; }
     public int PositionsCovered { get; set; }
+
+    /// <summary>Every live position in the tenant — the denominator <see cref="PositionsCovered"/> was missing.</summary>
+    /// <remarks>
+    /// ⚠ "1 position covered" is not a fact anyone can act on without knowing whether that is 1 of 2
+    /// or 1 of 146. FR-HR-134 asks for approved job descriptions <i>against positions</i>, so
+    /// coverage — and the list of what is NOT covered — is the whole reporting question.
+    /// </remarks>
+    public int TotalPositions { get; set; }
+
+    /// <summary>Positions with no approved job description at all.</summary>
+    public int PositionsUncovered { get; set; }
+
+    /// <summary>Positions whose establishment has been authorised (FR-HR-136).</summary>
+    public int PositionsEstablished { get; set; }
+
+    /// <summary>⚠ Established posts holding more people than the establishment allows.</summary>
+    /// <remarks>
+    /// The one number on this dashboard that is a live problem rather than a progress bar: every
+    /// one of these refuses new movements and requisitions until it is resolved.
+    /// </remarks>
+    public int PositionsOverStrength { get; set; }
     public int ValuedRoleCount { get; set; }
     public decimal? AverageEstimatedSalary { get; set; }
     public int MissionCriticalRoleCount { get; set; }

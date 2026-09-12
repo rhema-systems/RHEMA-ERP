@@ -1,6 +1,8 @@
 'use client';
 
 import type { FieldValues, Path, UseFormReturn } from 'react-hook-form';
+import { z } from 'zod';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -49,11 +51,142 @@ export function TextField<T extends FieldValues>({
   placeholder,
   required,
   type = 'text',
-}: BaseProps<T> & { type?: 'text' | 'email' | 'tel' }) {
+  disabled,
+  hint,
+}: BaseProps<T> & {
+  type?: 'text' | 'email' | 'tel';
+  /**
+   * Greys the box out. The value still registers and still submits — which is the point where a
+   * field is derived server-side: the record keeps saying what it says, the user just cannot type
+   * over something the server is about to overwrite.
+   */
+  disabled?: boolean;
+  /** Small note under the field, hidden while an error is showing. */
+  hint?: string;
+}) {
   return (
     <div className="space-y-2">
       <FieldLabel htmlFor={name} label={label} required={required} />
-      <Input id={name} type={type} placeholder={placeholder} {...form.register(name)} />
+      <Input
+        id={name}
+        type={type}
+        placeholder={placeholder}
+        readOnly={disabled}
+        disabled={disabled}
+        {...form.register(name)}
+      />
+      {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+      <FieldError form={form} name={name} />
+    </div>
+  );
+}
+
+/** A swatch preset needs to read as a colour, not a hex string, so the label is only a tooltip. */
+const COLOR_PRESETS = [
+  '#4F46E5', '#2563EB', '#0891B2', '#059669', '#65A30D',
+  '#CA8A04', '#EA580C', '#DC2626', '#DB2777', '#7C3AED',
+  '#475569', '#171717',
+];
+
+/**
+ * A CSS hex colour: #RGB, #RRGGBB or #RRGGBBAA. Mirrors `Constants.Colors.HexPattern` server-side —
+ * keep the two in step, since the API rejects a mismatch with a 400 the form cannot attribute to a
+ * field.
+ */
+export const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+/**
+ * Zod schema for an optional hex colour field. Empty is allowed — these are all nullable — but a
+ * non-empty value must be a real hex code, so a typo is caught on submit instead of coming back as
+ * a server-side 400.
+ */
+export const hexColorSchema = z
+  .string()
+  .trim()
+  .refine((v) => v === '' || HEX_COLOR_PATTERN.test(v), {
+    message: 'Use a hex colour such as #4F46E5 (#RGB, #RRGGBB or #RRGGBBAA).',
+  })
+  .optional()
+  .or(z.literal(''));
+
+const HEX_PATTERN = HEX_COLOR_PATTERN;
+
+/**
+ * Colour input: a native picker, a set of presets, and the hex text kept visible and editable.
+ *
+ * The text box is retained deliberately rather than replaced — a brand palette arrives as hex codes
+ * that someone needs to paste, and these values are stored as strings the API round-trips. The picker
+ * is what most people will use; the text box is the escape hatch and the audit of what was chosen.
+ *
+ * ⚠ `<input type="color">` cannot represent "no colour" — it reports #000000 when empty. So the
+ * control never writes to the field on mount, only on an actual user action, and offers an explicit
+ * Clear. Otherwise simply opening a form would silently set every blank colour to black.
+ */
+export function ColorField<T extends FieldValues>({
+  form,
+  name,
+  label,
+  required,
+}: BaseProps<T>) {
+  const raw = form.watch(name) as unknown;
+  const value = typeof raw === 'string' ? raw : '';
+  const isValid = HEX_PATTERN.test(value);
+  // The native picker only accepts 6-digit hex; fall back to a neutral so it does not error, while
+  // the field itself stays empty.
+  const pickerValue = isValid && value.length === 7 ? value : '#4F46E5';
+
+  const setValue = (next: string) =>
+    form.setValue(name, next as any, { shouldDirty: true, shouldValidate: true });
+
+  return (
+    <div className="space-y-2">
+      <FieldLabel htmlFor={name} label={label} required={required} />
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          aria-label={`${label} picker`}
+          value={pickerValue}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          className="h-9 w-12 shrink-0 cursor-pointer rounded-md border bg-background p-1"
+        />
+        <Input
+          id={name}
+          placeholder="#4F46E5"
+          className="font-mono uppercase"
+          {...form.register(name)}
+        />
+        {value !== '' && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="shrink-0 text-muted-foreground"
+            onClick={() => setValue('')}
+          >
+            Clear
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {COLOR_PRESETS.map((preset) => (
+          <button
+            key={preset}
+            type="button"
+            title={preset}
+            aria-label={preset}
+            onClick={() => setValue(preset)}
+            className={`h-6 w-6 rounded-full border transition-transform hover:scale-110 ${
+              value.toUpperCase() === preset ? 'ring-2 ring-offset-2 ring-ring' : ''
+            }`}
+            style={{ backgroundColor: preset }}
+          />
+        ))}
+      </div>
+      {value !== '' && !isValid && (
+        <p className="text-sm text-amber-600">
+          Not a valid hex colour — use #RGB, #RRGGBB or #RRGGBBAA.
+        </p>
+      )}
       <FieldError form={form} name={name} />
     </div>
   );
@@ -85,6 +218,40 @@ export function DateField<T extends FieldValues>({ form, name, label, required }
       <FieldError form={form} name={name} />
     </div>
   );
+}
+
+/**
+ * Native datetime-local input for the API's `DateTime` fields.
+ *
+ * ⚠ The form holds the browser's `YYYY-MM-DDTHH:mm` local string, NOT an ISO instant — the control
+ * cannot represent a zone, and writing an ISO string straight into it silently drops the time. Use
+ * {@link toIsoInstant} on submit and {@link fromIsoInstant} when seeding, so the conversion happens
+ * once at the edge rather than being half-applied across a form.
+ */
+export function DateTimeField<T extends FieldValues>({ form, name, label, required }: BaseProps<T>) {
+  return (
+    <div className="space-y-2">
+      <FieldLabel htmlFor={name} label={label} required={required} />
+      <Input id={name} type="datetime-local" {...form.register(name)} />
+      <FieldError form={form} name={name} />
+    </div>
+  );
+}
+
+/** ISO instant → the `YYYY-MM-DDTHH:mm` local string `DateTimeField` expects. Empty for null. */
+export function fromIsoInstant(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** `DateTimeField`'s local string → an ISO instant. Null for empty, so an optional field stays unset. */
+export function toIsoInstant(local?: string | null): string | null {
+  if (!local) return null;
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 /**

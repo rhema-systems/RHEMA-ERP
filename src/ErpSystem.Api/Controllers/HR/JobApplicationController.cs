@@ -1,16 +1,39 @@
+using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Job applications — a candidate against a vacancy, and everything the recruiter does to it.
+///
+/// <para><b>Reads are HR's, unlike <see cref="JobVacancyController"/>.</b> A vacancy is an advert and
+/// the whole tenant may read it; an application carries the candidate's name, email, phone, date of
+/// birth, CV, test results and rejection reasons, plus the EEO demographic report and the shortlist
+/// CSV export. The controller previously carried a bare <c>[Authorize]</c>, so any authenticated
+/// employee could read all of that — and shortlist, reject, delete or approve on top of it.</para>
+///
+/// <para>The exception is the internal job board at the bottom of this file: those four endpoints are
+/// employee self-service and act only on the caller's own applications, so they stay open to any
+/// authenticated employee. Note that ASP.NET Core <i>combines</i> authorization attributes rather than
+/// letting the method override the class, which is why the gate is applied per endpoint here instead
+/// of once at class level with exemptions.</para>
+///
+/// <para>Shortlist approval deliberately stays off the generic workflow engine: it is a flag on the
+/// vacancy with several writers (shortlisting, un-shortlisting and auto-shortlisting all invalidate an
+/// in-flight decision), which is the <c>AppraisalStatus</c> shape. The one thing the engine would have
+/// given it — the initiator cannot approve their own submission — is enforced in the service.</para>
+/// </summary>
 [ApiController]
 [Route("api/job-applications")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[RecruitmentBusinessRules]
 public class JobApplicationController : ControllerBase
 {
     private readonly IJobApplicationService _service;
@@ -27,6 +50,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PagedResult<JobApplicationSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -34,45 +58,55 @@ public class JobApplicationController : ControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, vacancyId));
 
     [HttpGet("all")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetAll(
         [FromQuery] Guid? vacancyId = null)
         => Ok(await _service.GetAllAsync(vacancyId));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobApplicationDto>> GetById(Guid id)
         => Ok(await _service.GetByIdAsync(id));
 
     [HttpGet("number/{applicationNumber}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobApplicationDto?>> GetByApplicationNumber(string applicationNumber)
         => Ok(await _service.GetByApplicationNumberAsync(applicationNumber));
 
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<JobApplicationDetailDto>> GetWithDetails(Guid id)
         => Ok(await _service.GetWithFullDetailsAsync(id));
 
     [HttpGet("vacancy/{vacancyId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetByVacancy(Guid vacancyId)
         => Ok(await _service.GetByVacancyIdAsync(vacancyId));
 
     [HttpGet("candidate/{candidateId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetByCandidate(Guid candidateId)
         => Ok(await _service.GetByCandidateIdAsync(candidateId));
 
     [HttpGet("status/{status}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetByStatus(
         ApplicationStatus status, [FromQuery] Guid? vacancyId = null)
         => Ok(await _service.GetByStatusAsync(status, vacancyId));
 
     [HttpGet("shortlisted")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetAllShortlisted(
         [FromQuery] Guid? vacancyId = null)
         => Ok(await _service.GetShortlistedAsync(vacancyId));
 
     [HttpGet("vacancy/{vacancyId:guid}/shortlisted")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetShortlisted(Guid vacancyId)
         => Ok(await _service.GetShortlistedAsync(vacancyId));
 
     [HttpGet("stage/{pipelineStageId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetByCurrentStage(Guid pipelineStageId)
         => Ok(await _service.GetByCurrentStageAsync(pipelineStageId));
 
@@ -81,6 +115,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobApplicationDto>> Create([FromBody] CreateJobApplicationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -98,6 +133,7 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         await _service.DeleteAsync(id);
@@ -107,8 +143,13 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
     // WORKFLOW
     // =========================================================================
+    // Every action below takes its subject from the route and overwrites whatever id the body carried.
+    // These DTOs all declare ApplicationId, and it used to be the only thing the service read — so a
+    // POST to /{A}/reject with {"applicationId": B} rejected B while the audit trail, the URL and the
+    // client all said A. Two of the endpoints (unshortlist, waitlist) already did this; the rest did not.
 
     [HttpPost("{id:guid}/shortlist")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Shortlist(Guid id, [FromBody] ShortlistApplicationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -117,11 +158,13 @@ public class JobApplicationController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.ApplicationId = id;
         await _service.ShortlistAsync(dto, employeeId.Value);
         return Ok(new { message = "Application shortlisted." });
     }
 
     [HttpPost("{id:guid}/reject")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Reject(Guid id, [FromBody] RejectApplicationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -130,11 +173,13 @@ public class JobApplicationController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.ApplicationId = id;
         await _service.RejectAsync(dto, employeeId.Value);
         return Ok(new { message = "Application rejected." });
     }
 
     [HttpPost("{id:guid}/withdraw")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Withdraw(Guid id, [FromBody] WithdrawApplicationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -143,11 +188,17 @@ public class JobApplicationController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.ApplicationId = id;
         await _service.WithdrawAsync(dto, employeeId.Value);
         return Ok(new { message = "Application withdrawn." });
     }
 
+    /// <summary>
+    /// Moves an application to a pipeline stage. Identical in effect to
+    /// <c>POST api/applications/move-stage</c> — both now run the same guarded transition.
+    /// </summary>
     [HttpPost("{id:guid}/move-to-stage")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> MoveToStage(Guid id, [FromBody] MoveApplicationToStageDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -156,6 +207,7 @@ public class JobApplicationController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.ApplicationId = id;
         await _service.MoveToStageAsync(dto, employeeId.Value);
         return Ok(new { message = "Application moved to stage." });
     }
@@ -165,6 +217,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("{applicationId:guid}/stage-history")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicationStageHistoryDto>>> GetStageHistory(Guid applicationId)
         => Ok(await _service.GetStageHistoryAsync(applicationId));
 
@@ -173,19 +226,23 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("{applicationId:guid}/test-results")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicantTestResultDto>>> GetTestResults(Guid applicationId)
         => Ok(await _service.GetTestResultsAsync(applicationId));
 
     [HttpGet("vacancy/{vacancyId:guid}/test-results")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicantTestResultDto>>> GetTestResultsByVacancy(Guid vacancyId)
         => Ok(await _service.GetTestResultsByVacancyAsync(vacancyId));
 
     [HttpGet("{applicationId:guid}/test-results/type/{testType}")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicantTestResultDto>>> GetTestResultsByType(
         Guid applicationId, JobApplicantTestType testType)
         => Ok(await _service.GetTestResultsByTypeAsync(applicationId, testType));
 
     [HttpPost("{applicationId:guid}/test-results")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobApplicantTestResultDto>> AddTestResult(
         Guid applicationId, [FromBody] CreateJobApplicantTestResultDto dto)
     {
@@ -199,10 +256,12 @@ public class JobApplicationController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobApplicationId = applicationId;
         return Ok(await _service.AddTestResultAsync(dto, tenantId.Value, employeeId.Value));
     }
 
     [HttpPut("test-results/{testResultId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobApplicantTestResultDto>> UpdateTestResult(
         Guid testResultId, [FromBody] UpdateJobApplicantTestResultDto dto)
     {
@@ -217,6 +276,7 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpDelete("test-results/{testResultId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
     public async Task<IActionResult> DeleteTestResult(Guid testResultId)
     {
         await _service.DeleteTestResultAsync(testResultId);
@@ -228,10 +288,12 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("{applicationId:guid}/communications")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobApplicantCommunicationDto>>> GetCommunications(Guid applicationId)
         => Ok(await _service.GetCommunicationsAsync(applicationId));
 
     [HttpPost("{applicationId:guid}/communications")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<JobApplicantCommunicationDto>> AddCommunication(
         Guid applicationId, [FromBody] CreateJobApplicantCommunicationDto dto)
     {
@@ -245,6 +307,7 @@ public class JobApplicationController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
+        dto.JobApplicationId = applicationId;
         return Ok(await _service.AddCommunicationAsync(dto, tenantId.Value, employeeId.Value));
     }
 
@@ -253,6 +316,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/unshortlist")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Unshortlist(Guid id, [FromBody] UnshortlistApplicationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -265,6 +329,7 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpPost("{id:guid}/waitlist")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Waitlist(Guid id, [FromBody] WaitlistApplicationDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -279,8 +344,12 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
     // SHORTLISTING — BULK / AUTO
     // =========================================================================
+    // The vacancy comes from the route and is passed to the service, which drops any id in the body
+    // that belongs to a different vacancy. Without that, "reject everyone I did not shortlist here"
+    // would act on whatever ids the caller supplied, from any vacancy in the tenant.
 
     [HttpPost("vacancy/{vacancyId:guid}/bulk-shortlist")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> BulkShortlist(
         Guid vacancyId, [FromBody] BulkShortlistDto dto)
     {
@@ -288,10 +357,11 @@ public class JobApplicationController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record.");
-        return Ok(await _service.BulkShortlistAsync(dto, employeeId.Value));
+        return Ok(await _service.BulkShortlistAsync(vacancyId, dto, employeeId.Value));
     }
 
     [HttpPost("vacancy/{vacancyId:guid}/bulk-reject")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> BulkReject(
         Guid vacancyId, [FromBody] BulkRejectDto dto)
     {
@@ -299,10 +369,11 @@ public class JobApplicationController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record.");
-        return Ok(await _service.BulkRejectAsync(dto, employeeId.Value));
+        return Ok(await _service.BulkRejectAsync(vacancyId, dto, employeeId.Value));
     }
 
     [HttpPost("vacancy/{vacancyId:guid}/auto-shortlist")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> AutoShortlist(
         Guid vacancyId, [FromBody] AutoShortlistByScoreDto dto)
     {
@@ -315,12 +386,14 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpPost("vacancy/{vacancyId:guid}/shortlist/send-notifications")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> SendShortlistNotifications(Guid vacancyId)
     {
         return Ok(await _service.SendShortlistNotificationsAsync(vacancyId));
     }
 
     [HttpPost("vacancy/{vacancyId:guid}/rejections/send-notifications")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<RecruitmentBulkOperationResultDto>> SendRejectionNotifications(Guid vacancyId)
     {
         return Ok(await _service.SendRejectionNotificationsAsync(vacancyId));
@@ -331,10 +404,12 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("vacancy/{vacancyId:guid}/shortlist/summary")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<ShortlistSummaryDto>> GetShortlistSummary(Guid vacancyId)
         => Ok(await _service.GetShortlistSummaryAsync(vacancyId));
 
     [HttpGet("vacancy/{vacancyId:guid}/shortlist/comparison")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<CandidateComparisonDto>> GetCandidateComparison(
         Guid vacancyId, [FromQuery] List<Guid>? applicationIds)
         => Ok(await _service.GetCandidateComparisonAsync(vacancyId, applicationIds ?? new List<Guid>()));
@@ -344,6 +419,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpPost("vacancy/{vacancyId:guid}/shortlist/submit-approval")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> SubmitShortlistForApproval(
         Guid vacancyId, [FromBody] SubmitShortlistForApprovalDto dto)
     {
@@ -357,6 +433,7 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpPost("vacancy/{vacancyId:guid}/shortlist/review-approval")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> ReviewShortlistApproval(
         Guid vacancyId, [FromBody] ReviewShortlistApprovalDto dto)
     {
@@ -370,6 +447,7 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpPost("vacancy/{vacancyId:guid}/shortlist/recall-approval")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> RecallShortlistApproval(Guid vacancyId)
     {
         await _service.RecallShortlistApprovalAsync(vacancyId);
@@ -381,10 +459,12 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/score")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<ApplicationAutoScoreDto>> EvaluateScore(Guid id)
         => Ok(await _service.EvaluateApplicationScoreAsync(id));
 
     [HttpPost("vacancy/{vacancyId:guid}/score-all")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<IEnumerable<ApplicationAutoScoreDto>>> EvaluateAllScores(Guid vacancyId)
         => Ok(await _service.EvaluateAllScoresForVacancyAsync(vacancyId));
 
@@ -393,6 +473,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("{id:guid}/decision-log")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<ShortlistDecisionLogDto>>> GetDecisionLog(Guid id, CancellationToken ct)
         => Ok(await _service.GetShortlistDecisionLogAsync(id, ct));
 
@@ -401,6 +482,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/reviews")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<ShortlistReviewDto>> AddReview(
         Guid id, [FromBody] CreateShortlistReviewDto dto, CancellationToken ct)
     {
@@ -414,10 +496,16 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpGet("{id:guid}/reviews/aggregated")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<AggregatedReviewScoreDto>> GetAggregatedReviewScore(Guid id, CancellationToken ct)
         => Ok(await _service.GetAggregatedReviewScoreAsync(id, ct));
 
+    /// <summary>
+    /// Commits the caller's own review so it counts toward the aggregate. Refused for anyone else's
+    /// review — finalizing is the reviewer signing off their judgement, not a clerical step.
+    /// </summary>
     [HttpPost("reviews/{reviewId:guid}/finalize")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<ActionResult<ShortlistReviewDto>> FinalizeReview(Guid reviewId, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -430,6 +518,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("vacancy/{vacancyId:guid}/eeo-report")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<EeoComplianceReportDto>> GetEeoReport(Guid vacancyId, CancellationToken ct)
         => Ok(await _service.GetEeoReportAsync(vacancyId, ct));
 
@@ -438,6 +527,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("vacancy/{vacancyId:guid}/shortlist/sla")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<ShortlistSlaStatusDto>> GetShortlistSla(Guid vacancyId, CancellationToken ct)
         => Ok(await _service.GetShortlistSlaStatusAsync(vacancyId, ct));
 
@@ -446,6 +536,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("vacancy/{vacancyId:guid}/blind-applications")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<BlindApplicationSummaryDto>>> GetBlindApplications(
         Guid vacancyId, CancellationToken ct)
         => Ok(await _service.GetBlindApplicationsAsync(vacancyId, ct));
@@ -455,6 +546,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/mark-internal")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> MarkAsInternal(Guid id, [FromBody] MarkInternalCandidateDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -466,6 +558,7 @@ public class JobApplicationController : ControllerBase
     }
 
     [HttpDelete("{id:guid}/mark-internal")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> UnmarkAsInternal(Guid id, CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
@@ -479,6 +572,7 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
 
     [HttpGet("vacancy/{vacancyId:guid}/shortlist/export")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<IActionResult> ExportShortlistCsv(Guid vacancyId, CancellationToken ct)
     {
         var csv = await _service.GetShortlistCsvExportAsync(vacancyId, ct);
@@ -488,6 +582,8 @@ public class JobApplicationController : ControllerBase
     // =========================================================================
     // INTERNAL JOB BOARD — Employee self-service
     // =========================================================================
+    // Deliberately NOT HR-gated: these four act only on the caller's own applications, taking the
+    // employee from the token, and exist so an employee can apply for an internal vacancy.
 
     /// <summary>
     /// Allows the currently authenticated employee to apply for an internal vacancy
@@ -517,7 +613,8 @@ public class JobApplicationController : ControllerBase
     /// through the Internal Job Board. Used to show "Already Applied" status.
     /// </summary>
     [HttpGet("my-applications")]
-    public async Task<ActionResult<IEnumerable<JobApplicationSummaryDto>>> GetMyApplications(CancellationToken ct)
+    [ProducesResponseType(typeof(IEnumerable<MyJobApplicationDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<MyJobApplicationDto>>> GetMyApplications(CancellationToken ct)
     {
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null)
@@ -525,6 +622,49 @@ public class JobApplicationController : ControllerBase
 
         var results = await _service.GetByInternalEmployeeAsync(employeeId.Value, ct);
         return Ok(results);
+    }
+
+    /// <summary>
+    /// One of the caller's own internal applications, in full.
+    /// </summary>
+    /// <remarks>
+    /// Somebody else's id is a 404, not a 403 — ownership is applied in the query, so this route
+    /// cannot be used to discover which application ids exist.
+    /// </remarks>
+    [HttpGet("my-applications/{id:guid}")]
+    [ProducesResponseType(typeof(MyJobApplicationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMyApplication(Guid id, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        var result = await _service.GetMyApplicationAsync(id, employeeId.Value, ct);
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    /// <summary>
+    /// Withdraws one of the caller's own internal applications.
+    /// </summary>
+    /// <remarks>
+    /// The desk withdraw is <c>RecruitmentWrite</c>. Without this, an employee could put their
+    /// name forward for an internal job and then had no way to take it back except by asking the
+    /// recruiter — which is the one decision in the whole pipeline that is unambiguously the
+    /// candidate's own.
+    /// </remarks>
+    [HttpPost("my-applications/{id:guid}/withdraw")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> WithdrawMyApplication(
+        Guid id, [FromBody] WithdrawMyApplicationDto? dto, CancellationToken ct)
+    {
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record.");
+
+        await _service.WithdrawMyApplicationAsync(id, employeeId.Value, dto?.WithdrawalReason, ct);
+        return Ok(new { message = "Application withdrawn." });
     }
 
     /// <summary>Saves or updates a draft internal application (status = Draft).</summary>

@@ -350,6 +350,7 @@ export function ProcurementDecisionEditor({ profileId, decision, editable, isSup
                 <SelectItem value="Draft">Draft</SelectItem>
                 <SelectItem value="Proposed">Proposed</SelectItem>
                 {isSuperAdmin && <SelectItem value="Approved">Approved</SelectItem>}
+                {status === 'Withdrawn' && <SelectItem value="Withdrawn" disabled>Withdrawn · inactive</SelectItem>}
                 {isSuperAdmin && <SelectItem value="Rejected">Rejected</SelectItem>}
               </SelectContent>
             </Select>

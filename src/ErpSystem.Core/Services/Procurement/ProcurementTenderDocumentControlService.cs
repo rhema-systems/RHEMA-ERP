@@ -2,7 +2,9 @@ using ErpSystem.Shared;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
@@ -24,6 +26,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
     private const string ApprovePermission = "procurement.tender.approve";
     private const string ObservePermission = "procurement.tender.observe";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions WorkflowConfigJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
     private static readonly IReadOnlyList<string> DecisionKeys =
         Enumerable.Range(1, 14).Select(item => $"DEC-{item:000}").ToArray();
 
@@ -92,6 +98,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         _unitOfWork.Repository<WorkflowDefinition>();
     private IGenericRepository<WorkflowInstance> WorkflowInstanceRows =>
         _unitOfWork.Repository<WorkflowInstance>();
+    private IGenericRepository<WorkflowStepInstance> WorkflowStepInstanceRows =>
+        _unitOfWork.Repository<WorkflowStepInstance>();
     private IGenericRepository<ProcurementTenderControl> LegacyTenderControls =>
         _unitOfWork.Repository<ProcurementTenderControl>();
 
@@ -158,7 +166,30 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         CancellationToken cancellationToken = default)
     {
         EnsureInternalReader();
-        return MapTemplate(await LoadTemplateAsync(id, tracked: false, cancellationToken));
+        var template = await LoadTemplateAsync(id, tracked: false, cancellationToken);
+        var detail = MapTemplate(template);
+        if (template.Status != ProcurementTenderDocumentTemplateStatus.PendingApproval ||
+            !template.WorkflowInstanceId.HasValue)
+            return detail;
+
+        var stepIds = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.WorkflowInstanceId == template.WorkflowInstanceId.Value)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        var candidates = await _unitOfWork.Repository<WorkflowEvidenceDocument>()
+            .GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                stepIds.Contains(item.StepInstanceId) && item.IsCurrent &&
+                item.MalwareScanStatus == WorkflowMalwareScanStatus.Clean &&
+                item.VerificationStatus != WorkflowEvidenceVerificationStatus.Rejected)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        foreach (var artifact in candidates)
+        {
+            if ((!artifact.ExpiryDate.HasValue || artifact.ExpiryDate.Value >= DateTime.UtcNow) &&
+                (artifact.VerificationStatus == WorkflowEvidenceVerificationStatus.Verified ||
+                 await HasConfiguredContentReviewAsync(template, artifact, cancellationToken)))
+                detail.EligibleContentEvidenceDocumentIds.Add(artifact.Id);
+        }
+        return detail;
     }
 
     public async Task<IReadOnlyList<ProcurementTenderDocumentWorkflowOptionDto>> GetTemplateWorkflowOptionsAsync(
@@ -217,12 +248,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         EnsureAuthenticatedTenant();
         var correlation = NormalizeCorrelation(correlationId);
         await EnsureCapabilityAsync(ManagePermission, request.TemplateCode, TemplateSourceType, correlation, cancellationToken);
-        ValidateTemplateRequest(request);
+        ValidateTemplateRequest(request, requireContent: false);
+        if (HasTemplateContent(request))
+            throw Validation("TENDER_DOCUMENT_CONTENT_WORKFLOW_REQUIRED",
+                "Create the Draft first, then attach content from its exact sourcing approval workflow.");
         var lineage = await ValidateTemplateLineageAsync(request, cancellationToken);
         await ValidateWorkflowDefinitionAsync(request.WorkflowDefinitionId, cancellationToken);
-        await ValidateTemplateContentArtifactAsync(
-            request.ContentWorkflowEvidenceDocumentId, request.ContentFileUploadRecordId,
-            request.ContentReference, request.ContentChecksumSha256, requireApproved: false, cancellationToken);
         var now = DateTime.UtcNow;
         var entity = new ProcurementTenderDocumentTemplateVersion
         {
@@ -260,17 +291,17 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
     {
         EnsureAuthenticatedTenant();
         var correlation = NormalizeCorrelation(correlationId);
-        ValidateTemplateRequest(request);
+        ValidateTemplateRequest(request, requireContent: false);
         var entity = await LoadTemplateAsync(id, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(ManagePermission, entity.TemplateCode, TemplateSourceType, correlation, cancellationToken);
         EnsureRowVersion(entity.RowVersion, request.RowVersion, "TENDER_DOCUMENT_TEMPLATE");
         EnsureTemplateStatus(entity, ProcurementTenderDocumentTemplateStatus.Draft,
             "Only a Draft tender-document template can be edited.");
+        if (HasTemplateContent(request))
+            throw Validation("TENDER_DOCUMENT_CONTENT_WORKFLOW_REQUIRED",
+                "Submit the Draft, then attach content from its exact sourcing approval workflow.");
         var lineage = await ValidateTemplateLineageAsync(request, cancellationToken);
         await ValidateWorkflowDefinitionAsync(request.WorkflowDefinitionId, cancellationToken);
-        await ValidateTemplateContentArtifactAsync(
-            request.ContentWorkflowEvidenceDocumentId, request.ContentFileUploadRecordId,
-            request.ContentReference, request.ContentChecksumSha256, requireApproved: false, cancellationToken);
         var before = TemplateSnapshot(entity);
         ApplyTemplateRequest(entity, request, lineage.Policy);
         var now = DateTime.UtcNow;
@@ -319,6 +350,64 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         }, cancellationToken);
     }
 
+    public async Task<ProcurementTenderDocumentTemplateDto> AttachTemplateContentAsync(
+        Guid id,
+        AttachProcurementTenderDocumentTemplateContentRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticatedTenant();
+        var correlation = NormalizeCorrelation(correlationId);
+        var entity = await LoadTemplateAsync(id, tracked: true, cancellationToken);
+        await EnsureCapabilityAsync(ManagePermission, entity.TemplateCode, TemplateSourceType, correlation, cancellationToken);
+        EnsureRowVersion(entity.RowVersion, request.RowVersion, "TENDER_DOCUMENT_TEMPLATE");
+        EnsureTemplateStatus(entity, ProcurementTenderDocumentTemplateStatus.PendingApproval,
+            "Controlled content can be attached only after the exact approval workflow starts.");
+        if (!entity.WorkflowInstanceId.HasValue)
+            throw Conflict("TENDER_DOCUMENT_WORKFLOW_NOT_STARTED",
+                "Submit the Draft to start its exact sourcing approval workflow before attaching content.");
+        if (request.ContentWorkflowEvidenceDocumentId == Guid.Empty)
+            throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_REQUIRED",
+                "Select one workflow evidence document from this template's approval workflow.");
+
+        var artifact = await _unitOfWork.Repository<WorkflowEvidenceDocument>()
+            .GetQueryable(item => item.Id == request.ContentWorkflowEvidenceDocumentId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .AsNoTracking().SingleOrDefaultAsync(cancellationToken)
+            ?? throw NotFound("TENDER_DOCUMENT_WORKFLOW_EVIDENCE_NOT_FOUND",
+                "The workflow evidence document was not found in the current tenant.");
+        var belongsToExactWorkflow = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.Id == artifact.StepInstanceId && item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted && item.WorkflowInstanceId == entity.WorkflowInstanceId.Value)
+            .AnyAsync(cancellationToken);
+        if (!belongsToExactWorkflow)
+            throw Conflict("TENDER_DOCUMENT_CONTENT_WORKFLOW_MISMATCH",
+                "Controlled content must come from this template's exact sourcing approval workflow instance.");
+
+        await ValidateTemplateContentArtifactAsync(
+            artifact.Id, null, artifact.FilePath, artifact.Sha256,
+            entity, requireApproved: true, cancellationToken);
+        var before = TemplateSnapshot(entity);
+        entity.ContentWorkflowEvidenceDocumentId = artifact.Id;
+        entity.ContentFileUploadRecordId = null;
+        entity.ContentReference = artifact.FilePath;
+        entity.ContentChecksumSha256 = artifact.Sha256.Trim().ToLowerInvariant();
+        var now = DateTime.UtcNow;
+        Touch(entity, now);
+        Capture(entity);
+
+        return await ExecuteAsync(async () =>
+        {
+            await Templates.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await RecordTemplateEventAsync(entity, "ContentAttached", ProcurementControlEventResult.Succeeded,
+                before, TemplateSnapshot(entity),
+                "Scan-clean content satisfying the configured review policy attached from the exact sourcing approval workflow.",
+                ContentEvidence(entity), correlation, now, cancellationToken);
+            return MapTemplate(entity);
+        }, cancellationToken);
+    }
+
     public async Task<ProcurementTenderDocumentTemplateDto> SubmitTemplateAsync(
         Guid id,
         ProcurementTenderDocumentTemplateLifecycleRequest request,
@@ -333,7 +422,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         EnsureTemplateStatus(entity, ProcurementTenderDocumentTemplateStatus.Draft,
             "Only a Draft tender-document template can be submitted.");
         EnsureEventEvidence(request.Evidence);
-        await ValidateTemplateForPublicationAsync(entity, cancellationToken);
+        await ValidateTemplateForSubmissionAsync(entity, cancellationToken);
         var before = TemplateSnapshot(entity);
         var now = DateTime.UtcNow;
         entity.Status = ProcurementTenderDocumentTemplateStatus.PendingApproval;
@@ -526,10 +615,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             PolicySetCode = source.PolicySetCode,
             PolicySetVersion = source.PolicySetVersion,
             SourceConfigurationProfileId = source.SourceConfigurationProfileId,
-            ContentReference = source.ContentReference,
-            ContentWorkflowEvidenceDocumentId = source.ContentWorkflowEvidenceDocumentId,
-            ContentFileUploadRecordId = source.ContentFileUploadRecordId,
-            ContentChecksumSha256 = source.ContentChecksumSha256,
+            ContentReference = string.Empty,
+            ContentWorkflowEvidenceDocumentId = null,
+            ContentFileUploadRecordId = null,
+            ContentChecksumSha256 = string.Empty,
             WorkflowDefinitionId = source.WorkflowDefinitionId,
             SupersedesVersionId = source.Id,
             ChangeSummary = request.ChangeSummary.Trim(),
@@ -646,12 +735,23 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             blocked.Add("No Published tender-document template is effective for the locked policy, profile, and procurement method.");
         if (!source.SubmissionDeadlineUtc.HasValue)
             blocked.Add("The source submission deadline is required before binding its tender-document register.");
+        if (source.Tender?.BidValidityPeriodDays.HasValue == true &&
+            source.Tender.Status != "Approved" && !IsSourcePublished(source))
+            blocked.Add("Approve the tender and its validity terms before binding the document register.");
         if (source.SourcingCase.MethodRule.IsDeleted || !source.SourcingCase.MethodRule.IsEnabled ||
             !source.SourcingCase.MethodRule.IsAllowed ||
             source.SourcingCase.MethodRule.Method != source.SourcingCase.SelectedMethod)
             blocked.Add("The locked sourcing-case method rule is no longer valid.");
+        var canBind = blocked.Count == 0;
+        var canRequestSchedule = CanRescheduleUnpublishedSource(source);
+        if (source.SubmissionDeadlineUtc <= now)
+            blocked.Add(canRequestSchedule
+                ? "The deadline has elapsed. Use Bind approved version to request new dates for approval before publication."
+                : "The source deadline has elapsed and this source is not eligible for pre-publication rescheduling.");
         return new ProcurementTenderDocumentRegisterReadinessDto
         {
+            SourceStatus = source.Tender?.Status ?? source.Rfq!.Status,
+            IsSourcePublished = IsSourcePublished(source),
             SourceType = sourceType,
             SourceId = sourceId,
             SourceReference = source.Reference,
@@ -660,15 +760,21 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             MethodRuleId = source.SourcingCase.MethodRuleId,
             MethodRuleCode = source.SourcingCase.MethodRuleCode,
             HasRegister = false,
+            AllowsNewRecipient = !_currentUser.IsExternalUser && AllowsOpenDocumentAccess(source),
+            AllowedExternalRecipientEmails = !_currentUser.IsExternalUser ? AllowedExternalRecipientEmails(source) : [],
             EffectiveTemplateVersionId = effectiveTemplate?.Id,
             EffectiveTemplateReference = effectiveTemplate is null
                 ? null
                 : $"{effectiveTemplate.TemplateCode}/v{effectiveTemplate.Version}",
             EffectiveSubmissionDeadlineUtc = source.SubmissionDeadlineUtc,
+            OpeningScheduledAtUtc = source.OpeningScheduledAtUtc,
+            BidValidityPeriodDays = source.Tender?.BidValidityPeriodDays,
             CurrencyCode = source.CurrencyCode,
             Ready = blocked.Count == 0,
             BlockedReasons = blocked,
-            AllowedActions = !_currentUser.IsExternalUser && blocked.Count == 0 ? ["Bind"] : []
+            AllowedActions = !_currentUser.IsExternalUser && canBind
+                ? canRequestSchedule ? ["Bind", "BindWithScheduleChange"] : ["Bind"]
+                : []
         };
     }
 
@@ -706,14 +812,39 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             throw Validation("TENDER_DOCUMENT_SOURCE_DEADLINE_REQUIRED",
                 "Set the source submission deadline before binding the tender-document register.");
         var deadline = EnsureUtc(request.SubmissionDeadlineUtc);
-        var validity = EnsureUtc(request.BidValidityUntilUtc);
+        var approvedDays = source.Tender?.BidValidityPeriodDays;
+        if (approvedDays.HasValue && source.Tender!.Status != "Approved" && !IsSourcePublished(source))
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_NOT_APPROVED",
+                "Approve the tender and its validity terms before binding the document register.");
+        if (approvedDays.HasValue && request.BidValidityPeriodDays.HasValue &&
+            request.BidValidityPeriodDays != approvedDays)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_MISMATCH",
+                "The validity period must match the saved tender terms; it cannot be changed during binding.");
+        var validityDays = approvedDays ?? request.BidValidityPeriodDays;
+        if (!validityDays.HasValue || validityDays.Value <= 0)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_REQUIRED",
+                "Record the positive bid-validity period in calendar days stated in the approved tender document.");
+        var validityNote = request.BidValidityTermsReference?.Trim();
+        if (validityNote?.Length > 500)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_REFERENCE_INVALID",
+                "The optional validity page/clause note must not exceed 500 characters.");
+        var validityBasis = request.ScheduleChange is null ? deadline : EnsureUtc(request.ScheduleChange.SubmissionDeadlineUtc);
+        DateTime validity;
+        try { validity = ProcurementBidValidity.Calculate(validityBasis, validityDays.Value); }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw Validation("TENDER_DOCUMENT_VALIDITY_TERMS_INVALID", "The validity period produces an invalid expiry date.");
+        }
+        if (request.BidValidityUntilUtc.HasValue && EnsureUtc(request.BidValidityUntilUtc.Value) != validity)
+            throw Validation("TENDER_DOCUMENT_VALIDITY_MISMATCH",
+                "Bid validity is calculated from the submission deadline and approved period; a different expiry cannot be supplied.");
         var opening = request.OpeningScheduledAtUtc.HasValue
             ? EnsureUtc(request.OpeningScheduledAtUtc.Value)
             : (DateTime?)null;
         if (deadline != EnsureUtc(source.SubmissionDeadlineUtc.Value))
             throw Validation("TENDER_DOCUMENT_DEADLINE_MISMATCH",
                 "The register submission deadline must exactly match the source deadline.");
-        if (deadline <= DateTime.UtcNow)
+        if (deadline <= DateTime.UtcNow && request.ScheduleChange is null)
             throw Validation("TENDER_DOCUMENT_DEADLINE_ELAPSED",
                 "The register submission deadline must be in the future.");
         if (opening.HasValue && opening.Value < deadline)
@@ -763,6 +894,14 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             CreatedById = _currentUser.UserId,
             RowVersion = Guid.NewGuid().ToByteArray()
         };
+        if (request.ScheduleChange is not null)
+        {
+            await EnsureChangeWindowOpenAsync(register, source,
+                ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule, cancellationToken);
+            ValidateUnpublishedSchedule(register, source, deadline, opening,
+                EnsureUtc(request.ScheduleChange.SubmissionDeadlineUtc),
+                EnsureUtc(request.ScheduleChange.OpeningScheduledAtUtc));
+        }
         Capture(register);
         return await ExecuteAsync(async () =>
         {
@@ -770,8 +909,29 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordRegisterEventAsync(register, source, "RegisterBound",
                 ProcurementControlEventResult.Succeeded, null, RegisterSnapshot(register),
-                "Exact published template, sourcing lineage, deadlines, validity, and fee mode were bound.",
+                $"Exact published template, sourcing lineage and issue terms bound. Bid validity: {validityDays.Value} calendar days from {validityBasis:O}; " +
+                (approvedDays.HasValue ? $"saved tender terms {source.Reference}; " : "transcribed from selected approved document; ") +
+                $"version {template.Id}; checksum {template.ContentChecksumSha256}." +
+                (string.IsNullOrEmpty(validityNote) ? string.Empty : $" Page/clause note: {validityNote}"),
                 [], correlation, now, cancellationToken);
+            if (request.ScheduleChange is { } schedule)
+            {
+                // Preserve the source schedule as immutable history. Binding and the pending
+                // shared approval request commit together; neither applies proposed dates.
+                await CreateChangeCoreAsync(new CreateProcurementTenderDocumentChangeRequest
+                {
+                    SourceType = request.SourceType,
+                    SourceId = request.SourceId,
+                    ChangeType = ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule,
+                    NewValueUtc = schedule.SubmissionDeadlineUtc,
+                    NewOpeningScheduledAtUtc = schedule.OpeningScheduledAtUtc,
+                    WorkflowDefinitionId = schedule.WorkflowDefinitionId,
+                    Reason = schedule.Reason,
+                    EvidenceReference = schedule.EvidenceReference,
+                    RequiresAcknowledgement = false,
+                    RegisterRowVersion = Convert.ToBase64String(register.RowVersion)
+                }, correlation, cancellationToken, useTransaction: false);
+            }
             return MapRegister(
                 await LoadRegisterAsync(request.SourceType, request.SourceId, tracked: false, cancellationToken),
                 source, null);
@@ -794,6 +954,13 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (replay is not null)
             return MapIssuance(replay);
         EnsureRowVersion(register.RowVersion, request.RegisterRowVersion, "TENDER_DOCUMENT_REGISTER");
+        RevalidateRegisterLineage(register, source);
+        if (RequiresTenderPublicationForIssue(source) && !IsSourcePublished(source))
+            throw Conflict("TENDER_DOCUMENT_TENDER_NOT_PUBLISHED",
+                "Publish the tender before issuing its documents to suppliers. A Published template is not a published tender.");
+        if (!Enum.IsDefined(source.SourcingCase.SelectedMethod))
+            throw Validation("TENDER_DOCUMENT_METHOD_UNSUPPORTED",
+                "The locked procurement method must be recognised before issuing documents.");
         if (DateTime.UtcNow > EffectiveSubmissionDeadline(register))
             throw Conflict("TENDER_DOCUMENT_ISSUE_WINDOW_CLOSED",
                 "Tender documents cannot be issued after the effective submission deadline.");
@@ -815,20 +982,48 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 partner.PartnerType is not ("Supplier" or "Contractor" or "Both"))
                 throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE",
                     "The selected business partner is not an active eligible supplier.");
-            var validation = source.Tender is not null
-                ? await _supplierValidation.ValidateForTenderAsync(
-                    partner.Id,
-                    source.Tender.RequiresPrequalification,
-                    source.Tender.MinimumPerformanceRating)
-                : await _supplierValidation.ValidateForRfqAsync(partner.Id);
-            if (!validation.IsValid)
-                throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE",
-                    string.Join("; ", validation.Errors));
+            // Access to an open NCT document is not a supplier invitation, bid qualification,
+            // award or purchasing approval. Those boundaries retain their own validation.
+            if (!AllowsOpenDocumentAccess(source))
+            {
+                var validation = source.Tender is not null
+                    ? await _supplierValidation.ValidateForTenderAsync(
+                        partner.Id,
+                        source.Tender.RequiresPrequalification,
+                        source.Tender.MinimumPerformanceRating)
+                    : await _supplierValidation.ValidateForRfqAsync(partner.Id);
+                if (!validation.IsValid)
+                    throw Validation("TENDER_DOCUMENT_RECIPIENT_INELIGIBLE",
+                        string.Join("; ", validation.Errors));
+            }
         }
-        else if (string.IsNullOrWhiteSpace(request.RecipientEmail))
+        else
         {
-            throw Validation("TENDER_DOCUMENT_RECIPIENT_CONTACT_REQUIRED",
-                "An external recipient must have an email address.");
+            if (string.IsNullOrWhiteSpace(request.RecipientEmail))
+                throw Validation("TENDER_DOCUMENT_RECIPIENT_CONTACT_REQUIRED",
+                    "A new interested supplier must have an email address.");
+            var recipientEmail = request.RecipientEmail.Trim().ToLowerInvariant();
+            if (!IsValidRecipientEmail(recipientEmail))
+                throw Validation("TENDER_DOCUMENT_RECIPIENT_EMAIL_INVALID",
+                    "Enter a valid recipient email address.");
+            if (!AllowsOpenDocumentAccess(source) &&
+                !AllowedExternalRecipientEmails(source).Contains(recipientEmail, StringComparer.OrdinalIgnoreCase))
+                throw Validation("TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED",
+                    "Select a saved supplier or an email-only recipient already configured on this RFQ.");
+
+            // Do not let a known supplier evade identity, blacklist or active-status checks
+            // by omitting its ID. Do not auto-link an ambiguous/shared email to a partner.
+            var recipientName = request.RecipientName.Trim().ToLowerInvariant();
+            var matchesSavedSupplier = await BusinessPartners.GetQueryable(item =>
+                    item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                    (item.PartnerType == "Supplier" || item.PartnerType == "Contractor" || item.PartnerType == "Both"))
+                .AnyAsync(item => item.PartnerName.Trim().ToLower() == recipientName ||
+                    (item.PrimaryEmail != null && item.PrimaryEmail.Trim().ToLower() == recipientEmail) ||
+                    item.Contacts.Any(contact => !contact.IsDeleted && contact.TenantId == _currentUser.TenantId &&
+                        contact.Email != null && contact.Email.Trim().ToLower() == recipientEmail), cancellationToken);
+            if (matchesSavedSupplier)
+                throw Validation("TENDER_DOCUMENT_SAVED_RECIPIENT_REQUIRED",
+                    "A saved supplier matches this name or email. Select its saved record instead of entering a new recipient.");
         }
         if (register.FeeMode == ProcurementTenderDocumentFeeMode.Paid)
         {
@@ -920,10 +1115,17 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         }, cancellationToken);
     }
 
-    public async Task<ProcurementTenderDocumentChangeDto> CreateChangeAsync(
+    public Task<ProcurementTenderDocumentChangeDto> CreateChangeAsync(
         CreateProcurementTenderDocumentChangeRequest request,
         string correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        CreateChangeCoreAsync(request, correlationId, cancellationToken);
+
+    private async Task<ProcurementTenderDocumentChangeDto> CreateChangeCoreAsync(
+        CreateProcurementTenderDocumentChangeRequest request,
+        string correlationId,
+        CancellationToken cancellationToken,
+        bool useTransaction = true)
     {
         EnsureAuthenticatedTenant();
         var correlation = NormalizeCorrelation(correlationId);
@@ -936,6 +1138,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (replay is not null)
             return MapChange(replay);
         EnsureRowVersion(register.RowVersion, request.RegisterRowVersion, "TENDER_DOCUMENT_REGISTER");
+        RevalidateRegisterLineage(register, source);
         await EnsureChangeWindowOpenAsync(register, source, request.ChangeType, cancellationToken);
         if (register.Changes.Any(item =>
             !item.IsDeleted && item.Status == ProcurementTenderDocumentChangeStatus.PendingApproval))
@@ -950,6 +1153,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         var effectiveTemplate = EffectiveTemplate(register);
         DateTime? previousValue = null;
         DateTime? newValue = null;
+        DateTime? previousOpening = null;
+        DateTime? newOpening = null;
         ProcurementTenderDocumentTemplateVersion? newTemplate = null;
         Guid? previousTemplateId = null;
         switch (request.ChangeType)
@@ -978,10 +1183,17 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 if (newValue <= DateTime.UtcNow)
                     throw Validation("TENDER_DOCUMENT_DEADLINE_EXTENSION_ELAPSED",
                         "The extended submission deadline must be in the future.");
-                if (register.OpeningScheduledAtUtc.HasValue &&
-                    newValue > register.OpeningScheduledAtUtc.Value)
+                if (EffectiveOpening(register).HasValue &&
+                    newValue > EffectiveOpening(register)!.Value)
                     throw Validation("TENDER_DOCUMENT_DEADLINE_AFTER_OPENING",
-                        "The submission deadline cannot be extended beyond the immutable scheduled opening.");
+                        "The submission deadline cannot be extended beyond the effective scheduled opening.");
+                break;
+            case ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule:
+                previousValue = EffectiveSubmissionDeadline(register);
+                previousOpening = EffectiveOpening(register);
+                newValue = request.NewValueUtc.HasValue ? EnsureUtc(request.NewValueUtc.Value) : null;
+                newOpening = request.NewOpeningScheduledAtUtc.HasValue ? EnsureUtc(request.NewOpeningScheduledAtUtc.Value) : null;
+                ValidateUnpublishedSchedule(register, source, previousValue, previousOpening, newValue, newOpening);
                 break;
             case ProcurementTenderDocumentChangeType.BidValidityExtension:
                 if (!request.NewValueUtc.HasValue)
@@ -1016,7 +1228,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             NewTemplateVersionId = newTemplate?.Id,
             PreviousValueUtc = previousValue,
             NewValueUtc = newValue,
-            RequiresAcknowledgement = true,
+            PreviousOpeningScheduledAtUtc = previousOpening,
+            NewOpeningScheduledAtUtc = newOpening,
+            RequiresAcknowledgement = request.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule,
             Reason = request.Reason.Trim(),
             WorkflowDefinitionId = definition.Id,
             EvidenceReference = request.EvidenceReference.Trim(),
@@ -1031,7 +1245,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             RowVersion = Guid.NewGuid().ToByteArray()
         };
         Capture(change);
-        return await ExecuteAsync(async () =>
+        async Task<ProcurementTenderDocumentChangeDto> PersistChangeAsync()
         {
             await Changes.AddAsync(change);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1046,12 +1260,21 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                     change.PreviousTemplateVersionId,
                     change.NewTemplateVersionId,
                     change.PreviousValueUtc,
-                    change.NewValueUtc
+                    change.NewValueUtc,
+                    change.PreviousOpeningScheduledAtUtc,
+                    change.NewOpeningScheduledAtUtc
                 }, cancellationToken);
+            if (change.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule &&
+                instance.Status is WorkflowInstanceStatus.Completed or WorkflowInstanceStatus.Cancelled or WorkflowInstanceStatus.Failed)
+                throw Conflict("TENDER_DOCUMENT_RESCHEDULE_APPROVAL_REQUIRED",
+                    "Rescheduling must start a pending shared approval workflow; an immediately completed or terminated route cannot approve schedule changes.");
             change.WorkflowInstanceId = instance.Id;
             Touch(change);
             Capture(change);
-            await Changes.UpdateAsync(change);
+            // This tracked reschedule was just saved above. Let EF detect its changed
+            // scalar fields instead of marking its entire immutable register graph Modified.
+            if (change.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                await Changes.UpdateAsync(change);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordRegisterEventAsync(register, source, "ChangeRequested",
                 ProcurementControlEventResult.ReviewRequired, null, ChangeSnapshot(change), change.Reason,
@@ -1059,7 +1282,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                     change.EvidenceFileUploadRecordId, "Tender document change", "DEC-003"),
                 correlation, now, cancellationToken);
             return MapChange(change);
-        }, cancellationToken);
+        }
+        return useTransaction
+            ? await ExecuteAsync(PersistChangeAsync, cancellationToken)
+            : await PersistChangeAsync();
     }
 
     public async Task<ProcurementTenderDocumentChangeDto> DecideChangeAsync(
@@ -1114,12 +1340,15 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         change.DecidedByUserId = _currentUser.UserId;
         if (approving)
         {
-            if (change.ChangeType == ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension)
+            if (change.ChangeType is ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension or
+                ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
             {
                 var extended = change.NewValueUtc!.Value;
                 if (source.Tender is not null)
                 {
                     source.Tender.SubmissionDeadline = extended;
+                    if (change.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                        source.Tender.OpeningDate = change.NewOpeningScheduledAtUtc;
                     Touch(source.Tender, now);
                     var legacy = await LegacyTenderControls.GetQueryable(item =>
                             item.TenantId == _currentUser.TenantId && item.TenderId == source.Tender.Id && !item.IsDeleted)
@@ -1130,7 +1359,11 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                         legacy.UpdatedAt = now;
                         await LegacyTenderControls.UpdateAsync(legacy);
                     }
-                    await Tenders.UpdateAsync(source.Tender);
+                    // LoadSourceAsync tracked this row. For rescheduling, update only dates
+                    // and audit fields; never overwrite concurrently changed publication state.
+                    // The change trigger rechecks the live publication state in this transaction.
+                    if (change.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                        await Tenders.UpdateAsync(source.Tender);
                 }
                 else
                 {
@@ -1161,7 +1394,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         {
             if (approving && change.Recipients.Count > 0)
                 await ChangeRecipients.AddRangeAsync(change.Recipients);
-            await Changes.UpdateAsync(change);
+            if (change.ChangeType != ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+                await Changes.UpdateAsync(change);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await RecordRegisterEventAsync(change.Register, source,
                 approving ? "ChangeApprovedAndDispatched" : "ChangeRejected",
@@ -1317,6 +1551,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (EnsureUtc(expectedDeadlineUtc) != state.EffectiveSubmissionDeadlineUtc)
             throw Conflict("TENDER_DOCUMENT_PUBLICATION_DEADLINE_MISMATCH",
                 "The source deadline does not match the effective controlled-document deadline.");
+        if (source.Tender is not null && source.OpeningScheduledAtUtc != EffectiveOpening(register))
+            throw Conflict("TENDER_DOCUMENT_PUBLICATION_OPENING_MISMATCH",
+                "The source opening schedule does not match the effective controlled-document opening.");
         if (!state.Ready)
             throw Conflict("TENDER_DOCUMENT_PUBLICATION_BLOCKED", string.Join("; ", state.BlockedReasons));
         await RecordRegisterEventAsync(register, source, "PublicationGuardPassed",
@@ -1663,7 +1900,12 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 "The source currency no longer matches its locked sourcing case.");
         return new SourceContext(
             sourceType, sourceId, reference, deadline.HasValue ? EnsureUtc(deadline.Value) : null,
-            opening.HasValue ? EnsureUtc(opening.Value) : null, currency, sourcingCase, tender, rfq);
+            opening.HasValue ? EnsureUtc(opening.Value) : null, currency, sourcingCase, tender, rfq,
+            tender is not null && (
+                await TenderBids.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                    item.TenderId == sourceId && !item.IsDeleted).AnyAsync(cancellationToken) ||
+                await LegacyTenderControls.GetQueryable(item => item.TenantId == _currentUser.TenantId &&
+                    item.TenderId == sourceId && !item.IsDeleted).AnyAsync(cancellationToken)));
     }
 
     private async Task EnsureSourceReaderAsync(SourceContext source, CancellationToken cancellationToken)
@@ -1810,7 +2052,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         return (policy, profile);
     }
 
-    private async Task ValidateTemplateForPublicationAsync(
+    private async Task ValidateTemplateForSubmissionAsync(
         ProcurementTenderDocumentTemplateVersion template,
         CancellationToken cancellationToken)
     {
@@ -1821,9 +2063,6 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             throw Validation("TENDER_DOCUMENT_TEMPLATE_CHANGE_SUMMARY_REQUIRED",
                 "A change summary is required for a replacement version.");
         await ValidateWorkflowDefinitionAsync(template.WorkflowDefinitionId, cancellationToken);
-        await ValidateTemplateContentArtifactAsync(
-            template.ContentWorkflowEvidenceDocumentId, template.ContentFileUploadRecordId,
-            template.ContentReference, template.ContentChecksumSha256, requireApproved: true, cancellationToken);
         var request = new SaveProcurementTenderDocumentTemplateRequest
         {
             PolicySetId = template.PolicySetId,
@@ -1836,6 +2075,32 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (ComputeHash(template.LifecycleSnapshotJson) != template.IntegrityHash)
             throw Conflict("TENDER_DOCUMENT_TEMPLATE_INTEGRITY_FAILED",
                 "The tender-document template failed integrity verification.");
+    }
+
+    private async Task ValidateTemplateForPublicationAsync(
+        ProcurementTenderDocumentTemplateVersion template,
+        CancellationToken cancellationToken)
+    {
+        await ValidateTemplateForSubmissionAsync(template, cancellationToken);
+        await ValidateTemplateContentArtifactAsync(
+            template.ContentWorkflowEvidenceDocumentId, template.ContentFileUploadRecordId,
+            template.ContentReference, template.ContentChecksumSha256, template, requireApproved: true, cancellationToken);
+        if (!template.WorkflowInstanceId.HasValue)
+            throw Conflict("TENDER_DOCUMENT_WORKFLOW_NOT_STARTED",
+                "The configured shared workflow was not started.");
+        var contentStepInstanceId = await _unitOfWork.Repository<WorkflowEvidenceDocument>()
+            .GetQueryable(item => item.Id == template.ContentWorkflowEvidenceDocumentId!.Value &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Select(item => item.StepInstanceId)
+            .SingleAsync(cancellationToken);
+        var exactWorkflowContent = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.Id == contentStepInstanceId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.WorkflowInstanceId == template.WorkflowInstanceId.Value)
+            .AnyAsync(cancellationToken);
+        if (!exactWorkflowContent)
+            throw Conflict("TENDER_DOCUMENT_CONTENT_WORKFLOW_MISMATCH",
+                "Controlled content must come from this template's exact sourcing approval workflow instance.");
     }
 
     private async Task EnsureTemplateCompatibleAsync(
@@ -1902,6 +2167,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         Guid? fileUploadRecordId,
         string contentReference,
         string checksumSha256,
+        ProcurementTenderDocumentTemplateVersion template,
         bool requireApproved,
         CancellationToken cancellationToken)
     {
@@ -1919,6 +2185,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (!artifact.IsCurrent)
             throw Conflict("TENDER_DOCUMENT_CONTENT_ARTIFACT_SUPERSEDED",
                 "The workflow evidence document is no longer the current content artifact.");
+        if (artifact.ExpiryDate.HasValue && artifact.ExpiryDate.Value < DateTime.UtcNow)
+            throw Conflict("TENDER_DOCUMENT_CONTENT_ARTIFACT_EXPIRED",
+                "The controlled content artifact has expired.");
         if (!string.Equals(artifact.FilePath, contentReference.Trim(), StringComparison.Ordinal))
             throw Validation("TENDER_DOCUMENT_CONTENT_REFERENCE_MISMATCH",
                 "ContentReference must exactly match the controlled evidence document path.");
@@ -1931,11 +2200,135 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         if (artifact.VerificationStatus == WorkflowEvidenceVerificationStatus.Rejected)
             throw Conflict("TENDER_DOCUMENT_CONTENT_VERIFICATION_REJECTED",
                 "The controlled content artifact was rejected during verification.");
-        if (requireApproved &&
-            (artifact.VerificationStatus != WorkflowEvidenceVerificationStatus.Verified ||
-             artifact.MalwareScanStatus != WorkflowMalwareScanStatus.Clean))
+        if (requireApproved && (artifact.MalwareScanStatus != WorkflowMalwareScanStatus.Clean ||
+            (artifact.VerificationStatus != WorkflowEvidenceVerificationStatus.Verified &&
+             !await HasConfiguredContentReviewAsync(template, artifact, cancellationToken))))
             throw Conflict("TENDER_DOCUMENT_CONTENT_NOT_APPROVED",
-                "The controlled content artifact must be verified and malware-scan clean before publication.");
+                "The controlled content artifact must be malware-scan clean and independently verified, " +
+                "unless its recorded approval policy explicitly permits completed independent workflow review instead.");
+    }
+
+    private async Task<bool> HasConfiguredContentReviewAsync(
+        ProcurementTenderDocumentTemplateVersion template,
+        WorkflowEvidenceDocument artifact,
+        CancellationToken cancellationToken)
+    {
+        // Absence of a recorded, explicit policy is deliberately strict for existing workflows.
+        // A live/default policy must never retroactively weaken an already-started approval route.
+        if (!template.WorkflowInstanceId.HasValue || string.IsNullOrWhiteSpace(artifact.RequirementKey) ||
+            artifact.VerificationStatus != WorkflowEvidenceVerificationStatus.Pending)
+            return false;
+        var workflow = await WorkflowInstanceRows.GetQueryable(item =>
+                item.Id == template.WorkflowInstanceId.Value && item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted && item.EntityId == template.Id &&
+                item.WorkflowDefinitionId == template.WorkflowDefinitionId &&
+                item.Status == WorkflowInstanceStatus.Completed)
+            .Include(item => item.EntityType).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (workflow == null || !await WorkflowDefinitions.GetQueryable(item =>
+                item.Id == workflow.WorkflowDefinitionId && item.TenantId == _currentUser.TenantId &&
+                !item.IsDeleted && item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published)
+            .AnyAsync(cancellationToken))
+            return false;
+        var steps = await WorkflowStepInstanceRows.GetQueryable(item =>
+                item.WorkflowInstanceId == workflow.Id && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Include(item => item.WorkflowStep).Include(item => item.Approvals)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        if (!steps.Any(item => item.Id == artifact.StepInstanceId))
+            return false;
+        var approvalSteps = steps.Where(item => item.WorkflowStep != null &&
+            item.WorkflowStep.StepType == WorkflowStepType.Approval).ToList();
+        if (approvalSteps.Count == 0)
+            return false;
+        var policyActivities = await _unitOfWork.Repository<WorkflowActivityLog>().GetQueryable(item =>
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                item.WorkflowInstanceId == workflow.Id && item.PerformedById == null &&
+                item.ActivityType == WorkflowActivityType.DataUpdated && item.Title == "Approval policy applied")
+            .AsNoTracking().ToListAsync(cancellationToken);
+        var matchedWaiver = false;
+        foreach (var step in approvalSteps)
+        {
+            if (step.WorkflowStep.TenantId != _currentUser.TenantId || step.WorkflowStep.IsDeleted ||
+                step.WorkflowStep.WorkflowDefinitionId != template.WorkflowDefinitionId ||
+                step.Status != WorkflowStepInstanceStatus.Completed ||
+                !step.Approvals.Any(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                    item.Status == WorkflowApprovalStatus.Approved && item.ProcessedById.HasValue &&
+                    item.ProcessedById.Value != artifact.UploadedById &&
+                    item.ProcessedDate.HasValue && item.ProcessedDate.Value >= artifact.UploadedAt))
+                return false;
+            try
+            {
+                using var result = JsonDocument.Parse(step.ResultData ?? "{}");
+                if (result.RootElement.ValueKind != JsonValueKind.Object || HasAmbiguousJsonProperties(result.RootElement) ||
+                    !result.RootElement.TryGetProperty("appliedApprovalPolicySetId", out var appliedId) ||
+                    appliedId.ValueKind != JsonValueKind.String || !appliedId.TryGetGuid(out var policyId))
+                    return false;
+                var startedAt = workflow.StartedDate ?? workflow.CreatedDate;
+                // ResultData can include caller input. Only the separate, server-written event
+                // corroborates which policy the engine actually applied to this exact step.
+                var appliedEvents = policyActivities.Where(item => item.StepInstanceId == step.Id).ToList();
+                if (appliedEvents.Count != 1 || appliedEvents[0].ActivityDate < startedAt ||
+                    appliedEvents[0].ActivityDate < step.CreatedDate ||
+                    !step.Approvals.Any(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                        item.Status == WorkflowApprovalStatus.Approved && item.ProcessedById.HasValue &&
+                        item.ProcessedById.Value != artifact.UploadedById &&
+                        item.ProcessedDate.HasValue && item.ProcessedDate.Value >= artifact.UploadedAt &&
+                        item.ProcessedDate.Value >= appliedEvents[0].ActivityDate))
+                    return false;
+                using var provenance = JsonDocument.Parse(appliedEvents[0].Data ?? "{}");
+                if (provenance.RootElement.ValueKind != JsonValueKind.Object ||
+                    HasAmbiguousJsonProperties(provenance.RootElement) ||
+                    !provenance.RootElement.TryGetProperty("PolicySetId", out var recordedId) ||
+                    recordedId.ValueKind != JsonValueKind.String || !recordedId.TryGetGuid(out var recordedPolicyId) ||
+                    recordedPolicyId != policyId ||
+                    !provenance.RootElement.TryGetProperty("PolicyCode", out var recordedCode) ||
+                    recordedCode.ValueKind != JsonValueKind.String)
+                    return false;
+                var policy = await _unitOfWork.Repository<WorkflowApprovalPolicySet>().GetQueryable(item =>
+                        item.Id == policyId && item.TenantId == _currentUser.TenantId && !item.IsDeleted &&
+                        item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+                        item.EffectiveFrom <= startedAt && (!item.EffectiveTo.HasValue || item.EffectiveTo.Value >= startedAt))
+                    .AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+                if (policy == null || !string.Equals(policy.Code, recordedCode.GetString(), StringComparison.Ordinal) ||
+                    (!string.IsNullOrWhiteSpace(policy.EntityType) &&
+                    !string.Equals(policy.EntityType.Trim(), workflow.EntityType?.Name, StringComparison.OrdinalIgnoreCase)))
+                    return false;
+                using var configuration = JsonDocument.Parse(policy.ApprovalConfiguration);
+                if (HasAmbiguousJsonProperties(configuration.RootElement))
+                    return false;
+                var config = JsonSerializer.Deserialize<WorkflowApprovalConfigDto>(
+                    policy.ApprovalConfiguration, WorkflowConfigJsonOptions);
+                if (config?.EvidenceRequirements == null)
+                    return false;
+                var requirements = config.EvidenceRequirements.Where(item => item != null &&
+                    string.Equals(item.RequirementKey?.Trim(), artifact.RequirementKey.Trim(),
+                        StringComparison.OrdinalIgnoreCase)).ToList();
+                if (requirements.Count == 0)
+                    continue;
+                if (requirements.Count != 1 || requirements[0].RequireVerification ||
+                    requirements[0].MinimumDocuments != 1 ||
+                    (!string.IsNullOrWhiteSpace(requirements[0].DocumentType) &&
+                     !string.Equals(requirements[0].DocumentType.Trim(), artifact.DocumentType?.Trim(),
+                         StringComparison.OrdinalIgnoreCase)))
+                    return false;
+                matchedWaiver = true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+        return matchedWaiver;
+    }
+
+    private static bool HasAmbiguousJsonProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+            return element.EnumerateArray().Any(HasAmbiguousJsonProperties);
+        if (element.ValueKind != JsonValueKind.Object)
+            return false;
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return element.EnumerateObject().Any(item =>
+            !names.Add(item.Name) || HasAmbiguousJsonProperties(item.Value));
     }
 
     private async Task<List<ProcurementTenderDocumentChangeRecipient>> BuildChangeRecipientsAsync(
@@ -2013,6 +2406,13 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
+        if (changeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+        {
+            if (!CanRescheduleUnpublished(register, source))
+                throw Conflict("TENDER_DOCUMENT_RESCHEDULE_NOT_ALLOWED",
+                    "Only an approved, never-published open NCT with no issued documents, bids or advertised statutory controls may be rescheduled before publication.");
+            return;
+        }
         var validityExtension = changeType == ProcurementTenderDocumentChangeType.BidValidityExtension;
         if (validityExtension)
         {
@@ -2106,12 +2506,16 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                     EnsureUtc(source.SubmissionDeadlineUtc.Value) != current)
                     throw Conflict("TENDER_DOCUMENT_SOURCE_DEADLINE_STALE",
                         "The procurement source deadline no longer matches the controlled register.");
-                if (change.Register.OpeningScheduledAtUtc.HasValue &&
-                    EnsureUtc(change.NewValueUtc.Value) > change.Register.OpeningScheduledAtUtc.Value)
+                if (EffectiveOpening(change.Register).HasValue &&
+                    EnsureUtc(change.NewValueUtc.Value) > EffectiveOpening(change.Register)!.Value)
                     throw Conflict("TENDER_DOCUMENT_DEADLINE_AFTER_OPENING",
-                        "The submission deadline cannot extend beyond the immutable scheduled opening.");
+                        "The submission deadline cannot extend beyond the effective scheduled opening.");
                 break;
             }
+            case ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule:
+                ValidateUnpublishedSchedule(change.Register, source, change.PreviousValueUtc,
+                    change.PreviousOpeningScheduledAtUtc, change.NewValueUtc, change.NewOpeningScheduledAtUtc);
+                break;
             case ProcurementTenderDocumentChangeType.BidValidityExtension:
             {
                 var current = EffectiveBidValidity(change.Register);
@@ -2234,13 +2638,61 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
     private static DateTime EffectiveSubmissionDeadline(ProcurementTenderDocumentRegister register) =>
         register.Changes.Where(item => !item.IsDeleted &&
                 item.Status == ProcurementTenderDocumentChangeStatus.Approved &&
-                item.ChangeType == ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension &&
+                (item.ChangeType == ProcurementTenderDocumentChangeType.SubmissionDeadlineExtension ||
+                 item.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule) &&
                 item.NewValueUtc.HasValue)
             .OrderByDescending(item => item.Sequence)
             .Select(item => item.NewValueUtc!.Value)
             .FirstOrDefault() is var value && value != default
                 ? value
                 : register.OriginalSubmissionDeadlineUtc;
+
+    private static DateTime? EffectiveOpening(ProcurementTenderDocumentRegister register) =>
+        register.Changes.Where(item => !item.IsDeleted && item.Status == ProcurementTenderDocumentChangeStatus.Approved &&
+                item.ChangeType == ProcurementTenderDocumentChangeType.UnpublishedScheduleReschedule)
+            .OrderByDescending(item => item.Sequence).Select(item => item.NewOpeningScheduledAtUtc)
+            .FirstOrDefault() ?? register.OpeningScheduledAtUtc;
+
+    private static bool IsSourcePublished(SourceContext source) => source.Tender is not null
+        ? source.Tender.Status == "Published" && source.Tender.PublishDate.HasValue &&
+          EnsureUtc(source.Tender.PublishDate.Value) <= DateTime.UtcNow
+        : source.Rfq!.Status is "Sent" or "Evaluation" or "PendingApproval" or "Approved" or "Awarded";
+
+    private static bool RequiresTenderPublicationForIssue(SourceContext source) =>
+        source.Tender is not null && source.SourcingCase.SelectedMethod != ProcurementMethodType.RequestForQuotation;
+
+    private static bool CanRescheduleUnpublished(ProcurementTenderDocumentRegister register, SourceContext source) =>
+        CanRescheduleUnpublishedSource(source) && !register.Issuances.Any(item => !item.IsDeleted);
+
+    private static bool CanRescheduleUnpublishedSource(SourceContext source) =>
+        AllowsOpenDocumentAccess(source) && source.Tender!.Status == "Approved" &&
+        !source.Tender.PublishDate.HasValue && !source.Tender.PublishedById.HasValue &&
+        !source.HasBidsOrStatutoryControls;
+
+    private static List<string> RegisterActions(ProcurementTenderDocumentRegister register, SourceContext source)
+    {
+        var actions = new List<string> { "CreateChange" };
+        if ((!RequiresTenderPublicationForIssue(source) || IsSourcePublished(source)) && DateTime.UtcNow <= EffectiveSubmissionDeadline(register))
+            actions.Insert(0, "Issue");
+        if (CanRescheduleUnpublished(register, source) && !register.Changes.Any(item =>
+                !item.IsDeleted && item.Status == ProcurementTenderDocumentChangeStatus.PendingApproval))
+            actions.Add("RescheduleUnpublished");
+        return actions;
+    }
+
+    private static void ValidateUnpublishedSchedule(ProcurementTenderDocumentRegister register, SourceContext source,
+        DateTime? previousDeadline, DateTime? previousOpening, DateTime? newDeadline, DateTime? newOpening)
+    {
+        if (previousDeadline != EffectiveSubmissionDeadline(register) || previousOpening != EffectiveOpening(register) ||
+            source.SubmissionDeadlineUtc != previousDeadline || source.OpeningScheduledAtUtc != previousOpening)
+            throw Conflict("TENDER_DOCUMENT_SCHEDULE_BASE_STALE",
+                "The tender schedule no longer matches the controlled register. Reload before requesting or approving a reschedule.");
+        if (!newDeadline.HasValue || !newOpening.HasValue || newDeadline <= previousDeadline ||
+            newDeadline <= DateTime.UtcNow || newOpening <= newDeadline ||
+            (previousOpening.HasValue && newOpening <= previousOpening) || newDeadline >= EffectiveBidValidity(register))
+            throw Validation("TENDER_DOCUMENT_RESCHEDULE_DATES_INVALID",
+                "Choose a future submission deadline later than the current deadline and before bid-validity expiry, with a later opening strictly after submission.");
+    }
 
     private static DateTime EffectiveBidValidity(ProcurementTenderDocumentRegister register) =>
         register.Changes.Where(item => !item.IsDeleted &&
@@ -2252,6 +2704,27 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             .FirstOrDefault() is var value && value != default
                 ? value
                 : register.OriginalBidValidityUntilUtc;
+
+    private static bool AllowsOpenDocumentAccess(SourceContext source) =>
+        source.SourceType == ProcurementTenderDocumentSourceType.Tender &&
+        source.Tender is { RequiresPrequalification: false, UseQCBSEvaluation: false } &&
+        source.SourcingCase.SelectedMethod == ProcurementMethodType.NationalCompetitiveTendering;
+
+    private static List<string> AllowedExternalRecipientEmails(SourceContext source) =>
+        source.SourceType == ProcurementTenderDocumentSourceType.RequestForQuotation &&
+        source.SourcingCase.SelectedMethod == ProcurementMethodType.RequestForQuotation &&
+        !string.IsNullOrWhiteSpace(source.Rfq?.ExternalRecipientEmails)
+            ? source.Rfq.ExternalRecipientEmails
+                .Split([',', ';', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(IsValidRecipientEmail)
+                .Select(email => email.ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : [];
+
+    private static bool IsValidRecipientEmail(string email) =>
+        System.Net.Mail.MailAddress.TryCreate(email, out var address) &&
+        string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase);
 
     private static void RevalidateRegisterLineage(
         ProcurementTenderDocumentRegister register,
@@ -2617,25 +3090,54 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 "Template code and family version must be unique, including deleted Draft revisions.");
     }
 
-    private static void ValidateTemplateRequest(SaveProcurementTenderDocumentTemplateRequest request)
+    private static void ValidateTemplateRequest(
+        SaveProcurementTenderDocumentTemplateRequest request,
+        bool requireContent)
     {
         Require(request.TemplateCode, "TENDER_DOCUMENT_TEMPLATE_CODE_REQUIRED", "TemplateCode is required.");
         Require(request.Name, "TENDER_DOCUMENT_TEMPLATE_NAME_REQUIRED", "Name is required.");
         Require(request.DocumentTypeCode, "TENDER_DOCUMENT_TYPE_REQUIRED", "DocumentTypeCode is required.");
-        Require(request.ContentReference, "TENDER_DOCUMENT_CONTENT_REQUIRED", "ContentReference is required.");
-        Require(request.ContentChecksumSha256, "TENDER_DOCUMENT_CHECKSUM_REQUIRED",
-            "ContentChecksumSha256 is required.");
-        if (request.ContentChecksumSha256.Length != 64 ||
-            request.ContentChecksumSha256.Any(character => !Uri.IsHexDigit(character)))
-            throw Validation("TENDER_DOCUMENT_CHECKSUM_INVALID",
-                "ContentChecksumSha256 must be exactly 64 hexadecimal characters.");
-        if (!request.ContentWorkflowEvidenceDocumentId.HasValue || request.ContentFileUploadRecordId.HasValue)
+        var hasContent = HasTemplateContent(request);
+        if (requireContent && !hasContent)
             throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_REQUIRED",
                 "A controlled template must reference exactly one workflow evidence document.");
+        if (hasContent)
+        {
+            Require(request.ContentReference, "TENDER_DOCUMENT_CONTENT_REQUIRED", "ContentReference is required.");
+            Require(request.ContentChecksumSha256, "TENDER_DOCUMENT_CHECKSUM_REQUIRED",
+                "ContentChecksumSha256 is required.");
+            if (request.ContentChecksumSha256.Length != 64 ||
+                request.ContentChecksumSha256.Any(character => !Uri.IsHexDigit(character)))
+                throw Validation("TENDER_DOCUMENT_CHECKSUM_INVALID",
+                    "ContentChecksumSha256 must be exactly 64 hexadecimal characters.");
+            if (!request.ContentWorkflowEvidenceDocumentId.HasValue || request.ContentFileUploadRecordId.HasValue)
+                throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_REQUIRED",
+                    "A controlled template must reference exactly one workflow evidence document.");
+        }
         if (request.ApplicableMethods.Count == 0 || request.ApplicableMethods.Any(method => !Enum.IsDefined(method)))
             throw Validation("TENDER_DOCUMENT_TEMPLATE_METHOD_REQUIRED",
                 "At least one valid applicable procurement method is required.");
         ValidatePeriod(request.EffectiveFromUtc, request.EffectiveToUtc);
+    }
+
+    private static bool HasTemplateContent(SaveProcurementTenderDocumentTemplateRequest request)
+    {
+        var any = request.ContentWorkflowEvidenceDocumentId.HasValue ||
+            request.ContentFileUploadRecordId.HasValue ||
+            !string.IsNullOrWhiteSpace(request.ContentReference) ||
+            !string.IsNullOrWhiteSpace(request.ContentChecksumSha256);
+        var none = !request.ContentWorkflowEvidenceDocumentId.HasValue &&
+            !request.ContentFileUploadRecordId.HasValue &&
+            string.IsNullOrWhiteSpace(request.ContentReference) &&
+            string.IsNullOrWhiteSpace(request.ContentChecksumSha256);
+        if (any && !none &&
+            (!request.ContentWorkflowEvidenceDocumentId.HasValue ||
+             request.ContentFileUploadRecordId.HasValue ||
+             string.IsNullOrWhiteSpace(request.ContentReference) ||
+             string.IsNullOrWhiteSpace(request.ContentChecksumSha256)))
+            throw Validation("TENDER_DOCUMENT_CONTENT_ARTIFACT_INCOMPLETE",
+                "Content ID, controlled path, and SHA-256 must be supplied together.");
+        return any;
     }
 
     private static void ValidatePeriod(DateTime effectiveFromUtc, DateTime? effectiveToUtc)
@@ -2725,6 +3227,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             blocked.Add("At least one applicable procurement method is required.");
         if (item.Version > 1 && string.IsNullOrWhiteSpace(item.ChangeSummary))
             blocked.Add("A replacement version requires a change summary.");
+        if (!item.ContentWorkflowEvidenceDocumentId.HasValue)
+            blocked.Add(item.Status == ProcurementTenderDocumentTemplateStatus.PendingApproval
+                ? "Upload and attach one scan-clean content document from this exact approval workflow; the configured policy determines whether separate verification is required."
+                : "Controlled content must be attached before publication.");
         return new ProcurementTenderDocumentTemplateDto
         {
             Id = list.Id,
@@ -2789,6 +3295,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             .ToList();
         return new ProcurementTenderDocumentRegisterReadinessDto
         {
+            SourceStatus = source.Tender?.Status ?? source.Rfq!.Status,
+            IsSourcePublished = IsSourcePublished(source),
             SourceType = register.SourceType,
             SourceId = source.SourceId,
             SourceReference = source.Reference,
@@ -2797,10 +3305,13 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             MethodRuleId = register.MethodRuleId,
             MethodRuleCode = register.MethodRuleCode,
             HasRegister = true,
+            AllowsNewRecipient = externalPartnerIds is null && AllowsOpenDocumentAccess(source),
+            AllowedExternalRecipientEmails = externalPartnerIds is null ? AllowedExternalRecipientEmails(source) : [],
             RegisterId = register.Id,
             EffectiveTemplateVersionId = state.EffectiveTemplateVersionId,
             EffectiveTemplateReference = state.EffectiveTemplateReference,
             EffectiveSubmissionDeadlineUtc = state.EffectiveSubmissionDeadlineUtc,
+            OpeningScheduledAtUtc = EffectiveOpening(register),
             EffectiveBidValidityUntilUtc = state.EffectiveBidValidityUntilUtc,
             FeeMode = register.FeeMode,
             FeeAmount = register.FeeAmount,
@@ -2814,7 +3325,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             Ready = state.Ready,
             BlockedReasons = state.BlockedReasons,
             AllowedActions = externalPartnerIds is null
-                ? ["View", "Issue", "CreateChange"]
+                ? ["View", ..RegisterActions(register, source)]
                 : recipients.Any(item => !item.Acknowledgements.Any(ack => !ack.IsDeleted &&
                     ack.Outcome == ProcurementTenderDocumentAcknowledgementOutcome.Acknowledged))
                     ? ["View", "Acknowledge"]
@@ -2845,7 +3356,11 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 ack.Outcome == ProcurementTenderDocumentAcknowledgementOutcome.Acknowledged));
         return new ProcurementTenderDocumentRegisterDto
         {
+            SourceStatus = source.Tender?.Status ?? source.Rfq!.Status,
+            IsSourcePublished = IsSourcePublished(source),
             Id = register.Id,
+            AllowsNewRecipient = externalPartnerIds is null && AllowsOpenDocumentAccess(source),
+            AllowedExternalRecipientEmails = externalPartnerIds is null ? AllowedExternalRecipientEmails(source) : [],
             SourceType = register.SourceType,
             SourceId = source.SourceId,
             TenderId = register.TenderId,
@@ -2863,8 +3378,9 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             EffectiveTemplateVersionId = state.EffectiveTemplateVersionId,
             EffectiveTemplateReference = state.EffectiveTemplateReference,
             OriginalSubmissionDeadlineUtc = register.OriginalSubmissionDeadlineUtc,
+            OriginalOpeningScheduledAtUtc = register.OpeningScheduledAtUtc,
             EffectiveSubmissionDeadlineUtc = state.EffectiveSubmissionDeadlineUtc,
-            OpeningScheduledAtUtc = register.OpeningScheduledAtUtc,
+            OpeningScheduledAtUtc = EffectiveOpening(register),
             OriginalBidValidityUntilUtc = register.OriginalBidValidityUntilUtc,
             EffectiveBidValidityUntilUtc = state.EffectiveBidValidityUntilUtc,
             FeeMode = register.FeeMode,
@@ -2882,7 +3398,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
                 .Select(item => MapChange(item, externalPartnerIds)).ToList(),
             BlockedReasons = state.BlockedReasons,
             AllowedActions = externalPartnerIds is null
-                ? ["Issue", "CreateChange"]
+                ? RegisterActions(register, source)
                 : outstandingAcknowledgement ? ["Acknowledge"] : [],
             RowVersion = Convert.ToBase64String(register.RowVersion)
         };
@@ -2937,6 +3453,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
             NewTemplateVersionId = item.NewTemplateVersionId,
             PreviousValueUtc = item.PreviousValueUtc,
             NewValueUtc = item.NewValueUtc,
+            PreviousOpeningScheduledAtUtc = item.PreviousOpeningScheduledAtUtc,
+            NewOpeningScheduledAtUtc = item.NewOpeningScheduledAtUtc,
             RequiresAcknowledgement = item.RequiresAcknowledgement,
             Reason = item.Reason,
             WorkflowDefinitionId = item.WorkflowDefinitionId,
@@ -3007,7 +3525,7 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         status switch
         {
             ProcurementTenderDocumentTemplateStatus.Draft => ["Edit", "Submit", "DeleteDraft"],
-            ProcurementTenderDocumentTemplateStatus.PendingApproval => ["Publish", "Reject"],
+            ProcurementTenderDocumentTemplateStatus.PendingApproval => ["AttachContent", "Publish", "Reject"],
             ProcurementTenderDocumentTemplateStatus.Published => ["Clone", "Retire"],
             ProcurementTenderDocumentTemplateStatus.Retired => ["Clone"],
             _ => []
@@ -3028,10 +3546,10 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         entity.PolicySetCode = policy.Code;
         entity.PolicySetVersion = policy.Version;
         entity.SourceConfigurationProfileId = policy.SourceConfigurationProfileId;
-        entity.ContentReference = request.ContentReference.Trim();
+        entity.ContentReference = request.ContentReference?.Trim() ?? string.Empty;
         entity.ContentWorkflowEvidenceDocumentId = request.ContentWorkflowEvidenceDocumentId;
         entity.ContentFileUploadRecordId = request.ContentFileUploadRecordId;
-        entity.ContentChecksumSha256 = request.ContentChecksumSha256.Trim().ToLowerInvariant();
+        entity.ContentChecksumSha256 = request.ContentChecksumSha256?.Trim().ToLowerInvariant() ?? string.Empty;
         entity.WorkflowDefinitionId = request.WorkflowDefinitionId;
         entity.ChangeSummary = TrimOrNull(request.ChangeSummary, 1000);
     }
@@ -3244,6 +3762,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         entity.NewTemplateVersionId,
         entity.PreviousValueUtc,
         entity.NewValueUtc,
+        entity.PreviousOpeningScheduledAtUtc,
+        entity.NewOpeningScheduledAtUtc,
         entity.RequiresAcknowledgement,
         entity.Reason,
         entity.WorkflowDefinitionId,
@@ -3362,7 +3882,8 @@ public sealed class ProcurementTenderDocumentControlService : IProcurementTender
         string CurrencyCode,
         ProcurementSourcingCase SourcingCase,
         Tender? Tender,
-        RequestForQuotation? Rfq);
+        RequestForQuotation? Rfq,
+        bool HasBidsOrStatutoryControls);
 
     private sealed record RecipientCandidate(
         ProcurementTenderDocumentRecipientSourceType SourceType,

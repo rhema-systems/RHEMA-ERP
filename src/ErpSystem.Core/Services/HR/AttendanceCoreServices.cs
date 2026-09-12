@@ -740,6 +740,7 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
                 TenantId = log.TenantId,
                 EmployeeId = log.EmployeeId,
                 AttendanceDate = logDate,
+                DayOfWeek = logDate.DayOfWeek,
                 ActualCheckInTime = log.LogType == AttendanceLogType.CheckIn ? (TimeSpan?)log.LogDateTime.TimeOfDay : null,
                 ActualCheckOutTime = log.LogType == AttendanceLogType.CheckOut ? (TimeSpan?)log.LogDateTime.TimeOfDay : null,
                 Status = StaffAttendanceStatus.Present,
@@ -756,10 +757,21 @@ public class StaffAttendanceLogService : IStaffAttendanceLogService
             else if (log.LogType == AttendanceLogType.CheckOut)
                 daily.ActualCheckOutTime = log.LogDateTime.TimeOfDay;
 
+            // Rows minted before this path stamped the day defaulted to Sunday — correct on touch.
+            daily.DayOfWeek = logDate.DayOfWeek;
             ApplyLocationToDaily(daily, log, verification);
             daily.UpdatedAt = DateTime.UtcNow;
             daily.UpdatedBy = userId.ToString();
             await _dailyRepository.UpdateAsync(daily);
+        }
+
+        // A same-day out-punch closes the day: derive the worked hours the punch pair implies.
+        // Overnight pairs (out before in) stay null rather than going negative.
+        if (daily.ActualCheckInTime is TimeSpan checkIn &&
+            daily.ActualCheckOutTime is TimeSpan checkOut &&
+            checkOut > checkIn)
+        {
+            daily.ActualWorkHours = Math.Round((decimal)(checkOut - checkIn).TotalHours, 2);
         }
 
         await WriteVerificationLogAsync(log, verification, userId);
@@ -1212,10 +1224,24 @@ public class StaffAttendanceRegularizationService : IStaffAttendanceRegularizati
         return true;
     }
 
+    /// <summary>
+    /// Next regularization number for today, from the day's maximum over ALL rows — soft-deleted
+    /// included — since a withdrawn request keeps its number in the unique index and a row count
+    /// regenerates it (the overtime-request collision, same shape; W3 slice 12).
+    /// </summary>
     private async Task<string> GenerateRegularizationNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(r => r.TenantId == tenantId, ct);
-        return $"REG-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
+        // GetQueryableIncludingDeleted, not GetQueryable().IgnoreQueryFilters(): the repository
+        // applies its soft-delete filter as a plain Where, which IgnoreQueryFilters cannot remove.
+        var prefix = $"REG-{DateTime.UtcNow:yyyyMMdd}-";
+        var numbers = await _repository
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId && r.RegularizationNumber.StartsWith(prefix))
+            .Select(r => r.RegularizationNumber)
+            .ToListAsync(ct);
+        var max = 0;
+        foreach (var number in numbers)
+            if (int.TryParse(number.AsSpan(prefix.Length), out var value) && value > max) max = value;
+        return $"{prefix}{max + 1:D5}";
     }
 }
 
@@ -1661,10 +1687,24 @@ public class StaffBulkAttendanceImportService : IStaffBulkAttendanceImportServic
         return true;
     }
 
+    /// <summary>
+    /// Next import reference for today, from the day's maximum over ALL rows — soft-deleted
+    /// included — since a deleted import keeps its reference in the unique index and a row count
+    /// regenerates it (the overtime-request collision, same shape; W3 slice 12).
+    /// </summary>
     private async Task<string> GenerateImportReferenceAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(i => i.TenantId == tenantId, ct);
-        return $"ATT-IMP-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
+        // GetQueryableIncludingDeleted, not GetQueryable().IgnoreQueryFilters(): the repository
+        // applies its soft-delete filter as a plain Where, which IgnoreQueryFilters cannot remove.
+        var prefix = $"ATT-IMP-{DateTime.UtcNow:yyyyMMdd}-";
+        var numbers = await _repository
+            .GetQueryableIncludingDeleted(i => i.TenantId == tenantId && i.ImportReference.StartsWith(prefix))
+            .Select(i => i.ImportReference)
+            .ToListAsync(ct);
+        var max = 0;
+        foreach (var number in numbers)
+            if (int.TryParse(number.AsSpan(prefix.Length), out var value) && value > max) max = value;
+        return $"{prefix}{max + 1:D5}";
     }
 }
 

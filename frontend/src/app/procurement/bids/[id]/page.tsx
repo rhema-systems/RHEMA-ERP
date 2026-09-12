@@ -36,6 +36,8 @@ import {
   DollarSign,
   AlertCircle,
   RefreshCw,
+  ShieldCheck,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as tenderBidService from '@/services/tenderBidService';
@@ -54,6 +56,40 @@ import { Textarea } from '@/components/ui/textarea';
 import { QuantitySurveyTenderBoqVettingPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqVettingPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import { getSupportingDocuments, getSupportingDocumentRequirements } from '@/lib/procurement-bid-documents';
+import {
+  getTenderEvaluationRoute,
+  type TenderEvaluationRoute,
+} from '@/lib/procurement-tender-evaluation-route';
+
+function BidDocumentRequirements({ bid, tender }: { bid: TenderBidDetailDto; tender: TenderDetailDto | null }) {
+  const requirements = getSupportingDocumentRequirements(tender);
+  if (requirements === null) {
+    return <Alert className="mb-4"><AlertTitle>Document requirements unavailable</AlertTitle><AlertDescription>Uploaded files are listed below, but completeness cannot be checked until the tender requirements load correctly.</AlertDescription></Alert>;
+  }
+
+  if (!requirements.length) return <p className="mb-4 text-sm text-muted-foreground">No supporting-document requirements were configured for this tender. Technical and commercial proposals are listed under Proposals.</p>;
+  return (
+    <section aria-label="Document requirements" className="mb-6 space-y-2">
+      <h3 className="font-medium">Tender supporting-document requirements</h3>
+      <p className="text-sm text-muted-foreground">{requirements.filter((item) => item.isRequired).length} required · {requirements.filter((item) => !item.isRequired).length} optional. Upload presence does not confirm document validity.</p>
+      <ul className="divide-y rounded-lg border">
+        {requirements.map((requirement, index) => {
+          const count = bid.documents?.filter((document) => document.documentType === requirement.documentType).length ?? 0;
+          const withheld = bid.isFinancialProposalSealed;
+          const status = count ? `Uploaded (${count})` : withheld ? 'Not available in this phase' : requirement.isRequired ? 'Missing' : 'Not supplied';
+          return (
+            <li key={`${requirement.documentType}-${index}`} className="flex items-center justify-between gap-4 p-3 text-sm">
+              <span>{requirement.documentName}<span className="ml-2 text-muted-foreground">{requirement.isRequired ? 'Required' : 'Optional'}</span></span>
+              <Badge variant={!count && !withheld && requirement.isRequired ? 'destructive' : 'secondary'}>{status}</Badge>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 // Interface for criteria scores stored in evaluationCriteriaJson
 interface CriteriaScore {
@@ -295,7 +331,10 @@ export function TenderPaymentVerificationPanel({
                         <TableCell>
                           {payment.journalEntryId ? (
                             <div className="space-y-1">
-                              <Badge variant="outline" className="border-green-200 bg-green-100 text-green-800">
+                              <Badge
+                                variant="outline"
+                                className="border-green-200 bg-green-100 text-green-800"
+                              >
                                 Posted
                               </Badge>
                               <a
@@ -310,8 +349,12 @@ export function TenderPaymentVerificationPanel({
                                 </p>
                               )}
                             </div>
-                          ) : payment.status.trim().toLowerCase() === 'verified' ? (
-                            <Badge variant="outline" className="border-amber-200 bg-amber-100 text-amber-800">
+                          ) : payment.status.trim().toLowerCase() ===
+                            'verified' ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-200 bg-amber-100 text-amber-800"
+                            >
                               Posting pending
                             </Badge>
                           ) : (
@@ -375,8 +418,8 @@ export function TenderPaymentVerificationPanel({
           isFinanceRecovery
             ? 'Post tender fee payment to Finance'
             : decision?.isApproved
-            ? 'Approve tender fee payment'
-            : 'Reject tender fee payment'
+              ? 'Approve tender fee payment'
+              : 'Reject tender fee payment'
         }
         description={
           decision
@@ -411,8 +454,8 @@ export function TenderPaymentVerificationPanel({
                 isFinanceRecovery
                   ? 'Add recovery notes for the audit record'
                   : decision?.isApproved
-                  ? 'Add verification notes for the audit record'
-                  : 'Enter the reason this payment is being rejected'
+                    ? 'Add verification notes for the audit record'
+                    : 'Enter the reason this payment is being rejected'
               }
               disabled={verifying}
             />
@@ -444,6 +487,10 @@ export default function BidDetailPage() {
   const [bid, setBid] = useState<TenderBidDetailDto | null>(null);
   const [payments, setPayments] = useState<TenderPaymentDto[]>([]);
   const [template, setTemplate] = useState<EvaluationTemplate | null>(null);
+  const [sourceTender, setSourceTender] = useState<TenderDetailDto | null>(
+    null
+  );
+  const [evaluationRouteError, setEvaluationRouteError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
   const [showOpenDialog, setShowOpenDialog] = useState(false);
@@ -465,16 +512,54 @@ export default function BidDetailPage() {
   };
 
   useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (
+      requestedTab &&
+      [
+        'overview',
+        'items',
+        'proposals',
+        'documents',
+        'payments',
+        'qs-boq',
+        'evaluation',
+        'interviews',
+      ].includes(requestedTab)
+    ) {
+      setActiveTab(requestedTab);
+    }
+  }, []);
+
+  useEffect(() => {
     if (bidId) {
       loadBidDetails();
     }
   }, [bidId]);
+
+  useEffect(() => {
+    if (activeTab !== 'evaluation' || !sourceTender) return;
+    const route = getTenderEvaluationRoute(sourceTender, bidId);
+    if (route.mode === 'controlled') router.replace(route.evaluationHref);
+  }, [activeTab, bidId, router, sourceTender]);
 
   const loadBidDetails = async () => {
     try {
       setLoading(true);
       const data = await tenderBidService.getBidById(bidId);
       setBid(data);
+
+      try {
+        setEvaluationRouteError(undefined);
+        setSourceTender(await tenderService.getTenderById(data.tenderId));
+      } catch (tenderError) {
+        setSourceTender(null);
+        setEvaluationRouteError(
+          getProcurementProblemMessage(
+            tenderError,
+            'The tender evaluation route could not be determined.'
+          )
+        );
+      }
 
       // Load evaluation template if assigned
       if (data.evaluationTemplateId) {
@@ -611,6 +696,58 @@ export default function BidDetailPage() {
     );
   }
 
+  const openBidConfirmation = (
+    <ConfirmationDialog
+      open={showOpenDialog && canAdministerTender}
+      onOpenChange={setShowOpenDialog}
+      title="Mark Bid as Opened"
+      description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."
+      confirmText="Mark as Opened"
+      cancelText="Cancel"
+      variant="default"
+      onConfirm={confirmOpenBid}
+      isLoading={opening}
+    />
+  );
+
+  if (bid.isSealed) {
+    const openingTime = sourceTender?.openingDate ? Date.parse(sourceTender.openingDate) : NaN;
+    const closingTime = sourceTender?.submissionDeadline ? Date.parse(sourceTender.submissionDeadline) : NaN;
+    const canRequestOpening = canAdministerTender && bid.status === 'Submitted' &&
+      sourceTender?.status === 'Closed' && sourceTender.usesControlledTenderLifecycle === false &&
+      closingTime <= Date.now() && openingTime <= Date.now();
+    return (
+      <div className="container mx-auto py-6 space-y-6">
+        <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${bid.tenderId}`)}>
+          <ArrowLeft className="h-4 w-4 mr-2" />Return to tender
+        </Button>
+        <Card>
+          <CardHeader><CardTitle>Bid sealed</CardTitle></CardHeader>
+          <CardContent>
+            <p className="font-mono mb-2">{bid.bidNumber}</p>
+            <p>Prices, proposals and attachments remain confidential until formal bid opening. Complete the committee, closing-time and quorum prerequisites from the tender process flow.</p>
+            {canRequestOpening && (
+              <Button className="mt-4" onClick={handleOpenBid} disabled={opening}>Open bid</Button>
+            )}
+          </CardContent>
+        </Card>
+        {openBidConfirmation}
+      </div>
+    );
+  }
+
+  const supportingDocuments = getSupportingDocuments(bid.documents);
+  const evaluationRoute: TenderEvaluationRoute | undefined = sourceTender
+    ? getTenderEvaluationRoute(sourceTender, bidId)
+    : undefined;
+  const handleTabChange = (value: string) => {
+    if (value === 'evaluation' && evaluationRoute?.mode === 'controlled') {
+      router.push(evaluationRoute.evaluationHref);
+      return;
+    }
+    setActiveTab(value);
+  };
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       {/* Header */}
@@ -618,7 +755,11 @@ export default function BidDetailPage() {
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"
-            onClick={() => router.push('/procurement/bids')}
+            onClick={() =>
+              router.push(
+                `/procurement/bids?tenderId=${encodeURIComponent(bid.tenderId)}`
+              )
+            }
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
@@ -649,7 +790,7 @@ export default function BidDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">
-              {formatCurrency(bid.totalBidAmount, bid.currency)}
+              {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
             </p>
           </CardContent>
         </Card>
@@ -708,7 +849,7 @@ export default function BidDetailPage() {
       {/* Tabs */}
       <Tabs
         value={activeTab}
-        onValueChange={setActiveTab}
+        onValueChange={handleTabChange}
         className="space-y-4"
       >
         <TabsList
@@ -731,13 +872,7 @@ export default function BidDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="documents">
             <Upload className="h-4 w-4 mr-2" />
-            Documents (
-            {bid.documents?.filter(
-              (doc) =>
-                doc.documentType !== 'TechnicalProposal' &&
-                doc.documentType !== 'CommercialProposal'
-            ).length || 0}
-            )
+            Documents ({supportingDocuments.length})
           </TabsTrigger>
           <TabsTrigger value="payments">
             <DollarSign className="h-4 w-4 mr-2" />
@@ -786,7 +921,7 @@ export default function BidDetailPage() {
               <div>
                 <p className="text-sm text-gray-500">Total Bid Amount</p>
                 <p className="font-semibold">
-                  {formatCurrency(bid.totalBidAmount, bid.currency)}
+                  {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                 </p>
               </div>
               <div>
@@ -1227,7 +1362,7 @@ export default function BidDetailPage() {
                           Total Bid Amount:
                         </span>
                         <span className="text-2xl font-bold text-blue-600 break-all text-right">
-                          {formatCurrency(bid.totalBidAmount, bid.currency)}
+                          {bid.isFinancialProposalSealed ? 'Sealed' : formatCurrency(bid.totalBidAmount, bid.currency)}
                         </span>
                       </div>
                     </div>
@@ -1399,17 +1534,13 @@ export default function BidDetailPage() {
         <TabsContent value="documents" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Required Documents</CardTitle>
+              <CardTitle>Supporting Documents</CardTitle>
               <CardDescription>
-                {bid.documents?.filter(
-                  (doc) =>
-                    doc.documentType !== 'TechnicalProposal' &&
-                    doc.documentType !== 'CommercialProposal'
-                ).length || 0}{' '}
-                document(s)
+                {supportingDocuments.length} supporting file(s) uploaded. Technical and commercial proposals are shown separately.
               </CardDescription>
             </CardHeader>
             <CardContent>
+              {bid.status !== 'Submitted' && <BidDocumentRequirements bid={bid} tender={sourceTender} />}
               {bid.status === 'Submitted' ? (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-yellow-800">
@@ -1419,14 +1550,9 @@ export default function BidDetailPage() {
                     </span>
                   </div>
                 </div>
-              ) : !bid.documents ||
-                bid.documents.filter(
-                  (doc) =>
-                    doc.documentType !== 'TechnicalProposal' &&
-                    doc.documentType !== 'CommercialProposal'
-                ).length === 0 ? (
+              ) : !supportingDocuments.length ? (
                 <p className="text-center py-8 text-gray-500">
-                  No required documents uploaded
+                  No supporting files uploaded
                 </p>
               ) : (
                 <Table>
@@ -1439,13 +1565,7 @@ export default function BidDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bid.documents
-                      .filter(
-                        (doc) =>
-                          doc.documentType !== 'TechnicalProposal' &&
-                          doc.documentType !== 'CommercialProposal'
-                      )
-                      .map((doc) => (
+                    {supportingDocuments.map((doc) => (
                         <TableRow key={doc.id}>
                           <TableCell>
                             <Badge variant="outline">{doc.documentType}</Badge>
@@ -1491,202 +1611,255 @@ export default function BidDetailPage() {
 
         {/* Evaluation Tab */}
         <TabsContent value="evaluation" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Evaluations</CardTitle>
-                  <CardDescription>
-                    {bid.evaluations?.length || 0} evaluation(s)
-                  </CardDescription>
-                </div>
+          {evaluationRoute?.mode === 'controlled' ? (
+            <Card className="border-blue-200 bg-blue-50/40">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-blue-700" />
+                  Controlled committee evaluation
+                </CardTitle>
+                <CardDescription>
+                  Open the signed tender evaluation workspace to score this bid.
+                  All bids remain side by side in one controlled committee
+                  record so the comparison and audit history stay complete.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
                 <Button
-                  onClick={() =>
-                    router.push(
-                      `/procurement/evaluations/create?bidId=${bidId}`
-                    )
-                  }
-                  className="gap-2"
+                  variant="outline"
+                  onClick={() => router.push(evaluationRoute.committeeHref)}
                 >
-                  <Award className="h-4 w-4" />
-                  Create Evaluation
+                  <Users className="mr-2 h-4 w-4" />
+                  Committee controls
                 </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {!bid.evaluations || bid.evaluations.length === 0 ? (
-                <div className="text-center py-8">
-                  <Award className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 mb-4">No evaluations yet</p>
+                <Button
+                  onClick={() => router.push(evaluationRoute.evaluationHref)}
+                >
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {evaluationRoute.evaluationLabel}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : evaluationRoute?.mode === 'legacy' ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Evaluations</CardTitle>
+                    <CardDescription>
+                      {bid.evaluations?.length || 0} evaluation(s)
+                    </CardDescription>
+                  </div>
                   <Button
                     onClick={() =>
                       router.push(
                         `/procurement/evaluations/create?bidId=${bidId}`
                       )
                     }
-                    variant="outline"
+                    className="gap-2"
                   >
-                    <Award className="h-4 w-4 mr-2" />
-                    Create First Evaluation
+                    <Award className="h-4 w-4" />
+                    Create Evaluation
                   </Button>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {bid.evaluations.map((evaluation) => (
-                    <Card key={evaluation.id} className="border">
-                      <CardHeader className="pb-2 pt-3 px-4">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <CardTitle className="text-sm font-semibold">
-                              {evaluation.evaluatorName || 'Unknown Evaluator'}
-                            </CardTitle>
-                            <CardDescription className="text-xs">
-                              {formatDate(evaluation.evaluationDate)}
-                            </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!bid.evaluations || bid.evaluations.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Award className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <p className="text-gray-500 mb-4">No evaluations yet</p>
+                    <Button
+                      onClick={() =>
+                        router.push(
+                          `/procurement/evaluations/create?bidId=${bidId}`
+                        )
+                      }
+                      variant="outline"
+                    >
+                      <Award className="h-4 w-4 mr-2" />
+                      Create First Evaluation
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {bid.evaluations.map((evaluation) => (
+                      <Card key={evaluation.id} className="border">
+                        <CardHeader className="pb-2 pt-3 px-4">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <CardTitle className="text-sm font-semibold">
+                                {evaluation.evaluatorName ||
+                                  'Unknown Evaluator'}
+                              </CardTitle>
+                              <CardDescription className="text-xs">
+                                {formatDate(evaluation.evaluationDate)}
+                              </CardDescription>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <Badge
+                                variant={
+                                  evaluation.status === 'Submitted'
+                                    ? 'default'
+                                    : 'outline'
+                                }
+                                className={`text-xs ${evaluation.status === 'Submitted' ? 'bg-green-600' : ''}`}
+                              >
+                                {evaluation.status === 'Submitted'
+                                  ? 'Completed'
+                                  : evaluation.status}
+                              </Badge>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() =>
+                                  router.push(
+                                    `/procurement/evaluations/${evaluation.id}`
+                                  )
+                                }
+                              >
+                                View
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <Badge
-                              variant={
-                                evaluation.status === 'Submitted'
-                                  ? 'default'
-                                  : 'outline'
-                              }
-                              className={`text-xs ${evaluation.status === 'Submitted' ? 'bg-green-600' : ''}`}
-                            >
-                              {evaluation.status === 'Submitted'
-                                ? 'Completed'
-                                : evaluation.status}
-                            </Badge>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() =>
-                                router.push(
-                                  `/procurement/evaluations/${evaluation.id}`
-                                )
-                              }
-                            >
-                              View
-                            </Button>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pt-2 pb-3 px-4 space-y-2">
-                        {/* Dynamic Criteria Scores */}
-                        {evaluation.evaluationCriteriaJson ? (
-                          (() => {
-                            try {
-                              const criteriaScores: CriteriaScore[] =
-                                JSON.parse(evaluation.evaluationCriteriaJson);
-                              const colors = [
-                                'text-blue-600',
-                                'text-green-600',
-                                'text-orange-600',
-                                'text-purple-600',
-                                'text-red-600',
-                                'text-cyan-600',
-                                'text-pink-600',
-                                'text-indigo-600',
-                                'text-teal-600',
-                              ];
-                              return (
-                                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                                  {criteriaScores.map((criteria, index) => (
-                                    <div key={criteria.criterionId}>
-                                      <p className="text-xs text-gray-500">
-                                        {criteria.criterionName}
-                                      </p>
-                                      <div className="flex items-baseline gap-1">
-                                        <p
-                                          className={`text-sm font-bold ${colors[index % colors.length]}`}
-                                        >
-                                          {criteria.score}
+                        </CardHeader>
+                        <CardContent className="pt-2 pb-3 px-4 space-y-2">
+                          {/* Dynamic Criteria Scores */}
+                          {evaluation.evaluationCriteriaJson ? (
+                            (() => {
+                              try {
+                                const criteriaScores: CriteriaScore[] =
+                                  JSON.parse(evaluation.evaluationCriteriaJson);
+                                const colors = [
+                                  'text-blue-600',
+                                  'text-green-600',
+                                  'text-orange-600',
+                                  'text-purple-600',
+                                  'text-red-600',
+                                  'text-cyan-600',
+                                  'text-pink-600',
+                                  'text-indigo-600',
+                                  'text-teal-600',
+                                ];
+                                return (
+                                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                                    {criteriaScores.map((criteria, index) => (
+                                      <div key={criteria.criterionId}>
+                                        <p className="text-xs text-gray-500">
+                                          {criteria.criterionName}
                                         </p>
-                                        <span className="text-xs text-gray-400">
-                                          / {criteria.maxScore}
-                                        </span>
+                                        <div className="flex items-baseline gap-1">
+                                          <p
+                                            className={`text-sm font-bold ${colors[index % colors.length]}`}
+                                          >
+                                            {criteria.score}
+                                          </p>
+                                          <span className="text-xs text-gray-400">
+                                            / {criteria.maxScore}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-gray-400">
+                                          Weighted:{' '}
+                                          {criteria.weightedScore.toFixed(1)}%
+                                        </p>
                                       </div>
-                                      <p className="text-xs text-gray-400">
-                                        Weighted:{' '}
-                                        {criteria.weightedScore.toFixed(1)}%
+                                    ))}
+                                    <div className="border-l pl-2">
+                                      <p className="text-xs text-gray-500 font-medium">
+                                        Total
+                                      </p>
+                                      <p className="text-sm font-bold text-indigo-600">
+                                        {evaluation.totalScore !== undefined &&
+                                        evaluation.totalScore !== null
+                                          ? `${evaluation.totalScore.toFixed(1)}%`
+                                          : criteriaScores
+                                              .reduce(
+                                                (sum, c) =>
+                                                  sum + c.weightedScore,
+                                                0
+                                              )
+                                              .toFixed(1) + '%'}
                                       </p>
                                     </div>
-                                  ))}
-                                  <div className="border-l pl-2">
-                                    <p className="text-xs text-gray-500 font-medium">
-                                      Total
-                                    </p>
-                                    <p className="text-sm font-bold text-indigo-600">
-                                      {evaluation.totalScore !== undefined &&
-                                      evaluation.totalScore !== null
-                                        ? `${evaluation.totalScore.toFixed(1)}%`
-                                        : criteriaScores
-                                            .reduce(
-                                              (sum, c) => sum + c.weightedScore,
-                                              0
-                                            )
-                                            .toFixed(1) + '%'}
-                                    </p>
                                   </div>
+                                );
+                              } catch {
+                                return (
+                                  <p className="text-xs text-gray-500">
+                                    Could not parse evaluation criteria
+                                  </p>
+                                );
+                              }
+                            })()
+                          ) : (
+                            <p className="text-xs text-gray-500">
+                              No detailed criteria scores available
+                            </p>
+                          )}
+                          {(evaluation.technicalComments ||
+                            evaluation.commercialComments ||
+                            evaluation.recommendation) && (
+                            <div className="text-xs space-y-1 pt-1 border-t">
+                              {evaluation.technicalComments && (
+                                <div>
+                                  <p className="font-medium text-gray-600">
+                                    Technical:
+                                  </p>
+                                  <p className="text-gray-700 line-clamp-2">
+                                    {evaluation.technicalComments}
+                                  </p>
                                 </div>
-                              );
-                            } catch {
-                              return (
-                                <p className="text-xs text-gray-500">
-                                  Could not parse evaluation criteria
-                                </p>
-                              );
-                            }
-                          })()
-                        ) : (
-                          <p className="text-xs text-gray-500">
-                            No detailed criteria scores available
-                          </p>
-                        )}
-                        {(evaluation.technicalComments ||
-                          evaluation.commercialComments ||
-                          evaluation.recommendation) && (
-                          <div className="text-xs space-y-1 pt-1 border-t">
-                            {evaluation.technicalComments && (
-                              <div>
-                                <p className="font-medium text-gray-600">
-                                  Technical:
-                                </p>
-                                <p className="text-gray-700 line-clamp-2">
-                                  {evaluation.technicalComments}
-                                </p>
-                              </div>
-                            )}
-                            {evaluation.commercialComments && (
-                              <div>
-                                <p className="font-medium text-gray-600">
-                                  Commercial:
-                                </p>
-                                <p className="text-gray-700 line-clamp-2">
-                                  {evaluation.commercialComments}
-                                </p>
-                              </div>
-                            )}
-                            {evaluation.recommendation && (
-                              <div className="bg-blue-50 p-2 rounded">
-                                <p className="font-medium text-blue-900">
-                                  Recommendation:
-                                </p>
-                                <p className="text-blue-800 line-clamp-2">
-                                  {evaluation.recommendation}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                              )}
+                              {evaluation.commercialComments && (
+                                <div>
+                                  <p className="font-medium text-gray-600">
+                                    Commercial:
+                                  </p>
+                                  <p className="text-gray-700 line-clamp-2">
+                                    {evaluation.commercialComments}
+                                  </p>
+                                </div>
+                              )}
+                              {evaluation.recommendation && (
+                                <div className="bg-blue-50 p-2 rounded">
+                                  <p className="font-medium text-blue-900">
+                                    Recommendation:
+                                  </p>
+                                  <p className="text-blue-800 line-clamp-2">
+                                    {evaluation.recommendation}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Evaluation route unavailable</AlertTitle>
+              <AlertDescription className="space-y-3">
+                <p>
+                  {evaluationRouteError ??
+                    'The tender evaluation route could not be determined.'}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    router.push(`/procurement/tenders/${bid.tenderId}`)
+                  }
+                >
+                  Return to tender
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
         </TabsContent>
 
         {/* Interviews Tab */}
@@ -1772,17 +1945,7 @@ export default function BidDetailPage() {
       </Tabs>
 
       {/* Open Bid Confirmation Dialog */}
-      <ConfirmationDialog
-        open={showOpenDialog && canAdministerTender}
-        onOpenChange={setShowOpenDialog}
-        title="Mark Bid as Opened"
-        description="Are you sure you want to mark this bid as opened? The supplier will be notified that their bid has been opened."
-        confirmText="Mark as Opened"
-        cancelText="Cancel"
-        variant="default"
-        onConfirm={confirmOpenBid}
-        isLoading={opening}
-      />
+      {openBidConfirmation}
     </div>
   );
 }

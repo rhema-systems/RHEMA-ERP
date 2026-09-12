@@ -19,6 +19,7 @@ import {
   IssueRequisitionDto, RequisitionStatusMap
 } from '@/services/inventoryRequisitionService';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { format } from 'date-fns';
 import {
   InventoryTrackingExceptionSelect,
@@ -78,6 +79,7 @@ const normalizeStatus = (status: number | string | undefined): number => {
 
 export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSuccess }: IssueRequisitionDialogProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [requisition, setRequisition] = useState<InventoryRequisitionDetailDto | null>(null);
@@ -90,7 +92,8 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
   const [vouchers, setVouchers] = useState<InventoryIssueVoucherDto[]>([]);
   const [acknowledgementComment, setAcknowledgementComment] = useState('');
   const [voucherActionId, setVoucherActionId] = useState<string | null>(null);
-  const trackingExceptions = useAvailableInventoryTrackingExceptions(open && Boolean(requisitionId));
+  const canIssue = Boolean(requisition && [3, 4, 5].includes(normalizeStatus(requisition.status)));
+  const trackingExceptions = useAvailableInventoryTrackingExceptions(open && canIssue);
 
   useEffect(() => {
     if (open && requisitionId) {
@@ -102,21 +105,26 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
     if (!requisitionId) return;
     try {
       setLoading(true);
-      const [detail, receiverOptions, issueVouchers, governedOptions] = await Promise.all([
+      const [detail, issueVouchers] = await Promise.all([
         inventoryRequisitionService.getById(requisitionId),
-        inventoryRequisitionService.getIssueReceivers(),
         inventoryRequisitionService.getIssueVouchers(requisitionId),
-        inventoryRequisitionService.getIssueAccountingOptions(requisitionId),
       ]);
       setRequisition(detail);
-      setReceivers(receiverOptions);
       setVouchers(issueVouchers);
-      setAccountingOptions(governedOptions);
-      setMovementReasonCode(current => governedOptions.applicableMovementReasonCodes.includes(current)
-        ? current
-        : governedOptions.applicableMovementReasonCodes.length === 1
-          ? governedOptions.applicableMovementReasonCodes[0]
-          : '');
+      setReceivers([]);
+      setAccountingOptions(null);
+      setMovementReasonCode('');
+      // Viewing/acknowledging an issued voucher must not require issue-configuration access.
+      if ([3, 4, 5].includes(normalizeStatus(detail.status))) {
+        const [receiverOptions, governedOptions] = await Promise.all([
+          inventoryRequisitionService.getIssueReceivers(),
+          inventoryRequisitionService.getIssueAccountingOptions(requisitionId),
+        ]);
+        setReceivers(receiverOptions);
+        setAccountingOptions(governedOptions);
+        setMovementReasonCode(governedOptions.applicableMovementReasonCodes.length === 1
+          ? governedOptions.applicableMovementReasonCodes[0] : '');
+      }
       setReceiverUserId(detail.requestedById || '');
       // Initialize issue items from requisition items
       const items: IssueItemState[] = detail.items.map(item => ({
@@ -277,13 +285,13 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
         <DialogHeader>
           <div className="flex flex-col gap-1">
             <DialogTitle>
-              Issue Items
+              {canIssue ? 'Issue Items' : 'Issue vouchers'}
               {requisition && <span className="ml-2 text-muted-foreground">#{requisition.requisitionNumber}</span>}
             </DialogTitle>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                Issue inventory items for this requisition
-              </span>
+              <DialogDescription className="text-sm text-muted-foreground">
+                {canIssue ? 'Issue inventory items for this requisition' : 'Review handover evidence and receiver acknowledgement'}
+              </DialogDescription>
               {requisition && getStatusBadge(requisition.status)}
             </div>
           </div>
@@ -305,6 +313,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
               </CardContent>
             </Card>
 
+            {canIssue && <>
             <Card className="border-blue-200 bg-blue-50/40">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Controlled handover</CardTitle>
@@ -427,6 +436,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
               </Card>
             )}
 
+            </>}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Store Issue Voucher register</CardTitle>
@@ -444,8 +454,8 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Badge className={voucher.status === 2 ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}>
-                          {voucher.status === 2 ? 'Acknowledged' : 'Awaiting receiver'}
+                        <Badge className={voucher.status === 2 || String(voucher.status) === 'Acknowledged' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}>
+                          {voucher.status === 2 || String(voucher.status) === 'Acknowledged' ? 'Acknowledged' : 'Awaiting receiver'}
                         </Badge>
                         <Button variant="outline" size="sm" onClick={() => handleDownload(voucher)} disabled={voucherActionId === voucher.id}>
                           <Download className="mr-1 h-3.5 w-3.5" /> PDF
@@ -455,7 +465,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                     <div className="text-xs text-muted-foreground">
                       {voucher.lines.length} line(s) · {accountingOptions?.movementReasons[voucher.movementReasonCode] ?? voucher.movementReasonCode} · Finance {voucher.financeJournalEntryId ? 'posted' : 'pending'}
                     </div>
-                    {voucher.status === 1 ? (
+                    {(voucher.status === 1 || String(voucher.status) === 'Issued') && user?.id === voucher.receiverUserId ? (
                       <div className="flex flex-col gap-2 sm:flex-row">
                         <Input
                           value={acknowledgementComment}
@@ -467,9 +477,9 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
                           <ClipboardCheck className="mr-1 h-4 w-4" /> Acknowledge receipt
                         </Button>
                       </div>
-                    ) : (
+                    ) : (voucher.status === 2 || String(voucher.status) === 'Acknowledged') ? (
                       <p className="text-xs text-green-700">Acknowledged {voucher.acknowledgedAtUtc ? format(new Date(voucher.acknowledgedAtUtc), 'dd MMM yyyy HH:mm') : ''}: {voucher.receiverComment}</p>
-                    )}
+                    ) : <p className="text-xs text-muted-foreground">Awaiting acknowledgement by {voucher.receiverName}.</p>}
                   </div>
                 ))}
               </CardContent>
@@ -480,10 +490,10 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleIssue} disabled={issuing || totalIssuing === 0 || !receiverUserId || !movementReasonCode}>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{canIssue ? 'Cancel' : 'Close'}</Button>
+          {canIssue && <Button onClick={handleIssue} disabled={issuing || totalIssuing === 0 || !receiverUserId || !movementReasonCode}>
             {issuing ? 'Issuing...' : `Issue ${totalIssuing} Items`}
-          </Button>
+          </Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

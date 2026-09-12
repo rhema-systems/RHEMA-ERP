@@ -3,15 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  ArrowLeft,
-  ClipboardCheck,
-  Loader2,
-  MailCheck,
-  RefreshCw,
-  ShieldCheck,
-  Users,
-} from 'lucide-react';
+import { ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AwardReadinessRegister } from './AwardReadinessRegister';
@@ -119,18 +111,6 @@ export function AwardReadinessWorkspace({
       : isExceptional
         ? `/procurement/tenders/${sourceId}/exception-controls`
         : `/procurement/tenders/${sourceId}`;
-  const committeeHref =
-    sourceType === 'RequestForQuotation'
-      ? `/procurement/rfqs/${sourceId}/committee-controls`
-      : `/procurement/tenders/${sourceId}/committee-controls`;
-  const bidderCommunicationsHref =
-    sourceType === 'RequestForQuotation'
-      ? `/procurement/rfqs/${sourceId}/bidder-communications`
-      : `/procurement/tenders/${sourceId}/bidder-communications${
-          sourceType === 'ExceptionalSourcing'
-            ? '?sourceType=ExceptionalSourcing'
-            : ''
-        }`;
   const sourceLabel = awardReadinessSourceLabel(sourceType);
 
   if ((latest.isLoading || history.isLoading) && !decision) {
@@ -177,60 +157,12 @@ export function AwardReadinessWorkspace({
             </Link>
           </Button>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold">
-              Recommendation approval and award readiness
-            </h1>
+            <h1 className="text-2xl font-semibold">Award readiness</h1>
             <Badge variant="outline">{sourceLabel}</Badge>
-            {decision && (
-              <Badge
-                variant={
-                  decision.status === 'Ready' && decision.isCurrent
-                    ? 'default'
-                    : 'destructive'
-                }
-              >
-                {decision.status}
-                {!decision.isCurrent ? ' · Historical' : ''}
-              </Badge>
-            )}
           </div>
           <p className="mt-1 max-w-4xl text-sm text-muted-foreground">
             Review the current checks before submitting or approving the award.
           </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline">
-            <Link href={committeeHref}>
-              <Users className="mr-2 h-4 w-4" />
-              Committee controls
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={bidderCommunicationsHref}>
-              <MailCheck className="mr-2 h-4 w-4" />
-              Bidder communications
-            </Link>
-          </Button>
-          {sourceType !== 'RequestForQuotation' && (
-            <Button asChild variant="outline">
-              <Link href={`/procurement/tenders/${sourceId}?tab=verification`}>
-                <ClipboardCheck className="mr-2 h-4 w-4" />
-                Award verification
-              </Link>
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            onClick={() => void refresh()}
-            disabled={latest.isFetching || history.isFetching}
-          >
-            <RefreshCw
-              className={`mr-2 h-4 w-4 ${
-                latest.isFetching || history.isFetching ? 'animate-spin' : ''
-              }`}
-            />
-            Refresh history
-          </Button>
         </div>
       </div>
 
@@ -249,6 +181,10 @@ export function AwardReadinessWorkspace({
         canEvaluate={canEvaluate}
         isEvaluating={evaluate.isPending}
         onEvaluate={() => evaluate.mutate()}
+        onRefresh={() => void refresh()}
+        isRefreshing={
+          latest.isFetching || history.isFetching || sodStatus.isFetching
+        }
       />
     </div>
   );

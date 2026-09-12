@@ -269,6 +269,10 @@ public class AwardVerificationsController : ControllerBase
         {
             return NotFound(ex.Message);
         }
+        catch (InvalidOperationException ex)
+        {
+            return VerificationValidationProblem(ex);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating template item {ItemId}", itemId);
@@ -432,7 +436,7 @@ public class AwardVerificationsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return VerificationValidationProblem(ex);
         }
         catch (Exception ex)
         {
@@ -459,7 +463,7 @@ public class AwardVerificationsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return VerificationValidationProblem(ex);
         }
         catch (Exception ex)
         {
@@ -492,6 +496,20 @@ public class AwardVerificationsController : ControllerBase
     }
 
     #endregion
+
+    private ObjectResult VerificationValidationProblem(InvalidOperationException exception)
+    {
+        var parts = exception.Message.Split(": ", 2, StringSplitOptions.None);
+        var code = parts[0].StartsWith("AWARD_VERIFICATION_", StringComparison.Ordinal)
+            ? parts[0] : "AWARD_VERIFICATION_INCOMPLETE";
+        return UnprocessableEntity(new ProblemDetails
+        {
+            Title = "Award verification needs attention",
+            Status = StatusCodes.Status422UnprocessableEntity,
+            Detail = parts.Length == 2 && code == parts[0] ? parts[1] : exception.Message,
+            Extensions = { ["code"] = code }
+        });
+    }
 
     #region Document Endpoints
 

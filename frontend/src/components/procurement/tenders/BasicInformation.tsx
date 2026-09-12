@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,25 +10,40 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Loader2, FileText, CheckCircle } from 'lucide-react';
 import { type TenderFormData } from '@/app/procurement/tenders/new/page';
-import { evaluationTemplateService, EvaluationTemplate, EvaluationTemplateListItem } from '@/services/evaluationTemplateService';
+import { evaluationTemplateService, EvaluationTemplate } from '@/services/evaluationTemplateService';
+import { getTemplateEvaluationSettings } from '@/lib/tender-evaluation-configuration';
 
 interface BasicInformationProps {
   formData: TenderFormData;
   updateFormData: (data: Partial<TenderFormData>) => void;
   procurementCategory?: string;
+  sourceCurrency?: string;
 }
 
 const CURRENCIES = ['USD', 'GHS', 'EUR', 'GBP'];
 
-export default function BasicInformation({ formData, updateFormData, procurementCategory }: BasicInformationProps) {
-  const [evaluationTemplates, setEvaluationTemplates] = useState<EvaluationTemplateListItem[]>([]);
-  const [selectedTemplateDetails, setSelectedTemplateDetails] = useState<EvaluationTemplate | null>(null);
+export default function BasicInformation({
+  formData,
+  updateFormData,
+  procurementCategory,
+  sourceCurrency,
+}: BasicInformationProps) {
+  const [evaluationTemplates, setEvaluationTemplates] = useState<EvaluationTemplate[]>([]);
+  const [evaluationMethod, setEvaluationMethod] = useState<'Standard' | 'QCBS' | ''>(
+    formData.useQCBSEvaluation ? 'QCBS' : formData.evaluationTemplateId ? 'Standard' : ''
+  );
   const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [selectedTemplateDetails, setSelectedTemplateDetails] = useState<EvaluationTemplate | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [detailsReloadKey, setDetailsReloadKey] = useState(0);
+  const updateFormRef = useRef(updateFormData);
+  updateFormRef.current = updateFormData;
   const [templateLoadError, setTemplateLoadError] = useState<string | null>(null);
   const [templateReloadKey, setTemplateReloadKey] = useState(0);
 
-  // Load only active templates applicable to this tender source and tender type.
+  // The existing active endpoint includes the methods needed to filter the list.
+  // Never choose a default template before the user has chosen the evaluation method.
   useEffect(() => {
     let cancelled = false;
 
@@ -36,26 +51,9 @@ export default function BasicInformation({ formData, updateFormData, procurement
       try {
         setLoadingTemplates(true);
         setTemplateLoadError(null);
-        const templates = await evaluationTemplateService.getForDropdown(
-          procurementCategory,
-          formData.tenderType
-        );
+        const templates = await evaluationTemplateService.getActive();
         if (cancelled) return;
         setEvaluationTemplates(templates);
-
-        if (formData.evaluationTemplateId &&
-            !templates.some(template => template.id === formData.evaluationTemplateId)) {
-          updateFormData({ evaluationTemplateId: null, evaluationTemplateName: '' });
-          setSelectedTemplateDetails(null);
-        } else if (!formData.evaluationTemplateId) {
-          const defaultTemplate = templates.find(template => template.isDefault);
-          if (defaultTemplate) {
-            updateFormData({
-              evaluationTemplateId: defaultTemplate.id,
-              evaluationTemplateName: defaultTemplate.templateName
-            });
-          }
-        }
       } catch (error) {
         if (cancelled) return;
         console.error('Failed to load evaluation templates:', error);
@@ -70,38 +68,66 @@ export default function BasicInformation({ formData, updateFormData, procurement
     loadTemplates();
 
     return () => { cancelled = true; };
-  }, [procurementCategory, formData.tenderType, templateReloadKey]);
+  }, [templateReloadKey]);
 
-  // Load template details when selection changes and auto-populate QCBS settings
+  const matchingTemplates = useMemo(() => evaluationTemplates.filter(template =>
+    template.isActive &&
+    (!procurementCategory?.trim() || template.category.trim().toLowerCase() === procurementCategory.trim().toLowerCase()) &&
+    template.tenderType.trim().toLowerCase() === formData.tenderType.trim().toLowerCase() &&
+    (evaluationMethod === 'QCBS'
+      ? template.scoringMethod === 'QCBS'
+      : evaluationMethod === 'Standard' && ['WeightedAverage', 'SimpleAverage', 'PassFail'].includes(template.scoringMethod))
+  ), [evaluationTemplates, procurementCategory, formData.tenderType, evaluationMethod]);
+  const selectedTemplate = matchingTemplates.find(template => template.id === formData.evaluationTemplateId) ?? null;
+
+  // Recheck existing draft selections when the source, type or loaded templates change.
+  // Async loading never overrides a more recent method/template choice.
   useEffect(() => {
-    const loadTemplateDetails = async () => {
-      if (!formData.evaluationTemplateId) {
-        setSelectedTemplateDetails(null);
-        return;
-      }
-      try {
-        setLoadingDetails(true);
-        const details = await evaluationTemplateService.getById(formData.evaluationTemplateId);
-        setSelectedTemplateDetails(details);
+    if (loadingTemplates || templateLoadError || !formData.evaluationTemplateId) return;
+    if (!selectedTemplate) {
+      updateFormData({ evaluationTemplateId: null, evaluationTemplateName: '' });
+    }
+  }, [loadingTemplates, templateLoadError, selectedTemplate, formData.evaluationTemplateId, updateFormData]);
 
-        // Auto-populate QCBS settings if template uses QCBS scoring method
-        if (details.scoringMethod === 'QCBS') {
-          updateFormData({
-            useQCBSEvaluation: true,
-            technicalWeight: details.technicalWeight,
-            financialWeight: details.financialWeight,
-            minimumTechnicalScore: details.minimumTechnicalScore
-          });
+  // Only the detail endpoint includes criterion names. Discard a late response after
+  // changing the method, selection or source; never let it restore the old settings.
+  useEffect(() => {
+    let cancelled = false;
+    setSelectedTemplateDetails(null);
+    setDetailsError(null);
+    setLoadingDetails(Boolean(selectedTemplate));
+    if (!selectedTemplate) return;
+    const loadDetails = async () => {
+      try {
+        const details = await evaluationTemplateService.getById(selectedTemplate.id);
+        if (cancelled) return;
+        if (!details.isActive || details.id !== selectedTemplate.id ||
+            details.scoringMethod !== selectedTemplate.scoringMethod ||
+            details.category !== selectedTemplate.category || details.tenderType !== selectedTemplate.tenderType) {
+          throw new Error('The template configuration changed. Reload templates and select a matching template.');
         }
+        setSelectedTemplateDetails(details);
+        updateFormRef.current(getTemplateEvaluationSettings(details));
       } catch (error) {
-        console.error('Failed to load template details:', error);
-        setSelectedTemplateDetails(null);
+        if (!cancelled) setDetailsError(error instanceof Error ? error.message : 'Template details could not be loaded.');
       } finally {
-        setLoadingDetails(false);
+        if (!cancelled) setLoadingDetails(false);
       }
     };
-    loadTemplateDetails();
-  }, [formData.evaluationTemplateId]);
+    void loadDetails();
+    return () => { cancelled = true; };
+  }, [selectedTemplate, detailsReloadKey]);
+
+  const handleMethodChange = (method: string) => {
+    if (method !== 'Standard' && method !== 'QCBS') return;
+    if (method === evaluationMethod) return;
+    setEvaluationMethod(method);
+    updateFormData({
+      useQCBSEvaluation: method === 'QCBS',
+      evaluationTemplateId: null,
+      evaluationTemplateName: '',
+    });
+  };
 
   const handleTemplateChange = (templateId: string) => {
     if (templateId === 'none') {
@@ -110,10 +136,12 @@ export default function BasicInformation({ formData, updateFormData, procurement
         evaluationTemplateName: ''
       });
     } else {
-      const template = evaluationTemplates.find(t => t.id === templateId);
+      const template = matchingTemplates.find(t => t.id === templateId);
+      if (!template) return;
       updateFormData({
         evaluationTemplateId: templateId,
-        evaluationTemplateName: template?.templateName || ''
+        evaluationTemplateName: template.templateName,
+        ...getTemplateEvaluationSettings(template),
       });
     }
   };
@@ -187,6 +215,7 @@ export default function BasicInformation({ formData, updateFormData, procurement
             <Select
               value={formData.currency}
               onValueChange={(value) => updateFormData({ currency: value })}
+              disabled={Boolean(sourceCurrency)}
             >
               <SelectTrigger id="currency">
                 <SelectValue placeholder="Select currency" />
@@ -259,23 +288,42 @@ export default function BasicInformation({ formData, updateFormData, procurement
               type="datetime-local"
               value={formData.openingDate}
               onChange={(e) => updateFormData({ openingDate: e.target.value })}
+              min={formData.submissionDeadline || undefined}
             />
+            <p className="text-xs text-muted-foreground">
+              Must be at or after the submission deadline.
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Evaluation Template Selection */}
+      {/* Method first, then a compatible template. No independent QCBS switch. */}
       <div>
         <h3 className="text-lg font-semibold mb-4">
-          Evaluation Template <span className="text-red-500">*</span>
+          Evaluation Setup <span className="text-red-500">*</span>
         </h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Select an evaluation template that defines the criteria and weights for bid evaluation.
+          Choose the method first, then a matching template. Its scoring settings apply automatically.
         </p>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="evaluationTemplate">Select Template</Label>
+            <Label htmlFor="evaluationMethod">1. Evaluation Method</Label>
+            <Select value={evaluationMethod} onValueChange={handleMethodChange}>
+              <SelectTrigger id="evaluationMethod">
+                <SelectValue placeholder="Choose an evaluation method" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Standard">Standard (non-QCBS)</SelectItem>
+                <SelectItem value="QCBS">QCBS — Quality and Cost-Based Selection</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Changing the method clears the selected template.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="evaluationTemplate">2. Evaluation Template</Label>
             {loadingTemplates ? (
               <div className="flex items-center space-x-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -295,15 +343,16 @@ export default function BasicInformation({ formData, updateFormData, procurement
               </div>
             ) : (
               <Select
-                value={formData.evaluationTemplateId || 'none'}
+                value={selectedTemplate?.id || 'none'}
                 onValueChange={handleTemplateChange}
+                disabled={!evaluationMethod || matchingTemplates.length === 0}
               >
                 <SelectTrigger id="evaluationTemplate">
                   <SelectValue placeholder="Select an evaluation template" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">-- No Template Selected --</SelectItem>
-                  {evaluationTemplates.map((template) => (
+                  <SelectItem value="none">{evaluationMethod ? 'Select a matching template' : 'Choose the method first'}</SelectItem>
+                  {matchingTemplates.map((template) => (
                     <SelectItem key={template.id} value={template.id}>
                       {template.templateName} ({template.templateCode})
                     </SelectItem>
@@ -311,22 +360,26 @@ export default function BasicInformation({ formData, updateFormData, procurement
                 </SelectContent>
               </Select>
             )}
-            {!loadingTemplates && !templateLoadError && evaluationTemplates.length === 0 && (
+            {evaluationMethod && !loadingTemplates && !templateLoadError && matchingTemplates.length === 0 && (
               <p className="text-sm text-amber-700">
-                No active evaluation template matches {procurementCategory || 'this category'} and {formData.tenderType}.
+                No active {evaluationMethod === 'QCBS' ? 'QCBS' : 'non-QCBS'} template matches {procurementCategory || 'this category'} and {formData.tenderType}. Ask Procurement to configure a matching template.
               </p>
             )}
           </div>
 
           {/* Template Details Preview */}
-          {loadingDetails && (
-            <div className="flex items-center space-x-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Loading template details...</span>
+          {loadingDetails && <p className="text-sm text-muted-foreground">Loading template details...</p>}
+          {detailsError && (
+            <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <p>{detailsError}</p>
+              <button type="button" className="mt-2 font-medium underline" onClick={() => {
+                setTemplateReloadKey(value => value + 1);
+                setDetailsReloadKey(value => value + 1);
+              }}>Reload templates</button>
             </div>
           )}
-
-          {selectedTemplateDetails && !loadingDetails && (
+          {selectedTemplateDetails && selectedTemplateDetails.id === selectedTemplate?.id &&
+            !loadingDetails && !loadingTemplates && !templateLoadError && !detailsError && (
             <Card className="bg-muted/50">
               <CardContent className="pt-4">
                 <div className="flex items-start justify-between mb-4">
@@ -401,123 +454,9 @@ export default function BasicInformation({ formData, updateFormData, procurement
             </Card>
           )}
 
-          {!formData.evaluationTemplateId && !loadingTemplates && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <p className="text-sm text-yellow-800">
-                ⚠ Please select an evaluation template. This defines how bids will be scored and evaluated.
-              </p>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* QCBS Evaluation Settings */}
-      <div>
-        <h3 className="text-lg font-semibold mb-4">QCBS Evaluation Settings</h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          Quality and Cost-Based Selection (QCBS) evaluates bids based on both technical merit and financial proposal.
-        </p>
-
-        <div className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="useQCBSEvaluation"
-              checked={formData.useQCBSEvaluation}
-              onCheckedChange={(checked) => updateFormData({ useQCBSEvaluation: checked as boolean })}
-            />
-            <Label htmlFor="useQCBSEvaluation" className="cursor-pointer font-medium">
-              Use QCBS Evaluation Method
-            </Label>
-          </div>
-
-          {formData.useQCBSEvaluation && (
-            <Card className="bg-blue-50/50 border-blue-200">
-              <CardContent className="pt-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Technical Weight */}
-                  <div className="space-y-2">
-                    <Label htmlFor="technicalWeight">Technical Weight (%)</Label>
-                    <Input
-                      id="technicalWeight"
-                      type="number"
-                      value={formData.technicalWeight}
-                      onChange={(e) => {
-                        const techWeight = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                        updateFormData({
-                          technicalWeight: techWeight,
-                          financialWeight: 100 - techWeight
-                        });
-                      }}
-                      min="0"
-                      max="100"
-                      step="5"
-                    />
-                    <p className="text-xs text-muted-foreground">Weight for technical score (0-100)</p>
-                  </div>
-
-                  {/* Financial Weight */}
-                  <div className="space-y-2">
-                    <Label htmlFor="financialWeight">Financial Weight (%)</Label>
-                    <Input
-                      id="financialWeight"
-                      type="number"
-                      value={formData.financialWeight}
-                      onChange={(e) => {
-                        const finWeight = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                        updateFormData({
-                          financialWeight: finWeight,
-                          technicalWeight: 100 - finWeight
-                        });
-                      }}
-                      min="0"
-                      max="100"
-                      step="5"
-                    />
-                    <p className="text-xs text-muted-foreground">Weight for financial score (0-100)</p>
-                  </div>
-
-                  {/* Minimum Technical Score */}
-                  <div className="space-y-2">
-                    <Label htmlFor="minimumTechnicalScore">Minimum Technical Score (%)</Label>
-                    <Input
-                      id="minimumTechnicalScore"
-                      type="number"
-                      value={formData.minimumTechnicalScore}
-                      onChange={(e) => updateFormData({ minimumTechnicalScore: parseInt(e.target.value) || 0 })}
-                      min="0"
-                      max="100"
-                      step="5"
-                    />
-                    <p className="text-xs text-muted-foreground">Bids below this score are disqualified</p>
-                  </div>
-                </div>
-
-                {/* Summary */}
-                <div className="mt-4 p-3 bg-white rounded-lg border">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Weight Distribution:</span>
-                    <span className="text-sm">
-                      Technical: <strong>{formData.technicalWeight}%</strong> | Financial: <strong>{formData.financialWeight}%</strong>
-                    </span>
-                  </div>
-                  {formData.technicalWeight + formData.financialWeight !== 100 && (
-                    <p className="text-xs text-red-600 mt-1">
-                      ⚠ Weights must total 100% (currently {formData.technicalWeight + formData.financialWeight}%)
-                    </p>
-                  )}
-                </div>
-
-                {/* QCBS Formula Info */}
-                <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-muted-foreground">
-                  <strong>QCBS Formula:</strong> Combined Score = (Technical Score × {formData.technicalWeight}%) + (Financial Score × {formData.financialWeight}%)
-                  <br />
-                  Financial Score is calculated based on Financial evaluation criteria (if defined)
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
 
       {/* Options */}
       <div>
@@ -564,6 +503,13 @@ export default function BasicInformation({ formData, updateFormData, procurement
           </div>
 
           {/* Terms and Conditions */}
+          <div className="space-y-2">
+            <Label htmlFor="bidValidityPeriodDays">Bid validity period (calendar days)</Label>
+            <Input id="bidValidityPeriodDays" type="number" min={1} step={1}
+              value={formData.bidValidityPeriodDays ?? ''}
+              onChange={(event) => updateFormData({ bidValidityPeriodDays: event.target.value ? Number(event.target.value) : null })} />
+            <p className="text-xs text-gray-500">Enter the period stated in the tender terms, counted from submission closing. It is reviewed with this tender and used to calculate expiry during document binding. No default is assumed.</p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="termsAndConditions">Terms and Conditions</Label>
             <Textarea

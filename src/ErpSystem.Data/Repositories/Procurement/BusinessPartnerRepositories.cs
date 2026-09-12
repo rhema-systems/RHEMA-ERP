@@ -77,6 +77,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         return await _dbSet
             .IgnoreQueryFilters()
             .Include(bp => bp.User)
+            .Include(bp => bp.BankAccounts)
             .Where(bp =>
                 bp.TenantId == tenantId &&
                 !bp.IsDeleted &&
@@ -147,12 +148,14 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var searchLower = search.ToLower();
+            // Keep the predicate server-translatable: the StringComparison
+            // overload of Contains is not supported by the SQL Server provider.
+            var searchLower = search.Trim().ToLowerInvariant();
             query = query.Where(bp =>
-                bp.PartnerName.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase) ||
-                bp.PartnerCode.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase) ||
-                (bp.PrimaryEmail != null && bp.PrimaryEmail.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase)) ||
-                (bp.BusinessRegistrationNumber != null && bp.BusinessRegistrationNumber.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase)));
+                bp.PartnerName.ToLower().Contains(searchLower) ||
+                bp.PartnerCode.ToLower().Contains(searchLower) ||
+                (bp.PrimaryEmail != null && bp.PrimaryEmail.ToLower().Contains(searchLower)) ||
+                (bp.BusinessRegistrationNumber != null && bp.BusinessRegistrationNumber.ToLower().Contains(searchLower)));
         }
 
         if (!string.IsNullOrWhiteSpace(partnerType))
@@ -529,6 +532,20 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             .FirstOrDefaultAsync();
     }
 
+    public async Task<BusinessPartner?> GetWithBankAccountsAsync(Guid id)
+    {
+        var accessiblePartner = await GetByIdAsync(id);
+        if (accessiblePartner == null)
+        {
+            return null;
+        }
+
+        return await _dbSet
+            .Where(bp => bp.Id == accessiblePartner.Id && !bp.IsDeleted)
+            .Include(bp => bp.BankAccounts)
+            .FirstOrDefaultAsync();
+    }
+
     public async Task<BusinessPartner?> GetWithAllRelatedDataAsync(Guid id)
     {
         var query = _dbSet.Where(bp => bp.Id == id && !bp.IsDeleted);
@@ -536,7 +553,18 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
         // External users can only see their own business partner
         if (_currentUserProvider.IsExternalUser)
         {
-            query = query.Where(bp => bp.UserId == _currentUserProvider.UserId);
+            var tenantId = _currentUserProvider.TenantId;
+            var userId = _currentUserProvider.UserId;
+            query = query.Where(bp =>
+                bp.TenantId == tenantId &&
+                (bp.UserId == userId || _context.BusinessPartnerUsers
+                    .IgnoreQueryFilters()
+                    .Any(link =>
+                        link.TenantId == tenantId &&
+                        link.BusinessPartnerId == bp.Id &&
+                        link.UserId == userId &&
+                        link.IsActive &&
+                        !link.IsDeleted)));
         }
 
         return await query
@@ -547,6 +575,7 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
             .Include(bp => bp.Licenses)
                 .ThenInclude(l => l.LicenseType)
             .Include(bp => bp.Contacts)
+            .Include(bp => bp.BankAccounts)
             .Include(bp => bp.Documents)
             .Include(bp => bp.Financials)
             .Include(bp => bp.ApprovedBy)

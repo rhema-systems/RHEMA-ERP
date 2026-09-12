@@ -410,6 +410,13 @@ public class EmolumentService : IEmolumentService
         var asOfDt = asOf.ToDateTime(TimeOnly.MinValue);
         var tenantId = GetTenantId();
 
+        // Somebody the payroll run does not pay has no monthly basic — not a stale figure from
+        // before they left payroll, not the notch they were on then. Zero here is what makes an
+        // encashment, a benefit contribution or a costing come out as "nothing from payroll".
+        var employee = await _employeeRepo.GetByIdAsync(employeeId);
+        if (employee == null || employee.TenantId != tenantId || !employee.IsOnPayroll)
+            return 0m;
+
         var assignment = await _salaryAssignmentRepo.GetQueryable()
             .Include(a => a.Notch)
             .Where(a => a.TenantId == tenantId
@@ -422,9 +429,6 @@ public class EmolumentService : IEmolumentService
         if (assignment?.Notch != null)
             return assignment.Notch.SalaryAmount;
 
-        var employee = await _employeeRepo.GetByIdAsync(employeeId);
-        if (employee == null || employee.TenantId != tenantId)
-            return 0m;
         return employee.Salary ?? 0m;
     }
 

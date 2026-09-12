@@ -24,7 +24,6 @@ public interface ISheWasteDisposalRecordRepository : IGenericRepository<SheWaste
     Task<IEnumerable<SheWasteDisposalRecord>> GetByWasteTypeAsync(Guid wasteTypeId);
     Task<IEnumerable<SheWasteDisposalRecord>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate);
     Task<IEnumerable<SheWasteDisposalRecord>> GetByContractorAsync(Guid contractorId);
-    Task<string> GetNextRecordNumberAsync();
 }
 
 // ============================================================================
@@ -45,7 +44,6 @@ public interface ISheEnvironmentalIncidentRepository : IGenericRepository<SheEnv
     /// <summary>Returns incidents that are not yet closed.</summary>
     Task<IEnumerable<SheEnvironmentalIncident>> GetOpenAsync();
 
-    Task<string> GetNextIncidentNumberAsync();
 }
 
 public interface ISheEnvironmentalMonitoringRecordRepository : IGenericRepository<SheEnvironmentalMonitoringRecord>
@@ -58,7 +56,6 @@ public interface ISheEnvironmentalMonitoringRecordRepository : IGenericRepositor
     /// <summary>Returns readings that exceeded the regulatory limit or action level.</summary>
     Task<IEnumerable<SheEnvironmentalMonitoringRecord>> GetExceedancesAsync();
 
-    Task<string> GetNextRecordNumberAsync();
 }
 
 // ============================================================================
@@ -83,6 +80,10 @@ public interface ISheOccupationalHealthSurveillanceRepository : IGenericReposito
 public interface ISheFirstAidStationRepository : IGenericRepository<SheFirstAidStation>
 {
     Task<SheFirstAidStation?> GetByCodeAsync(string stationCode);
+
+    /// <summary>All stations with Location and ResponsibleAider resolved — the default register read.</summary>
+    Task<IEnumerable<SheFirstAidStation>> GetAllListAsync();
+
     Task<IEnumerable<SheFirstAidStation>> GetByLocationAsync(Guid locationId);
     Task<IEnumerable<SheFirstAidStation>> GetActiveAsync();
 
@@ -96,6 +97,9 @@ public interface ISheFirstAidStationRepository : IGenericRepository<SheFirstAidS
 public interface ISheWellnessProgramRepository : IGenericRepository<SheWellnessProgram>
 {
     Task<SheWellnessProgram?> GetByCodeAsync(string programCode);
+
+    /// <summary>All programs with the Coordinator resolved — the default register read.</summary>
+    Task<IEnumerable<SheWellnessProgram>> GetAllListAsync();
     Task<IEnumerable<SheWellnessProgram>> GetByStatusAsync(SheWellnessProgramStatus status);
     Task<IEnumerable<SheWellnessProgram>> GetByTypeAsync(SheWellnessProgramType type);
     Task<IEnumerable<SheWellnessProgram>> GetActiveAsync();

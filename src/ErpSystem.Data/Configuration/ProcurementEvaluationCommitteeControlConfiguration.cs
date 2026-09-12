@@ -13,15 +13,26 @@ public sealed class ProcurementEvaluationCommitteeControlConfiguration :
         {
             table.HasTrigger("TR_ProcurementEvaluationCommitteeControls_Lifecycle");
             table.HasCheckConstraint("CK_ProcurementEvaluationCommitteeControls_State",
-                "[SourceType] BETWEEN 0 AND 1 AND [Version] >= 1 AND [Status] BETWEEN 0 AND 2 " +
+                "[SourceType] BETWEEN 0 AND 1 AND [Version] >= 1 AND [Status] BETWEEN 0 AND 3 " +
                 "AND [RequiredQuorum] BETWEEN 1 AND 50 AND [PolicyVersion] >= 1 " +
                 "AND ([ConfigurationProfileVersion] IS NULL OR [ConfigurationProfileVersion] >= 1) " +
                 "AND ([EffectiveToUtc] IS NULL OR [EffectiveToUtc] >= [EffectiveFromUtc]) " +
                 "AND LEN([CompositionIntegrityHash]) = 64 AND ISJSON([CompositionSnapshotJson]) = 1 " +
                 "AND (([Status] = 0 AND [ActivatedAtUtc] IS NULL AND [ActivatedByUserId] IS NULL " +
-                "AND [ActivationEvidenceReference] IS NULL) OR " +
+                "AND [ActivationEvidenceReference] IS NULL AND [RetiredAtUtc] IS NULL " +
+                "AND [RetiredByUserId] IS NULL AND [RetirementReason] IS NULL " +
+                "AND [RetirementEvidenceReference] IS NULL AND [RetirementIdempotencyKey] IS NULL) OR " +
                 "([Status] IN (1, 2) AND [ActivatedAtUtc] IS NOT NULL AND [ActivatedByUserId] IS NOT NULL " +
-                "AND LEN(LTRIM(RTRIM(ISNULL([ActivationEvidenceReference], '')))) > 0))");
+                "AND LEN(LTRIM(RTRIM(ISNULL([ActivationEvidenceReference], '')))) > 0 " +
+                "AND [RetiredAtUtc] IS NULL AND [RetiredByUserId] IS NULL " +
+                "AND [RetirementReason] IS NULL AND [RetirementEvidenceReference] IS NULL " +
+                "AND [RetirementIdempotencyKey] IS NULL) OR " +
+                "([Status] = 3 AND [ActivatedAtUtc] IS NULL AND [ActivatedByUserId] IS NULL " +
+                "AND [ActivationEvidenceReference] IS NULL AND [ActivationIdempotencyKey] IS NULL " +
+                "AND [RetiredAtUtc] IS NOT NULL AND [RetiredByUserId] IS NOT NULL " +
+                "AND LEN(LTRIM(RTRIM(ISNULL([RetirementReason], '')))) >= 10 " +
+                "AND LEN(LTRIM(RTRIM(ISNULL([RetirementEvidenceReference], '')))) > 0 " +
+                "AND LEN(LTRIM(RTRIM(ISNULL([RetirementIdempotencyKey], '')))) > 0))");
         });
         builder.HasIndex(item => new
             { item.TenantId, item.SourceType, item.SourceId, item.Version }).IsUnique();

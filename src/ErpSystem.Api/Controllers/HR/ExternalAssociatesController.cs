@@ -1,26 +1,109 @@
+﻿using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The register of external associates — interview panellists, technical assessors and advisers who
+/// act for the organisation without holding an ERP login.
+/// </summary>
+/// <remarks>
+/// <para><b>The whole surface is gated — reads included</b> (W3 slice 14: <c>HR.Company.Read</c>
+/// on reads and search, Write on create/amend/activate/deactivate, Admin on delete — replacing
+/// the SA/TenantAdmin/HR role gate with the same reach for HR). That is a tighter gate than the
+/// union register next door, and deliberately so: a union is a noticeboard, while this is a
+/// directory of named third parties' personal email addresses and phone numbers. The gate costs
+/// nothing in reach, because the one endpoint anything consumes — <c>search</c>, behind
+/// <c>PanelMemberPicker</c> — is only ever rendered inside an action that
+/// <c>JobInterviewService</c> already restricts to HR (<c>EnsureHr("change an interview panel")</c>).
+/// Checked before gating rather than assumed.</para>
+///
+/// <para>⚠ Until areas 19-23 slice 8 this controller carried a bare <c>[Authorize]</c>, and slice 8's
+/// probe measured what that meant: a plain <c>Employee</c> could list every associate with their
+/// email and phone number, and create one.</para>
+///
+/// <para>⚠ It also had no error contract worth the name. <c>Delete</c> caught only
+/// <c>ArgumentException</c>, so the panel-membership refusal added in this slice would have arrived
+/// as a bare 500; the four list reads caught nothing at all. One <c>RunAsync</c> now carries every
+/// action, as on <see cref="UnionController"/>.</para>
+/// </remarks>
 [ApiController]
 [Route("api/external-associates")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ExternalAssociatesController : ControllerBase
 {
     private readonly IExternalAssociateService _service;
     private readonly ICurrentUserService       _currentUser;
+    private readonly ILogger<ExternalAssociatesController> _logger;
+
+    // The controlled-upload gate's four dependencies. They sit here rather than the photo endpoints
+    // moving to EmployeeDocumentsController, because an associate is not an employee and the route
+    // belongs with the register it describes.
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
 
     public ExternalAssociatesController(
         IExternalAssociateService service,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ILogger<ExternalAssociatesController> logger,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db)
     {
         _service     = service;
         _currentUser = currentUser;
+        _logger      = logger;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+    }
+
+    /// <summary>
+    /// One error contract for every action here, so a rule can explain itself.
+    /// </summary>
+    /// <remarks>
+    /// <c>ArgumentException</c> is the service's "not found", <c>InvalidOperationException</c> its
+    /// "you may not do that", and <c>UnauthorizedAccessException</c> its cross-tenant refusal. Each
+    /// carries the sentence the service wrote; the catch-all keeps its detail out of the response
+    /// and puts it in the log.
+    /// </remarks>
+    private async Task<IActionResult> RunAsync<T>(Func<Task<T>> action, string what)
+    {
+        try
+        {
+            return Ok(await action());
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "External associates: {What} failed", what);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = $"Could not {what}." });
+        }
     }
 
     // =========================================================================
@@ -28,26 +111,36 @@ public class ExternalAssociatesController : ControllerBase
     // =========================================================================
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ExternalAssociateSummaryDto>>> GetAll(CancellationToken ct) =>
-        Ok(await _service.GetAllAsync(ct));
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public Task<IActionResult> GetAll(CancellationToken ct) =>
+        RunAsync(() => _service.GetAllAsync(ct), "list the external associates");
 
+    /// <param name="isActive">
+    /// ⚠ New in slice 8. The register has an activate/deactivate pair and had no way to page the
+    /// inactive half; the parameter did not exist, so the screen could only ever show everyone.
+    /// </param>
     [HttpGet("paged")]
-    public async Task<ActionResult<PagedResult<ExternalAssociateSummaryDto>>> GetPaged(
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public Task<IActionResult> GetPaged(
         [FromQuery] int     pageNumber  = 1,
         [FromQuery] int     pageSize    = 20,
         [FromQuery] string? searchTerm  = null,
+        [FromQuery] bool?   isActive    = null,
         CancellationToken ct = default) =>
-        Ok(await _service.GetPagedAsync(pageNumber, pageSize, searchTerm, ct));
+        RunAsync(() => _service.GetPagedAsync(pageNumber, pageSize, searchTerm, isActive, ct),
+            "page the external associates");
 
     [HttpGet("active")]
-    public async Task<ActionResult<IEnumerable<ExternalAssociateSummaryDto>>> GetActive(CancellationToken ct) =>
-        Ok(await _service.GetActiveAsync(ct));
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public Task<IActionResult> GetActive(CancellationToken ct) =>
+        RunAsync(() => _service.GetActiveAsync(ct), "list the active external associates");
 
     /// <summary>
     /// Typeahead search — used by the interview panel picker.
     /// Requires at least 2 characters; returns up to <paramref name="limit"/> results.
     /// </summary>
     [HttpGet("search")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public async Task<ActionResult<IEnumerable<ExternalAssociateSearchResultDto>>> Search(
         [FromQuery] string? q,
         [FromQuery] int limit = 20,
@@ -60,68 +153,73 @@ public class ExternalAssociatesController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<ExternalAssociateDto>> GetById(Guid id, CancellationToken ct)
-    {
-        try
-        {
-            return Ok(await _service.GetByIdAsync(id, ct));
-        }
-        catch (ArgumentException)
-        {
-            return NotFound();
-        }
-    }
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public Task<IActionResult> GetById(Guid id, CancellationToken ct) =>
+        RunAsync(() => _service.GetByIdAsync(id, ct), "read the external associate");
 
+    /// <remarks>
+    /// ⚠ Answers <b>404</b> when the number names nobody. It used to answer 200 with a null body —
+    /// a "not found" the caller had to detect by inspecting the payload.
+    /// </remarks>
     [HttpGet("number/{associateNumber}")]
-    public async Task<ActionResult<ExternalAssociateDto?>> GetByNumber(
-        string associateNumber, CancellationToken ct) =>
-        Ok(await _service.GetByAssociateNumberAsync(associateNumber, ct));
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public Task<IActionResult> GetByNumber(string associateNumber, CancellationToken ct) =>
+        RunAsync(() => _service.GetByAssociateNumberAsync(associateNumber, ct),
+            "read the external associate by number");
 
     // =========================================================================
     // CRUD
     // =========================================================================
 
     [HttpPost]
-    public async Task<ActionResult<ExternalAssociateDto>> Create(
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> Create(
         [FromBody] CreateExternalAssociateDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
         var tenantId   = _currentUser.TenantId;
         var employeeId = _currentUser.EmployeeId;
-        if (tenantId   == null) return BadRequest("Tenant context could not be resolved.");
-        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+        if (tenantId   == null) return BadRequest(new { message = "Tenant context could not be resolved." });
+        if (employeeId == null) return BadRequest(new { message = "Your user account is not linked to an employee record." });
 
         try
         {
             var result = await _service.CreateAsync(dto, tenantId.Value, employeeId.Value, ct);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
+        catch (ArgumentException ex)            { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex)    { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex)  { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult<ExternalAssociateDto>> Update(
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> Update(
         Guid id, [FromBody] UpdateExternalAssociateDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
         if (id != dto.Id)       return BadRequest(new { message = "ID in URL does not match body." });
 
         var employeeId = _currentUser.EmployeeId;
-        if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
+        if (employeeId == null) return BadRequest(new { message = "Your user account is not linked to an employee record." });
 
         try
         {
             return Ok(await _service.UpdateAsync(dto, employeeId.Value, ct));
         }
-        catch (ArgumentException)            { return NotFound(); }
-        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        catch (ArgumentException ex)            { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex)    { return Conflict(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex)  { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
     }
 
+    /// <remarks>
+    /// ⚠ Refused with a <b>409</b> naming the count when the associate sits on an interview panel.
+    /// The delete is a soft delete, so the <c>OnDelete.Restrict</c> on the panel's foreign key never
+    /// fires; before this slice the associate simply vanished from every panel that carried them.
+    /// </remarks>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         try
@@ -129,7 +227,8 @@ public class ExternalAssociatesController : ControllerBase
             await _service.DeleteAsync(id, ct);
             return NoContent();
         }
-        catch (ArgumentException) { return NotFound(); }
+        catch (ArgumentException ex)         { return NotFound(new { message = ex.Message }); }
+        catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
     // =========================================================================
@@ -137,31 +236,85 @@ public class ExternalAssociatesController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/activate")]
-    public async Task<ActionResult<ExternalAssociateDto>> Activate(Guid id, CancellationToken ct)
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> Activate(Guid id, CancellationToken ct)
     {
         var empId = _currentUser.EmployeeId;
-        if (empId == null) return BadRequest("Your user account is not linked to an employee record.");
+        if (empId == null) return BadRequest(new { message = "Your user account is not linked to an employee record." });
 
         try
         {
             return Ok(await _service.ActivateAsync(id, empId.Value, ct));
         }
-        catch (ArgumentException)            { return NotFound(); }
+        catch (ArgumentException ex)         { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
 
     [HttpPost("{id:guid}/deactivate")]
-    public async Task<ActionResult<ExternalAssociateDto>> Deactivate(Guid id, CancellationToken ct)
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
         var empId = _currentUser.EmployeeId;
-        if (empId == null) return BadRequest("Your user account is not linked to an employee record.");
+        if (empId == null) return BadRequest(new { message = "Your user account is not linked to an employee record." });
 
         try
         {
             return Ok(await _service.DeactivateAsync(id, empId.Value, ct));
         }
-        catch (ArgumentException)            { return NotFound(); }
+        catch (ArgumentException ex)         { return NotFound(new { message = ex.Message }); }
         catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
     }
-}
 
+    // ── The photograph, through the controlled gate ─────────────────────────
+    //
+    // ⚠ Until these existed the only way to set an associate's photo was to put a path string on
+    // the create or update DTO — a caller-supplied file location, the last of the four this module
+    // carried. `PicturePath` survives for ported images and the download falls back to it; nothing
+    // new writes it.
+
+    /// <summary>Replaces the associate's photograph, through the scanning gate.</summary>
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    [HttpPost("{id:guid}/photo")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadPhoto(Guid id, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        var associate = await _service.GetEntityForPhotoAsync(id, ct);
+        if (associate is null) return NotFound(new { message = $"External associate '{id}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.ExternalAssociate),
+            sourceRecordId: id,
+            sourceLabel: "External associate photograph",
+            documentType: "ExternalAssociatePhoto",
+            description: null,
+            persist: (_, document) => _service.AttachPhotoAsync(id, document.FileUploadRecordId, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrExternalAssociatePhotos);
+    }
+
+    /// <summary>Streams the associate's photograph.</summary>
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    [HttpGet("{id:guid}/photo")]
+    public async Task<IActionResult> DownloadPhoto(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var associate = await _service.GetEntityForPhotoAsync(id, ct);
+        if (associate is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            documentRecordId: null, documentVersionId: null,
+            associate.PhotoFileUploadRecordId,
+            // ⚠ The one place the legacy path is still read — a ported image has no gate record,
+            // and refusing to serve it would lose every photo the port brought over.
+            legacyPath: associate.PicturePath,
+            fallbackFileName: "associate-photo",
+            fallbackContentType: null,
+            inline: true, ct);
+    }
+}

@@ -260,7 +260,7 @@ export default function DataRetentionAdminPage() {
                     variant="outline"
                     title={item.emittedActions.join(', ')}
                   >
-                    {String(item.operation)}
+                    {item.module}: {String(item.operation)}
                   </Badge>
                 ))}
               </div>

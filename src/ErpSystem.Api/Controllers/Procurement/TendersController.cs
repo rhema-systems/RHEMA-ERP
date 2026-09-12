@@ -169,6 +169,14 @@ public class TendersController : ControllerBase
             var tender = await _tenderService.CreateTenderAsync(dto);
             return CreatedAtAction(nameof(GetTender), new { id = tender.Id }, tender);
         }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
         catch (ProcurementRequisitionSourcingBlockedException ex)
         {
             return UnprocessableEntity(SourcingProblem(ex.Readiness.DecisionCode, ex.Message, ex.Readiness));
@@ -180,6 +188,30 @@ public class TendersController : ControllerBase
         catch (ProcurementRequisitionSourcingAuthorizationException ex)
         {
             return StatusCode(403, SourcingProblem("PR_SOURCING_CONTROL_FORBIDDEN", ex.Message, status: 403));
+        }
+        catch (ProcurementSourcingCaseAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("SOURCING_CASE_FORBIDDEN", ex.Message, status: 403));
+        }
+        catch (ProcurementSourcingCaseValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementComplianceRequestValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementSourcingCaseConflictException ex)
+        {
+            return Conflict(SourcingProblem(ex.Code, ex.Message, status: 409));
+        }
+        catch (ProcurementCompliancePolicyNotFoundException ex)
+        {
+            return Conflict(SourcingProblem("SOURCING_CASE_POLICY_NOT_FOUND", ex.Message, status: 409));
+        }
+        catch (ProcurementCompliancePolicyConflictException ex)
+        {
+            return Conflict(SourcingProblem("SOURCING_CASE_POLICY_CONFLICT", ex.Message, status: 409));
         }
         catch (ProcurementExceptionalSourcingConflictException ex)
         {
@@ -203,6 +235,14 @@ public class TendersController : ControllerBase
         {
             var tender = await _tenderService.UpdateTenderAsync(id, dto);
             return Ok(tender);
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -228,6 +268,18 @@ public class TendersController : ControllerBase
             await _tenderService.SubmitTenderForApprovalAsync(id, userId);
             return NoContent();
         }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
+        catch (ProcurementTenderWorkflowValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(ex.Message);
@@ -251,6 +303,14 @@ public class TendersController : ControllerBase
             var userId = _currentUserProvider.UserId;
             await _tenderService.ApproveTenderAsync(id, userId, request?.Notes);
             return NoContent();
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -311,6 +371,42 @@ public class TendersController : ControllerBase
         {
             var tender = await _tenderService.PublishTenderAsync(id, dto);
             return Ok(tender);
+        }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
+        catch (ProcurementTenderDocumentControlConflictException ex)
+        {
+            return Conflict(SourcingProblem(ex.Code, ex.Message, status: 409));
+        }
+        catch (ProcurementTenderDocumentControlValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementTenderDocumentControlNotFoundException ex)
+        {
+            return NotFound(SourcingProblem(ex.Code, ex.Message, status: 404));
+        }
+        catch (ProcurementTenderDocumentControlAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("TENDER_DOCUMENT_FORBIDDEN", ex.Message, status: 403));
+        }
+        catch (ProcurementTenderControlValidationException ex)
+        {
+            return UnprocessableEntity(SourcingProblem(ex.Code, ex.Message));
+        }
+        catch (ProcurementTenderControlConflictException ex)
+        {
+            return Conflict(SourcingProblem(ex.Code, ex.Message, status: 409));
+        }
+        catch (ProcurementTenderControlAuthorizationException ex)
+        {
+            return StatusCode(403, SourcingProblem("TENDER_CONTROL_FORBIDDEN", ex.Message, status: 403));
         }
         catch (ProcurementRequisitionSourcingBlockedException ex)
         {

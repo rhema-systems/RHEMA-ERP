@@ -65,9 +65,12 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
             .Which.Extensions["code"].Should().Be("REGISTRATION_REQUIRED");
     }
 
-    [Fact]
-    public async Task TrustedPaymentActivationDeliversSecretButReturnsOnlyTokenMetadata()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TrustedPaymentActivationDeliversSecretButReturnsOnlyTokenMetadata(bool disconnectAfterCommit)
     {
+        using var request = new CancellationTokenSource();
         var tokenId = Guid.NewGuid();
         var paymentId = Guid.NewGuid();
         var token = new ProcurementSupplierOnboardingTokenDto
@@ -82,6 +85,7 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
                 It.IsAny<ReconcileProcurementSupplierOnboardingPaymentRequest>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
+            .Callback(() => { if (disconnectAfterCommit) request.Cancel(); })
             .ReturnsAsync(new ProcurementSupplierOnboardingTokenIssueResultDto
             {
                 Token = token,
@@ -110,7 +114,7 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
                 Notes = "Funds verified.",
                 RowVersion = "row-version"
             },
-            CancellationToken.None);
+            request.Token);
 
         result.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().BeSameAs(token);
@@ -118,7 +122,7 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
             tokenId,
             "trusted-activation-secret",
             It.IsAny<string>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.Is<CancellationToken>(token => !token.CanBeCanceled)), Times.Once);
     }
 
     [Fact]
@@ -159,7 +163,12 @@ public sealed class ProcurementSupplierOnboardingTokensControllerTests
             new ReconcileProcurementSupplierOnboardingPaymentRequest(),
             CancellationToken.None);
 
-        result.Should().BeOfType<ConflictObjectResult>();
+        var conflict = result.Should().BeOfType<ConflictObjectResult>().Subject;
+        var problem = conflict.Value.Should().BeAssignableTo<ProblemDetails>().Subject;
+        problem.Extensions["code"].Should()
+            .Be("SUPPLIER_ONBOARDING_TOKEN_DELIVERY_FAILED");
+        problem.Detail.Should().Contain("Retry payment confirmation")
+            .And.NotContain("Reissue");
     }
 
     [Fact]

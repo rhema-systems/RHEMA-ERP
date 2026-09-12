@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
@@ -1513,6 +1513,459 @@ public class SimpleWorkflowService : IWorkflowService
             // Billable hours are the usual routing threshold here.
             context["totalHours"] = timesheet.TotalHours;
             context["status"] = timesheet.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "APPRAISAL_TEMPLATE", "AppraisalTemplate", "Appraisal Template"))
+        {
+            var template = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.AppraisalTemplate>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Appraisal template not found");
+
+            context["templateName"] = template.TemplateName;
+            // The scope a template targets is what a routing rule keys on: a form written
+            // for one position is a smaller decision than one covering a whole org level.
+            context["organizationLevelId"] = template.OrganizationLevelId;
+            context["organizationUnitId"] = template.OrganizationUnitId;
+            context["positionId"] = template.PositionId;
+            context["isGlobalScope"] = template.OrganizationLevelId == null
+                                    && template.OrganizationUnitId == null
+                                    && template.PositionId == null;
+            context["isActive"] = template.IsActive;
+            context["status"] = template.ApprovalStatus.ToString();
+            context["submittedById"] = template.SubmittedById;
+        }
+
+        if (IsEntityType(entityTypeRecord, "SALARY_REVIEW_PROPOSAL", "SalaryReviewProposal", "Salary Review Proposal"))
+        {
+            var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.SalaryReviewProposal>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Salary review proposal not found");
+
+            // The size of the pay change is the routing threshold: a 3% merit increase and a
+            // 25% one are not the same decision.
+            context["employeeId"] = proposal.EmployeeId;
+            context["proposalType"] = proposal.ProposalType.ToString();
+            context["proposedPercent"] = proposal.ProposedPercent;
+            context["proposedAmount"] = proposal.ProposedAmount;
+            context["sourceAppraisalId"] = proposal.SourceAppraisalId;
+            context["status"] = proposal.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "EMPLOYMENT_ACTION_PROPOSAL", "EmploymentActionProposal", "Employment Action Proposal"))
+        {
+            var proposal = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.EmploymentActionProposal>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Employment action proposal not found");
+
+            // What kind of action it is carries the whole weight here — a recognition and a
+            // termination should not route to the same approver.
+            context["employeeId"] = proposal.EmployeeId;
+            context["actionType"] = proposal.ActionType.ToString();
+            context["sourceAppraisalId"] = proposal.SourceAppraisalId;
+            context["status"] = proposal.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "PERFORMANCE_IMPROVEMENT_PLAN", "PerformanceImprovementPlan", "Performance Improvement Plan", "PIP"))
+        {
+            var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Performance.PerformanceImprovementPlan>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Performance improvement plan not found");
+
+            // How long the plan runs is the routing threshold here — a two-week course correction
+            // and a six-month plan that could end in dismissal are not the same decision — along
+            // with whether an appraisal called for it or a manager raised it unprompted.
+            context["employeeId"] = plan.EmployeeId;
+            context["supervisorId"] = plan.SupervisorId;
+            context["hrOwnerId"] = plan.HROwnerId;
+            context["durationDays"] = (int)(plan.EndDate.Date - plan.StartDate.Date).TotalDays;
+            context["fromAppraisal"] = plan.AppraisalId != null;
+            context["sourceAppraisalId"] = plan.AppraisalId;
+            context["status"] = plan.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "PROBATION_PERIOD", "ProbationPeriod", "Probation Period"))
+        {
+            var probation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.ProbationPeriod>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Probation period not found");
+
+            // What a routing rule could reasonably branch on. The staff category is the one that
+            // matters most: FR-HR-031 already separates senior from junior probation, and a tenant
+            // may well want the two confirmed at different levels. Extensions are here because a
+            // probation extended twice is a different conversation from one that ran straight
+            // through, and the reviews' recommendation is the evidence the decision rests on.
+            context["employeeId"] = probation.EmployeeId;
+            context["durationMonths"] = probation.DurationMonths;
+            context["extensionCount"] = probation.ExtensionCount;
+            context["startDate"] = probation.StartDate.ToString("yyyy-MM-dd");
+            context["endDate"] = probation.CurrentEndDate.ToString("yyyy-MM-dd");
+            context["wasExtended"] = probation.ExtensionCount > 0;
+
+            var employee = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Employee>()
+                .FirstOrDefaultAsync(e => e.Id == probation.EmployeeId);
+            if (employee != null)
+            {
+                context["organizationUnitId"] = employee.OrganizationUnitId;
+                context["departmentId"] = employee.DepartmentId;
+                context["positionId"] = employee.PositionId;
+                context["employmentType"] = employee.EmploymentType.ToString();
+            }
+
+            var latestRecommendation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.ProbationReview>()
+                .GetQueryable()
+                .Where(r => r.ProbationPeriodId == probation.Id && !r.IsDeleted && r.Recommendation != null)
+                .OrderByDescending(r => r.ActualDate ?? r.ScheduledDate)
+                .Select(r => r.Recommendation)
+                .FirstOrDefaultAsync();
+            context["latestReviewRecommendation"] = latestRecommendation?.ToString();
+
+            return context;
+        }
+
+        if (IsEntityType(entityTypeRecord, "MANPOWER_BUDGET", "ManpowerBudget", "Manpower Budget"))
+        {
+            var budget = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.ManpowerBudget>()
+                .FirstOrDefaultAsync(b => b.Id == entityId)
+                ?? throw new InvalidOperationException("Manpower budget not found");
+
+            // What a routing rule branches on here is money and headcount growth, not document
+            // type. FR-HR-135's chain is Department Head to HR to Managing Director for every
+            // budget, but a tenant that wants the MD step only above a threshold needs the total
+            // and the headcount delta to say so — and "how many NEW posts" is a different question
+            // from "how much does this cost", which is why both are here.
+            context["budgetNumber"] = budget.BudgetNumber;
+            context["fiscalYear"] = budget.FiscalYear;
+            context["organizationUnitId"] = budget.OrganizationUnitId;
+            context["organizationLevelId"] = budget.OrganizationLevelId;
+            context["currentHeadcount"] = budget.CurrentHeadcount;
+            context["plannedHeadcount"] = budget.PlannedHeadcount;
+            context["headcountIncrease"] = budget.PlannedHeadcount - budget.CurrentHeadcount;
+            context["plannedNewHires"] = budget.PlannedNewHires;
+            context["totalBudget"] = budget.TotalBudget;
+            context["salaryBudget"] = budget.SalaryBudget;
+            context["costIncrease"] = budget.PlannedSalaryCost - budget.CurrentSalaryCost;
+            context["status"] = budget.Status.ToString();
+
+            var lineCount = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.ManpowerBudgetLine>()
+                .GetQueryable()
+                .CountAsync(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted);
+            context["budgetLineCount"] = lineCount;
+
+            return context;
+        }
+
+        if (IsEntityType(entityTypeRecord, "JOB_DESCRIPTION", "JobDescription", "Job Description"))
+        {
+            var jobDescription = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.JobAnalysis.JobDescription>()
+                .FirstOrDefaultAsync(jd => jd.Id == entityId)
+                ?? throw new InvalidOperationException("Job description not found");
+
+            // What a routing rule could reasonably branch on. The job family and level are the two
+            // that matter: a tenant that approves technical roles in one line and management roles
+            // in another is expressing exactly that, and neither is derivable from the position.
+            // The valuation is here because a role priced above a threshold is a pay decision as
+            // much as a job-content one, and a first version is a different conversation from an
+            // annual re-issue — hence the version number.
+            context["jobDescriptionNumber"] = jobDescription.JobDescriptionNumber;
+            context["positionId"] = jobDescription.PositionId;
+            context["jobFamilyId"] = jobDescription.JobFamilyId;
+            context["jobSubFamilyId"] = jobDescription.JobSubFamilyId;
+            context["jobLevelId"] = jobDescription.JobLevelId;
+            context["staffLevelId"] = jobDescription.StaffLevelId;
+            context["versionNumber"] = jobDescription.VersionNumber;
+            context["isFirstVersion"] = jobDescription.VersionNumber <= 1;
+            context["roleCriticality"] = jobDescription.RoleCriticality?.ToString();
+            context["roleIntrinsicValue"] = jobDescription.RoleIntrinsicValue;
+            context["industryBenchmarkSalary"] = jobDescription.IndustryBenchmarkSalary;
+            context["isBargainingUnitRole"] = jobDescription.IsBargainingUnitRole;
+            context["status"] = jobDescription.Status.ToString();
+
+            var jobPosition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeePosition>()
+                .FirstOrDefaultAsync(p => p.Id == jobDescription.PositionId);
+            if (jobPosition != null)
+            {
+                context["organizationUnitId"] = jobPosition.OrganizationUnitId;
+                context["organizationLevelId"] = jobPosition.OrganizationLevelId;
+                context["positionTitle"] = jobPosition.Title;
+            }
+
+            return context;
+        }
+
+        if (IsEntityType(entityTypeRecord, "STAFF_MOVEMENT", "StaffMovement", "Staff Movement"))
+        {
+            var movement = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.PromotionTransfer.StaffMovement>()
+                .FirstOrDefaultAsync(m => m.Id == entityId)
+                ?? throw new InvalidOperationException("Staff movement not found");
+
+            // A movement has an ORIGIN and a DESTINATION, and both sides have to agree to it — which
+            // is the thing a role-based chain could not express and the reason both supervisors and
+            // both org units are here. The size of the pay change and whether the move is permanent
+            // are the routing thresholds on top of that: a lateral move inside one department and a
+            // promotion across two with a 30% rise are not the same decision.
+            context["movementNumber"] = movement.MovementNumber;
+            context["employeeId"] = movement.EmployeeId;
+            context["movementType"] = movement.MovementType.ToString();
+            context["category"] = movement.Category.ToString();
+            context["currentOrganizationUnitId"] = movement.CurrentOrganizationUnitId;
+            context["newOrganizationUnitId"] = movement.NewOrganizationUnitId;
+            context["currentSupervisorId"] = movement.CurrentSupervisorId;
+            context["newSupervisorId"] = movement.NewSupervisorId;
+            context["currentSalary"] = movement.CurrentSalary;
+            context["newSalary"] = movement.NewSalary;
+            context["salaryIncreaseAmount"] = movement.SalaryIncreaseAmount;
+            context["salaryIncreasePercentage"] = movement.SalaryIncreasePercentage;
+            context["isTemporary"] = movement.IsTemporary;
+            context["isReorganization"] = movement.IsReorganization;
+            context["isSuccessionPlan"] = movement.IsSuccessionPlan;
+            context["requestedById"] = movement.RequestedById;
+            context["effectiveDate"] = movement.EffectiveDate;
+            context["crossesOrganizationUnit"] =
+                movement.CurrentOrganizationUnitId != movement.NewOrganizationUnitId;
+            context["status"] = movement.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "STAFF_TRAVEL_REQUEST", "StaffTravelRequest", "Staff Travel Request"))
+        {
+            var travel = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Staff travel request not found");
+
+            // Cost and exposure are the routing thresholds here. A GHS 400 taxi to Kumasi and a
+            // two-week trip to Lagos costing GHS 40,000 are not the same decision, and neither are
+            // a domestic trip and one needing a visa into a high-risk destination. The currency is
+            // carried alongside the amount deliberately — a threshold rule that compares bare
+            // numbers across currencies is wrong, and the definition author needs to see which one
+            // this is.
+            context["requestNumber"] = travel.RequestNumber;
+            context["employeeId"] = travel.EmployeeId;
+            context["initiatedById"] = travel.InitiatedById;
+            context["initiatedByRole"] = travel.InitiatedByRole.ToString();
+            context["organizationUnitId"] = travel.OrganizationUnitId;
+            context["travelType"] = travel.TravelType.ToString();
+            context["travelPurpose"] = travel.TravelPurpose.ToString();
+            context["priority"] = travel.Priority.ToString();
+            context["estimatedTotalCost"] = travel.EstimatedTotalCost;
+            context["currencyCode"] = travel.CurrencyCode;
+            context["isInternational"] = travel.IsInternational;
+            context["requiresVisa"] = travel.RequiresVisa;
+            context["requiresHealthClearance"] = travel.RequiresHealthClearance;
+            context["riskLevel"] = travel.RiskLevel.ToString();
+            context["destinationCountryId"] = travel.DestinationCountryId;
+            context["originCountryId"] = travel.OriginCountryId;
+            context["travelStartDate"] = travel.TravelStartDate;
+            context["travelEndDate"] = travel.TravelEndDate;
+            context["travelDays"] = travel.TravelEndDate.DayNumber - travel.TravelStartDate.DayNumber + 1;
+            context["status"] = travel.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "STAFF_DISCIPLINARY_ACTION", "StaffDisciplinaryAction", "Staff Disciplinary Action"))
+        {
+            var disciplinaryCase = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryAction>()
+                .FirstOrDefaultAsync(d => d.Id == entityId)
+                ?? throw new InvalidOperationException("Disciplinary case not found");
+
+            // What is being decided, how serious it is, and who is entitled to confirm it. FR-HR-080
+            // limits heads of department to verbal warnings and FR-HR-092 has the MD signing
+            // terminations, so `minimumAuthority` is the field a definition branches on to pick the
+            // approver — it is the catalog's own statement of who may issue this sanction, rather
+            // than a guess made from the action's name.
+            var actionType = disciplinaryCase.ActionTypeId is Guid actionTypeId
+                ? await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryActionType>()
+                    .FirstOrDefaultAsync(t => t.Id == actionTypeId)
+                : null;
+
+            context["caseNumber"] = disciplinaryCase.CaseNumber;
+            context["employeeId"] = disciplinaryCase.EmployeeId;
+            context["staffOffenseId"] = disciplinaryCase.StaffOffenseId;
+            context["severity"] = disciplinaryCase.Severity.ToString();
+            context["isGrossMisconduct"] = disciplinaryCase.Severity == Core.Enums.StaffOffenseSeverity.GrossMisconduct;
+            context["requiresInvestigation"] = disciplinaryCase.RequiresInvestigation;
+            context["hearingRequired"] = disciplinaryCase.HearingRequired;
+            context["reportedById"] = disciplinaryCase.ReportedById;
+            context["reportedToId"] = disciplinaryCase.ReportedToId;
+            context["decisionById"] = disciplinaryCase.DecisionById;
+            context["actionTypeId"] = disciplinaryCase.ActionTypeId;
+            context["actionTypeCode"] = actionType?.Code;
+            context["actionTypeName"] = actionType?.Name;
+            context["minimumAuthority"] = actionType?.MinimumAuthority.ToString();
+            context["requiresManagementApproval"] =
+                actionType?.MinimumAuthority == Core.Enums.DisciplinaryActionAuthority.Management;
+            context["incidentDate"] = disciplinaryCase.IncidentDate;
+            context["status"] = disciplinaryCase.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "STAFF_REQUISITION", "StaffRequisition", "Staff Requisition"))
+        {
+            var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Requisition.StaffRequisition>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Staff requisition not found");
+
+            // How many heads are being asked for, and whether any budget covers them, is the
+            // routing threshold here — one budgeted replacement and a five-head unbudgeted
+            // expansion are not the same decision.
+            context["requisitionNumber"] = requisition.RequisitionNumber;
+            context["positionId"] = requisition.PositionId;
+            context["organizationUnitId"] = requisition.OrganizationUnitId;
+            context["locationId"] = requisition.LocationId;
+            context["requisitionType"] = requisition.Type.ToString();
+            context["priority"] = requisition.Priority.ToString();
+            context["numberOfPositions"] = requisition.NumberOfPositions;
+            context["isBudgeted"] = requisition.IsBudgeted;
+            context["requestedById"] = requisition.RequestedById;
+            context["desiredStartDate"] = requisition.DesiredStartDate;
+            context["status"] = requisition.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_ASSET_REQUISITION", "HrAssetRequisition", "HR Asset Requisition"))
+        {
+            var requisition = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetRequisition>()
+                .FirstOrDefaultAsync(r => r.Id == entityId)
+                ?? throw new InvalidOperationException("Asset requisition not found");
+
+            // What a definition could reasonably branch on: how many of what, how urgently, and
+            // whether the person who asked is the person who gets it. A department head signing off
+            // one replacement keyboard and ten laptops for a new site are not the same decision.
+            context["requisitionNumber"] = requisition.RequisitionNumber;
+            context["assetTypeId"] = requisition.AssetTypeId;
+            context["quantity"] = requisition.Quantity;
+            context["priority"] = requisition.Priority.ToString();
+            context["isUrgent"] = requisition.Priority == Core.Enums.HRAssetRequisitionPriority.Urgent;
+            context["requestedById"] = requisition.RequestedById;
+            context["beneficiaryEmployeeId"] = requisition.BeneficiaryEmployeeId;
+            // AST-6b. Who benefits is a routing fact, not decoration: a request somebody raised for
+            // themselves and one raised on another employee's behalf carry different conflicts.
+            context["isOnBehalf"] = requisition.BeneficiaryEmployeeId != null;
+            context["requiredByDate"] = requisition.RequiredByDate;
+            context["status"] = requisition.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_ASSET_TRANSFER", "HrAssetTransfer", "HR Asset Transfer"))
+        {
+            // ⚠ Fully qualified. `AssetTransfer` unqualified in this file would be ambiguous or
+            // wrong — Finance declares one too, and this is HR's. Build plan §3.3.
+            var transfer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetTransfer>()
+                .FirstOrDefaultAsync(t => t.Id == entityId)
+                ?? throw new InvalidOperationException("Asset transfer not found");
+
+            // The kind of move is the routing fact here: handing a laptop from one employee to
+            // another is a different authority from moving equipment between units or sites.
+            context["transferNumber"] = transfer.TransferNumber;
+            context["assetId"] = transfer.AssetId;
+            context["transferType"] = transfer.Type.ToString();
+            context["isBetweenEmployees"] = transfer.Type == Core.Enums.HRAssetTransferType.EmployeeToEmployee;
+            context["fromEmployeeId"] = transfer.FromEmployeeId;
+            context["toEmployeeId"] = transfer.ToEmployeeId;
+            context["fromLocationId"] = transfer.FromLocationId;
+            context["toLocationId"] = transfer.ToLocationId;
+            context["fromUnitId"] = transfer.FromUnitId;
+            context["toUnitId"] = transfer.ToUnitId;
+            context["initiatedById"] = transfer.InitiatedById;
+            context["transferDate"] = transfer.TransferDate;
+            context["status"] = transfer.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "HR_ASSET_SURCHARGE", "HrAssetSurcharge", "HR Asset Surcharge"))
+        {
+            var surcharge = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Assets.AssetSurcharge>()
+                .FirstOrDefaultAsync(x => x.Id == entityId)
+                ?? throw new InvalidOperationException("Asset surcharge not found");
+
+            // What a definition could reasonably branch on: how much, why, and — the fact that most
+            // deserves a higher authority — whether the employee disputed it. A charge somebody has
+            // contested is not the same decision as one they signed.
+            context["surchargeNumber"] = surcharge.SurchargeNumber;
+            context["employeeId"] = surcharge.EmployeeId;
+            context["reason"] = surcharge.Reason.ToString();
+            context["assessedAmount"] = surcharge.AssessedAmount;
+            context["currencyCode"] = surcharge.CurrencyCode;
+            context["employeeResponse"] = surcharge.EmployeeResponse.ToString();
+            context["isDisputed"] = surcharge.EmployeeResponse == Core.Enums.AssetSurchargeEmployeeResponse.Disputed;
+            context["proceededWithoutResponse"] = surcharge.ProceededWithoutResponseReason != null;
+            context["raisedById"] = surcharge.RaisedById;
+            context["status"] = surcharge.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "EMPLOYEE_SEPARATION", "EmployeeSeparation", "Employee Separation"))
+        {
+            var separation = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeSeparation>()
+                .FirstOrDefaultAsync(x => x.Id == entityId)
+                ?? throw new InvalidOperationException("Employee separation not found");
+
+            // ⚠ `isProcedural` is THE routing fact for FR-HR-092. Under the rule settled with the
+            // client, a termination for absence beyond the tenant's threshold auto-approves at HR
+            // and everything else — resignation and retirement included — goes to the Managing
+            // Director. A definition branches on this to assign the step; the guarantee itself
+            // stays in SeparationService.RequireDecisionAuthority, so the rule holds even against a
+            // definition that was never authored or was authored wrongly.
+            context["separationNumber"] = separation.SeparationNumber;
+            context["employeeId"] = separation.EmployeeId;
+            context["separationType"] = separation.SeparationType.ToString();
+            context["reasonCategory"] = separation.ReasonCategory?.ToString();
+            context["isProcedural"] = separation.IsProcedural;
+            // ⚠ Derived exactly as the detail DTO derives them, not read off columns that do not
+            // exist: an exit is disciplinary because it carries a disciplinary action, and it needs
+            // the Managing Director's signature precisely when it is not procedural. A definition
+            // must branch on the same facts a screen shows, or the two will explain the same
+            // decision differently.
+            context["isDisciplinary"] = separation.DisciplinaryActionId != null;
+            context["isSystemInitiated"] = separation.IsSystemInitiated;
+            context["absenceDays"] = separation.AbsenceDays;
+            context["requiresManagingDirectorSignature"] = !separation.IsProcedural;
+            context["effectiveDate"] = separation.EffectiveDate;
+            context["lastWorkingDay"] = separation.LastWorkingDay;
+            context["initiatedById"] = separation.InitiatedById;
+            context["status"] = separation.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "SUCCESSION_PLAN", "SuccessionPlan", "Succession Plan"))
+        {
+            var plan = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.SuccessionPlanning.SuccessionPlan>()
+                .FirstOrDefaultAsync(p => p.Id == entityId)
+                ?? throw new InvalidOperationException("Succession plan not found");
+
+            // How critical the post is, how exposed it is, and whether anyone is actually lined up
+            // are the routing thresholds. A Low-criticality post with a ready-now successor and a
+            // Critical post at HighRisk with nobody identified are not the same decision, and a
+            // definition should be able to send them to different approvers.
+            context["planNumber"] = plan.PlanNumber;
+            context["positionId"] = plan.PositionId;
+            context["planYear"] = plan.PlanYear;
+            context["criticality"] = plan.Criticality.ToString();
+            context["riskLevel"] = plan.RiskLevel.ToString();
+            context["numberOfIdentifiedSuccessors"] = plan.NumberOfIdentifiedSuccessors;
+            context["hasReadyNowSuccessor"] = plan.HasReadyNowSuccessor;
+            context["hasEmergencySuccessor"] = plan.HasEmergencySuccessor;
+            context["currentIncumbentId"] = plan.CurrentIncumbentId;
+            context["versionNumber"] = plan.VersionNumber;
+            context["status"] = plan.Status.ToString();
+        }
+
+        if (IsEntityType(entityTypeRecord, "JOB_OFFER", "JobOffer", "Job Offer"))
+        {
+            var offer = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Recruitment.JobOffer>()
+                .FirstOrDefaultAsync(o => o.Id == entityId)
+                ?? throw new InvalidOperationException("Job offer not found");
+
+            // What the offer commits, and where it sits in the band, is the routing threshold here —
+            // an offer at the bottom of a junior band and one above the midpoint of a senior one are
+            // not the same decision. `aboveBandMidpoint` is precomputed because a definition
+            // condition cannot do the arithmetic itself.
+            context["offerNumber"] = offer.OfferNumber;
+            context["positionId"] = offer.PositionId;
+            context["positionTitle"] = offer.PositionTitle;
+            context["employmentType"] = offer.EmploymentType.ToString();
+            context["baseSalary"] = offer.BaseSalary ?? 0m;
+            context["currencyCode"] = offer.CurrencyCode ?? string.Empty;
+            context["salaryGradeMin"] = offer.SalaryGradeMin ?? 0m;
+            context["salaryGradeMax"] = offer.SalaryGradeMax ?? 0m;
+            context["aboveBandMidpoint"] =
+                offer.BaseSalary.HasValue && offer.SalaryGradeMin.HasValue && offer.SalaryGradeMax.HasValue
+                && offer.BaseSalary.Value > (offer.SalaryGradeMin.Value + offer.SalaryGradeMax.Value) / 2m;
+            context["isConditional"] = offer.IsConditional;
+            context["version"] = offer.Version;
+            context["preparedById"] = offer.PreparedById;
+            context["status"] = offer.OfferStatus.ToString();
         }
 
         if (IsEntityType(entityTypeRecord, "TRAINING_NOMINATION", "TrainingNomination", "Training Nomination"))

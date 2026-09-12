@@ -15,6 +15,33 @@ namespace ErpSystem.Api.Tests.Controllers.Procurement;
 public sealed class TenderBidsOwnershipControllerTests
 {
     [Fact]
+    public async Task FilteredSealedDocumentCannotReachTheFileDownloadPath()
+    {
+        var fixture = new Fixture();
+        var bidId = Guid.NewGuid();
+        fixture.Bids.Setup(service => service.GetBidByIdAsync(bidId))
+            .ReturnsAsync(new TenderBidDetailDto { Id = bidId, IsSealed = true });
+        fixture.Bids.Setup(service => service.GetBidDocumentsAsync(bidId))
+            .ReturnsAsync(Array.Empty<TenderBidDocumentDto>());
+        Assert.IsType<NotFoundObjectResult>(await fixture.Controller.DownloadDocument(bidId, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task ExternalSupplierCannotReadAnotherSuppliersLotCollection()
+    {
+        var fixture = new Fixture();
+        var bidId = Guid.NewGuid();
+        fixture.CurrentUser.SetupGet(user => user.IsExternalUser).Returns(true);
+        fixture.BusinessPartners.Setup(repo => repo.GetByUserIdAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(new BusinessPartner { Id = Guid.NewGuid() });
+        fixture.Bids.Setup(service => service.GetBidByIdAsync(bidId))
+            .ReturnsAsync(new TenderBidDetailDto { Id = bidId, BusinessPartnerId = Guid.NewGuid() });
+        var result = await fixture.Controller.GetBidLots(bidId);
+        Assert.IsType<NotFoundResult>(result.Result);
+        fixture.Bids.Verify(service => service.GetBidLotsAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
     public async Task GetBidsForwardsExactTenderFilter()
     {
         var fixture = new Fixture();

@@ -59,6 +59,7 @@ public interface IBusinessPartnerRepository : IGenericRepository<BusinessPartner
     Task<BusinessPartner?> GetWithSpecializationsAsync(Guid id);
     Task<BusinessPartner?> GetWithLicensesAsync(Guid id);
     Task<BusinessPartner?> GetWithContactsAsync(Guid id);
+    Task<BusinessPartner?> GetWithBankAccountsAsync(Guid id);
     Task<BusinessPartner?> GetWithDocumentsAsync(Guid id);
     Task<BusinessPartner?> GetWithFinancialsAsync(Guid id);
     Task<BusinessPartner?> GetWithAllRelatedDataAsync(Guid id);

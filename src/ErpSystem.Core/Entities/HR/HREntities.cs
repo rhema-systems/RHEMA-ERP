@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.Maintenance;
@@ -52,12 +52,44 @@ public class Employee : TenantEntity
 
     public Gender? Gender { get; set; }
 
+    /// <summary>
+    /// How the employee describes their gender, where <see cref="Enums.Gender.Other"/> is chosen.
+    /// </summary>
+    /// <remarks>
+    /// The enum offers <c>Other</c> and then had nowhere to say what "other" means, which makes the
+    /// option a dead end for the person choosing it. Free text on purpose: an enumeration of the
+    /// answers would be the same problem one level down.
+    /// </remarks>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
     public DateOnly? DateOfBirth { get; set; }
 
     public MaritalStatus? MaritalStatus { get; set; }
 
     [MaxLength(50)]
     public string? Religion { get; set; }
+
+    /// <summary>Home town or place of origin.</summary>
+    [MaxLength(150)]
+    public string? Hometown { get; set; }
+
+    /// <summary>
+    /// Whether the employee has a disability, and what it is.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Deliberately DUPLICATED with <see cref="EmployeeDependent"/>, not moved from it.</b>
+    /// The demo feedback recorded these as sitting "on EmployeeDependent, not Employee" — read as a
+    /// misplacement. It is not one: a dependant's disability and an employee's own are different
+    /// facts about different people, and both are needed. The dependant's fields stay exactly as
+    /// they are; these are new. Decided by the user, 2026-09-01.</para>
+    /// <para>Same names and same length as the dependant's pair, so a reader moving between the two
+    /// is not asked to learn a second vocabulary for one idea.</para>
+    /// </remarks>
+    public bool HasDisability { get; set; }
+
+    [MaxLength(500)]
+    public string? DisabilityDescription { get; set; }
 
     public bool IsFullTime { get; set; } = true;
 
@@ -67,9 +99,19 @@ public class Employee : TenantEntity
     [MaxLength(500)]
     public string? Address { get; set; }
 
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since 2026-09-03, not the source of truth. When
+    /// <see cref="GeoAreaId"/> is set the service overwrites this with the resolved town or
+    /// district name. Kept because reports, integrations and ported rows read it, and because an
+    /// employee whose address predates the geography tree still has to say something.
+    /// </summary>
     [MaxLength(100)]
     public string? City { get; set; }
 
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since 2026-09-03 — see <see cref="City"/>. Overwritten with the
+    /// resolved region name when <see cref="GeoAreaId"/> is set.
+    /// </summary>
     [MaxLength(50)]
     public string? State { get; set; }
 
@@ -81,10 +123,33 @@ public class Employee : TenantEntity
 
     public Guid? CountryId { get; set; }
 
-    [Required]
+    /// <summary>
+    /// Where this employee lives, as one reference to the administrative geography tree.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ One FK, not one per tier.</b> It points at the <i>lowest</i> tier known — a
+    /// community if that is what was chosen, a district if not — and the ancestors come from
+    /// <c>GeoArea.Path</c>. That is what lets Ghana's scheme gain a fifth tier, or a second country
+    /// arrive with a different depth, without a migration on this table. A
+    /// <c>RegionId</c>/<c>DistrictId</c>/<c>TownId</c> trio would have to be migrated the day
+    /// either happened.</para>
+    ///
+    /// <para>Nullable and expected to stay null on plenty of rows: the register predates the
+    /// geography tree, and <see cref="State"/> / <see cref="City"/> carry whatever those rows
+    /// already said. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <summary>
+    /// Optional since 2026-09-03. A register never has an address for every driver, carpenter or
+    /// bill distributor, and a required column only taught data loads to invent one. Null means
+    /// "none"; the service normalises blank to null so the filtered unique index
+    /// (<c>IX_Employee_Tenant_EmailAddress</c>, <c>WHERE EmailAddress IS NOT NULL</c>) is never
+    /// asked to compare two empty strings.
+    /// </summary>
     [MaxLength(200)]
-    [EmailAddress]
-    public string EmailAddress { get; set; } = string.Empty;
+    [ErpSystem.Core.Validation.OptionalEmailAddress]
+    public string? EmailAddress { get; set; }
 
     [MaxLength(50)]
     public string? TelephoneNumber { get; set; }
@@ -109,8 +174,31 @@ public class Employee : TenantEntity
 
     public DateOnly? EndDate { get; set; } // Populated on exit
 
+    /// <summary>
+    /// ⚠ <b>LEGACY, and a caller-supplied path.</b> It is on the create AND update DTOs and mapped
+    /// straight onto the entity, while no photo upload endpoint has ever existed — so the only way
+    /// to "set" an employee photo has been for a caller to type a location. That is the sink area 16
+    /// replaced wholesale and D-10, D-14 and D-39 each removed again after shipping; this is its
+    /// seventh instance and the first on the module's most-used entity.
+    /// <para>Kept because it holds ported values. Use <see cref="PhotoDocumentRecordId"/> and its
+    /// siblings for anything new; the download helper prefers the DMS ids and only falls back to
+    /// this string. It should be retired once the ported images are migrated through the gate.</para>
+    /// </summary>
     [MaxLength(500)]
     public string? PicturePath { get; set; }
+
+    // ── The photograph, through the controlled gate ───────────────────────────
+    public Guid? PhotoFileUploadRecordId { get; set; }
+    public Guid? PhotoDocumentRecordId { get; set; }
+    public Guid? PhotoDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? PhotoFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? PhotoMimeType { get; set; }
+
+    public long? PhotoFileSizeBytes { get; set; }
 
     public Guid? DepartmentId { get; set; }
 
@@ -166,6 +254,23 @@ public class Employee : TenantEntity
     public bool Tier2Only { get; set; }
 
     public bool Overtime { get; set; }
+
+    // ── Payroll membership ──────────────────────────────────────────────────────────────────
+    // Not every employee is paid through the payroll run: consultants are paid on invoice, interns
+    // and national service personnel on an allowance, secondees by their parent body. This is HR's
+    // statement of WHICH; membership of an actual run stays payroll's decision on its own profile
+    // (PayrollEmployeeProfile.PayrollActive). When false, Salary, the five switches above and the
+    // grade/notch assignment are not captured — see EmployeeService.
+
+    /// <summary>Whether this person is paid through the payroll run.</summary>
+    public bool IsOnPayroll { get; set; } = true;
+
+    /// <summary>Why not, when <see cref="IsOnPayroll"/> is false. Null while on payroll.</summary>
+    public OffPayrollReason? OffPayrollReason { get; set; }
+
+    /// <summary>Free text qualifying the reason (who pays, under what arrangement).</summary>
+    [MaxLength(500)]
+    public string? OffPayrollNote { get; set; }
 
     [MaxLength(50)]
     public string? BadgeNumber { get; set; }
@@ -237,10 +342,19 @@ public class Employee : TenantEntity
     [NotMapped]
     public string DisplayName => $"{FullName} ({EmployeeNumber})";
 
+    /// <summary>
+    /// Completed years of service, counting only anniversaries that have actually come round.
+    /// </summary>
+    /// <remarks>
+    /// Corrected in area 14 slice 3b. This previously read
+    /// <c>DateTime.Today.Year - DateEmployed.Value.Year</c>, which reports a completed year on
+    /// 1 January for someone whose anniversary falls in December — overstating service by up to a
+    /// year for anyone whose start date has not yet come round. It fell on exactly the rules that
+    /// turn on a threshold, and it disagreed with <c>HrPolicyCalculations.Age</c>, which had always
+    /// done the check correctly. Both now share one implementation.
+    /// </remarks>
     [NotMapped]
-    public int? YearsOfService => DateEmployed.HasValue
-        ? DateTime.Today.Year - DateEmployed.Value.Year
-        : null;
+    public int? YearsOfService => ErpSystem.Core.Services.HR.HrPolicyCalculations.CompletedYears(DateEmployed);
 
     [NotMapped]
     public bool IsOnProbation => StaffStatus == StaffStatus.Probation;
@@ -285,6 +399,10 @@ public class Employee : TenantEntity
     public virtual WorkStation? Station { get; set; }
     public virtual EmployeePosition Position { get; set; } = null!;
     public virtual Country? Country { get; set; }
+
+    /// <summary>The administrative area this employee lives in. See <see cref="GeoAreaId"/>.</summary>
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
+
     public virtual Employee? Manager { get; set; }
     public virtual LocationLevel? LocationLevel { get; set; }
     public virtual Location? Location { get; set; }
@@ -781,6 +899,35 @@ public class EmployeePosition : TenantEntity
     // Capacity planning
     public int ExpectedHeadcount { get; set; } = 1;
 
+    /// <summary>When an approved manpower budget last set <see cref="ExpectedHeadcount"/>.</summary>
+    /// <remarks>
+    /// <para>⚠ This column exists to answer one question FR-HR-136 cannot be enforced without:
+    /// <b>is this position's establishment an authorised number, or is it still the column
+    /// default?</b> Measured on the live tenant, <b>132 of 146 positions carry
+    /// <c>ExpectedHeadcount = 1</c></b> — the default, never touched — while one of them holds over
+    /// a thousand people. A rule that refuses a vacancy "outside the establishment" would therefore
+    /// refuse almost everything, which is why area 8 had to downgrade FR-HR-173 to advisory and why
+    /// area 6's establishment classification is decorative.</para>
+    ///
+    /// <para>With this, the rule can have teeth exactly where it is meaningful: null means nobody
+    /// has ever authorised a headcount for this post, so it is not establishment-constrained — the
+    /// same shape as the requisition budget check's "no approved budget line" branch. Set means the
+    /// number came from a manpower budget that went the whole way up FR-HR-135's chain, and it is
+    /// then worth refusing to exceed.</para>
+    ///
+    /// <para>Written by <c>ManpowerBudgetService</c> on approval (decision D-2) and by the
+    /// establishment admin endpoint for posts no budget covers.</para>
+    /// </remarks>
+    public DateTime? EstablishmentApprovedOn { get; set; }
+
+    /// <summary>The manpower budget that authorised the current establishment, when one did.</summary>
+    /// <remarks>
+    /// Null when the establishment was set directly by HR rather than derived from a budget — both
+    /// are legitimate, and telling them apart is what lets a screen say <i>where the number came
+    /// from</i> rather than just showing it.
+    /// </remarks>
+    public Guid? EstablishmentSourceBudgetId { get; set; }
+
     public Guid? SalaryGradeId { get; set; }
 
     public WorkMode WorkMode { get; set; } = WorkMode.OnSite;
@@ -800,6 +947,36 @@ public class EmployeePosition : TenantEntity
     public bool RequiresCertification { get; set; } = false;
 
     public bool RequiresGuarantor { get; set; }
+
+    /// <summary>
+    /// How much surety the post requires, where <see cref="RequiresGuarantor"/> is set.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b><c>RequiresGuarantor</c> was a bare bool</b> — the post could demand a guarantor
+    /// and never say for how much, so "is this cashier properly guaranteed?" was a question the
+    /// system could pose and not answer. The same shape as <c>FamilyAccompanying</c>, and the same
+    /// fix: give the flag something behind it.</para>
+    ///
+    /// <para>Per POSITION rather than per employee or per tenant, because the exposure is the
+    /// post's: a cashier handling daily takings needs a larger surety than a clerk, and it should
+    /// not have to be re-argued for each person appointed to the seat.</para>
+    ///
+    /// <para>Null with <c>RequiresGuarantor</c> true means "a guarantor is required, no amount is
+    /// specified" — a legitimate state, and the compliance read reports the guarantor as present
+    /// or absent without judging the sum.</para>
+    /// </remarks>
+    public decimal? RequiredGuarantorAmount { get; set; }
+
+    /// <summary>
+    /// The currency that requirement is stated in, validated against Finance's currency master.
+    /// </summary>
+    /// <remarks>
+    /// Null means the tenant's configured HR default. ⚠ Comparing a surety in one currency against
+    /// a requirement in another needs a rate and a date; see <c>EmployeeDocumentService</c>'s
+    /// guarantor compliance for what it does and — more importantly — what it refuses to guess.
+    /// </remarks>
+    [MaxLength(3)]
+    public string? RequiredGuarantorCurrencyCode { get; set; }
 
     public int? NumberOfGuarantors { get; set; }
 
@@ -987,6 +1164,10 @@ public class EmployeeDependent : TenantEntity
 
     public Gender? Gender { get; set; }
 
+    /// <summary>How the dependant describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
     public bool HasDisability { get; set; }
 
     [MaxLength(500)]
@@ -1008,8 +1189,22 @@ public class EmployeeDependent : TenantEntity
 
     public bool IsDeceased { get; set; }
 
+    /// <summary>⚠ Legacy caller-supplied path, as on <see cref="Employee"/>. See the note there.</summary>
     [MaxLength(500)]
     public string? PicturePath { get; set; }
+
+    // The photograph, through the controlled gate.
+    public Guid? PhotoFileUploadRecordId { get; set; }
+    public Guid? PhotoDocumentRecordId { get; set; }
+    public Guid? PhotoDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? PhotoFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? PhotoMimeType { get; set; }
+
+    public long? PhotoFileSizeBytes { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -1309,6 +1504,15 @@ public class ExpatriateAssignment : TenantEntity
 
     public DateOnly? RelocationDate { get; set; }
 
+    /// <summary>
+    /// Whether family came with them — and, when true, <see cref="FamilyMembers"/> says who.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This was a bare bool with nothing behind it: the record could say a family had accompanied
+    /// the assignee and never who they were, so nobody could tell how many permits were owed or
+    /// whose were expiring. The flag stays — it is what a form asks first — and the collection is
+    /// what makes it answerable.
+    /// </remarks>
     public bool FamilyAccompanying { get; set; }
 
     [MaxLength(1000)]
@@ -1317,12 +1521,42 @@ public class ExpatriateAssignment : TenantEntity
     [MaxLength(100)]
     public string? VisaType { get; set; }
 
+    /// <summary>
+    /// When the visa was ISSUED, as opposed to when it runs out.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Every permit on this record carried an expiry and no issue date, so it could never answer
+    /// "how long was this granted for" — the question asked when a renewal is refused or shortened.
+    /// </remarks>
+    public DateOnly? VisaIssueDate { get; set; }
+
     public DateOnly? VisaExpiryDate { get; set; }
 
     [MaxLength(100)]
     public string? WorkPermitNumber { get; set; }
 
+    public DateOnly? WorkPermitIssueDate { get; set; }
+
     public DateOnly? WorkPermitExpiryDate { get; set; }
+
+    /// <summary>
+    /// The residence permit — a separate instrument from the work permit.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ These are issued by different authorities on different clocks: the work permit says you
+    /// may be employed, the residence permit says you may live here. Recording only one and calling
+    /// it "the permit" is how somebody ends up lawfully employed and unlawfully resident, with a
+    /// record that cannot show it.
+    /// </remarks>
+    [MaxLength(100)]
+    public string? ResidentPermitNumber { get; set; }
+
+    public DateOnly? ResidentPermitIssueDate { get; set; }
+
+    public DateOnly? ResidentPermitExpiryDate { get; set; }
+
+    public virtual ICollection<ExpatriateFamilyMember> FamilyMembers { get; set; }
+        = new List<ExpatriateFamilyMember>();
 
     // Navigation Properties
     [ForeignKey(nameof(EmployeeId))]
@@ -1450,6 +1684,21 @@ public class EmployeeReferee : TenantEntity
     [MaxLength(1000)]
     public string? ReferenceNotes { get; set; }
 
+    // ── The written reference, through the controlled gate ────────────────────
+    // A referee could be recorded, phoned and noted, and the letter they actually wrote had nowhere
+    // to live. Three ids, never a path.
+    public Guid? LetterFileUploadRecordId { get; set; }
+    public Guid? LetterDocumentRecordId { get; set; }
+    public Guid? LetterDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? LetterFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? LetterMimeType { get; set; }
+
+    public long? LetterFileSizeBytes { get; set; }
+
     public bool IsPrimary { get; set; }
 
     public bool IsActive { get; set; } = true;
@@ -1494,6 +1743,10 @@ public class EmployeeGuarantor : TenantEntity
 
     public Gender? Gender { get; set; }
 
+    /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
+    [MaxLength(100)]
+    public string? GenderDescription { get; set; }
+
     public DateOnly? DateOfBirth { get; set; }
 
     [Required]
@@ -1537,6 +1790,49 @@ public class EmployeeGuarantor : TenantEntity
     public string? NationalIdNumber { get; set; }
 
     public DateOnly? NationalIdExpiryDate { get; set; }
+
+    /// <summary>
+    /// What the guarantor stands surety FOR.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Distinct from <c>MonthlyIncome</c>, which is what the guarantor EARNS — the row could say
+    /// how solvent the person was and never what they had undertaken, which is the only figure that
+    /// matters if the guarantee is ever called. Stated in the tenant's default currency
+    /// (<c>CompanyHrPolicySettings.DefaultCurrencyCode</c>); a per-row currency would need the
+    /// Finance rate bridge and no HR guarantee has ever been in anything but GHS.
+    /// </remarks>
+    public decimal? AmountGuaranteed { get; set; }
+
+    /// <summary>
+    /// The currency that amount is stated in — validated against FINANCE's currency master.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A bare three-letter code that nothing checks is how travel ended up able to file a claim
+    /// in "XYZ" and total it. <c>HrCurrencyBridge.RequireKnownCurrencyAsync</c> refuses a code
+    /// Finance does not hold. Null means the tenant's configured HR default applies, so existing
+    /// rows keep meaning what they meant.
+    /// <para>No FK column: Finance's uniqueness is <c>(TenantId, Code)</c>, and a composite FK here
+    /// would make a currency re-code a schema problem — the same call travel made.</para>
+    /// </remarks>
+    [MaxLength(3)]
+    public string? AmountGuaranteedCurrencyCode { get; set; }
+
+    // ── The guarantor's photograph, through the controlled gate ───────────────
+    // ⚠ Three ids and never a path. Note `GuarantorFormPath` above: a caller-supplied file location
+    // of exactly the kind D-10, D-14 and D-39 each had to remove. It is left alone here because it
+    // holds legacy values and gating it is its own migration, but nothing NEW on this row may use
+    // that shape — which is why the photograph gets its own gated columns rather than a second path.
+    public Guid? PhotoFileUploadRecordId { get; set; }
+    public Guid? PhotoDocumentRecordId { get; set; }
+    public Guid? PhotoDocumentVersionId { get; set; }
+
+    [MaxLength(255)]
+    public string? PhotoFileName { get; set; }
+
+    [MaxLength(150)]
+    public string? PhotoMimeType { get; set; }
+
+    public long? PhotoFileSizeBytes { get; set; }
 
     public bool HasSignedGuarantorForm { get; set; } = false;
 
@@ -1759,8 +2055,23 @@ public class EmployeeSkill : TenantEntity
     [MaxLength(200)]
     public string? CertificationNumber { get; set; }
 
+    /// <summary>
+    /// Who certified the skill, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ KEPT alongside <see cref="CertifyingBodyId"/> rather than replaced. Two reasons: the
+    /// existing rows are free text and dropping the column would discard them, and a genuinely
+    /// one-off certifier does not deserve a catalogue row. The lookup is what makes the common
+    /// case consistent; this stays for the tail.
+    /// </remarks>
     [MaxLength(200)]
     public string? CertifyingBody { get; set; }
+
+    /// <summary>The catalogued body that certified this skill, where there is one.</summary>
+    public Guid? CertifyingBodyId { get; set; }
+
+    [ForeignKey(nameof(CertifyingBodyId))]
+    public virtual CertifyingBody? CertifyingBodyRef { get; set; }
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -1949,12 +2260,100 @@ public class Qualification : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    /// <summary>
+    /// What KIND of qualification this is — Education, Certification, License, Membership.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A category, NOT a rank. It cannot answer "is a Master's higher than a Diploma", which is
+    /// what shortlisting and succession need; <see cref="QualificationLevelId"/> is the ladder.
+    /// </remarks>
     public QualificationType Type { get; set; }
+
+    /// <summary>Where this sits on the academic / professional ladder, when it sits on one.</summary>
+    /// <remarks>
+    /// Nullable because plenty of qualifications are unranked — a membership or a short course has
+    /// a kind but no level, and forcing one would invent a comparison that does not exist.
+    /// </remarks>
+    public Guid? QualificationLevelId { get; set; }
+
+    [ForeignKey(nameof(QualificationLevelId))]
+    public virtual QualificationLevel? QualificationLevel { get; set; }
 
     [MaxLength(200)]
     public string? IssuingAuthority { get; set; }
 
     public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// An organisation that certifies a skill — an institute, board or awarding body.
+/// </summary>
+/// <remarks>
+/// <para>Introduced because <c>EmployeeSkill.CertifyingBody</c> was free text, so "Institute of
+/// Chartered Accountants", "ICAG" and "I.C.A.G." were three different certifiers as far as any
+/// report was concerned.</para>
+///
+/// <para>⚠ The free-text column stays. A lookup that forces every one-off certifier into the
+/// catalogue makes the catalogue worthless; this exists so the COMMON certifiers are consistent,
+/// not so the rare ones are impossible.</para>
+/// </remarks>
+public class CertifyingBody : TenantEntity
+{
+    [Required]
+    [MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Short form, e.g. "ICAG", "CIPS". What people actually write.</summary>
+    [MaxLength(50)]
+    public string? Abbreviation { get; set; }
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    /// <summary>Country the body is based in, where that distinguishes it.</summary>
+    public Guid? CountryId { get; set; }
+
+    [ForeignKey(nameof(CountryId))]
+    public virtual Country? Country { get; set; }
+
+    [MaxLength(255)]
+    public string? Website { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<EmployeeSkill> EmployeeSkills { get; set; } = new List<EmployeeSkill>();
+}
+
+/// <summary>
+/// The academic / professional ladder a <see cref="Qualification"/> can sit on.
+/// </summary>
+/// <remarks>
+/// <para>Separate from <see cref="QualificationType"/>, which is a CATEGORY (Education,
+/// Certification, License…) and cannot be ordered. This is what makes "at least a Bachelor's"
+/// answerable.</para>
+///
+/// <para><b><see cref="Rank"/> is the whole point.</b> A ladder whose rungs cannot be compared is
+/// just a second category. Rank ascends — higher means more advanced — and is what a shortlisting
+/// rule or a succession readiness check compares.</para>
+/// </remarks>
+public class QualificationLevel : TenantEntity
+{
+    [Required]
+    [MaxLength(100)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string? Code { get; set; }
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    /// <summary>Ascending order. Higher is more advanced; ties are permitted for equivalents.</summary>
+    public int Rank { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<Qualification> Qualifications { get; set; } = new List<Qualification>();
 }
 
 #endregion
@@ -2024,6 +2423,22 @@ public class IdentificationType : TenantEntity
     /// </summary>
     public bool HasExpiryDate { get; set; } = true;
 
+    /// <summary>
+    /// How many days before a card of this type expires the holder should be reminded.
+    /// </summary>
+    /// <remarks>
+    /// Per TYPE, because the lead time is a property of the document, not of the person: a Ghana
+    /// Card renewal is not a passport renewal. <c>null</c> means no reminder for this type, which
+    /// is the correct reading for an ID that does not expire at all — see
+    /// <see cref="HasExpiryDate"/>.
+    ///
+    /// ⚠ Read by <c>IdentificationExpiryReminderBackgroundService</c>. Before 2026-09-01 nothing
+    /// swept <c>EmployeeIdentificationCard.ExpiryDate</c> at all, so this column and that sweep
+    /// were added together — a lead time nothing acts on is a setting that only looks like a
+    /// feature.
+    /// </remarks>
+    public int? ExpiryNotificationLeadDays { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     [ForeignKey(nameof(IssuingCountryId))]
@@ -2069,8 +2484,28 @@ public class ExternalAssociate : TenantEntity
 
     public string? Role { get; set; }
 
+    /// <summary>
+    /// Legacy caller-supplied file location for the associate's photograph.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Kept for ported values only; nothing new writes it.</b> A photograph is set through the
+    /// controlled upload endpoint, which stores <see cref="PhotoFileUploadRecordId"/>. Non-nullable
+    /// with an empty default, so "no photo" is an empty string here rather than null.
+    /// </remarks>
     [MaxLength(500)]
     public string PicturePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Scanned controlled upload holding the associate's photograph.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>One column, not the employee's six.</b> An associate's photo is an avatar, and the
+    /// house precedent for an avatar is <c>JobCandidate.ProfilePhotoFileUploadRecordId</c>: it is
+    /// deliberately NOT registered in the central DMS, because an avatar carries no retention value
+    /// and one document record per photo is repository noise. An employee photograph is part of a
+    /// personnel file and does get DMS ids; an external associate is a contact, not personnel.
+    /// </remarks>
+    public Guid? PhotoFileUploadRecordId { get; set; }
 
     public bool IsActive { get; set; }
 

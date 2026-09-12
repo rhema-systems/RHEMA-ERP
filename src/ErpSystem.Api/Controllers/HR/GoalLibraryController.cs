@@ -3,12 +3,13 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class GoalLibraryController : ControllerBase
 {
     private readonly IGoalLibraryService _goalLibraryService;
@@ -131,6 +132,7 @@ public class GoalLibraryController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(GoalLibraryDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateGoalLibraryDto createDto, CancellationToken cancellationToken = default)
     {
         try
@@ -154,6 +156,7 @@ public class GoalLibraryController : ControllerBase
     [ProducesResponseType(typeof(GoalLibraryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateGoalLibraryDto updateDto, CancellationToken cancellationToken = default)
     {
         try
@@ -176,6 +179,7 @@ public class GoalLibraryController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -198,6 +202,7 @@ public class GoalLibraryController : ControllerBase
     /// <summary>Get the number of employee goals that reference this library item</summary>
     [HttpGet("{id:guid}/usage-count")]
     [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetUsageCount(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -216,6 +221,7 @@ public class GoalLibraryController : ControllerBase
     [HttpPatch("{id:guid}/active-status")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SetActiveStatus(Guid id, [FromBody] bool isActive, CancellationToken cancellationToken = default)
     {
         try
@@ -290,6 +296,7 @@ public class GoalLibraryController : ControllerBase
     /// <summary>Get usage statistics for a goal library item</summary>
     [HttpGet("{id:guid}/usage-stats")]
     [ProducesResponseType(typeof(GoalLibraryUsageStatsDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetUsageStats(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -307,6 +314,7 @@ public class GoalLibraryController : ControllerBase
     /// <summary>Get paged usage rows for a goal library item</summary>
     [HttpGet("{id:guid}/usage")]
     [ProducesResponseType(typeof(PagedResult<GoalLibraryUsageRowDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetUsagePaged(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken cancellationToken = default)
     {
         try

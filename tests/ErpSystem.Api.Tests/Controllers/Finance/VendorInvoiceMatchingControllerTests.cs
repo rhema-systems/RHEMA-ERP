@@ -18,6 +18,24 @@ namespace ErpSystem.Api.Tests.Controllers.Finance;
 public sealed class VendorInvoiceMatchingControllerTests
 {
     [Fact]
+    public async Task GoodsEntry_ShouldRequireInvoiceWritePermissionAndUseTheInvoiceService()
+    {
+        var service = new Mock<IVendorInvoiceService>();
+        await using var db = Context();
+        var deniedUser = new Mock<ICurrentUserService>();
+        deniedUser.SetupGet(x => x.UserId).Returns("not-a-user-id");
+        var denied = new VendorInvoiceController(service.Object, deniedUser.Object, db);
+        (await denied.GetGoodsEntry(Guid.NewGuid(), null, CancellationToken.None)).Result.Should().BeOfType<ForbidResult>();
+        service.VerifyNoOtherCalls();
+        var po = Guid.NewGuid();
+        var expected = new ApGoodsInvoiceEntryDto { PurchaseOrderId = po };
+        service.Setup(x => x.GetGoodsInvoiceEntryAsync(po, null, It.IsAny<CancellationToken>())).ReturnsAsync(expected);
+        var allowed = new VendorInvoiceController(service.Object, PrivilegedCurrentUser().Object, db);
+        (await allowed.GetGoodsEntry(po, null, CancellationToken.None)).Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeSameAs(expected);
+    }
+
+    [Fact]
     public void DedicatedReadinessRouteIsAuthenticated()
     {
         var method = typeof(VendorInvoiceController).GetMethod(
@@ -34,7 +52,9 @@ public sealed class VendorInvoiceMatchingControllerTests
     {
         var invoiceId = Guid.NewGuid();
         var service = new Mock<IVendorInvoiceService>();
-        service.Setup(item => item.SubmitForApprovalAsync(invoiceId, It.IsAny<CancellationToken>()))
+        service.Setup(item => item.SubmitForApprovalAsync(invoiceId,
+                It.IsAny<ErpSystem.Core.Finance.Integration.FinancePostingProducerContext>(),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new VendorInvoiceMatchControlException(
                 "AP_MATCH_CONFIGURATION_REQUIRED",
                 "An effective procurement configuration profile is required."));

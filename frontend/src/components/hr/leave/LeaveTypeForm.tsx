@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/card';
 import { ENCASHMENT_RATE_BASIS_OPTIONS } from '@/types/hr/leave';
 import {
+  ColorField,
+  hexColorSchema,
   DateField as _DateField,
   FieldRow,
   NumberField,
@@ -36,7 +38,7 @@ export const leaveTypeSchema = z
     maxDaysPerYear: z.coerce.number().int('Whole days only').min(0, 'Cannot be negative'),
     minDaysNotice: z.string().optional().or(z.literal('')),
     requiresApproval: z.boolean(),
-    calendarColor: z.string().max(20).optional().or(z.literal('')),
+    calendarColor: hexColorSchema,
     hasSubTypes: z.boolean(),
     allowCarryOver: z.boolean(),
     maxCarryOverDays: z.string().optional().or(z.literal('')),
@@ -136,13 +138,7 @@ export function LeaveTypeForm({
             <TextareaField form={form} name="description" label="Description" />
             <FieldRow>
               <div className="space-y-2">
-                <Label htmlFor="calendarColor">Calendar colour</Label>
-                <Input
-                  id="calendarColor"
-                  type="color"
-                  className="h-10 w-20 p-1"
-                  {...form.register('calendarColor')}
-                />
+                <ColorField form={form} name="calendarColor" label="Calendar colour" />
                 <p className="text-xs text-muted-foreground">Used on leave calendars.</p>
               </div>
               <SwitchField

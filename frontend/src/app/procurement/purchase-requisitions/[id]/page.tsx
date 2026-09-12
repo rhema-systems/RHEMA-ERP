@@ -86,6 +86,11 @@ import { PurchaseRequisitionDocuments } from '@/components/procurement/PurchaseR
 import { format } from 'date-fns';
 import Link from 'next/link';
 import { printProcurementDocument } from '@/lib/procurement-document-output';
+import { useAuth } from '@/hooks/use-auth';
+import {
+  canRenderPurchaseRequisitionApprovalActions,
+  canUsePurchaseRequisitionApprovalActions,
+} from '@/lib/purchase-requisition-actions';
 
 const PRStatuses = [
   {
@@ -147,6 +152,7 @@ const tenderMethods = new Set<ProcurementMethodType>([
   'SingleSource',
   'QualityBasedSelection',
   'QualityAndCostBasedSelection',
+  'PettyPurchase',
 ]);
 
 const formatMethod = (method?: ProcurementMethodType) =>
@@ -156,6 +162,7 @@ const formatMethod = (method?: ProcurementMethodType) =>
 
 export default function PurchaseRequisitionDetailPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : (params?.id ?? '');
 
@@ -403,9 +410,10 @@ export default function PurchaseRequisitionDetailPage() {
       requisition?.status === 'Draft' &&
       submissionReadiness?.canSubmit === true &&
       budgetReadiness?.canReserve === true,
-    canApproveReject:
-      requisition?.status === 'Pending Approval' ||
-      requisition?.status === 'Submitted',
+    canApproveReject: canUsePurchaseRequisitionApprovalActions(
+      requisition?.status,
+      user
+    ),
     enabled: Boolean(id && requisition),
     commands: {
       submit: () => purchasingService.submitPurchaseRequisition(id),
@@ -424,6 +432,12 @@ export default function PurchaseRequisitionDetailPage() {
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
   });
+  const canRenderApprovalActions =
+    canRenderPurchaseRequisitionApprovalActions(
+      requisition?.status,
+      user,
+      workflow.summary?.canCurrentUserApprove
+    );
 
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
@@ -463,14 +477,20 @@ export default function PurchaseRequisitionDetailPage() {
   const handleCreateTender = async () => {
     if (!canCreateTender) {
       toast.error(
-        resolvedMethod
-          ? `The effective policy selected ${formatMethod(resolvedMethod)}, which is not routed through Tender creation.`
-          : sourcingCaseReadiness?.message || 'The procurement method has not been resolved.'
+        existingTenderSource
+          ? `This requisition is already being sourced through ${existingTenderSource.sourceEntityReference || sourcingCaseReadiness?.currentCase?.caseNumber}. Continue that tender instead of creating a duplicate.`
+          : activeSourcingCaseIsStale
+            ? sourcingCaseReadiness?.message || 'The active sourcing case must be closed or cancelled before a replacement tender can be created.'
+            : resolvedMethod
+              ? `The effective policy selected ${formatMethod(resolvedMethod)}, which is not routed through Tender creation.`
+              : sourcingCaseReadiness?.message || 'The procurement method has not been resolved.'
       );
       return;
     }
     try {
-      router.push(`/procurement/tenders/new?fromRequisitionId=${id}`);
+      router.push(resolvedMethod === 'PettyPurchase'
+        ? `/procurement/petty-purchases/new?fromRequisitionId=${id}`
+        : `/procurement/tenders/new?fromRequisitionId=${id}`);
     } catch (error: any) {
       console.error('Error navigating to tender creation:', error);
       toast.error(error.message || 'Failed to start Tender process');
@@ -550,6 +570,17 @@ export default function PurchaseRequisitionDetailPage() {
   const resolvedMethod =
     sourcingCaseReadiness?.selectedMethod ??
     sourcingCaseReadiness?.recommendedMethod;
+  const existingTenderSource = sourcingCaseReadiness?.currentCase?.sourceRequests.find(
+    (request) =>
+      request.status === 'Created' &&
+      request.sourceType.toLowerCase() === 'tender'
+  );
+  const activeSourcingCaseIsStale = Boolean(
+    sourcingCaseReadiness?.currentCase &&
+    (sourcingCaseReadiness.currentCase.status === 'Ready' ||
+      sourcingCaseReadiness.currentCase.status === 'InProgress') &&
+    !sourcingCaseReadiness.currentCase.isSourceCurrent
+  );
   const canConvertToPO = approved && poSourceStatus?.ready === true;
   const canCreateRfq =
     approved &&
@@ -560,7 +591,9 @@ export default function PurchaseRequisitionDetailPage() {
     approved &&
     sourcingPresentation.canEnterSourcing &&
     sourcingCaseReadiness?.isMethodCompliant === true &&
-    Boolean(resolvedMethod && tenderMethods.has(resolvedMethod));
+    Boolean(resolvedMethod && tenderMethods.has(resolvedMethod)) &&
+    !existingTenderSource &&
+    !activeSourcingCaseIsStale;
 
   return (
     <div ref={documentRef} className="space-y-6">
@@ -605,21 +638,33 @@ export default function PurchaseRequisitionDetailPage() {
             </Link>
           )}
 
-          <WorkflowApprovalActions {...workflow.actionProps} />
+          <WorkflowApprovalActions
+            {...workflow.actionProps}
+            canApproveReject={canRenderApprovalActions}
+          />
 
-          {approved && (
+          {approved && resolvedMethod === 'PettyPurchase' && existingTenderSource?.sourceEntityId && (
+            <Button asChild><Link href={`/procurement/tenders/${existingTenderSource.sourceEntityId}/exception-controls`}>Open Petty Purchase</Link></Button>
+          )}
+          {approved && !(resolvedMethod === 'PettyPurchase' && existingTenderSource) && (
             <Button
               variant="outline"
               onClick={handleCreateTender}
               disabled={!canCreateTender}
-              title={!canCreateTender ? 'Available only when policy selects a tender method.' : undefined}
+              title={!canCreateTender
+                ? existingTenderSource
+                  ? `Continue ${existingTenderSource.sourceEntityReference || 'the existing tender'} instead.`
+                  : activeSourcingCaseIsStale
+                    ? 'Close or cancel the stale active sourcing case before starting a replacement tender.'
+                    : 'Available only when policy selects a tender method.'
+                : undefined}
             >
               <FileText className="h-4 w-4 mr-2" />
-              Create Tender
+              {resolvedMethod === 'PettyPurchase' ? 'Prepare Petty Purchase' : 'Create Tender'}
             </Button>
           )}
 
-          {approved && (
+          {approved && (resolvedMethod !== 'PettyPurchase' || canConvertToPO) && (
             <Button
               onClick={handleConvertToPO}
               disabled={!canConvertToPO}
@@ -630,7 +675,7 @@ export default function PurchaseRequisitionDetailPage() {
             </Button>
           )}
 
-          {approved && (
+          {approved && resolvedMethod !== 'PettyPurchase' && (
             <Button
               variant="outline"
               onClick={handleCreateRfq}
@@ -1867,6 +1912,7 @@ export default function PurchaseRequisitionDetailPage() {
           value="approval"
           className="space-y-6"
           {...workflow.actionProps}
+          canApproveReject={canRenderApprovalActions}
         />
       </Tabs>
     </div>

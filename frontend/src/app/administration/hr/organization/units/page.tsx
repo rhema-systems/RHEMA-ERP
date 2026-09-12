@@ -3,7 +3,15 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, MoreHorizontal, Pencil, Trash2, Building2 } from 'lucide-react';
+import {
+  Plus,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Building2,
+  ArrowRightLeft,
+  UserCog,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -28,6 +36,10 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import {
+  ChangeUnitHeadDialog,
+  MoveUnitDialog,
+} from '@/components/hr/organization/UnitRestructureDialogs';
 import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import type { OrganizationUnit } from '@/types/hr/organization';
 
@@ -40,6 +52,13 @@ export default function OrganizationUnitsPage() {
   const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<OrganizationUnit | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // ⚠ A restructure and a change of leadership are separate acts on separate effective-dated
+  // series of the change log, so they are separate dialogs — the edit form can perform both but
+  // only carries one reason box between them.
+  const [moveTarget, setMoveTarget] = useState<OrganizationUnit | null>(null);
+  const [headTarget, setHeadTarget] = useState<OrganizationUnit | null>(null);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'organization-units'] });
 
   const { data, isLoading } = useQuery({
     queryKey: ['hr', 'organization-units', page, PAGE_SIZE],
@@ -172,6 +191,23 @@ export default function OrganizationUnitsPage() {
                             >
                               <Pencil className="mr-2 h-4 w-4" /> Edit
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHeadTarget(unit);
+                              }}
+                            >
+                              <UserCog className="mr-2 h-4 w-4" />
+                              {unit.headEmployeeId ? 'Change head' : 'Appoint head'}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMoveTarget(unit);
+                              }}
+                            >
+                              <ArrowRightLeft className="mr-2 h-4 w-4" /> Move unit
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
@@ -232,6 +268,24 @@ export default function OrganizationUnitsPage() {
         isLoading={deleting}
         onConfirm={handleDelete}
       />
+
+      {moveTarget && (
+        <MoveUnitDialog
+          unit={moveTarget}
+          open
+          onOpenChange={(open) => !open && setMoveTarget(null)}
+          onDone={refresh}
+        />
+      )}
+
+      {headTarget && (
+        <ChangeUnitHeadDialog
+          unit={headTarget}
+          open
+          onOpenChange={(open) => !open && setHeadTarget(null)}
+          onDone={refresh}
+        />
+      )}
     </div>
   );
 }

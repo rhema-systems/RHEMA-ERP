@@ -2,12 +2,13 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalCycleTemplatesController : ControllerBase
 {
     private readonly IAppraisalCycleTemplateService _cycleTemplateService;
@@ -79,6 +80,8 @@ public class AppraisalCycleTemplatesController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(AppraisalCycleTemplateDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalCycleTemplateDto createDto, CancellationToken cancellationToken = default)
     {
         try
@@ -90,6 +93,10 @@ public class AppraisalCycleTemplatesController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "assigning a template to a cycle");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating appraisal cycle template");
@@ -97,20 +104,46 @@ public class AppraisalCycleTemplatesController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Actionable rules — "only approved templates can be assigned to a cycle" is the one
+    /// callers hit — are raised as <see cref="InvalidOperationException"/> by the service.
+    /// Without this they fell to the generic handler, which returns a bare string body: the
+    /// client could not read a message out of it, so the user saw an unexplained 500 for a
+    /// rule they had simply broken.
+    ///
+    /// 422 rather than 409, matching the convention already set by
+    /// <c>EmployeeGoalsController</c> so the same kind of refusal answers the same way across
+    /// the Performance area. Logged at warning: the request was refused correctly.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Cycle-template rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
     /// <summary>Update an existing cycle-template assignment</summary>
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(AppraisalCycleTemplateDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalCycleTemplateDto updateDto, CancellationToken cancellationToken = default)
     {
         try
         {
+            // The service keys off the body's Id, so a mismatch would edit a different assignment.
+            if (id != updateDto.Id)
+                return BadRequest(new { message = "ID mismatch" });
+
             var result = await _cycleTemplateService.UpdateAsync(updateDto, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating a template assignment");
         }
         catch (Exception ex)
         {
@@ -123,6 +156,7 @@ public class AppraisalCycleTemplatesController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
         try
@@ -146,6 +180,7 @@ public class AppraisalCycleTemplatesController : ControllerBase
     [HttpPost("bulk-assign/{cycleId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<AppraisalCycleTemplateDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> BulkAssign(Guid cycleId, [FromBody] IEnumerable<CreateAppraisalCycleTemplateDto> assignments, CancellationToken cancellationToken = default)
     {
         try
@@ -156,6 +191,10 @@ public class AppraisalCycleTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "bulk-assigning templates");
         }
         catch (Exception ex)
         {

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Entities;
 
 namespace ErpSystem.Api.Models
 {
@@ -114,6 +115,10 @@ namespace ErpSystem.Api.Models
 
         // Authentication provider (Local or LDAP)
         public string AuthenticationProvider { get; set; } = "Local";
+
+        // The user↔employee link. Null = not linked; the portal's route gate
+        // reads presence/absence of this to route to /me or the "not linked yet" page.
+        public Guid? EmployeeId { get; set; }
     }
 
     public class RegisterRequest
@@ -305,6 +310,14 @@ namespace ErpSystem.Api.Models
         public bool IsDefault { get; set; }
         public required string GrantedAt { get; set; }
         public required TenantUserInfo User { get; set; }
+    }
+
+    public sealed class SaveTenantUserMappingRequest
+    {
+        public Guid UserId { get; set; }
+        public Guid TenantId { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public string? Reason { get; set; }
     }
 
     public class TenantUserInfo

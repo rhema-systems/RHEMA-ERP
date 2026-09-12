@@ -33,6 +33,22 @@ export const validateProcurementAppExport = (
   return undefined;
 };
 
+export const toProcurementAppEventInputValue = (
+  minimumAtUtc?: string,
+  now = new Date()
+) => {
+  const minimum = minimumAtUtc ? new Date(minimumAtUtc).getTime() : 0;
+  const minimumMilliseconds = Number.isFinite(minimum) ? minimum : 0;
+  const safeInstant = new Date(
+    Math.ceil((Math.max(now.getTime(), minimumMilliseconds) + 1) / 1000) *
+      1000
+  );
+  const localValue = new Date(
+    safeInstant.getTime() - safeInstant.getTimezoneOffset() * 60_000
+  );
+  return localValue.toISOString().slice(0, 19);
+};
+
 export async function readProcurementAppExportFile(file: Blob & { name: string }) {
   const bytes = typeof file.arrayBuffer === 'function'
     ? await file.arrayBuffer()

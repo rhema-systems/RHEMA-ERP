@@ -1,11 +1,16 @@
+using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -18,11 +23,25 @@ namespace ErpSystem.Api.Controllers.HR;
 public class MedicalExpenseClaimsController : MedicalControllerBase
 {
     private readonly IMedicalExpenseClaimService _service;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ApplicationDbContext _db;
 
-    public MedicalExpenseClaimsController(IMedicalExpenseClaimService service, ICurrentUserService currentUser)
+    public MedicalExpenseClaimsController(
+        IMedicalExpenseClaimService service,
+        IHrControlledDocumentService hrDocuments,
+        ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ApplicationDbContext db,
+        ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
     }
 
     // =========================================================================
@@ -63,6 +82,19 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<MedicalExpenseClaimSummaryDto>>> GetFlagged(CancellationToken ct)
         => Ok(await _service.GetFlaggedClaimsAsync(ct));
 
+    /// <summary>
+    /// Files a medical expense claim on behalf of an employee. HR-facing.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>EmployeeId</c> is required here: this is the HR caseload surface, and everything on
+    /// it already requires the medical write permission, which an ordinary employee does not hold.
+    /// Employees file their <b>own</b> claims through the self-service surface instead.</para>
+    ///
+    /// <para>This previously defaulted <c>EmployeeId</c> to the caller and carried a role check to
+    /// allow HR to override it — a branch no ordinary employee could ever reach, because the
+    /// permission gate above had already turned them away. It read like a working self-service
+    /// path and was not one.</para>
+    /// </remarks>
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<MedicalExpenseClaimDto>> Create(
@@ -70,18 +102,11 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId) is { } error) return error;
+        if (dto.EmployeeId is null || dto.EmployeeId == Guid.Empty)
+            return BadRequest("An employee id is required. Employees file their own claims through self-service.");
+        if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
 
-        // Default to the caller filing for themselves. HR/Admin may file on behalf of another employee.
-        var targetEmployeeId = employeeId;
-        if (dto.EmployeeId.HasValue && dto.EmployeeId.Value != employeeId)
-        {
-            if (!User.IsInRole("HR") && !User.IsInRole("Admin") && !User.IsInRole("SuperAdmin"))
-                return Forbid();
-            targetEmployeeId = dto.EmployeeId.Value;
-        }
-
-        var created = await _service.CreateClaimAsync(dto, targetEmployeeId, tenantId, userId, ct);
+        var created = await _service.CreateClaimAsync(dto, dto.EmployeeId.Value, tenantId, userId, ct);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -107,7 +132,10 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId) is { } error) return error;
+        // ApprovedById is an Employee FK, so an adjudicator genuinely has to be an employee —
+        // unlike filing, where the audit field takes the user id. Say which it is.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Recording a claim approval") is { } error) return error;
 
         await _service.ProcessApprovalAsync(dto, tenantId, employeeId, userId, ct);
         return Ok(new { message = "Approval recorded." });
@@ -121,7 +149,8 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.ProcessPaymentAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.ProcessPaymentAsync(dto, userId, ct);
         return Ok(new { message = "Payment processed." });
     }
 
@@ -133,7 +162,8 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.FlagClaimAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.FlagClaimAsync(dto, userId, ct);
         return Ok(new { message = "Claim flagged." });
     }
 
@@ -145,7 +175,8 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ClaimId = id;
-        await _service.UnflagClaimAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.UnflagClaimAsync(dto, userId, ct);
         return Ok(new { message = "Claim unflagged." });
     }
 
@@ -213,20 +244,62 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         CancellationToken ct)
         => Ok(await _service.GetDocumentsAsync(claimId, ct));
 
+    /// <summary>Uploads a supporting document — typically a receipt — against a claim.</summary>
+    /// <remarks>
+    /// This used to be a JSON endpoint taking a caller-supplied <c>FilePath</c>, which let any
+    /// authenticated user with write access attach arbitrary bytes on disk — including another
+    /// tenant's — to a claim. It is now a real multipart upload routed through the shared gate, so
+    /// the file is malware-scanned and stored outside the publicly served web root. Same fix, same
+    /// shape, as medical exam documents.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{claimId:guid}/documents")]
-    public async Task<ActionResult<MedicalExpenseDocumentDto>> AddDocument(
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    [ProducesResponseType(typeof(MedicalExpenseDocumentDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> AddDocument(
         Guid claimId,
-        [FromBody] CreateMedicalExpenseDocumentDto dto,
+        IFormFile file,
+        [FromForm] MedicalDocumentType type,
+        [FromForm] string? description,
         CancellationToken ct)
     {
-        dto.ClaimId = claimId;
-        if (!ModelState.IsValid) return BadRequest(ModelState);
         if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
 
-        var created = await _service.AddDocumentAsync(dto, tenantId, userId, ct);
-        return CreatedAtAction(nameof(GetById), new { id = claimId }, created);
+        var claim = await LoadClaimInTenantAsync(claimId, tenantId, ct);
+        if (claim is null) return NotFound("Medical expense claim not found.");
+
+        return await MedicalClaimDocumentUpload.ExecuteAsync(
+            this, _hrDocuments, _service, claimId, file, type, description,
+            tenantId, userId, CurrentUser.UserName, ct);
     }
+
+    /// <summary>Streams a document attached to a claim.</summary>
+    [HttpGet("documents/{id:guid}/download")]
+    public async Task<IActionResult> DownloadDocument(Guid id, CancellationToken ct)
+    {
+        if (TryGetWriteContext(out var tenantId, out _) is { } error) return error;
+
+        var document = await _db.Set<MedicalExpenseDocument>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == id && item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (document is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId, document.FilePath,
+            document.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Confirms a claim exists in this tenant before anything is stored against it.</summary>
+    private Task<MedicalExpenseClaim?> LoadClaimInTenantAsync(Guid claimId, Guid tenantId, CancellationToken ct)
+        => _db.Set<MedicalExpenseClaim>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == claimId && item.TenantId == tenantId && !item.IsDeleted, ct);
 
     [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("documents/{id:guid}")]
@@ -258,7 +331,9 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
     {
         dto.ClaimId = claimId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId) is { } error) return error;
+        // AuthorId is an Employee FK — a note has to be attributable to a person, not an account.
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Adding a note to a claim") is { } error) return error;
 
         var created = await _service.AddNoteAsync(dto, tenantId, employeeId, userId, ct);
         return Ok(created);

@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -96,7 +96,6 @@ public class StaffTravelRequestDto : BaseDto
     public List<StaffTravelRequestCommentDto> Comments { get; set; } = new();
     public List<StaffTravelRequestAttachmentDto> Attachments { get; set; } = new();
     public List<StaffTravelItinerarySummaryDto> Itineraries { get; set; } = new();
-    public List<StaffTravelApprovalInstanceSummaryDto> ApprovalInstances { get; set; } = new();
     public List<StaffTravelFlightBookingSummaryDto> FlightBookings { get; set; } = new();
     public List<StaffTravelHotelBookingSummaryDto> HotelBookings { get; set; } = new();
     public List<StaffTravelGroundTransportDto> GroundTransports { get; set; } = new();
@@ -141,7 +140,11 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
     [Required]
     public Guid EmployeeId { get; set; }
 
-    [Required]
+    /// <summary>
+    /// Who raised the request. <b>Server-assigned — anything sent here is overwritten</b> with the
+    /// caller's employee id (falling back to <see cref="EmployeeId"/> for an unlinked account).
+    /// Kept on the DTO because the entity mapper reads it; it is not a client input.
+    /// </summary>
     public Guid InitiatedById { get; set; }
 
     [Required]
@@ -304,6 +307,21 @@ public class CancelStaffTravelRequestDto
     public string CancellationReason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Withdrawing your own travel request, from the self-service surface.
+/// </summary>
+/// <remarks>
+/// Carries the reason and nothing else. <c>RequestId</c> comes from the route and
+/// <c>CancelledById</c> from the token, so neither appears here — accepting either from the body
+/// would let a caller withdraw someone else's travel, or claim someone else did.
+/// </remarks>
+public class CancelMyStaffTravelRequestDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string CancellationReason { get; set; } = string.Empty;
+}
+
 #endregion
 
 #region Staff Group Travel
@@ -425,8 +443,8 @@ public class CreateStaffTravelRequestCommentDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid AuthorId { get; set; }
+    // AuthorId removed deliberately: it is stamped from the caller's token. Accepting it let
+    // any caller post a comment under a colleague's name.
 
     [Required]
     public TravelRequestCommentType CommentType { get; set; }
@@ -453,6 +471,11 @@ public class UpdateStaffTravelRequestCommentDto : UpdateDtoBase
 
 #region Staff Travel Request Attachment
 
+/// <remarks>
+/// <c>FileUrl</c> is empty for anything uploaded through the controlled gate; use
+/// <c>documentRecordId</c> to tell a stored document from a legacy row, and download through
+/// <c>GET .../attachments/{id}/download</c> rather than dereferencing a path.
+/// </remarks>
 public class StaffTravelRequestAttachmentDto : BaseDto
 {
     public Guid StaffTravelRequestId { get; set; }
@@ -462,6 +485,16 @@ public class StaffTravelRequestAttachmentDto : BaseDto
     public string MimeType { get; set; } = string.Empty;
     public TravelAttachmentType AttachmentType { get; set; }
     public string AttachmentTypeName => AttachmentType.ToString();
+
+    /// <summary>Scanned controlled upload backing this attachment; null on legacy rows.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered; null on legacy rows.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered; null on legacy rows.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     public Guid UploadedById { get; set; }
     public string UploadedByName { get; set; } = string.Empty;
     public DateTime UploadedAt { get; set; }
@@ -472,25 +505,31 @@ public class CreateStaffTravelRequestAttachmentDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
+    // FileName, FileUrl, FileSizeBytes and MimeType are no longer caller-supplied: they are read
+    // off the stored document the upload gate returns. A caller-supplied FileUrl was the
+    // path-injection sink the medical exam and claim documents were both fixed for.
     [MaxLength(500)]
     public string FileName { get; set; } = string.Empty;
 
-    [Required]
-    [MaxLength(2000)]
-    public string FileUrl { get; set; } = string.Empty;
-
     public long FileSizeBytes { get; set; }
 
-    [Required]
     [MaxLength(100)]
     public string MimeType { get; set; } = string.Empty;
 
     [Required]
     public TravelAttachmentType AttachmentType { get; set; }
 
-    [Required]
-    public Guid UploadedById { get; set; }
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
+    // UploadedById removed deliberately: stamped from the caller's token, same as AuthorId on a
+    // comment. It was [Required], so a client had to state who uploaded — and could state anyone.
 }
 
 #endregion
@@ -778,247 +817,6 @@ public class UpdateStaffTravelItineraryActivityDto : UpdateDtoBase
 #endregion
 
 // ============================================================================
-// GROUP 3 — APPROVAL WORKFLOW
-// ============================================================================
-
-#region Staff Travel Approval Workflow Template
-
-public class StaffTravelApprovalWorkflowTemplateDto : BaseDto
-{
-    public Guid TenantId { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public StaffTravelType? TravelType { get; set; }
-    public string? TravelTypeName => TravelType?.ToString();
-    public Guid? AppliesToLevelFromId { get; set; }
-    public string? AppliesToLevelFromName { get; set; }
-    public Guid? AppliesToLevelToId { get; set; }
-    public string? AppliesToLevelToName { get; set; }
-    public decimal? MinBudgetThreshold { get; set; }
-    public decimal? MaxBudgetThreshold { get; set; }
-    public bool? IsInternational { get; set; }
-    public TravelRiskLevel? RiskLevel { get; set; }
-    public string? RiskLevelName => RiskLevel?.ToString();
-    public bool IsActive { get; set; }
-    public List<StaffTravelApprovalWorkflowStepDto> Steps { get; set; } = new();
-}
-
-public class StaffTravelApprovalWorkflowTemplateSummaryDto
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public StaffTravelType? TravelType { get; set; }
-    public string? TravelTypeName => TravelType?.ToString();
-    public bool? IsInternational { get; set; }
-    public bool IsActive { get; set; }
-    public int StepCount { get; set; }
-}
-
-public class CreateStaffTravelApprovalWorkflowTemplateDto : CreateDtoBase
-{
-    [Required]
-    [MaxLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-
-    public StaffTravelType? TravelType { get; set; }
-    public Guid? AppliesToLevelFromId { get; set; }
-    public Guid? AppliesToLevelToId { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal? MinBudgetThreshold { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal? MaxBudgetThreshold { get; set; }
-
-    public bool? IsInternational { get; set; }
-    public TravelRiskLevel? RiskLevel { get; set; }
-    public bool IsActive { get; set; } = true;
-}
-
-public class UpdateStaffTravelApprovalWorkflowTemplateDto : UpdateDtoBase
-{
-    [Required]
-    [MaxLength(200)]
-    public string Name { get; set; } = string.Empty;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-
-    public StaffTravelType? TravelType { get; set; }
-    public Guid? AppliesToLevelFromId { get; set; }
-    public Guid? AppliesToLevelToId { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal? MinBudgetThreshold { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal? MaxBudgetThreshold { get; set; }
-
-    public bool? IsInternational { get; set; }
-    public TravelRiskLevel? RiskLevel { get; set; }
-    public bool IsActive { get; set; }
-}
-
-#endregion
-
-#region Staff Travel Approval Workflow Step
-
-public class StaffTravelApprovalWorkflowStepDto : BaseDto
-{
-    public Guid WorkflowTemplateId { get; set; }
-    public int StepOrder { get; set; }
-    public string StepName { get; set; } = string.Empty;
-    public TravelApproverType ApproverType { get; set; }
-    public string ApproverTypeName => ApproverType.ToString();
-    public string? ApproverRole { get; set; }
-    public Guid? SpecificApproverId { get; set; }
-    public string? SpecificApproverName { get; set; }
-    public bool IsMandatory { get; set; }
-    public bool CanDelegate { get; set; }
-    public int? SlaHours { get; set; }
-    public Guid? EscalationApproverId { get; set; }
-    public string? EscalationApproverName { get; set; }
-}
-
-public class CreateStaffTravelApprovalWorkflowStepDto : CreateDtoBase
-{
-    [Required]
-    public Guid WorkflowTemplateId { get; set; }
-
-    [Range(1, int.MaxValue)]
-    public int StepOrder { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string StepName { get; set; } = string.Empty;
-
-    [Required]
-    public TravelApproverType ApproverType { get; set; }
-
-    [MaxLength(100)]
-    public string? ApproverRole { get; set; }
-
-    public Guid? SpecificApproverId { get; set; }
-    public bool IsMandatory { get; set; } = true;
-    public bool CanDelegate { get; set; }
-
-    [Range(1, 8760)]
-    public int? SlaHours { get; set; }
-
-    public Guid? EscalationApproverId { get; set; }
-}
-
-public class UpdateStaffTravelApprovalWorkflowStepDto : UpdateDtoBase
-{
-    [Range(1, int.MaxValue)]
-    public int StepOrder { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string StepName { get; set; } = string.Empty;
-
-    [Required]
-    public TravelApproverType ApproverType { get; set; }
-
-    [MaxLength(100)]
-    public string? ApproverRole { get; set; }
-
-    public Guid? SpecificApproverId { get; set; }
-    public bool IsMandatory { get; set; }
-    public bool CanDelegate { get; set; }
-
-    [Range(1, 8760)]
-    public int? SlaHours { get; set; }
-
-    public Guid? EscalationApproverId { get; set; }
-}
-
-#endregion
-
-#region Staff Travel Approval Instance
-
-public class StaffTravelApprovalInstanceDto : BaseDto
-{
-    public Guid StaffTravelRequestId { get; set; }
-    public string? RequestNumber { get; set; }
-    public Guid WorkflowTemplateId { get; set; }
-    public string? WorkflowTemplateName { get; set; }
-    public int CurrentStepOrder { get; set; }
-    public TravelApprovalInstanceStatus Status { get; set; }
-    public string StatusName => Status.ToString();
-    public DateTime InitiatedAt { get; set; }
-    public DateTime? CompletedAt { get; set; }
-    public List<StaffTravelApprovalDecisionDto> Decisions { get; set; } = new();
-}
-
-public class StaffTravelApprovalInstanceSummaryDto
-{
-    public Guid Id { get; set; }
-    public string? WorkflowTemplateName { get; set; }
-    public int CurrentStepOrder { get; set; }
-    public TravelApprovalInstanceStatus Status { get; set; }
-    public string StatusName => Status.ToString();
-    public DateTime InitiatedAt { get; set; }
-    public DateTime? CompletedAt { get; set; }
-    public int DecisionCount { get; set; }
-}
-
-public class CreateStaffTravelApprovalInstanceDto : CreateDtoBase
-{
-    [Required]
-    public Guid StaffTravelRequestId { get; set; }
-
-    [Required]
-    public Guid WorkflowTemplateId { get; set; }
-}
-
-#endregion
-
-#region Staff Travel Approval Decision
-
-public class StaffTravelApprovalDecisionDto : BaseDto
-{
-    public Guid ApprovalInstanceId { get; set; }
-    public int StepOrder { get; set; }
-    public Guid ApproverId { get; set; }
-    public string ApproverName { get; set; } = string.Empty;
-    public Guid? OriginalApproverId { get; set; }
-    public string? OriginalApproverName { get; set; }
-    public TravelApprovalDecision Decision { get; set; }
-    public string DecisionName => Decision.ToString();
-    public string? Comments { get; set; }
-    public DateTime? DecidedAt { get; set; }
-    public bool IsEscalated { get; set; }
-    public DateTime? EscalatedAt { get; set; }
-    public DateTime? SlaDeadline { get; set; }
-}
-
-public class RecordStaffTravelApprovalDecisionDto
-{
-    [Required]
-    public Guid ApprovalInstanceId { get; set; }
-
-    [Required]
-    public int StepOrder { get; set; }
-
-    [Required]
-    public Guid ApproverId { get; set; }
-
-    [Required]
-    public TravelApprovalDecision Decision { get; set; }
-
-    [MaxLength(2000)]
-    public string? Comments { get; set; }
-
-    public DateTime DecidedAt { get; set; } = DateTime.UtcNow;
-}
-
-#endregion
-
-// ============================================================================
 // GROUP 4 — BOOKINGS
 // ============================================================================
 
@@ -1084,9 +882,18 @@ public class CreateStaffTravelFlightBookingDto : CreateDtoBase
     [Required]
     public FlightCabinClass BookingClass { get; set; }
 
-    [Required]
+    /// <summary>
+    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
+    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
+    /// declared what the policy permitted them to book.
+    /// </summary>
     public FlightCabinClass PolicyAllowedClass { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
+    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
+    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1127,9 +934,18 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     [Required]
     public FlightCabinClass BookingClass { get; set; }
 
-    [Required]
+    /// <summary>
+    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
+    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
+    /// declared what the policy permitted them to book.
+    /// </summary>
     public FlightCabinClass PolicyAllowedClass { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
+    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
+    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1156,6 +972,11 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     [Required]
     public TravelBookingStatus Status { get; set; }
 
+    /// <summary>
+    /// <b>Server-stamped from <see cref="Status"/>.</b> Both were client inputs, so a caller
+    /// asserted that a booking had been made or cancelled and nothing checked — the same fiction
+    /// shape as F-09's <c>NotificationSentAt</c>. Kept on the DTO because the mapper reads them.
+    /// </summary>
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
 
@@ -1223,7 +1044,11 @@ public class CreateStaffTravelFlightSegmentDto : CreateDtoBase
     [MaxLength(10)]
     public string? ArrivalTerminal { get; set; }
 
-    [Range(0, int.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two datetimes above; anything sent here is overwritten. It
+    /// was a client input sitting beside the values that define it, so a segment could claim any
+    /// length at all — and the itinerary reads it.
+    /// </summary>
     public int DurationMinutes { get; set; }
 
     [MaxLength(50)]
@@ -1274,7 +1099,11 @@ public class UpdateStaffTravelFlightSegmentDto : UpdateDtoBase
     [MaxLength(10)]
     public string? ArrivalTerminal { get; set; }
 
-    [Range(0, int.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two datetimes above; anything sent here is overwritten. It
+    /// was a client input sitting beside the values that define it, so a segment could claim any
+    /// length at all — and the itinerary reads it.
+    /// </summary>
     public int DurationMinutes { get; set; }
 
     [MaxLength(50)]
@@ -1377,7 +1206,11 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
+    /// client input beside the dates that determine it, so a three-night stay could be recorded as
+    /// one and every report downstream would believe it.
+    /// </summary>
     public int NumberOfNights { get; set; }
 
     [MaxLength(100)]
@@ -1386,16 +1219,25 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
+    /// </summary>
     public decimal? PolicyMaxRatePerNight { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
+    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
+    /// the right is 403.
+    /// </summary>
     public bool RateExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1443,7 +1285,11 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    [Range(0, 365)]
+    /// <summary>
+    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
+    /// client input beside the dates that determine it, so a three-night stay could be recorded as
+    /// one and every report downstream would believe it.
+    /// </summary>
     public int NumberOfNights { get; set; }
 
     [MaxLength(100)]
@@ -1452,16 +1298,25 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
+    /// </summary>
     public decimal? PolicyMaxRatePerNight { get; set; }
 
+    /// <summary>
+    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
+    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
+    /// the right is 403.
+    /// </summary>
     public bool RateExceptionApproved { get; set; }
 
     [MaxLength(1000)]
@@ -1478,6 +1333,7 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [MaxLength(1000)]
     public string? CancellationPolicy { get; set; }
 
+    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
 
@@ -1491,6 +1347,9 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
 
 public class StaffTravelGroundTransportDto : BaseDto
 {
+    /// <summary>The fleet trip reserving a company vehicle; null for external transport.</summary>
+    public Guid? FleetTripId { get; set; }
+
     public Guid StaffTravelRequestId { get; set; }
     public GroundTransportType TransportType { get; set; }
     public string TransportTypeName => TransportType.ToString();
@@ -1511,6 +1370,15 @@ public class StaffTravelGroundTransportDto : BaseDto
 
 public class CreateStaffTravelGroundTransportDto : CreateDtoBase
 {
+    /// <summary>
+    /// Company vehicle to reserve. Required when <c>TransportType</c> is <c>CompanyVehicle</c> —
+    /// that mode books a real vehicle through Fleet rather than recording a note.
+    /// </summary>
+    public Guid? VehicleAssetId { get; set; }
+
+    /// <summary>Optional driver for the reserved vehicle.</summary>
+    public Guid? DriverEmployeeId { get; set; }
+
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
@@ -1642,7 +1510,9 @@ public class CreateStaffTravelCarRentalBookingDto : CreateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
@@ -1687,7 +1557,9 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
+    /// </summary>
     public decimal TotalCost { get; set; }
 
     [Required]
@@ -1704,6 +1576,7 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
     [Required]
     public TravelBookingStatus Status { get; set; }
 
+    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
     public DateTime? BookedAt { get; set; }
 }
 
@@ -1792,10 +1665,16 @@ public class UpdateStaffTravelBudgetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal MiscellaneousBudget { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Server-derived; anything sent here is overwritten.</b> Committed is the value of
+    /// non-cancelled bookings on the request, actual is the value of paid expense claims, and
+    /// <c>Variance</c> is <c>ApprovedTotal - TotalActual</c>. All three were caller-declared, so a
+    /// budget-versus-actual screen showed whatever was last typed while the records that constitute
+    /// the spend sat unread on the same request. See <c>StaffTravelBudgetRollup</c>.
+    /// </summary>
     public decimal TotalCommitted { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary><b>Server-derived</b> — see <see cref="TotalCommitted"/>.</summary>
     public decimal TotalActual { get; set; }
 }
 
@@ -1885,9 +1764,7 @@ public class ReviewStaffTravelExpenseClaimDto
 {
     [Required]
     public Guid ClaimId { get; set; }
-
-    [Required]
-    public Guid FinanceReviewedById { get; set; }
+    // FinanceReviewedById removed: stamped from the caller's token, never accepted from the body.
 
     public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
 
@@ -1965,11 +1842,10 @@ public class CreateStaffTravelExpenseClaimLineDto : CreateDtoBase
     [MaxLength(3)]
     public string CurrencyOriginal { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
-    public decimal ExchangeRate { get; set; } = 1;
+    // ⚠ No ExchangeRate or AmountBaseCurrency. Both are DERIVED: the service reads Finance's
+    // published rate for the expense date and does the arithmetic, so a claim is valued at the
+    // organisation's own rate and cannot disagree with what Finance reports the trip cost.
 
-    [Range(0, double.MaxValue)]
-    public decimal AmountBaseCurrency { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal? PolicyLimit { get; set; }
@@ -2000,11 +1876,10 @@ public class UpdateStaffTravelExpenseClaimLineDto : UpdateDtoBase
     [MaxLength(3)]
     public string CurrencyOriginal { get; set; } = string.Empty;
 
-    [Range(0, double.MaxValue)]
-    public decimal ExchangeRate { get; set; }
+    // ⚠ No ExchangeRate or AmountBaseCurrency. Both are DERIVED: the service reads Finance's
+    // published rate for the expense date and does the arithmetic, so a claim is valued at the
+    // organisation's own rate and cannot disagree with what Finance reports the trip cost.
 
-    [Range(0, double.MaxValue)]
-    public decimal AmountBaseCurrency { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal? PolicyLimit { get; set; }
@@ -2018,9 +1893,7 @@ public class ReviewStaffTravelExpenseClaimLineDto
 {
     [Required]
     public Guid LineId { get; set; }
-
-    [Required]
-    public Guid ReviewedById { get; set; }
+    // ReviewedById removed: stamped from the caller's token, never accepted from the body.
 
     public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
 
@@ -2108,7 +1981,11 @@ public class UpdateStaffTravelAdvanceDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RequestedAmount { get; set; }
 
-    [Range(0, double.MaxValue)]
+    /// <summary>
+    /// <b>Ignored.</b> Approving an advance is <c>POST advances/{id}/approve</c>, which stamps the
+    /// approver from the token and checks the status. Accepting it here left an advance with money
+    /// approved and nobody on record as having approved it.
+    /// </summary>
     public decimal? ApprovedAmount { get; set; }
 
     [Required]
@@ -2125,9 +2002,7 @@ public class ApproveStaffTravelAdvanceDto
 {
     [Required]
     public Guid AdvanceId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
+    // ApprovedById removed: stamped from the caller's token, never accepted from the body.
 
     [Range(0, double.MaxValue)]
     public decimal ApprovedAmount { get; set; }
@@ -2137,10 +2012,13 @@ public class DisburseStaffTravelAdvanceDto
 {
     [Required]
     public Guid AdvanceId { get; set; }
+    // DisbursedById removed: stamped from the caller's token, never accepted from the body.
 
-    [Required]
-    public Guid DisbursedById { get; set; }
-
+    /// <summary>
+    /// <b>Ignored — stamped from the clock.</b> It let a caller state when the money went out, which
+    /// matters because the settlement deadline and the overdue-settlement sweep both run off dates.
+    /// Kept on the DTO so existing callers do not break; the value is not read.
+    /// </summary>
     public DateTime DisbursedAt { get; set; } = DateTime.UtcNow;
 }
 
@@ -2307,6 +2185,15 @@ public class StaffTravelPolicySummaryDto
     public DateOnly? EffectiveTo { get; set; }
     public decimal MaxSingleTripBudget { get; set; }
     public int RuleCount { get; set; }
+
+    /// <summary>
+    /// Who approved the policy, and when. <b>Null means it is a draft that enforces nothing</b> —
+    /// which a list of policies must be able to show: an unapproved policy caps nothing and is
+    /// otherwise indistinguishable from one in force.
+    /// </summary>
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ApprovedAt { get; set; }
 }
 
 public class CreateStaffTravelPolicyDto : CreateDtoBase
@@ -2520,6 +2407,7 @@ public class StaffTravelPolicyExceptionDto : BaseDto
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? DecidedAt { get; set; }
+    public string? DecisionNotes { get; set; }
 }
 
 public class CreateStaffTravelPolicyExceptionDto : CreateDtoBase
@@ -2544,126 +2432,24 @@ public class DecideStaffTravelPolicyExceptionDto
 {
     [Required]
     public Guid ExceptionId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
+    // ApprovedById removed: stamped from the caller's token.
 
     [Required]
     public TravelPolicyExceptionStatus Status { get; set; }
 
     public DateTime DecidedAt { get; set; } = DateTime.UtcNow;
-}
 
-#endregion
-
-#region Staff Travel Vendor
-
-public class StaffTravelVendorDto : BaseDto
-{
-    public Guid TenantId { get; set; }
-    public string VendorCode { get; set; } = string.Empty;
-    public string VendorName { get; set; } = string.Empty;
-    public TravelVendorType VendorType { get; set; }
-    public string VendorTypeName => VendorType.ToString();
-    public Guid? CountryId { get; set; }
-    public string? CountryName { get; set; }
-    public string? ContactEmail { get; set; }
-    public string? ContactPhone { get; set; }
-    public string? AccountNumber { get; set; }
-    public DateOnly? ContractStartDate { get; set; }
-    public DateOnly? ContractEndDate { get; set; }
-    public bool IsPreferred { get; set; }
-    public bool IsActive { get; set; }
-    public decimal? Rating { get; set; }
-    public string? PaymentTerms { get; set; }
-}
-
-public class StaffTravelVendorSummaryDto
-{
-    public Guid Id { get; set; }
-    public string VendorCode { get; set; } = string.Empty;
-    public string VendorName { get; set; } = string.Empty;
-    public TravelVendorType VendorType { get; set; }
-    public string VendorTypeName => VendorType.ToString();
-    public bool IsPreferred { get; set; }
-    public bool IsActive { get; set; }
-    public decimal? Rating { get; set; }
-}
-
-public class CreateStaffTravelVendorDto : CreateDtoBase
-{
-    [Required]
-    [MaxLength(30)]
-    public string VendorCode { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(300)]
-    public string VendorName { get; set; } = string.Empty;
-
-    [Required]
-    public TravelVendorType VendorType { get; set; }
-
-    public Guid? CountryId { get; set; }
-
-    [MaxLength(200)]
-    [EmailAddress]
-    public string? ContactEmail { get; set; }
-
-    [MaxLength(50)]
-    [Phone]
-    public string? ContactPhone { get; set; }
-
-    [MaxLength(100)]
-    public string? AccountNumber { get; set; }
-
-    public DateOnly? ContractStartDate { get; set; }
-    public DateOnly? ContractEndDate { get; set; }
-    public bool IsPreferred { get; set; }
-    public bool IsActive { get; set; } = true;
-
-    [Range(0, 5)]
-    public decimal? Rating { get; set; }
-
-    [MaxLength(200)]
-    public string? PaymentTerms { get; set; }
-}
-
-public class UpdateStaffTravelVendorDto : UpdateDtoBase
-{
-    [Required]
-    [MaxLength(30)]
-    public string VendorCode { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(300)]
-    public string VendorName { get; set; } = string.Empty;
-
-    [Required]
-    public TravelVendorType VendorType { get; set; }
-
-    public Guid? CountryId { get; set; }
-
-    [MaxLength(200)]
-    [EmailAddress]
-    public string? ContactEmail { get; set; }
-
-    [MaxLength(50)]
-    [Phone]
-    public string? ContactPhone { get; set; }
-
-    [MaxLength(100)]
-    public string? AccountNumber { get; set; }
-
-    public DateOnly? ContractStartDate { get; set; }
-    public DateOnly? ContractEndDate { get; set; }
-    public bool IsPreferred { get; set; }
-    public bool IsActive { get; set; }
-
-    [Range(0, 5)]
-    public decimal? Rating { get; set; }
-
-    [MaxLength(200)]
-    public string? PaymentTerms { get; set; }
+    /// <summary>
+    /// Why the exception was granted or refused.
+    /// </summary>
+    /// <remarks>
+    /// The client had been sending this as <c>notes</c> since the service layer was written and
+    /// the DTO had no such property, so every decision's reasoning was silently discarded by the
+    /// model binder — the shape a matched route cannot reveal, because the path resolves and the
+    /// body does not.
+    /// </remarks>
+    [MaxLength(2000)]
+    public string? DecisionNotes { get; set; }
 }
 
 #endregion
@@ -2733,9 +2519,7 @@ public class VerifyStaffTravelDocumentDto
 {
     [Required]
     public Guid DocumentId { get; set; }
-
-    [Required]
-    public Guid VerifiedById { get; set; }
+    // VerifiedById removed: stamped from the caller's token.
 
     public DateTime VerifiedAt { get; set; } = DateTime.UtcNow;
 }
@@ -3111,6 +2895,20 @@ public class StaffTravelAlertNotificationDto : BaseDto
 {
     public Guid TravelAlertId { get; set; }
     public string? AlertTitle { get; set; }
+
+    /// <summary>The alert's own text, and its severity.</summary>
+    /// <remarks>
+    /// ⚠ Both were absent, and this row is what a traveller is shown. That is D-31 exactly — the
+    /// destination-alert read returned a summary with no Body, so since the day the feature shipped
+    /// every traveller saw "Civil unrest · High" and never a word about what was happening, where,
+    /// or what to do. A severity with no text is not a security briefing, and a notification that
+    /// forces the screen to fetch the alert separately invites exactly the same omission again.
+    /// </remarks>
+    public string? AlertBody { get; set; }
+
+    /// <inheritdoc cref="AlertBody"/>
+    public TravelAlertSeverity? Severity { get; set; }
+
     public Guid StaffTravelRequestId { get; set; }
     public string? RequestNumber { get; set; }
     public Guid EmployeeId { get; set; }
@@ -3128,9 +2926,20 @@ public class CreateStaffTravelAlertNotificationDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid EmployeeId { get; set; }
-
+    /// <summary>
+    /// ⚠ <b>EmployeeId is deliberately absent.</b> The traveller is taken from the travel request,
+    /// which already names them.
+    /// </summary>
+    /// <remarks>
+    /// It used to be a required field on this DTO and it was the one parent
+    /// <c>CreateAlertNotificationAsync</c> never validated — the alert and the request were both
+    /// checked, so an unknown employee fell through to the foreign key and surfaced as the generic
+    /// 500 naming nothing. Worse than the missing 404: nothing checked the employee was <i>this
+    /// request's</i> traveller, so the desk could tell one person they were travelling on someone
+    /// else's trip. Deriving it removes both problems and there is nothing left to forge — the same
+    /// treatment D-05, D-15 and D-20 gave client-supplied actor ids. Nothing had ever sent the
+    /// field, because the endpoint had no caller at all.
+    /// </remarks>
     public DateTime? NotificationSentAt { get; set; }
 }
 
@@ -3308,65 +3117,62 @@ public class UpdateStaffTravelHealthRequirementDto : UpdateDtoBase
 
 #endregion
 
-// ============================================================================
-// GROUP 8 — CONFIGURATION
-// ============================================================================
 
-#region Staff Travel Currency Exchange Rate
+#region Staff travel reminder engine (slice 5a)
 
-public class StaffTravelCurrencyExchangeRateDto : BaseDto
+public class StaffTravelReminderRunResultDto
 {
-    public Guid TenantId { get; set; }
-    public string FromCurrency { get; set; } = string.Empty;
-    public string ToCurrency { get; set; } = string.Empty;
-    public decimal Rate { get; set; }
-    public DateOnly RateDate { get; set; }
-    public string? RateSource { get; set; }
-    public bool IsOfficial { get; set; }
+    public Guid RunId { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public int RemindersQueued { get; set; }
+
+    /// <summary>How many candidates were found but already claimed by an earlier sweep.</summary>
+    public int AlreadySent { get; set; }
 }
 
-public class CreateStaffTravelCurrencyExchangeRateDto : CreateDtoBase
+/// <summary>
+/// One thing a sweep would fire. Carries a reference and a date and nothing sensitive — see the
+/// remarks on <c>StaffTravelReminderDispatchLog</c>.
+/// </summary>
+public class StaffTravelReminderPreviewItemDto
 {
-    [Required]
-    [MaxLength(3)]
-    public string FromCurrency { get; set; } = string.Empty;
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public string DedupeKey { get; set; } = string.Empty;
 
-    [Required]
-    [MaxLength(3)]
-    public string ToCurrency { get; set; } = string.Empty;
-
-    [Range(0, double.MaxValue)]
-    public decimal Rate { get; set; }
-
-    [Required]
-    public DateOnly RateDate { get; set; }
-
-    [MaxLength(100)]
-    public string? RateSource { get; set; }
-
-    public bool IsOfficial { get; set; }
+    /// <summary>True when a previous sweep already claimed this key, so a real run would skip it.</summary>
+    public bool AlreadySent { get; set; }
 }
 
-public class UpdateStaffTravelCurrencyExchangeRateDto : UpdateDtoBase
+public class StaffTravelReminderRunDto
 {
-    [Required]
-    [MaxLength(3)]
-    public string FromCurrency { get; set; } = string.Empty;
+    public Guid Id { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string Trigger { get; set; } = string.Empty;
+    public Guid? TriggeredByUserId { get; set; }
+    public int RemindersQueued { get; set; }
+}
 
-    [Required]
-    [MaxLength(3)]
-    public string ToCurrency { get; set; } = string.Empty;
-
-    [Range(0, double.MaxValue)]
-    public decimal Rate { get; set; }
-
-    [Required]
-    public DateOnly RateDate { get; set; }
-
-    [MaxLength(100)]
-    public string? RateSource { get; set; }
-
-    public bool IsOfficial { get; set; }
+public class StaffTravelReminderLogEntryDto
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string ItemType { get; set; } = string.Empty;
+    public Guid EntityId { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public DateTime? DueDate { get; set; }
+    public int DaysRemaining { get; set; }
+    public int EscalationTier { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 #endregion

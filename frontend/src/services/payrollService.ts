@@ -3,6 +3,15 @@ const API_BASE_URL =
 
 type QueryValue = string | number | boolean | null | undefined;
 
+type PayrollProblemDetails = {
+  detail?: string;
+  message?: string;
+  error?: string;
+  title?: string;
+  code?: string;
+  extensions?: { code?: string };
+};
+
 function getToken() {
   if (typeof window === 'undefined') {
     return null;
@@ -41,11 +50,25 @@ async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null);
+    const payload = (await response.json().catch(() => null)) as
+      | PayrollProblemDetails
+      | string
+      | null;
+    const fallback = `Payroll API request failed with ${response.status}`;
+    const detail =
+      typeof payload === 'string'
+        ? payload || fallback
+        : payload?.detail ||
+          payload?.message ||
+          payload?.error ||
+          payload?.title ||
+          fallback;
+    const code =
+      typeof payload === 'string'
+        ? undefined
+        : payload?.code || payload?.extensions?.code;
     throw new Error(
-      payload?.message ||
-        payload?.error ||
-        `Payroll API request failed with ${response.status}`
+      code && !detail.includes(code) ? `${detail} (${code})` : detail
     );
   }
 

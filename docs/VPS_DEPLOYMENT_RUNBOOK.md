@@ -275,6 +275,15 @@ Rules:
 - Keep both development-seeding settings `true` only while this host is explicitly an isolated test server.
 - Set `SeedDevelopmentData=false` and remove or set `AllowDevelopmentDataSeedingOutsideDevelopment=false` before production promotion.
 - Remove `.svg` and `image/svg+xml` from applicant-upload allowlists unless uploads are moved to a separate, forced-download origin.
+- Provision a real ClamAV `clamd` endpoint before release. The default is the
+  private loopback endpoint `127.0.0.1:3310`; if an approved central scanner is
+  used instead, set `FileVirusScan__ClamAv__Host` and
+  `FileVirusScan__ClamAv__Port` in the protected API service configuration.
+  Never expose the unauthenticated clamd protocol publicly.
+- Treat a non-healthy `file-virus-scanner` entry on `/health/ready` as a release
+  blocker. It intentionally blocks clean-scan-required DMS uploads rather than
+  accepting unscanned content. Do not replace it with the no-op scanner to
+  obtain a green health response.
 - Preserve the existing database, JWT, email/SMS, NextAuth, and other secrets.
 - `Security__RequireHttps=false` is expected behind the current TLS-terminating proxy; browser traffic is still HTTPS at port `8443`.
 

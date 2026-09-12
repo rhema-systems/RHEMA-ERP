@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,7 +16,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/attendance-dashboard")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AttendanceDashboardController : AttendanceControllerBase
 {
     private readonly IAttendanceDashboardService _service;
@@ -36,6 +37,7 @@ public class AttendanceDashboardController : AttendanceControllerBase
     /// <param name="trendDays">Length of the daily trend, clamped to 1–90.</param>
     /// <param name="riskListSize">Size of the chronic-absentee list, clamped to 1–50.</param>
     [HttpGet]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<AttendanceDashboardDto>> Get(
         [FromQuery] DateOnly? asOf = null,
         [FromQuery] int trendDays = 7,

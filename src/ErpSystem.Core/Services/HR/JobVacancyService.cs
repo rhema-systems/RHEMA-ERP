@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -103,6 +104,25 @@ public class JobVacancyService : IJobVacancyService
         return entity;
     }
 
+    /// <summary>
+    /// Marking a pipeline stage done or skipped belongs to whoever was given it — usually a hiring
+    /// manager or interviewer, not HR — so these two cannot be gated by role on the controller the
+    /// way the rest of the vacancy mutations are. Without a check of their own they were open to
+    /// every authenticated user, who could sign off someone else's interview stage.
+    /// </summary>
+    private void RequireStageOwnership(VacancyPipelineStageAssignment assignment, Guid actingEmployeeId, string action)
+    {
+        if (_currentUserProvider.HasRole(Constants.Roles.SuperAdmin) ||
+            _currentUserProvider.HasRole(Constants.Roles.Hr))
+            return;
+
+        if (assignment.AssignedToId == actingEmployeeId || assignment.AssignedById == actingEmployeeId)
+            return;
+
+        throw new UnauthorizedAccessException(
+            $"Only the person this stage is assigned to, the person who assigned it, or HR can {action} it.");
+    }
+
     // ── Queries ─────────────────────────────────────────────────────────────
 
     public async Task<JobVacancyDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -140,9 +160,13 @@ public class JobVacancyService : IJobVacancyService
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
+            .Include(v => v.Position)
             .Include(v => v.HiringManager)
             .Include(v => v.Recruiter)
             .Include(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
+            // JobTitle is [NotMapped] over Requisition.JobDescription, so without this the list's
+            // primary column is blank on every row that has no CustomAdvertTitle.
+            .Include(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .OrderByDescending(v => v.CreatedAt)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
@@ -171,14 +195,43 @@ public class JobVacancyService : IJobVacancyService
         return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<JobVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The internal job board: what an EMPLOYEE may see and apply for.
+    /// </summary>
+    /// <remarks>
+    /// <para>Two things were wrong here before area 25 slice 13b, and both were measured.</para>
+    ///
+    /// <para><b>It returned the full <c>JobVacancyDto</c> to any internal caller.</b> Measured on
+    /// the same vacancy: 69 keys to an employee versus 23 to an anonymous member of the public —
+    /// the internal board handed out the auto-shortlist threshold, the test-score weight, the
+    /// internal-candidate boost points, whether blind screening was on, the shortlist approval
+    /// notes and approver, the workflow instance id, the pipeline counts, and the hiring manager
+    /// and recruiter by name. Those are the terms an applicant is about to be judged on. Worse,
+    /// it served <c>SalaryRangeMin/Max</c> regardless of <c>IsSalaryVisible</c>, which
+    /// <c>ToPublicDto</c> correctly withholds — so the LESS trusted audience was better protected
+    /// than the internal one. And it carried no job description at all, so the one thing an
+    /// applicant actually needs was the one thing missing. It now uses the same lean projection
+    /// the public portal uses, which fixes all of that at once.</para>
+    ///
+    /// <para><b>It ignored <c>AllowInternalCandidates</c>.</b> The published query is the public
+    /// portal's, which has no reason to consider it; the job-board screen compensated with a
+    /// client-side <c>.filter()</c>, so a vacancy closed to internal candidates was still served
+    /// by the API and could still be applied to by anyone posting directly. The flag is enforced
+    /// here now, and again on the apply path — a rule that lives only in the browser is not a rule.
+    /// (The vacancy already models this properly: publishing creates an <c>InternalPortal</c>
+    /// posting only when the flag is set.)</para>
+    /// </remarks>
+    public async Task<IEnumerable<PublicVacancyDto>> GetPublishedForJobBoardAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         // Same query as the public portal (deadline filter applied in SQL, requisition/job-description
         // eagerly loaded so job titles actually render), scoped to the caller's tenant.
         var entities = await _vacancyRepository.GetPublishedForPublicPortalAsync(
             tenantId, DateTime.UtcNow.Date, cancellationToken: cancellationToken);
 
-        return entities.Select(e => e.ToDto()).ToList();
+        return entities
+            .Where(e => e.AllowInternalCandidates)
+            .ToPublicDtoList()
+            .ToList();
     }
 
     public async Task<IEnumerable<JobVacancySummaryDto>> GetByPositionAsync(Guid positionId, CancellationToken cancellationToken = default)
@@ -241,7 +294,7 @@ public class JobVacancyService : IJobVacancyService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job vacancy created: {VacancyNumber}", entity.VacancyNumber);
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id);
     }
 
     public async Task<JobVacancyDto> UpdateAsync(UpdateJobVacancyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -273,6 +326,10 @@ public class JobVacancyService : IJobVacancyService
             };
             await _statusHistoryRepository.AddAsync(draftHistory);
 
+            // Editing a Published vacancy back to Draft used to leave its adverts live, so a role
+            // that was no longer approved stayed on the internal posting lists.
+            await ExpirePostingsIfUnpublishedAsync(entity, statusBeforeEdit, JobVacancyStatus.Draft, updatedByUserId);
+
             _logger.LogInformation(
                 "Job vacancy {VacancyNumber} reverted from {From} to Draft due to edit.",
                 entity.VacancyNumber, statusBeforeEdit);
@@ -283,7 +340,23 @@ public class JobVacancyService : IJobVacancyService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job vacancy updated: {VacancyNumber}", entity.VacancyNumber);
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id);
+    }
+
+    /// <summary>
+    /// Re-reads a vacancy so a write response carries the same names a subsequent GET would.
+    ///
+    /// <para>Create used to map the entity it had just built, which has no navigations at all — so
+    /// the response came back with an empty job title, position and requisition number, and the
+    /// screen showed blanks until it refetched. Editing had the subtler version of the same
+    /// problem: navigations loaded before the FKs changed are not re-queried by EF.</para>
+    /// </summary>
+    private async Task<JobVacancyDto> ReloadDtoAsync(Guid id)
+    {
+        var reloaded = await _vacancyRepository.GetByIdAsync(id);
+        if (reloaded == null)
+            throw new ArgumentException($"Job vacancy with ID '{id}' not found.");
+        return reloaded.ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -303,6 +376,52 @@ public class JobVacancyService : IJobVacancyService
     // ── Workflow ──────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// The transitions a vacancy is allowed to make.
+    ///
+    /// <para>Both status-changing entry points run through this. They did not used to:
+    /// <c>TransitionAsync</c> refused to touch a Cancelled or Filled vacancy while
+    /// <c>ChangeStatusAsync</c> — the same operation, reached through
+    /// <c>PUT /{id}/status</c> — applied whatever status it was handed. That let a cancelled
+    /// vacancy be resurrected, and let a Draft jump straight to Filled without ever being approved,
+    /// published, or advertised. Two doors into one operation, one of them unlocked.</para>
+    ///
+    /// <para>Kept as an explicit map rather than a chain of ifs so the legal shape of the lifecycle
+    /// is readable in one place: draft work, an approval gate, publication, then the hiring stages
+    /// in order. Cancellation is reachable from anywhere live and is handled by
+    /// <see cref="CloseAsync"/>; Filled and Cancelled are terminal.</para>
+    /// </summary>
+    private static readonly IReadOnlyDictionary<JobVacancyStatus, JobVacancyStatus[]> AllowedTransitions =
+        new Dictionary<JobVacancyStatus, JobVacancyStatus[]>
+        {
+            [JobVacancyStatus.Draft]                 = new[] { JobVacancyStatus.PendingApproval, JobVacancyStatus.Approved, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.PendingApproval]       = new[] { JobVacancyStatus.Approved, JobVacancyStatus.Rejected, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Rejected]              = new[] { JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Approved]              = new[] { JobVacancyStatus.Published, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Published]             = new[] { JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Shortlisting, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.ClosedForApplications] = new[] { JobVacancyStatus.Shortlisting, JobVacancyStatus.Published, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Shortlisting]          = new[] { JobVacancyStatus.Interviewing, JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Interviewing]          = new[] { JobVacancyStatus.OfferStage, JobVacancyStatus.Shortlisting, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.OfferStage]            = new[] { JobVacancyStatus.Filled, JobVacancyStatus.Interviewing, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Filled]                = Array.Empty<JobVacancyStatus>(),
+            [JobVacancyStatus.Cancelled]             = Array.Empty<JobVacancyStatus>(),
+        };
+
+    private static void GuardTransition(JobVacancy entity, JobVacancyStatus toStatus)
+    {
+        if (entity.VacancyStatus == toStatus)
+            throw new InvalidOperationException($"This vacancy is already {toStatus}.");
+
+        if (!AllowedTransitions.TryGetValue(entity.VacancyStatus, out var allowed) || allowed.Length == 0)
+            throw new InvalidOperationException(
+                $"A vacancy that is {entity.VacancyStatus} has reached the end of its lifecycle and cannot change status.");
+
+        if (!allowed.Contains(toStatus))
+            throw new InvalidOperationException(
+                $"A vacancy cannot go from {entity.VacancyStatus} to {toStatus}. " +
+                $"From here it can only become: {string.Join(", ", allowed)}.");
+    }
+
+    /// <summary>
     /// Atomically applies field updates AND a status transition in one DB transaction.
     /// This is the correct entry point for all transition buttons on the edit form.
     /// Using a single unit-of-work eliminates the partial-failure risk that existed
@@ -320,6 +439,8 @@ public class JobVacancyService : IJobVacancyService
 
         if (entity.VacancyStatus == JobVacancyStatus.Cancelled || entity.VacancyStatus == JobVacancyStatus.Filled)
             throw new InvalidOperationException("A closed or filled vacancy cannot be edited.");
+
+        GuardTransition(entity, dto.NewStatus);
 
         var fromStatus = entity.VacancyStatus;
 
@@ -353,6 +474,7 @@ public class JobVacancyService : IJobVacancyService
         await _statusHistoryRepository.AddAsync(history);
 
         await AutoCreatePublishPostingsIfNeededAsync(entity, fromStatus, dto.NewStatus, userId);
+        await ExpirePostingsIfUnpublishedAsync(entity, fromStatus, dto.NewStatus, userId);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -360,12 +482,14 @@ public class JobVacancyService : IJobVacancyService
             "Job vacancy {VacancyNumber} transitioned from {From} to {To}",
             entity.VacancyNumber, fromStatus, dto.NewStatus);
 
-        return entity.ToDto();
+        return await ReloadDtoAsync(entity.Id);
     }
 
     public async Task<bool> ChangeStatusAsync(ChangeJobVacancyStatusDto dto, Guid changedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(dto.VacancyId);
+
+        GuardTransition(entity, dto.NewStatus);
 
         var from = entity.VacancyStatus;
         entity.VacancyStatus = dto.NewStatus;
@@ -393,6 +517,7 @@ public class JobVacancyService : IJobVacancyService
         await _statusHistoryRepository.AddAsync(history);
 
         await AutoCreatePublishPostingsIfNeededAsync(entity, from, dto.NewStatus, changedByUserId);
+        await ExpirePostingsIfUnpublishedAsync(entity, from, dto.NewStatus, changedByUserId);
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -473,6 +598,50 @@ public class JobVacancyService : IJobVacancyService
         }
     }
 
+    /// <summary>
+    /// Takes the adverts down when a vacancy stops being published.
+    ///
+    /// <para>Publication created these postings; nothing retired them. So a vacancy that was
+    /// cancelled, closed for applications, or edited back to Draft for re-approval left its
+    /// postings sitting at <c>Published</c> and <c>IsActive</c> — still listed by
+    /// <c>GET api/job-postings/active</c>, and still carrying whatever URL was syndicated to an
+    /// external board. The public career portal never showed them because it filters on the
+    /// vacancy's own status, which is exactly why the inconsistency was invisible from the outside
+    /// while the internal lists kept advertising a role nobody was hiring for.</para>
+    ///
+    /// <para>Expiring rather than deleting: a posting is a record that the role was advertised on a
+    /// channel, and re-publishing the vacancy raises fresh ones.</para>
+    /// </summary>
+    private async Task ExpirePostingsIfUnpublishedAsync(
+        JobVacancy entity,
+        JobVacancyStatus fromStatus,
+        JobVacancyStatus toStatus,
+        Guid changedByUserId)
+    {
+        if (fromStatus != JobVacancyStatus.Published || toStatus == JobVacancyStatus.Published)
+            return;
+
+        var live = (await _postingRepository.GetByVacancyIdAsync(entity.Id))
+            .Where(p => p.TenantId == entity.TenantId
+                     && (p.IsActive || p.Status == JobPostingStatus.Published))
+            .ToList();
+
+        foreach (var posting in live)
+        {
+            posting.Status     = JobPostingStatus.Expired;
+            posting.IsActive   = false;
+            posting.ExpiryDate = DateTime.UtcNow;
+            posting.UpdatedAt  = DateTime.UtcNow;
+            posting.UpdatedBy  = changedByUserId.ToString();
+            await _postingRepository.UpdateAsync(posting);
+        }
+
+        if (live.Count > 0)
+            _logger.LogInformation(
+                "Expired {Count} job posting(s) for vacancy {VacancyNumber}, which left Published for {Status}.",
+                live.Count, entity.VacancyNumber, toStatus);
+    }
+
     public async Task<bool> CloseAsync(CloseJobVacancyDto dto, Guid closedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(dto.VacancyId);
@@ -503,6 +672,7 @@ public class JobVacancyService : IJobVacancyService
 
         await _vacancyRepository.UpdateAsync(entity);
         await _statusHistoryRepository.AddAsync(history);
+        await ExpirePostingsIfUnpublishedAsync(entity, from, JobVacancyStatus.Cancelled, closedByUserId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job vacancy closed: {VacancyNumber}", entity.VacancyNumber);
@@ -538,6 +708,7 @@ public class JobVacancyService : IJobVacancyService
 
         await _vacancyRepository.UpdateAsync(entity);
         await _statusHistoryRepository.AddAsync(history);
+        await ExpirePostingsIfUnpublishedAsync(entity, from, JobVacancyStatus.ClosedForApplications, closedByUserId);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job vacancy {VacancyNumber} closed for applications (reason: {Reason})",
@@ -547,18 +718,52 @@ public class JobVacancyService : IJobVacancyService
 
     // ── Attachments ───────────────────────────────────────────────────────────
 
-    public async Task<JobVacancyAttachmentDto> AddAttachmentAsync(CreateJobVacancyAttachmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Records an attachment against a vacancy. The file itself has already been scanned and
+    /// registered by the controlled-upload gate in the controller — this only writes the row, from
+    /// the stored document's own metadata rather than anything the caller typed.
+    ///
+    /// <para>This used to take a <c>CreateJobVacancyAttachmentDto</c> carrying a caller-supplied
+    /// <c>filePath</c>, so the endpoint stored no file and recorded whatever path was posted to it.
+    /// The DTO is gone rather than ignored, so it cannot drift back.</para>
+    /// </summary>
+    public async Task<JobVacancyAttachmentDto> AddAttachmentAsync(
+        Guid jobVacancyId,
+        Guid uploadedById,
+        string fileName,
+        long fileSize,
+        string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null)
     {
-        var current = GetTenantId();
-        if (tenantId != Guid.Empty && tenantId != current)
-            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
+        var vacancy = await GetOwnedAsync(jobVacancyId);
 
-        await GetOwnedAsync(createDto.JobVacancyId);
+        var entity = new JobVacancyAttachment
+        {
+            TenantId           = vacancy.TenantId,
+            JobVacancyId       = jobVacancyId,
+            FileName           = fileName,
+            // The stored file is addressed by its upload/DMS ids, not by a path the client chose.
+            FilePath           = string.Empty,
+            FileSizeBytes      = fileSize,
+            Description        = description,
+            UploadDate         = DateTime.UtcNow,
+            UploadedById       = uploadedById,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId   = documentRecordId,
+            DocumentVersionId  = documentVersionId,
+            CreatedBy          = uploadedById.ToString(),
+        };
 
-        var entity = createDto.ToEntity(current, createdByUserId);
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read so the response carries the uploader's name rather than a null navigation.
+        var reloaded = (await _attachmentRepository.GetByVacancyIdAsync(jobVacancyId))
+            .FirstOrDefault(a => a.Id == entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<JobVacancyAttachmentDto>> GetAttachmentsAsync(Guid vacancyId, CancellationToken cancellationToken = default)
@@ -597,6 +802,7 @@ public class JobVacancyService : IJobVacancyService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedAsync(createDto.JobVacancyId);
+        RequireScorableCriterion(createDto.Type);
 
         var entity = createDto.ToEntity(current, createdByUserId);
         await _criteriaRepository.AddAsync(entity);
@@ -616,12 +822,35 @@ public class JobVacancyService : IJobVacancyService
     public async Task<JobShortlistingCriteriaDto> UpdateCriteriaAsync(UpdateJobShortlistingCriteriaDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCriteriaAsync(updateDto.Id);
+        RequireScorableCriterion(updateDto.Type);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _criteriaRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await MarkApplicationScoresStaleAsync(entity.JobVacancyId, cancellationToken);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Refuses a shortlisting criterion whose <see cref="JobShortlistingCriteriaType"/> is not a
+    /// defined member.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>[Required]</c> does not catch this. The property is a non-nullable enum, so a payload
+    /// that omits <c>type</c> binds to <c>0</c> and <c>RequiredAttribute</c> sees a value; the enum
+    /// starts at <c>1</c>. A criterion stored with <c>0</c> reaches
+    /// <c>JobApplicationService</c>'s scoring switch at its <c>default:</c> arm — *"Unknown / Other
+    /// — default pass with neutral score"* — so it passes every candidate and discriminates
+    /// between none of them. That is exactly what the only screen that creates criteria was doing
+    /// (lane 5b; ledger § E2 finding 1), and a screen fix alone would leave the hole open to any
+    /// other caller.
+    /// </remarks>
+    private static void RequireScorableCriterion(JobShortlistingCriteriaType type)
+    {
+        if (!Enum.IsDefined(typeof(JobShortlistingCriteriaType), type))
+            throw new InvalidOperationException(
+                $"'{(int)type}' is not a shortlisting criterion type. A criterion with no type is scored as "
+                + "Unknown, which passes every candidate — choose what the criterion measures.");
     }
 
     public async Task<bool> DeleteCriteriaAsync(Guid criteriaId, CancellationToken cancellationToken = default)
@@ -672,46 +901,11 @@ public class JobVacancyService : IJobVacancyService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
-    public async Task<bool> SubmitShortlistForApprovalAsync(
-        SubmitShortlistForApprovalDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default)
-    {
-        var vacancy = await GetOwnedAsync(dto.VacancyId);
-
-        if (vacancy.ShortlistApprovalStatus == ShortlistApprovalStatus.PendingApproval)
-            throw new InvalidOperationException("Shortlist is already pending approval.");
-
-        if (vacancy.ShortlistApprovalStatus == ShortlistApprovalStatus.Approved)
-            throw new InvalidOperationException("Shortlist is already approved.");
-
-        vacancy.ShortlistApprovalStatus = ShortlistApprovalStatus.PendingApproval;
-        vacancy.ShortlistSubmittedAt = DateTime.UtcNow;
-        vacancy.ShortlistSubmittedById = submittedByUserId;
-        vacancy.ShortlistApprovalNotes = dto.Notes;
-
-        await _vacancyRepository.UpdateAsync(vacancy);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return true;
-    }
-
-    public async Task<bool> ReviewShortlistApprovalAsync(
-        ReviewShortlistApprovalDto dto, Guid reviewedByUserId, CancellationToken cancellationToken = default)
-    {
-        var vacancy = await GetOwnedAsync(dto.VacancyId);
-
-        if (vacancy.ShortlistApprovalStatus != ShortlistApprovalStatus.PendingApproval)
-            throw new InvalidOperationException("Shortlist is not currently pending approval.");
-
-        vacancy.ShortlistApprovalStatus = dto.Approved
-            ? ShortlistApprovalStatus.Approved
-            : ShortlistApprovalStatus.Rejected;
-        vacancy.ShortlistApprovedAt = DateTime.UtcNow;
-        vacancy.ShortlistApprovedById = reviewedByUserId;
-        vacancy.ShortlistApprovalNotes = dto.Notes;
-
-        await _vacancyRepository.UpdateAsync(vacancy);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return true;
-    }
+    // Shortlist submit/review used to be implemented here as well as on JobApplicationService.
+    // JobApplicationController calls the application service's pair, and nothing called these — a dead
+    // second implementation of the same rules, minus the two guards the live pair has (an empty
+    // shortlist cannot be submitted, and the submitter cannot approve their own). Deleted so it cannot
+    // be wired up in place of the real one.
 
     // ── Public career portal ──────────────────────────────────────────────────
 
@@ -764,6 +958,21 @@ public class JobVacancyService : IJobVacancyService
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
 
+    /// <summary>
+    /// [Required] on a non-nullable Guid is inert — Guid.Empty passes model validation and dies
+    /// at the FK with a 500 that names neither the field nor the constraint. Reject it here with
+    /// the field's name (the D-17 recipe).
+    /// </summary>
+    private static void RequireStageAssignmentIds(Guid pipelineStageId, Guid assignedToId, Guid? escalateToId)
+    {
+        if (pipelineStageId == Guid.Empty)
+            throw new InvalidOperationException("pipelineStageId is required and cannot be empty.");
+        if (assignedToId == Guid.Empty)
+            throw new InvalidOperationException("assignedToId is required and cannot be empty.");
+        if (escalateToId == Guid.Empty)
+            throw new InvalidOperationException("escalateToId cannot be an empty id; omit it instead.");
+    }
+
     public async Task<VacancyPipelineStageAssignmentDto> UpsertStageAssignmentAsync(
         CreateVacancyPipelineStageAssignmentDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
     {
@@ -771,11 +980,42 @@ public class JobVacancyService : IJobVacancyService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        RequireStageAssignmentIds(dto.PipelineStageId, dto.AssignedToId, dto.EscalateToId);
         await GetOwnedAsync(dto.JobVacancyId);
 
         var existing = await _stageAssignmentRepository.GetByVacancyAndStageAsync(dto.JobVacancyId, dto.PipelineStageId);
         if (existing != null && existing.TenantId != current)
             existing = null;
+
+        // IX_VacancyStageAssignment_Vacancy_Stage is unique with NO IsDeleted filter while the
+        // delete is soft, so a removed assignment keeps occupying its (vacancy, stage) slot and
+        // a plain re-add 500s on the index — remove-then-reassign a stage owner would be a
+        // one-click path to it. Revive the soft-deleted row instead (the D-21/D-24 idiom); the
+        // tenant predicate is re-applied by hand because IgnoreQueryFilters drops that too.
+        if (existing == null)
+        {
+            var buried = await _stageAssignmentRepository
+                .GetQueryableIncludingDeleted(a => a.JobVacancyId == dto.JobVacancyId &&
+                                                   a.PipelineStageId == dto.PipelineStageId &&
+                                                   a.TenantId == current)
+                .FirstOrDefaultAsync(ct);
+            if (buried != null)
+            {
+                buried.IsDeleted = false;
+                buried.DeletedAt = null;
+                buried.DeletedBy = null;
+                buried.Status          = VacancyStageAssignmentStatus.NotStarted;
+                buried.CompletedAt     = null;
+                buried.CompletedById   = null;
+                buried.CompletionNotes = null;
+                buried.EscalatedAt     = null;
+                buried.EscalationNotes = null;
+                buried.AssignedById    = userId;
+                buried.AssignedAt      = DateTime.UtcNow;
+                existing = buried;
+            }
+        }
+
         if (existing != null)
         {
             existing.AssignedToId             = dto.AssignedToId;
@@ -819,6 +1059,7 @@ public class JobVacancyService : IJobVacancyService
         UpdateVacancyPipelineStageAssignmentDto dto, Guid userId, CancellationToken ct = default)
     {
         var entity = await GetOwnedStageAssignmentAsync(dto.Id);
+        RequireStageAssignmentIds(entity.PipelineStageId, dto.AssignedToId, dto.EscalateToId);
 
         entity.AssignedToId           = dto.AssignedToId;
         entity.DueDate                = dto.DueDate;
@@ -837,6 +1078,7 @@ public class JobVacancyService : IJobVacancyService
         CompleteVacancyPipelineStageAssignmentDto dto, Guid userId, CancellationToken ct = default)
     {
         var entity = await GetOwnedStageAssignmentAsync(dto.Id);
+        RequireStageOwnership(entity, userId, "complete");
 
         entity.Status          = VacancyStageAssignmentStatus.Completed;
         entity.CompletedAt     = DateTime.UtcNow;
@@ -854,6 +1096,7 @@ public class JobVacancyService : IJobVacancyService
         SkipVacancyPipelineStageAssignmentDto dto, Guid userId, CancellationToken ct = default)
     {
         var entity = await GetOwnedStageAssignmentAsync(dto.Id);
+        RequireStageOwnership(entity, userId, "skip");
 
         entity.Status          = VacancyStageAssignmentStatus.Skipped;
         entity.CompletionNotes = dto.Reason;
