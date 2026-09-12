@@ -247,8 +247,11 @@ public class CreateTrainerProfileDto : CreateDtoBase
 
     public Guid? EmployeeId { get; set; }
 
-    [Required]
-    public Guid VendorId { get; set; }
+    // Nullable to match the entity: an internal trainer (linked via EmployeeId) has no vendor. A
+    // non-nullable Guid here previously forced Guid.Empty onto TrainerProfile.VendorId instead of
+    // null for that case, which the FK constraint rejects (SQL 547) — found while scoping this
+    // area's UI, never previously exercised.
+    public Guid? VendorId { get; set; }
 
     [MaxLength(2000)]
     public string? Bio { get; set; }
@@ -270,8 +273,7 @@ public class UpdateTrainerProfileDto : UpdateDtoBase
 
     public Guid? EmployeeId { get; set; }
 
-    [Required]
-    public Guid VendorId { get; set; }
+    public Guid? VendorId { get; set; }
 
     [MaxLength(2000)]
     public string? Bio { get; set; }
@@ -529,6 +531,7 @@ public class CreateTrainingProgramGroupDto : CreateDtoBase
     public string Name { get; set; } = string.Empty;
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     [MaxLength(500)]
@@ -545,6 +548,7 @@ public class UpdateTrainingProgramGroupDto : UpdateDtoBase
     public string Name { get; set; } = string.Empty;
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     [MaxLength(500)]
@@ -565,6 +569,7 @@ public class CreateTrainingCategoryOptionDto : CreateDtoBase
     public string Name { get; set; } = string.Empty;
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     [MaxLength(500)]
@@ -581,6 +586,7 @@ public class UpdateTrainingCategoryOptionDto : UpdateDtoBase
     public string Name { get; set; } = string.Empty;
 
     [MaxLength(9)]
+    [RegularExpression(Shared.Constants.Colors.HexPattern, ErrorMessage = Shared.Constants.Colors.HexMessage)]
     public string? ColorHex { get; set; }
 
     [MaxLength(500)]
@@ -908,6 +914,12 @@ public class TrainingScheduleDto : BaseDto
     public string? CancellationReason { get; set; }
     public DateTime? CancelledDate { get; set; }
 
+    // The cancellation audit was half-exposed: the DTO carried when and why but never who, while the
+    // approval side above exposes both ApprovedById and ApprovedByName. Only the id is offered here —
+    // TrainingSchedule.CancelledById is a bare scalar with no paired navigation, so there is no
+    // Employee to read a name from without a model change. Resolve it client-side if a name is needed.
+    public Guid? CancelledById { get; set; }
+
     public List<TrainingSessionDto> Sessions { get; set; } = new();
 }
 
@@ -1069,10 +1081,10 @@ public class CancelTrainingScheduleDto
     [MaxLength(1000)]
     public string CancellationReason { get; set; } = string.Empty;
 
-    [Required]
-    public Guid CancelledById { get; set; }
-
-    public DateTime CancelledDate { get; set; } = DateTime.UtcNow;
+    // Canceller and cancellation timestamp come from the authenticated user / server clock, matching
+    // ApproveTrainingScheduleDto above. CancelledById used to be a [Required] non-nullable Guid taken
+    // straight off the body — which is a no-op attribute on a value type (an omitted value became
+    // Guid.Empty), and let any caller attribute a cancellation to another employee.
 }
 
 public class CompleteTrainingScheduleDto
@@ -1156,6 +1168,10 @@ public class TrainingNominationDto : BaseDto
 
     public Guid ScheduleId { get; set; }
     public string ScheduleNumber { get; set; } = string.Empty;
+
+    // Named the programme but never identified it, so a caller holding a nomination could not issue
+    // a certificate against it (IssueCertificateDto needs ProgramId) without a second round trip.
+    public Guid ProgramId { get; set; }
     public string ProgramName { get; set; } = string.Empty;
     public DateTime TrainingStartDate { get; set; }
     public DateTime TrainingEndDate { get; set; }
@@ -1206,6 +1222,12 @@ public class TrainingNominationSummaryDto
     public Guid Id { get; set; }
     public string NominationNumber { get; set; } = string.Empty;
     public string ProgramName { get; set; } = string.Empty;
+
+    // The summary named the employee but never identified them, so a caller holding a schedule's
+    // nominee list could not act on a row (mark attendance, record a completion) without fetching
+    // each nomination individually. ScheduleId is here for the same reason.
+    public Guid EmployeeId { get; set; }
+    public Guid ScheduleId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public string EmployeeNumber { get; set; } = string.Empty;
     public NominationType Type { get; set; }
@@ -1365,6 +1387,13 @@ public class TrainingCompletionDto : BaseDto
     public string EmployeeNumber { get; set; } = string.Empty;
 
     public string ProgramName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The programme issues a certificate, so a PASSED completion cannot be verified until one has
+    /// been issued for the nomination (finish-plan lane 4). Lets the verify dialog say so up front
+    /// instead of leaving the refusal to explain itself.
+    /// </summary>
+    public bool ProgramProvidesCertificate { get; set; }
 
     public DateTime CompletionDate { get; set; }
     public TrainingCompletionStatus Status { get; set; }
@@ -1822,6 +1851,11 @@ public class TrainingCertificateSummaryDto
     public Guid Id { get; set; }
     public string CertificateNumber { get; set; } = string.Empty;
     public string? VerificationCode { get; set; }
+
+    // The summary named the holder and the programme but identified neither, so a certificates list
+    // could not link through to either. Mapped from the FKs, so they survive a missed include.
+    public Guid EmployeeId { get; set; }
+    public Guid ProgramId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public string ProgramName { get; set; } = string.Empty;
     public string CertificateName { get; set; } = string.Empty;
@@ -1946,6 +1980,10 @@ public class EmployeeCertificateDto : BaseDto
 public class EmployeeCertificateSummaryDto
 {
     public Guid Id { get; set; }
+
+    // Same gap: the unverified queue is org-wide, so a row has to say whose certificate it is.
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
     public string CertificateName { get; set; } = string.Empty;
     public string IssuingBody { get; set; } = string.Empty;
     public DateTime IssuedDate { get; set; }
@@ -2070,6 +2108,7 @@ public class ComplianceTrainingRequirementSummaryDto
     public Guid Id { get; set; }
     public string RequirementCode { get; set; } = string.Empty;
     public string RequirementName { get; set; } = string.Empty;
+    public Guid ProgramId { get; set; }
     public string ProgramName { get; set; } = string.Empty;
     public ComplianceFrequency Frequency { get; set; }
     public string FrequencyName => Frequency.ToString();
@@ -2206,8 +2245,18 @@ public class EmployeeComplianceRecordDto : BaseDto
 public class EmployeeComplianceRecordSummaryDto
 {
     public Guid Id { get; set; }
+
+    // The non-compliant and overdue queues are org-wide, so a row has to identify both sides —
+    // otherwise a caller cannot open the employee or the requirement it is complaining about.
+    public Guid EmployeeId { get; set; }
+    public Guid RequirementId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public string RequirementName { get; set; } = string.Empty;
+
+    // The queues that consume this summary show which programme satisfies the requirement, and an
+    // "Exempt" column is meaningless without saying who granted it.
+    public string ProgramName { get; set; } = string.Empty;
+    public string? ExemptedByName { get; set; }
     public ComplianceStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateTime? NextDueDate { get; set; }
@@ -3228,6 +3277,10 @@ public class EmployeeLearningPathSummaryDto
     public Guid Id { get; set; }
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+
+    // Named the path but never identified it, so a "My Learning" row could not open the path it
+    // refers to. From the FK, so a missed include cannot blank it.
+    public Guid LearningPathId { get; set; }
     public string LearningPathName { get; set; } = string.Empty;
     public DateTime EnrolledDate { get; set; }
     public DateTime? TargetCompletionDate { get; set; }
@@ -3310,6 +3363,15 @@ public class UpdateLearningPathStepDto : UpdateDtoBase
     public bool IsCompleted { get; set; }
     public DateTime? CompletedDate { get; set; }
     public Guid? NominationId { get; set; }
+
+    /// <summary>
+    /// Why HR is completing a step that has no attendance or completion record behind it.
+    ///
+    /// Mandatory for that case and ignored otherwise — it cannot be a <c>[Required]</c> attribute
+    /// because it is only required conditionally, so the service enforces it.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
 }
 
 #endregion
@@ -3446,6 +3508,15 @@ public class MentoringPairDto : BaseDto
 
     public int TotalSessionsCount { get; set; }
     public int TotalMinutes { get; set; }
+
+    /// <summary>
+    /// Which side of this relationship the caller is on. The screen needs this to tell "there is no
+    /// note" apart from "the note is not yours to read" — both arrive as null, and a UI that guesses
+    /// from null-ness will eventually offer someone an empty box to overwrite another person's words.
+    /// A coordinator or HR viewer is neither.
+    /// </summary>
+    public bool ViewerIsMentor { get; set; }
+    public bool ViewerIsMentee { get; set; }
 }
 
 public class MentoringPairSummaryDto
@@ -3609,6 +3680,12 @@ public class TrainingDashboardDto
     public int EmployeesCertifiedThisYear { get; set; }
     public int ExpiringCertificatesIn30Days { get; set; }
     public decimal OverallComplianceRate { get; set; }
+    /// <summary>
+    /// The denominator behind <see cref="OverallComplianceRate"/>. Without it a screen cannot tell
+    /// "0% because nobody complies" from "0% because nobody has been assigned anything" — and the
+    /// second reads as a five-alarm fire when it means the programme has not started.
+    /// </summary>
+    public int ComplianceRecordsCount { get; set; }
     public int NonCompliantEmployeesCount { get; set; }
     public int ActiveMentoringPairsCount { get; set; }
     public int ActiveLearningPathEnrollmentsCount { get; set; }
@@ -3646,6 +3723,8 @@ public class TrainingAnalyticsDto
     public int PassedYtd { get; set; }
     public decimal PassRate { get; set; }
     public decimal ComplianceRate { get; set; }
+    /// <summary>The denominator behind <see cref="ComplianceRate"/> — see the dashboard DTO for why.</summary>
+    public int ComplianceRecordsCount { get; set; }
     public int CertificatesIssuedYtd { get; set; }
     public decimal BudgetAllocated { get; set; }
     public decimal BudgetSpent { get; set; }
@@ -3702,7 +3781,9 @@ public class EmployeeTrainingSummaryDto
     public string EmployeeName { get; set; } = string.Empty;
     public string EmployeeNumber { get; set; } = string.Empty;
 
+    /// <summary>Every recorded completion, passed or not. <see cref="TrainingsPassed"/> is the subset.</summary>
     public int TotalTrainingsCompleted { get; set; }
+    public int TrainingsPassed { get; set; }
     public int TotalTrainingHours { get; set; }
     public int ActiveCertificatesCount { get; set; }
     public int ExpiringCertificatesCount { get; set; }
@@ -3716,7 +3797,13 @@ public class EmployeeTrainingSummaryDto
     public bool HasActiveMentoringPair { get; set; }
 
     public List<TrainingNominationSummaryDto> RecentTrainings { get; set; } = new();
-    public List<EmployeeCertificateSummaryDto> Certificates { get; set; } = new();
+    /// <summary>
+    /// Certificates awarded from training we ran — the same population the counts above describe.
+    /// This was declared as <c>EmployeeCertificateSummaryDto</c> (externally-held qualifications,
+    /// a different entity) while the counts came from <c>TrainingCertificate</c>, so the list and
+    /// the numbers beside it described different things. Nothing consumed it either way.
+    /// </summary>
+    public List<TrainingCertificateSummaryDto> Certificates { get; set; } = new();
     public List<EmployeeComplianceRecordSummaryDto> ComplianceRecords { get; set; } = new();
 }
 
@@ -3742,8 +3829,13 @@ public class StepDetailPageDto
     public bool      IsLocked                { get; set; }
     public string?   PrerequisiteProgramName { get; set; }
     public bool      IsMandatory             { get; set; }
-    /// <summary>True when the employee has attendance records or a completion record — enabling "Mark as Complete".</summary>
+    /// <summary>True when the enrolled employee has attendance records or a completion record — enabling "Mark as Complete".</summary>
     public bool      CanMarkComplete         { get; set; }
+    /// <summary>Who is enrolled, which is not always who is looking — HR can open this from the org-wide list.</summary>
+    public Guid      LearnerId               { get; set; }
+    public string    LearnerName             { get; set; } = string.Empty;
+    /// <summary>False when someone other than the learner is viewing, so the page can stop saying "your".</summary>
+    public bool      IsOwnStep               { get; set; }
 
     // ── Program detail ─────────────────────────────────────────────────────
     public Guid         ProgramId           { get; set; }

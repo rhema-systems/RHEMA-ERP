@@ -338,33 +338,89 @@ public class EmployeeGoalService : IEmployeeGoalService
     }
 
     // ─── Progress Tracking ───────────────────────────────────────────────────
+    //
+    // Progress tracking owns the goal's EXECUTION status (InProgress, OnTrack, AtRisk,
+    // Completed); GoalWorkflowCommandService owns the approval lifecycle and says so in its
+    // own header. That split was documented but never implemented: a progress entry carried a
+    // GoalProgressStatus that was stored on the entry and dropped on the floor, so nothing in
+    // the codebase ever wrote AtRisk or OnTrack, and InProgress was only reachable from AtRisk
+    // — i.e. never. Every at-risk read therefore returned an empty list for every tenant: the
+    // manager's At Risk tab, the org-wide report, and the risk severity scores.
+    //
+    // (The only thing that ever set those statuses was a plain PUT carrying `status`, which
+    // was also how a goal could be self-approved. Closing that hole is what made the gap
+    // visible; ApplyProgressToGoal is the legitimate channel it should always have had.)
 
-    public async Task<GoalProgressEntryDto> AddProgressEntryAsync(Guid goalId, CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
+    /// <summary>Statuses a goal may receive progress entries in — approved and still running.</summary>
+    private static readonly HashSet<GoalStatus> LiveExecutionStatuses = new()
     {
+        GoalStatus.Approved,
+        GoalStatus.InProgress,
+        GoalStatus.OnTrack,
+        GoalStatus.AtRisk,
+    };
+
+    /// <summary>
+    /// Carries an entry's percent and reported status onto the goal.
+    ///
+    /// Reaching 100% completes the goal whatever the entry claims — the number is the fact.
+    /// NotStarted and Cancelled leave the status alone: the first says nothing has happened
+    /// yet, and the second has no GoalStatus equivalent (cancelling is a workflow decision,
+    /// not something a progress note should trigger).
+    /// </summary>
+    private static void ApplyProgressToGoal(EmployeeGoal goal, decimal? progressPercent, GoalProgressStatus entryStatus)
+    {
+        if (progressPercent.HasValue)
+            goal.ProgressPercent = progressPercent.Value;
+
+        if (progressPercent >= 100)
+        {
+            goal.Status = GoalStatus.Completed;
+            return;
+        }
+
+        goal.Status = entryStatus switch
+        {
+            GoalProgressStatus.InProgress => GoalStatus.InProgress,
+            GoalProgressStatus.OnTrack    => GoalStatus.OnTrack,
+            GoalProgressStatus.AtRisk     => GoalStatus.AtRisk,
+            GoalProgressStatus.Completed  => GoalStatus.Completed,
+            _                             => goal.Status,
+        };
+    }
+
+    public async Task<GoalProgressEntryDto> AddProgressEntryAsync(Guid goalId, CreateGoalProgressEntryDto dto, Guid recordedById, CancellationToken cancellationToken = default)
+    {
+        // GoalProgressEntry.RecordedById is a required Employee FK.
+        if (recordedById == Guid.Empty)
+            throw new InvalidOperationException("Unable to determine the recording employee. Please ensure your account is linked to an employee record.");
+
         var tenantId = GetTenantId();
         var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
 
-        if (goal.Status != GoalStatus.Approved && goal.Status != GoalStatus.AtRisk && goal.Status != GoalStatus.InProgress)
-            throw new InvalidOperationException("Progress entries can only be added to approved, in-progress, or at-risk goals.");
+        if (!LiveExecutionStatuses.Contains(goal.Status))
+            throw new InvalidOperationException("Progress entries can only be added to approved, on-track, in-progress, or at-risk goals.");
 
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         entity.EmployeeGoalId = goalId;
         entity.EntryDate = DateTime.UtcNow;
+        // An omitted status binds as 0 — not a member of GoalProgressStatus (it starts at 1) —
+        // and was stored as-is, then serialized as a bare number and fed to ApplyProgressToGoal.
+        // Derive from the reported progress instead; an explicit status is respected.
+        if (entity.Status == default)
+        {
+            entity.Status = entity.ProgressPercent >= 100 ? GoalProgressStatus.Completed
+                : entity.ProgressPercent > 0 ? GoalProgressStatus.InProgress
+                : GoalProgressStatus.NotStarted;
+        }
+        // Attribution comes from the token, not the payload: a progress entry is a claim about what
+        // someone did, and the body used to be free to name anyone.
+        entity.RecordedById = recordedById;
 
         await _progressRepository.AddAsync(entity);
 
-        // Update goal's progress percent from the entry
-        if (entity.ProgressPercent.HasValue)
-        {
-            goal.ProgressPercent = entity.ProgressPercent.Value;
-
-            // Auto-update goal status if progress is 100%
-            if (entity.ProgressPercent.Value >= 100)
-                goal.Status = GoalStatus.Completed;
-            else if (goal.Status == GoalStatus.AtRisk && entity.ProgressPercent.Value > 0)
-                goal.Status = GoalStatus.InProgress;
-        }
+        ApplyProgressToGoal(goal, entity.ProgressPercent, entity.Status);
 
         await _goalRepository.UpdateAsync(goal);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -391,7 +447,7 @@ public class EmployeeGoalService : IEmployeeGoalService
 
     public async Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedGoalAsync(goalId, cancellationToken);
+        var goal = await GetOwnedGoalAsync(goalId, cancellationToken);
         var tenantId = GetTenantId();
         var entity = await _progressRepository.GetQueryable()
             .Include(p => p.RecordedBy)
@@ -402,6 +458,19 @@ public class EmployeeGoalService : IEmployeeGoalService
 
         dto.UpdateEntity(entity);
         await _progressRepository.UpdateAsync(entity);
+
+        // The goal reflects its most recent entry, so correcting one has to be carried back —
+        // otherwise fixing a mistyped 40% to 90% left the goal reporting 40% forever. Only the
+        // latest entry counts, so editing an older one changes nothing, which is right.
+        var latest = await _progressRepository
+            .GetQueryable(p => p.EmployeeGoalId == goalId && p.TenantId == tenantId && !p.IsDeleted)
+            .OrderByDescending(p => p.EntryDate)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (latest != null && latest.Id == entity.Id && !goal.IsLocked)
+            ApplyProgressToGoal(goal, entity.ProgressPercent, entity.Status);
+
+        await _goalRepository.UpdateAsync(goal);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Progress entry updated: {EntryId}", entity.Id);

@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -11,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class OrganizationLevelController : ControllerBase
 {
     private readonly IOrganizationLevelService _organizationLevelService;
@@ -153,6 +154,7 @@ public class OrganizationLevelController : ControllerBase
     /// Creates a new organization level
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(OrganizationLevelDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateOrganizationLevelDto createDto)
@@ -180,6 +182,7 @@ public class OrganizationLevelController : ControllerBase
     /// Updates an existing organization level
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(OrganizationLevelDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -213,6 +216,7 @@ public class OrganizationLevelController : ControllerBase
     /// Deletes an organization level
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id)

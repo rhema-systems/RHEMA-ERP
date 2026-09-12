@@ -19,6 +19,12 @@ namespace ErpSystem.Api.Authorization;
 ///
 /// <para>Deliberately scoped to permissions beginning <c>HR.</c> so Finance authorization —
 /// which has a fully seeded permission set — is untouched.</para>
+///
+/// <para><b>It grants exactly what <see cref="HrPermissions.RoleGrants"/> says the role would
+/// have been seeded, and nothing more.</b> An earlier version succeeded on the <c>HR.</c> prefix
+/// alone without inspecting the verb, so an HR-role user holding only Read and Write also
+/// satisfied <c>MedicalAdminPolicy</c> and could delete medical records — including paid expense
+/// claims. Standing in for the seed means matching the seed; both sides read the same map.</para>
 /// </remarks>
 public sealed class HrPermissionRoleFallbackAuthorizationHandler
     : AuthorizationHandler<PermissionRequirement>
@@ -40,7 +46,17 @@ public sealed class HrPermissionRoleFallbackAuthorizationHandler
         if (principal?.Identity?.IsAuthenticated != true)
             return Task.CompletedTask;
 
-        if (HrPermissions.MedicalFallbackRoles.Any(principal.IsInRole))
+        // Everything the caller's roles would have been granted by the seed.
+        var granted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (roleName, permissions) in HrPermissions.RoleGrants)
+        {
+            if (principal.IsInRole(roleName))
+                granted.UnionWith(permissions);
+        }
+
+        // Holding any one of a requirement's permissions satisfies it, matching the
+        // database-backed PermissionAuthorizationHandler's own OR semantics.
+        if (requirement.Permissions.Any(granted.Contains))
             context.Succeed(requirement);
 
         return Task.CompletedTask;

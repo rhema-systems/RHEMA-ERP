@@ -1,33 +1,46 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
-using ErpSystem.Api.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The consultant-client contact's own portal surface — dashboard and timesheet
+/// confirm/reject — for invited accounts on the main JWT scheme (ConsultantClient role).
+/// Replaced the PortalBearer-scheme controller 2026-08-31.
+/// </summary>
+/// <remarks>
+/// Two fences sit in front of every action here: the <c>ConsultantClientOnly</c> policy (only
+/// the ConsultantClient role gets in) and <c>ConsultantClientAccessMiddleware</c> (the same
+/// tokens get NOTHING outside the client-portal allowlist). Ownership inside is by
+/// <c>ConsultantClientContact.UserId</c> — every lookup scopes through the caller's own active
+/// contact rows, so a guessed timesheet id is a refusal, not a disclosure. Password changes
+/// live on the shared <c>api/auth</c> surface now; the bespoke change-password action retired
+/// with the scheme.
+/// </remarks>
 [ApiController]
 [Route("api/client-portal")]
-[Authorize(Policy = "ConsultantClientPortal", AuthenticationSchemes = PortalAuth.Scheme)]
+[Authorize(Policy = "ConsultantClientOnly")]
 public class ConsultantClientPortalController : ControllerBase
 {
     private readonly IConsultantClientPortalService _portalService;
-    private readonly IConsultantClientPortalAuthService _authService;
+    private readonly ICurrentUserService _currentUser;
 
     public ConsultantClientPortalController(
         IConsultantClientPortalService portalService,
-        IConsultantClientPortalAuthService authService)
+        ICurrentUserService currentUser)
     {
         _portalService = portalService;
-        _authService = authService;
+        _currentUser = currentUser;
     }
 
     [HttpGet("dashboard")]
     [ProducesResponseType(typeof(ConsultantClientPortalDashboardDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<ConsultantClientPortalDashboardDto>> GetDashboard(CancellationToken ct)
     {
-        var result = await _portalService.GetDashboardAsync(GetAccountId(), GetTenantId(), ct);
+        var result = await _portalService.GetDashboardAsync(GetUserId(), GetTenantId(), ct);
         return Ok(result);
     }
 
@@ -39,7 +52,7 @@ public class ConsultantClientPortalController : ControllerBase
     {
         try
         {
-            var result = await _portalService.GetTimesheetAsync(GetAccountId(), id, GetTenantId(), ct);
+            var result = await _portalService.GetTimesheetAsync(GetUserId(), id, GetTenantId(), ct);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -61,13 +74,12 @@ public class ConsultantClientPortalController : ControllerBase
     {
         try
         {
-            var result = await _portalService.ConfirmTimesheetAsync(
-                GetAccountId(),
-                id,
-                dto,
-                GetTenantId(),
-                ct);
+            var result = await _portalService.ConfirmTimesheetAsync(GetUserId(), id, dto, GetTenantId(), ct);
             return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -91,13 +103,12 @@ public class ConsultantClientPortalController : ControllerBase
 
         try
         {
-            var result = await _portalService.RejectTimesheetAsync(
-                GetAccountId(),
-                id,
-                dto,
-                GetTenantId(),
-                ct);
+            var result = await _portalService.RejectTimesheetAsync(GetUserId(), id, dto, GetTenantId(), ct);
             return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -109,40 +120,14 @@ public class ConsultantClientPortalController : ControllerBase
         }
     }
 
-    [HttpPost("profile/change-password")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> ChangePassword(
-        [FromBody] ConsultantClientPortalChangePasswordDto dto,
-        CancellationToken ct)
+    private Guid GetUserId()
     {
-        if (!ModelState.IsValid)
-            return BadRequest(ModelState);
-
-        try
-        {
-            await _authService.ChangePasswordAsync(GetAccountId(), dto, GetTenantId(), ct);
-            return NoContent();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        var id = _currentUser.UserId;
+        if (id == null || !Guid.TryParse(id, out var userId))
+            throw new UnauthorizedAccessException("Invalid token.");
+        return userId;
     }
 
-    private Guid GetAccountId()
-    {
-        var id = User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? User.FindFirstValue("sub");
-        if (id == null || !Guid.TryParse(id, out var accountId))
-            throw new UnauthorizedAccessException("Invalid portal token.");
-        return accountId;
-    }
-
-    private Guid GetTenantId()
-    {
-        var tenant = User.FindFirstValue("tenant_id");
-        if (tenant == null || !Guid.TryParse(tenant, out var tenantId))
-            throw new UnauthorizedAccessException("Invalid portal token.");
-        return tenantId;
-    }
+    private Guid GetTenantId() =>
+        _currentUser.TenantId ?? throw new UnauthorizedAccessException("Tenant context could not be resolved.");
 }

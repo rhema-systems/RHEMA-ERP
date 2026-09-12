@@ -286,6 +286,32 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
     display: none !important;
   }
 
+  /* HR letters. Same visibility trick as the payslip, but the letter is
+     NOT pinned to a fixed A4 box: a payslip is one page by construction, whereas a letter is
+     flowing prose that may legitimately run onto a second page — clipping it would cut the
+     signature off the bottom of a document somebody is about to hand to a bank. */
+  body.printing-hr-letter > * {
+    visibility: hidden;
+  }
+
+  body.printing-hr-letter .hr-letter-print-root,
+  body.printing-hr-letter .hr-letter-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-hr-letter .hr-letter-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none;
+    border: none;
+  }
+
+  body.printing-hr-letter .hr-letter-no-print {
+    display: none !important;
+  }
+
   body.printing-finance-po > * {
     visibility: hidden;
   }
@@ -327,6 +353,41 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
   }
 
   body.printing-finance-grv .finance-grv-print-root {
+    position: absolute;
+    inset: 0;
+    display: block !important;
+    box-sizing: border-box;
+    width: 210mm;
+    min-height: 297mm;
+    max-width: none;
+    padding: 12mm !important;
+    overflow: visible;
+    background: white !important;
+    color: black !important;
+  }
+
+  /*
+   * The company-asset register report.
+   *
+   * Same shape as the two above, and for the same reason: a Tailwind `print:hidden` on the page's
+   * own header hides the header and nothing else, so the sidebar and the top bar still land on the
+   * paper. Hiding everything and re-showing one root is the only version that actually prints a
+   * document rather than a screenshot of the application.
+   */
+  body.printing-hr-asset-report > * {
+    visibility: hidden;
+  }
+
+  body.printing-hr-asset-report .hr-asset-report-print-root,
+  body.printing-hr-asset-report .hr-asset-report-print-root * {
+    visibility: visible;
+  }
+
+  body.printing-hr-asset-report .hr-asset-report-no-print {
+    display: none !important;
+  }
+
+  body.printing-hr-asset-report .hr-asset-report-print-root {
     position: absolute;
     inset: 0;
     display: block !important;

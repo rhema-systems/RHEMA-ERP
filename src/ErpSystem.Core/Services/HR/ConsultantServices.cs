@@ -1263,11 +1263,41 @@ public class ConsultantTimesheetService : IConsultantTimesheetService
         return entities.FirstOrDefault(c => c.TenantId == tenantId)?.ToDto();
     }
 
+    /// <remarks>
+    /// ⚠ <b>This counted LIVE rows against an index that counts deleted ones.</b>
+    /// <c>IX_ConsultantTimesheets_TenantId_TimesheetNumber</c> is unique with no <c>IsDeleted</c> filter while the delete is a soft delete,
+    /// so removing one row dropped the count and the next create re-issued a number the removed
+    /// row still holds — and every later create in that tenant failed with the generic handler's
+    /// 500, naming neither the column nor the constraint.
+    ///
+    /// <para>Reads the highest number ever issued, deleted rows included, rather than counting: a
+    /// count is also wrong the moment the sequence has a gap, and the maximum is the only value
+    /// the unique index cares about. Same shape and same fix as the overtime, letter-request, SHE,
+    /// movement, grievance, disciplinary, profile-change and travel-request generators.</para>
+    ///
+    /// <para><c>GetQueryableIncludingDeleted</c>, not <c>GetQueryable().IgnoreQueryFilters()</c> —
+    /// a repository that applies its soft-delete filter as a plain <c>Where</c> is not affected by
+    /// <c>IgnoreQueryFilters</c>.</para>
+    ///
+    /// <para>⚠ Still not atomic under concurrent creates. <c>INumberSequenceService</c> is the
+    /// platform mechanism for that; moving these onto it needs each sequence seeded from the
+    /// table's current maximum so it keeps issuing after the numbers already in the wild.</para>
+    /// </remarks>
     private async Task<string> GenerateTimesheetNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable()
-            .CountAsync(t => t.TenantId == tenantId, ct);
-        return $"TS-{DateTime.UtcNow:yyyyMM}-{(count + 1):D5}";
+        var prefix = $"TS-{DateTime.UtcNow:yyyyMM}-";
+
+        var issued = await _repository
+            .GetQueryableIncludingDeleted(t => t.TenantId == tenantId && t.TimesheetNumber.StartsWith(prefix))
+            .Select(t => t.TimesheetNumber)
+            .ToListAsync(ct);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D5}";
     }
 
     private async Task<bool> SendTimesheetConfirmationEmailAsync(
@@ -1769,11 +1799,41 @@ public class TimesheetInvoiceService : ITimesheetInvoiceService
         return true;
     }
 
+    /// <remarks>
+    /// ⚠ <b>This counted LIVE rows against an index that counts deleted ones.</b>
+    /// <c>IX_TimesheetInvoices_TenantId_InvoiceNumber</c> is unique with no <c>IsDeleted</c> filter while the delete is a soft delete,
+    /// so removing one row dropped the count and the next create re-issued a number the removed
+    /// row still holds — and every later create in that tenant failed with the generic handler's
+    /// 500, naming neither the column nor the constraint.
+    ///
+    /// <para>Reads the highest number ever issued, deleted rows included, rather than counting: a
+    /// count is also wrong the moment the sequence has a gap, and the maximum is the only value
+    /// the unique index cares about. Same shape and same fix as the overtime, letter-request, SHE,
+    /// movement, grievance, disciplinary, profile-change and travel-request generators.</para>
+    ///
+    /// <para><c>GetQueryableIncludingDeleted</c>, not <c>GetQueryable().IgnoreQueryFilters()</c> —
+    /// a repository that applies its soft-delete filter as a plain <c>Where</c> is not affected by
+    /// <c>IgnoreQueryFilters</c>.</para>
+    ///
+    /// <para>⚠ Still not atomic under concurrent creates. <c>INumberSequenceService</c> is the
+    /// platform mechanism for that; moving these onto it needs each sequence seeded from the
+    /// table's current maximum so it keeps issuing after the numbers already in the wild.</para>
+    /// </remarks>
     private async Task<string> GenerateInvoiceNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable()
-            .CountAsync(i => i.TenantId == tenantId, ct);
-        return $"INV-{DateTime.UtcNow:yyyyMM}-{(count + 1):D5}";
+        var prefix = $"INV-{DateTime.UtcNow:yyyyMM}-";
+
+        var issued = await _repository
+            .GetQueryableIncludingDeleted(i => i.TenantId == tenantId && i.InvoiceNumber.StartsWith(prefix))
+            .Select(i => i.InvoiceNumber)
+            .ToListAsync(ct);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D5}";
     }
 }
 

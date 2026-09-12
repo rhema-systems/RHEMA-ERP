@@ -273,6 +273,22 @@ public class JobVacancyAttachment : TenantEntity
 
     [ForeignKey(nameof(UploadedById))]
     public virtual Employee UploadedBy { get; set; } = null!;
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    /// <remarks>
+    /// Null on rows written before vacancy attachments moved onto the controlled-upload gate, where
+    /// <see cref="FilePath"/> arrived from the caller's payload and no file was ever stored. The
+    /// download endpoint falls back to the path for those.
+    /// </remarks>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 }
 
 public class JobVacancyStatusHistory : TenantEntity
@@ -412,6 +428,22 @@ public class JobPostingAttachment : TenantEntity
 
     [ForeignKey(nameof(UploadedById))]
     public virtual Employee UploadedBy { get; set; } = null!;
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    /// <remarks>
+    /// Null on rows written before posting attachments moved onto the controlled-upload gate, where
+    /// <see cref="FilePath"/> arrived from the caller's payload and no file was ever stored. The
+    /// download endpoint falls back to the path for those.
+    /// </remarks>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 }
 
 // =============================================================================
@@ -668,46 +700,9 @@ public class JobShortlistingCriteria : TenantEntity
 // SECTION 4 — CANDIDATE PROFILE
 // =============================================================================
 
-/// <summary>
-/// External candidate portal login account.
-/// Separate from ASP.NET Identity — lightweight auth purely for the career portal.
-/// Linked to a <see cref="JobCandidate"/> profile once the candidate completes their profile.
-/// </summary>
-public class CandidatePortalAccount : TenantEntity
-{
-    [Required, MaxLength(200), EmailAddress]
-    public string Email { get; set; } = string.Empty;
-
-    [Required]
-    public string PasswordHash { get; set; } = string.Empty;
-
-    public bool IsEmailVerified { get; set; }
-
-    [MaxLength(512)]
-    public string? EmailVerificationToken { get; set; }
-    public DateTime? EmailVerificationExpiry { get; set; }
-
-    [MaxLength(512)]
-    public string? PasswordResetToken { get; set; }
-    public DateTime? PasswordResetExpiry { get; set; }
-
-    public DateTime? LastLoginAt { get; set; }
-    public int FailedLoginAttempts { get; set; }
-    public DateTime? LockedOutUntil { get; set; }
-
-    /// <summary>
-    /// When the last verification email was dispatched. Backs the resend cooldown —
-    /// without it, a resend endpoint is a mailbox-bombing tool aimed at a third party.
-    /// </summary>
-    public DateTime? LastVerificationEmailSentAtUtc { get; set; }
-
-    public bool IsActive { get; set; } = true;
-
-    /// <summary>Linked candidate profile — null until the candidate completes their profile.</summary>
-    public Guid? JobCandidateId { get; set; }
-    [ForeignKey(nameof(JobCandidateId))]
-    public virtual JobCandidate? JobCandidate { get; set; }
-}
+// CandidatePortalAccount was deleted 2026-08-30 with the candidate portal's own auth surface —
+// candidates now self-register on the main JWT scheme (Candidate role) and their profile is
+// linked through JobCandidate.UserId below. The table had zero rows when dropped.
 
 /// <summary>
 /// General candidate record (separate from specific applications for talent pool)
@@ -753,11 +748,39 @@ public class JobCandidate : TenantEntity
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
 
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// The candidate's country. <b>Optional</b> — an external applicant supplies it on the public
+    /// form, where it stays required, but an <i>internal</i> candidate is a shadow record minted
+    /// from an employee who may well have no country on file.
+    /// </summary>
+    /// <remarks>
+    /// This was a required FK, and it made the internal job board unusable (area 25 slice 13b).
+    /// Both <c>InternalApplyAsync</c> and <c>InternalSaveDraftAsync</c> had to refuse an employee
+    /// with no country to avoid writing <c>Guid.Empty</c> and taking an FK 547 — measured on
+    /// DEFAULT 2026-08-27, that was <b>8,072 of 8,077</b> live employees, and the refusal told
+    /// them to "complete the employee record first", which is a field only HR can change
+    /// (<c>EmployeeProfileField.CountryId</c>, slice 12a). A country is a requirement the foreign
+    /// key invented, not one the business asked for, so the key gives way.
+    /// </remarks>
+    public Guid? CountryId { get; set; }
 
     [ForeignKey(nameof(CountryId))]
-    public virtual Country Country { get; set; } = null!;
-	
+    public virtual Country? Country { get; set; }
+
+    /// <summary>
+    /// The self-registered careers account this candidate belongs to — a main-scheme Identity
+    /// user in the Candidate role (2026-08-30, replacing the retired portal's
+    /// <c>CandidatePortalAccount.JobCandidateId</c> link, which pointed the other way).
+    /// Null for candidates HR created or the anonymous public flow minted, and until a
+    /// registered candidate completes their profile. ⚠ Adopting an EXISTING candidate row into
+    /// a new account requires the account's email to be confirmed first — the link hands over
+    /// the candidate's application history, and a phone OTP does not prove the mailbox.
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    [ForeignKey(nameof(UserId))]
+    public virtual ApplicationUser? User { get; set; }
+
     /// <summary>
     /// Whether this candidate is in the active talent pool for future vacancies.
     /// </summary>
@@ -2500,9 +2523,29 @@ public class PreEmploymentCheckItem : TenantEntity
 
     [MaxLength(2000)]
     public string? Remarks { get; set; }
- 
+
+    /// <summary>
+    /// ⚠ Legacy. A caller-supplied server path, settable straight from the request payload — the
+    /// same shape the recruitment and appraisal attachments were moved off. Retained only so
+    /// documents stored before the change still resolve; nothing writes it any more. The evidence
+    /// for a check now arrives through the controlled-upload gate and lands in the three columns
+    /// below.
+    /// </summary>
     [MaxLength(500)]
     public string? DocumentPath { get; set; }
+
+    /// <summary>Upload-record id from the controlled-upload gate (virus scan + storage).</summary>
+    public Guid? DocumentFileUploadRecordId { get; set; }
+
+    /// <summary>Central DMS document record, when the gate registered one.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central DMS version, when the gate registered one.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>Original file name, kept so a download can be served with a sensible name.</summary>
+    [MaxLength(255)]
+    public string? DocumentFileName { get; set; }
 
     /// <summary>Expected number of calendar days to complete this check.</summary>
     public int? ExpectedDays { get; set; }
@@ -2638,9 +2681,26 @@ public class ReferenceCheckResponse : TenantEntity
     public bool? ConfirmedPositionHeld { get; set; }
  
     public bool? ConfirmedReasonForLeaving { get; set; }
- 
+
+    /// <summary>
+    /// ⚠ Legacy caller-supplied path — see the note on <see cref="PreEmploymentCheckItem.DocumentPath"/>.
+    /// A written reference returned by a referee now goes through the controlled-upload gate.
+    /// </summary>
     [MaxLength(500)]
     public string? DocumentPath { get; set; }
+
+    /// <summary>Upload-record id from the controlled-upload gate (virus scan + storage).</summary>
+    public Guid? DocumentFileUploadRecordId { get; set; }
+
+    /// <summary>Central DMS document record, when the gate registered one.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central DMS version, when the gate registered one.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>Original file name, kept so a download can be served with a sensible name.</summary>
+    [MaxLength(255)]
+    public string? DocumentFileName { get; set; }
 }
  
 // =============================================================================

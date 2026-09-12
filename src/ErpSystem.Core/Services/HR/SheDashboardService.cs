@@ -1,4 +1,5 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 
@@ -17,6 +18,9 @@ public class SheDashboardService : ISheDashboardService
     private readonly IShePermitToWorkService _permits;
     private readonly ISafetyEquipmentService _equipment;
     private readonly IPpeManagementService _ppe;
+    private readonly ISheEnvironmentalService _environmental;
+    private readonly ISheEnvironmentalPermitService _environmentalPermits;
+    private readonly ISheEnvironmentalGovernanceService _environmentalGovernance;
     private readonly ICurrentUserProvider _currentUserProvider;
 
     public SheDashboardService(
@@ -27,6 +31,9 @@ public class SheDashboardService : ISheDashboardService
         IShePermitToWorkService permits,
         ISafetyEquipmentService equipment,
         IPpeManagementService ppe,
+        ISheEnvironmentalService environmental,
+        ISheEnvironmentalPermitService environmentalPermits,
+        ISheEnvironmentalGovernanceService environmentalGovernance,
         ICurrentUserProvider currentUserProvider)
     {
         _incidents = incidents;
@@ -36,6 +43,9 @@ public class SheDashboardService : ISheDashboardService
         _permits = permits;
         _equipment = equipment;
         _ppe = ppe;
+        _environmental = environmental;
+        _environmentalPermits = environmentalPermits;
+        _environmentalGovernance = environmentalGovernance;
         _currentUserProvider = currentUserProvider;
     }
 
@@ -92,6 +102,15 @@ public class SheDashboardService : ISheDashboardService
             EquipmentExpiringCertification = (await _equipment.GetExpiringCertificationAsync(30, cancellationToken)).Count(),
             EquipmentOutOfService = (await _equipment.GetOutOfServiceAsync(cancellationToken)).Count(),
             PpeBelowReorder = (await _ppe.GetBelowReorderLevelAsync(cancellationToken)).Count(),
+
+            // Environment (slice 17 — FR-ENV-019 red status + FR-ENV-029 sustainability presence)
+            ExpiredEnvironmentalPermits = await _environmentalPermits.CountExpiredAsync(cancellationToken),
+            EnvironmentalPermitsExpiringSoon = await _environmentalPermits.CountExpiringAsync(90, cancellationToken),
+            OpenEnvironmentalIncidents = (await _environmental.GetOpenIncidentsAsync(cancellationToken)).Count(),
+            MonitoringSchedulesDue = (await _environmentalGovernance.GetSchedulesAsync(activeOnly: true, dueInDays: 30, cancellationToken: cancellationToken)).Count(),
+            RegulatoryUpdatesOpen = (await _environmentalGovernance.GetRegulatoryUpdatesAsync(cancellationToken: cancellationToken))
+                .Count(u => u.Status != SheRegulatoryUpdateStatus.Closed),
+            SustainabilityInitiativesActive = (await _environmentalGovernance.GetSustainabilityKpisAsync(cancellationToken: cancellationToken)).ActiveInitiatives,
         };
     }
 }

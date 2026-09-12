@@ -594,10 +594,25 @@ public class StaffOvertimeRequestService : IStaffOvertimeRequestService
         return true;
     }
 
+    /// <summary>
+    /// Next request number for today. Derived from the day's actual maximum over ALL rows —
+    /// soft-deleted ones included (<c>IgnoreQueryFilters</c>) — because a withdrawn request keeps
+    /// its number in the unique index, and the previous row-count scheme regenerated it and
+    /// 500'd the tenant's next request (found by the W3 slice-11 create-then-withdraw probe).
+    /// </summary>
     private async Task<string> GenerateRequestNumberAsync(Guid tenantId, CancellationToken ct)
     {
-        var count = await _repository.GetQueryable().CountAsync(r => r.TenantId == tenantId, ct);
-        return $"OT-{DateTime.UtcNow:yyyyMMdd}-{(count + 1):D5}";
+        // GetQueryableIncludingDeleted, not GetQueryable().IgnoreQueryFilters(): the repository
+        // applies its soft-delete filter as a plain Where, which IgnoreQueryFilters cannot remove.
+        var prefix = $"OT-{DateTime.UtcNow:yyyyMMdd}-";
+        var numbers = await _repository
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId && r.RequestNumber.StartsWith(prefix))
+            .Select(r => r.RequestNumber)
+            .ToListAsync(ct);
+        var max = 0;
+        foreach (var number in numbers)
+            if (int.TryParse(number.AsSpan(prefix.Length), out var value) && value > max) max = value;
+        return $"{prefix}{max + 1:D5}";
     }
 }
 

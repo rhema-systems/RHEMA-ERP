@@ -1,9 +1,11 @@
 import { apiService } from '../api.service';
 import type { PagedResult } from '@/types/hr/common';
 import type {
+  ChangeUnitHeadRequest,
   OrganizationUnit,
   OrganizationUnitSummary,
   CreateOrganizationUnitRequest,
+  MoveUnitRequest,
   UpdateOrganizationUnitRequest,
 } from '@/types/hr/organization';
 
@@ -49,6 +51,27 @@ class OrganizationUnitService {
 
   remove(id: string): Promise<boolean> {
     return apiService.delete<boolean>(`${this.baseUrl}/${id}`);
+  }
+
+  /**
+   * Reparents a unit and records the move on the change log. Answers a bare `true`.
+   *
+   * ⚠ Idempotent by design: moving a unit to the parent it already has returns true and records
+   * NOTHING. Nine "moved from A to A" rows sit on the live log from before that guard existed, and
+   * a change log has no delete, so they are there for good.
+   */
+  move(unitId: string, data: MoveUnitRequest): Promise<boolean> {
+    return apiService.post<boolean>(`${this.baseUrl}/${unitId}/move`, data);
+  }
+
+  /**
+   * Appoints or replaces the unit's head and records it on the change log. Answers a bare `true`.
+   *
+   * ⚠ The server refuses to clear the head of a level that requires one, and reappointing the
+   * sitting head is a no-op that records nothing — the same guard as {@link move}.
+   */
+  changeHead(unitId: string, data: ChangeUnitHeadRequest): Promise<boolean> {
+    return apiService.post<boolean>(`${this.baseUrl}/${unitId}/change-head`, data);
   }
 }
 

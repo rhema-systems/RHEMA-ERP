@@ -3,9 +3,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RequisitionDialog } from './RequisitionDialog';
 import { inventoryRequisitionService as service } from '@/services/inventoryRequisitionService';
+import { workflowApiService } from '@/services/workflow-api.service';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock('@/services/workflow-api.service', () => ({
+  workflowApiService: { getWorkflowEntitySummary: vi.fn() },
+}));
 vi.mock('@/components/workflow/WorkflowApprovalActions', () => ({ WorkflowApprovalActions: () => null }));
 vi.mock('@/components/workflow/WorkflowApprovalHistoryPanel', () => ({
   WorkflowApprovalHistoryPanel: () => <div>No workflow history found for this record.</div>,
@@ -24,6 +28,11 @@ vi.mock('@/services/inventoryManagementService', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(workflowApiService.getWorkflowEntitySummary).mockResolvedValue({
+    entityType: 'InventoryRequisition', entityId: 'req-1', approvalRequired: true,
+    hasActiveInstance: false, hasWorkflowHistory: false,
+    canCurrentUserApprove: false, pendingApprovers: [],
+  });
   vi.mocked(service.getDepartments).mockResolvedValue([]);
   vi.mocked(service.getById).mockResolvedValue({
     id: 'req-1', requisitionNumber: 'REQ-TEST', status: 1, requisitionType: 1,
@@ -116,6 +125,22 @@ describe('requisition dialog tab layout', () => {
     expect(screen.getByRole('tabpanel')).toContainElement(screen.getByRole('combobox', { name: 'Inventory item' }));
     expectFixedFrame();
     expect(screen.getByRole('button', { name: 'Save' })).toBeVisible();
+  });
+
+  it.each(['edit', 'view'] as const)('hides inactive workflow in %s mode without changing the fixed frame', async mode => {
+    vi.mocked(workflowApiService.getWorkflowEntitySummary).mockResolvedValue({
+      entityType: 'InventoryRequisition', entityId: 'req-1', approvalRequired: false,
+      hasActiveInstance: false, hasWorkflowHistory: false,
+      canCurrentUserApprove: false, pendingApprovers: [],
+    });
+    open(mode);
+    await waitFor(() => expect(workflowApiService.getWorkflowEntitySummary).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('tab', { name: 'Workflow' })).not.toBeInTheDocument());
+    expectFixedFrame();
+    selectTab('Items (0)');
+    expectFixedFrame();
+    expect(service.update).not.toHaveBeenCalled();
+    expect(service.submit).not.toHaveBeenCalled();
   });
 
   it('uses the same bounded height for the two-tab new requisition dialog', async () => {

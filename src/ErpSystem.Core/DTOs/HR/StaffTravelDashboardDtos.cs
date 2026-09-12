@@ -36,6 +36,13 @@ public class StaffTravelDashboardDto
     public List<StaffTravelTypeCountDto> ByTravelType { get; set; } = new();
     public List<StaffTravelMonthlyCountDto> MonthlyTrend { get; set; } = new();
 
+    /// <summary>
+    /// Cost split by the currency each trip was costed in. ⚠ The two scalar totals above add
+    /// currencies together and are only meaningful when a tenant travels in one — see
+    /// <see cref="StaffTravelCurrencyTotalDto"/>.
+    /// </summary>
+    public List<StaffTravelCurrencyTotalDto> CostByCurrency { get; set; } = new();
+
     // Spotlights
     public List<StaffTravelRequestSummaryDto> PendingApprovals { get; set; } = new();
     public List<StaffTravelRequestSummaryDto> UpcomingTrips { get; set; } = new();
@@ -62,4 +69,27 @@ public class StaffTravelMonthlyCountDto
     public int Month { get; set; }
     public string Label { get; set; } = string.Empty;
     public int Count { get; set; }
+}
+
+/// <summary>
+/// Travel cost for one currency, on the dashboard.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>This exists because the scalar totals beside it add currencies together.</b>
+/// <c>TotalEstimatedCost</c> and <c>TotalApprovedBudget</c> sum <c>EstimatedTotalCost</c> across
+/// every request regardless of the currency each was costed in, so 5,000 GHS and 5,000 USD become
+/// "10,000" of nothing. On a headline figure that is worse than showing no number at all.
+///
+/// <para>The totals are <b>not</b> converted to a base currency here, deliberately. Travel does not
+/// invent a rate (slice 6), Finance's conversion is currently inverted
+/// (<c>docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c> §2), and a converted headline would be
+/// confidently wrong rather than visibly incomplete. A screen should show the single figure when a
+/// tenant travels in one currency and this breakdown when it does not.</para>
+/// </remarks>
+public class StaffTravelCurrencyTotalDto
+{
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal EstimatedTotal { get; set; }
+    public decimal ApprovedBudget { get; set; }
+    public int RequestCount { get; set; }
 }

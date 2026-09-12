@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -11,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/reason-codes")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ReasonCodesController : ControllerBase
 {
     private readonly IReasonCodeService _service;
@@ -39,6 +40,7 @@ public class ReasonCodesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(ReasonCodeDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ReasonCodeDto>> Create([FromBody] CreateReasonCodeDto dto)
@@ -52,6 +54,7 @@ public class ReasonCodesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(ReasonCodeDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -66,6 +69,7 @@ public class ReasonCodesController : ControllerBase
     }
 
     [HttpPatch("{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Deactivate(Guid id)

@@ -87,9 +87,9 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.PreAuthorizationId = id;
-        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId) is { } error) return error;
+        if (TryGetEmployeeWriteContext(out _, out var approverUserId, out var employeeId) is { } error) return error;
         dto.ApprovedBy = employeeId; // internal approver derived from the authenticated employee, not the client
-        await _service.ApprovePreAuthorizationAsync(dto, ct);
+        await _service.ApprovePreAuthorizationAsync(dto, approverUserId, ct);
         return Ok(new { message = "Pre-authorization approved." });
     }
 
@@ -101,7 +101,8 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.PreAuthorizationId = id;
-        await _service.RejectPreAuthorizationAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.RejectPreAuthorizationAsync(dto, userId, ct);
         return Ok(new { message = "Pre-authorization rejected." });
     }
 
@@ -174,7 +175,8 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ReferralId = id;
-        await _service.UpdateReferralStatusAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.UpdateReferralStatusAsync(dto, userId, ct);
         return Ok(new { message = "Referral status updated." });
     }
 
@@ -186,7 +188,8 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.ReferralId = id;
-        await _service.CompleteReferralAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.CompleteReferralAsync(dto, userId, ct);
         return Ok(new { message = "Referral completed." });
     }
 
@@ -263,7 +266,8 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.AppointmentId = id;
-        await _service.UpdateAppointmentStatusAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.UpdateAppointmentStatusAsync(dto, userId, ct);
         return Ok(new { message = "Appointment status updated." });
     }
 
@@ -275,7 +279,8 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.AppointmentId = id;
-        await _service.CancelAppointmentAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.CancelAppointmentAsync(dto, userId, ct);
         return Ok(new { message = "Appointment cancelled." });
     }
 
@@ -287,7 +292,8 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.AppointmentId = id;
-        await _service.CheckInAppointmentAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.CheckInAppointmentAsync(dto, userId, ct);
         return Ok(new { message = "Appointment checked in." });
     }
 
@@ -299,7 +305,8 @@ public class MedicalClinicalController : MedicalControllerBase
         CancellationToken ct)
     {
         dto.AppointmentId = id;
-        await _service.CheckOutAppointmentAsync(dto, ct);
+        if (TryGetWriteContext(out _, out var userId) is { } writeError) return writeError;
+        await _service.CheckOutAppointmentAsync(dto, userId, ct);
         return Ok(new { message = "Appointment checked out." });
     }
 

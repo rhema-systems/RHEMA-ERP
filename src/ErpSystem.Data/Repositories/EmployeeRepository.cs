@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -44,7 +44,13 @@ namespace ErpSystem.Data.Repositories
                 .Include(e => e.Qualifications)
                 .Include(e => e.ContractDetails)
                 .Include(e => e.Skills)
-                    .ThenInclude(es => es.Skill);
+                    .ThenInclude(es => es.Skill)
+                // ⚠ Paired with the skill include on purpose. EmployeeSkillDto reports the catalogued
+                // certifier's name, and an uneven include — the dedicated skills read resolving it
+                // while the employee detail does not — is how the same row shows a body on one screen
+                // and a blank on another.
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.CertifyingBodyRef);
         }
 
         private IQueryable<Employee> WithFullProfileIncludes(IQueryable<Employee> query)
@@ -70,6 +76,8 @@ namespace ErpSystem.Data.Repositories
                     .ThenInclude(q => q.Country)
                 .Include(e => e.Skills)
                     .ThenInclude(es => es.Skill)
+                .Include(e => e.Skills)
+                    .ThenInclude(es => es.CertifyingBodyRef)
 
                 // Documents & history
                 .Include(e => e.IdentificationCards)
@@ -225,17 +233,34 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
+        /// <summary>
+        /// Whether a staff number is taken. <b>Tombstones count as taken.</b>
+        /// </summary>
+        /// <remarks>
+        /// <para>⚠ <c>IX_Employee_Tenant_EmployeeNumber</c> is NOT filtered, so a soft-deleted
+        /// employee's number is still occupied. This check used to exclude them twice over — the
+        /// explicit <c>!IsDeleted</c> predicate and the soft-delete query filter behind it — so a
+        /// caller-supplied number belonging to a leaver passed validation and then died in
+        /// <c>SaveChanges</c> as a 500, with the index name as the only clue.</para>
+        ///
+        /// <para>The same shape as the generator's scan, which was corrected in lane 3d; this is
+        /// the half of it that was left behind, and it is the half the import path relies on,
+        /// because there the number always comes from the caller. Saying "that number belongs to a
+        /// former employee" is a worse answer than nothing only if it is not true.</para>
+        /// </remarks>
         public async Task<bool> EmployeeNumberExistsAsync(string employeeNumber)
         {
-            return await _dbSet.AnyAsync(e => e.EmployeeNumber == employeeNumber && !e.IsDeleted);
+            return await _dbSet
+                .IgnoreQueryFilters()
+                .AnyAsync(e => e.EmployeeNumber == employeeNumber);
         }
 
+        /// <inheritdoc cref="EmployeeNumberExistsAsync(string)"/>
         public async Task<bool> EmployeeNumberExistsAsync(string employeeNumber, Guid excludeEmployeeId)
         {
-            return await _dbSet.AnyAsync(e =>
-                e.EmployeeNumber == employeeNumber &&
-                e.Id != excludeEmployeeId &&
-                !e.IsDeleted);
+            return await _dbSet
+                .IgnoreQueryFilters()
+                .AnyAsync(e => e.EmployeeNumber == employeeNumber && e.Id != excludeEmployeeId);
         }
 
         public async Task<bool> EmailExistsAsync(string email)
@@ -474,12 +499,41 @@ namespace ErpSystem.Data.Repositories
                 .ToListAsync();
         }
 
+        /// <summary>
+        /// The original staff-number generator. <b>Superseded — do not call it for new employees.</b>
+        /// </summary>
+        /// <remarks>
+        /// <para>⚠ <c>IStaffNumberService</c> is the way in now. This method hardcodes one format
+        /// (<c>{year}{sequence:D4}</c>) for every register, which cannot express an organisation that
+        /// numbers permanent staff as bare digits and contract staff with a prefix — and it is a
+        /// max+1 scan, so it is not atomic under concurrent creates.</para>
+        ///
+        /// <para>Kept because it is still reachable through <c>IEmployeeService</c> and removing it is
+        /// a separate change; both callers that mattered (employee create and the recruitment hire
+        /// path) now go through the register's rule instead.</para>
+        /// </remarks>
         public async Task<string> GenerateEmployeeNumberAsync()
         {
             var currentYear = DateTime.UtcNow.Year.ToString();
 
-            // EmployeeNumber is expected to be formatted as YYYY#### (zero-padded), so string Max works.
-            var maxEmployeeNumber = await BaseQuery()
+            // ⚠ Scans EVERY row, tombstones included — deliberately, and NOT through BaseQuery().
+            //
+            // BaseQuery() filters `!IsDeleted`, while IX_Employee_Tenant_EmployeeNumber is NOT
+            // filtered and therefore still holds the numbers of soft-deleted employees. Scanning
+            // only live rows handed the newest deleted employee's number straight back to the next
+            // create, which the index then rejected — as a 500, from SaveChanges, on the most
+            // ordinary path in HR.
+            //
+            // It is deterministic, not a race: delete the most recently created employee and NO
+            // further employee can be created for the rest of the calendar year. Reproduced
+            // 2026-09-01 by a probe that created one employee and deleted it; the next create broke.
+            //
+            // This makes the scan agree with the index. It does not make it atomic — two
+            // simultaneous creates can still pick the same number. The durable fix is
+            // INumberSequenceService, which is atomic per tenant and is lane 3b's work.
+            var maxEmployeeNumber = await _dbSet
+                .AsNoTracking()
+                .IgnoreQueryFilters()
                 .Where(e => e.EmployeeNumber.StartsWith(currentYear))
                 .Select(e => e.EmployeeNumber)
                 .DefaultIfEmpty()

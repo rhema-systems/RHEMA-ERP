@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -13,11 +13,12 @@ using System.Text.Json;
 namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
-/// Candidate self-service portal — profile management and job applications.
+/// Candidate self-service — profile management and job applications for self-registered careers
+/// accounts (main-scheme Identity users in the Candidate role). The caller's candidate is
+/// resolved through <c>JobCandidate.UserId</c>; the retired portal's account table is gone.
 /// </summary>
 public sealed class CandidatePortalService : ICandidatePortalService
 {
-    private readonly IGenericRepository<CandidatePortalAccount> _accountRepo;
     private readonly IJobCandidateRepository _candidateRepo;
     private readonly IGenericRepository<JobCandidateWorkHistory> _workHistoryRepo;
     private readonly IGenericRepository<JobCandidateQualification> _qualificationRepo;
@@ -37,7 +38,6 @@ public sealed class CandidatePortalService : ICandidatePortalService
     private readonly IApplicationPipelineService _pipelineService;
 
     public CandidatePortalService(
-        IGenericRepository<CandidatePortalAccount> accountRepo,
         IJobCandidateRepository candidateRepo,
         IGenericRepository<JobCandidateWorkHistory> workHistoryRepo,
         IGenericRepository<JobCandidateQualification> qualificationRepo,
@@ -56,7 +56,6 @@ public sealed class CandidatePortalService : ICandidatePortalService
         IApplicationSnapshotService snapshotService,
         IApplicationPipelineService pipelineService)
     {
-        _accountRepo      = accountRepo;
         _candidateRepo    = candidateRepo;
         _workHistoryRepo  = workHistoryRepo;
         _qualificationRepo = qualificationRepo;
@@ -88,13 +87,17 @@ public sealed class CandidatePortalService : ICandidatePortalService
         return tenantId;
     }
 
-    private async Task<CandidatePortalAccount> GetOwnedAccountAsync(Guid accountId, Guid tenantId)
+    /// <summary>The caller's own candidate profile, or null when they have not completed one.</summary>
+    private async Task<JobCandidate?> FindOwnCandidateAsync(Guid userId, Guid tenantId)
     {
-        var account = await _accountRepo.FirstOrDefaultAsync(
-            a => a.Id == accountId && a.TenantId == tenantId);
-        if (account == null)
-            throw new InvalidOperationException("Account not found.");
-        return account;
+        return await _candidateRepo.FirstOrDefaultAsync(
+            c => c.UserId == userId && c.TenantId == tenantId);
+    }
+
+    private async Task<JobCandidate> RequireOwnCandidateAsync(Guid userId, Guid tenantId, string act)
+    {
+        return await FindOwnCandidateAsync(userId, tenantId)
+            ?? throw new InvalidOperationException($"Please complete your candidate profile before {act}.");
     }
 
     private async Task<JobApplication> GetOwnedApplicationAsync(
@@ -119,22 +122,22 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
     // ── Get Profile ────────────────────────────────────────────────────────────
     public async Task<CandidatePortalProfileDto> GetProfileAsync(
-        Guid accountId, Guid tenantId, CancellationToken ct = default)
+        CandidateAccountContext account, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
 
         var dto = new CandidatePortalProfileDto
         {
-            AccountId       = account.Id,
-            CandidateId     = account.JobCandidateId,
+            AccountId       = account.UserId,
             Email           = account.Email,
-            IsEmailVerified = account.IsEmailVerified,
+            IsEmailVerified = account.EmailConfirmed,
         };
 
-        if (account.JobCandidateId.HasValue)
+        var own = await FindOwnCandidateAsync(account.UserId, tenantId);
+        if (own != null)
         {
-            var candidate = await _candidateRepo.GetWithFullDetailsAsync(account.JobCandidateId.Value);
+            dto.CandidateId = own.Id;
+            var candidate = await _candidateRepo.GetWithFullDetailsAsync(own.Id);
             if (candidate != null && candidate.TenantId == tenantId)
                 PopulateCandidateFields(dto, candidate);
         }
@@ -144,41 +147,55 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
     // ── Save Profile ───────────────────────────────────────────────────────────
     public async Task<CandidatePortalProfileDto> SaveProfileAsync(
-        Guid accountId,
+        CandidateAccountContext account,
         UpdateCandidatePortalProfileDto dto,
         Guid tenantId,
         CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
 
-        JobCandidate candidate;
+        // Loaded without nav props deliberately — EF tracking child collections during the
+        // scalar update would cause duplicate inserts when the collections are patched below.
+        var candidate = await FindOwnCandidateAsync(account.UserId, tenantId);
 
-        if (!account.JobCandidateId.HasValue)
+        if (candidate == null)
         {
-            // Create a new candidate record and link it
-            candidate = new JobCandidate
+            // An unlinked candidate with this email may already exist — HR-created, or minted by
+            // an application before the account did. Adopting it hands over that application
+            // history, so it takes MAILBOX proof, not just a matching string: anyone can type
+            // someone else's address at registration.
+            var byEmail = await _candidateRepo.GetByEmailAsync(account.Email, tenantId);
+            if (byEmail != null)
             {
-                TenantId        = tenantId,
-                CandidateNumber = await _candidateRepo.GetNextCandidateNumberAsync(),
-                Email           = account.Email,
-            };
-            MapDtoToCandidate(dto, candidate);
-            await _candidateRepo.AddAsync(candidate);
-            await _unitOfWork.SaveChangesAsync(ct);
+                if (byEmail.UserId.HasValue && byEmail.UserId.Value != account.UserId)
+                    throw new InvalidOperationException(
+                        "A candidate profile with this email address is already linked to another account.");
+                if (!account.EmailConfirmed)
+                    throw new InvalidOperationException(
+                        "A candidate profile with your email address already exists. Confirm your email address to link it to your account.");
 
-            account.JobCandidateId = candidate.Id;
-            await _accountRepo.UpdateAsync(account);
-            await _unitOfWork.SaveChangesAsync(ct);
+                candidate = byEmail;
+                candidate.UserId = account.UserId;
+                MapDtoToCandidate(dto, candidate);
+                await _candidateRepo.UpdateAsync(candidate);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }
+            else
+            {
+                candidate = new JobCandidate
+                {
+                    TenantId        = tenantId,
+                    CandidateNumber = await _candidateRepo.GetNextCandidateNumberAsync(),
+                    Email           = account.Email,
+                    UserId          = account.UserId,
+                };
+                MapDtoToCandidate(dto, candidate);
+                await _candidateRepo.AddAsync(candidate);
+                await _unitOfWork.SaveChangesAsync(ct);
+            }
         }
         else
         {
-            // Load only the root candidate row — no nav props — to avoid EF tracking
-            // child collections during the scalar update, which would otherwise cause
-            // duplicate inserts when we patch the collections below.
-            candidate = await _candidateRepo.GetByIdAsync(account.JobCandidateId.Value);
-            if (candidate == null || candidate.TenantId != tenantId)
-                throw new InvalidOperationException("Candidate record not found.");
             MapDtoToCandidate(dto, candidate);
             await _candidateRepo.UpdateAsync(candidate);
             await _unitOfWork.SaveChangesAsync(ct);
@@ -402,23 +419,19 @@ public sealed class CandidatePortalService : ICandidatePortalService
         await _unitOfWork.SaveChangesAsync(ct);
 
         _logger.LogInformation(
-            "Portal profile saved for account {AccountId}, candidate {CandidateId}",
-            accountId, candidate.Id);
+            "Candidate profile saved for user {UserId}, candidate {CandidateId}",
+            account.UserId, candidate.Id);
 
         // Return fresh profile
-        return await GetProfileAsync(accountId, tenantId, ct);
+        return await GetProfileAsync(account, tenantId, ct);
     }
 
     // ── Save Draft ──────────────────────────────────────────────────────
     public async Task<CandidatePortalApplicationSummaryDto> SaveDraftAsync(
-        Guid accountId, CandidatePortalSaveDraftDto dto, Guid tenantId, CancellationToken ct = default)
+        Guid userId, CandidatePortalSaveDraftDto dto, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        if (!account.JobCandidateId.HasValue)
-            throw new InvalidOperationException(
-                "Please complete your candidate profile before saving a draft.");
+        var ownCandidate = await RequireOwnCandidateAsync(userId, tenantId, "saving a draft");
 
         var vacancy = await GetTenantVacancyAsync(dto.VacancyId, tenantId);
         if (vacancy.VacancyStatus != JobVacancyStatus.Published)
@@ -426,7 +439,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
         // Check for an existing non-withdrawn application (Draft or otherwise)
         var existing = await _applicationRepo.FirstOrDefaultAsync(
-            a => a.JobCandidateId == account.JobCandidateId.Value
+            a => a.JobCandidateId == ownCandidate.Id
               && a.JobVacancyId   == dto.VacancyId
               && a.TenantId       == tenantId
               && a.Status         != ApplicationStatus.Withdrawn);
@@ -444,8 +457,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
             existing.Source           = dto.Source;
             await _applicationRepo.UpdateAsync(existing);
             await _unitOfWork.SaveChangesAsync(ct);
-            _logger.LogInformation("Draft application {AppNumber} updated by account {AccountId}",
-                existing.ApplicationNumber, accountId);
+            _logger.LogInformation("Draft application {AppNumber} updated by user {UserId}",
+                existing.ApplicationNumber, userId);
             return MapApplicationToSummary(existing, vacancy);
         }
 
@@ -455,7 +468,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             TenantId              = tenantId,
             ApplicationNumber     = await _applicationRepo.GetNextApplicationNumberAsync(),
             JobVacancyId          = dto.VacancyId,
-            JobCandidateId        = account.JobCandidateId.Value,
+            JobCandidateId        = ownCandidate.Id,
             Status                = ApplicationStatus.Draft,
             Source                = dto.Source,
             CoverLetter           = dto.CoverLetter,
@@ -467,38 +480,30 @@ public sealed class CandidatePortalService : ICandidatePortalService
         };
         await _applicationRepo.AddAsync(application);
 
-        if (dto.AddToTalentPool)
+        if (dto.AddToTalentPool && !ownCandidate.IsInTalentPool)
         {
-            var candidate = await _candidateRepo.GetByIdAsync(account.JobCandidateId.Value);
-            if (candidate == null || candidate.TenantId != tenantId)
-                throw new InvalidOperationException("Candidate record not found.");
-            if (!candidate.IsInTalentPool)
-            {
-                candidate.IsInTalentPool      = true;
-                candidate.TalentPoolAddedDate = DateTime.UtcNow;
-                await _candidateRepo.UpdateAsync(candidate);
-            }
+            ownCandidate.IsInTalentPool      = true;
+            ownCandidate.TalentPoolAddedDate = DateTime.UtcNow;
+            await _candidateRepo.UpdateAsync(ownCandidate);
         }
 
         await _unitOfWork.SaveChangesAsync(ct);
-        _logger.LogInformation("Draft application {AppNumber} created by account {AccountId} for vacancy {VacancyId}",
-            application.ApplicationNumber, accountId, dto.VacancyId);
+        _logger.LogInformation("Draft application {AppNumber} created by user {UserId} for vacancy {VacancyId}",
+            application.ApplicationNumber, userId, dto.VacancyId);
         return MapApplicationToSummary(application, vacancy);
     }
 
     // ── Submit Draft ──────────────────────────────────────────────────
     public async Task<CandidatePortalApplicationSummaryDto> SubmitDraftAsync(
-        Guid accountId, Guid applicationId, CandidatePortalSubmitDraftDto dto,
+        CandidateAccountContext account, Guid applicationId, CandidatePortalSubmitDraftDto dto,
         Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        if (!account.JobCandidateId.HasValue)
-            throw new InvalidOperationException("Application not found.");
+        var ownCandidate = await FindOwnCandidateAsync(account.UserId, tenantId)
+            ?? throw new InvalidOperationException("Application not found.");
 
         var application = await GetOwnedApplicationAsync(
-            applicationId, account.JobCandidateId.Value, tenantId);
+            applicationId, ownCandidate.Id, tenantId);
         if (application.Status != ApplicationStatus.Draft)
             throw new InvalidOperationException(
                 $"Only draft applications can be submitted. Current status: {application.Status}.");
@@ -544,8 +549,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         await AdjustVacancyApplicationCountAsync(vacancy.Id, +1, tenantId, ct);
 
         _logger.LogInformation(
-            "Draft application {AppNumber} submitted by account {AccountId} for vacancy {VacancyId}",
-            application.ApplicationNumber, accountId, application.JobVacancyId);
+            "Draft application {AppNumber} submitted by user {UserId} for vacancy {VacancyId}",
+            application.ApplicationNumber, account.UserId, application.JobVacancyId);
 
         // Place the application into the first pipeline stage, if the vacancy has one.
         await _pipelineService.PlaceInFirstPipelineStageAsync(
@@ -615,17 +620,15 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
     // ── Withdraw Application ───────────────────────────────────────────────────
     public async Task WithdrawApplicationAsync(
-        Guid accountId, Guid applicationId, CandidatePortalWithdrawDto dto,
+        Guid userId, Guid applicationId, CandidatePortalWithdrawDto dto,
         Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        if (!account.JobCandidateId.HasValue)
-            throw new InvalidOperationException("Application not found.");
+        var ownCandidate = await FindOwnCandidateAsync(userId, tenantId)
+            ?? throw new InvalidOperationException("Application not found.");
 
         var application = await GetOwnedApplicationAsync(
-            applicationId, account.JobCandidateId.Value, tenantId);
+            applicationId, ownCandidate.Id, tenantId);
 
         if (application.Status is ApplicationStatus.Hired or ApplicationStatus.Withdrawn)
             throw new InvalidOperationException(
@@ -647,17 +650,16 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
     // ── Get Applications ───────────────────────────────────────────────────────
     public async Task<List<CandidatePortalApplicationSummaryDto>> GetApplicationsAsync(
-        Guid accountId, Guid tenantId, CancellationToken ct = default)
+        Guid userId, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        if (!account.JobCandidateId.HasValue)
+        var ownCandidate = await FindOwnCandidateAsync(userId, tenantId);
+        if (ownCandidate == null)
             return new List<CandidatePortalApplicationSummaryDto>();
 
-        var applications = await _applicationRepo.GetByCandidateIdAsync(account.JobCandidateId.Value);
+        var applications = await _applicationRepo.GetByCandidateIdAsync(ownCandidate.Id);
         return applications
-            .Where(a => a.TenantId == tenantId && a.JobCandidateId == account.JobCandidateId.Value)
+            .Where(a => a.TenantId == tenantId && a.JobCandidateId == ownCandidate.Id)
             .OrderByDescending(a => a.ApplicationDate)
             .Select(a => MapApplicationToSummary(a, a.JobVacancy))
             .ToList();
@@ -665,11 +667,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
     // ── Get Dashboard ──────────────────────────────────────────────────────────
     public async Task<CandidatePortalDashboardDto> GetDashboardAsync(
-        Guid accountId, Guid tenantId, CancellationToken ct = default)
+        CandidateAccountContext account, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var profile      = await GetProfileAsync(accountId, tenantId, ct);
-        var applications = await GetApplicationsAsync(accountId, tenantId, ct);
+        var profile      = await GetProfileAsync(account, tenantId, ct);
+        var applications = await GetApplicationsAsync(account.UserId, tenantId, ct);
 
         var active = applications
             .Where(a => a.Status is not ApplicationStatus.Withdrawn and not ApplicationStatus.Rejected)
@@ -690,14 +692,14 @@ public sealed class CandidatePortalService : ICandidatePortalService
     // ── Documents ──────────────────────────────────────────────────────────────
 
     public async Task<List<JobCandidateDocumentDto>> GetDocumentsAsync(
-        Guid accountId, Guid tenantId, CancellationToken ct = default)
+        Guid userId, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
+        var ownCandidate = await FindOwnCandidateAsync(userId, tenantId);
+        if (ownCandidate == null) return new();
 
-        if (!account.JobCandidateId.HasValue) return new();
-
-        var docs = await _documentRepo.FindAsync(d => d.JobCandidateId == account.JobCandidateId.Value && d.TenantId == tenantId);
+        var candidateId = ownCandidate.Id;
+        var docs = await _documentRepo.FindAsync(d => d.JobCandidateId == candidateId && d.TenantId == tenantId);
         return docs.OrderByDescending(d => d.UploadDate).Select(d => new JobCandidateDocumentDto
         {
             Id             = d.Id,
@@ -711,37 +713,34 @@ public sealed class CandidatePortalService : ICandidatePortalService
     }
 
     /// <summary>
-    /// Resolves the candidate profile behind a portal account, so the caller can name it as the
+    /// Resolves the candidate profile behind the account, so the caller can name it as the
     /// source record when registering a document in the central DMS.
     /// </summary>
     public async Task<Guid> RequireCandidateIdAsync(
-        Guid accountId, Guid tenantId, CancellationToken ct = default)
+        Guid userId, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        return account.JobCandidateId
+        var ownCandidate = await FindOwnCandidateAsync(userId, tenantId);
+        return ownCandidate?.Id
             ?? throw new InvalidOperationException(
                 "You must save your profile before uploading documents.");
     }
 
     public async Task<JobCandidateDocumentDto> AddDocumentAsync(
-        Guid accountId, JobCandidateDocumentType documentType, string fileName, string filePath,
+        Guid userId, JobCandidateDocumentType documentType, string fileName, string filePath,
         Guid tenantId, CancellationToken ct = default,
         Guid? fileUploadRecordId = null,
         Guid? documentRecordId = null,
         Guid? documentVersionId = null)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        if (!account.JobCandidateId.HasValue)
-            throw new InvalidOperationException("You must save your profile before uploading documents.");
+        var ownCandidate = await FindOwnCandidateAsync(userId, tenantId)
+            ?? throw new InvalidOperationException("You must save your profile before uploading documents.");
 
         var doc = new JobCandidateDocument
         {
             TenantId       = tenantId,
-            JobCandidateId = account.JobCandidateId.Value,
+            JobCandidateId = ownCandidate.Id,
             DocumentType   = documentType,
             FileName       = fileName,
             FilePath       = filePath,
@@ -767,18 +766,16 @@ public sealed class CandidatePortalService : ICandidatePortalService
     }
 
     public async Task DeleteDocumentAsync(
-        Guid accountId, Guid documentId, Guid tenantId, CancellationToken ct = default)
+        Guid userId, Guid documentId, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        if (!account.JobCandidateId.HasValue)
-            throw new InvalidOperationException("Document not found.");
+        var ownCandidate = await FindOwnCandidateAsync(userId, tenantId)
+            ?? throw new InvalidOperationException("Document not found.");
 
         var doc = await _documentRepo.FirstOrDefaultAsync(
             d => d.Id == documentId
               && d.TenantId == tenantId
-              && d.JobCandidateId == account.JobCandidateId.Value);
+              && d.JobCandidateId == ownCandidate.Id);
         if (doc == null)
             throw new InvalidOperationException("Document not found.");
 
@@ -796,17 +793,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
     /// <c>ProfilePhotoUrl</c> stays null on new rows because there is no public URL to store.
     /// </remarks>
     public async Task UpdateProfilePhotoAsync(
-        Guid accountId, Guid fileUploadRecordId, Guid tenantId, CancellationToken ct = default)
+        Guid userId, Guid fileUploadRecordId, Guid tenantId, CancellationToken ct = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        var account = await GetOwnedAccountAsync(accountId, tenantId);
-
-        if (!account.JobCandidateId.HasValue)
-            throw new InvalidOperationException("You must save your profile before uploading a photo.");
-
-        var candidate = await _candidateRepo.GetByIdAsync(account.JobCandidateId.Value);
-        if (candidate == null || candidate.TenantId != tenantId)
-            throw new InvalidOperationException("Candidate not found.");
+        var candidate = await FindOwnCandidateAsync(userId, tenantId)
+            ?? throw new InvalidOperationException("You must save your profile before uploading a photo.");
 
         candidate.ProfilePhotoFileUploadRecordId = fileUploadRecordId;
         candidate.ProfilePhotoUrl = null;
@@ -847,12 +838,21 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // Compliance
         c.WorkAuthorizationStatus = dto.WorkAuthorizationStatus;
         // Documents
-        c.ProfilePhotoUrl = dto.ProfilePhotoUrl;
+        // ⚠ ProfilePhotoUrl is NOT taken from the payload. It is the legacy public URL, and
+        // UpdateProfilePhotoAsync above deliberately nulls it when a photo is uploaded through the
+        // gate — so accepting it here let an EXTERNAL candidate put an arbitrary 500-character
+        // string back on their own record, and every profile save undid the upload's own cleanup.
+        // The photo is set by uploading it; there is no public URL to store.
         c.IsInTalentPool  = dto.IsInTalentPool;
         if (dto.IsInTalentPool && !c.TalentPoolAddedDate.HasValue)
             c.TalentPoolAddedDate = DateTime.UtcNow;
     }
 
+    // ⚠ Every child mapping below filters IsDeleted even though the repository read already
+    // uses filtered includes: SaveProfileAsync soft-deletes replace-set leavers and then builds
+    // its response in the SAME DbContext, and EF's relationship fixup re-attaches the tracked,
+    // just-deleted children to the navigation regardless of what the SQL returned. Without the
+    // mapper-side filter, a row the save had just removed came straight back on the response.
     private static void PopulateCandidateFields(CandidatePortalProfileDto dto, JobCandidate c)
     {
         dto.CandidateId    = c.Id;
@@ -892,7 +892,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
         dto.ProfilePhotoUrl  = c.ProfilePhotoUrl;
         dto.IsInTalentPool   = c.IsInTalentPool;
 
-        dto.WorkHistories = c.WorkHistories.Select(w => new JobCandidateWorkHistoryDto
+        dto.WorkHistories = c.WorkHistories.Where(w => !w.IsDeleted).Select(w => new JobCandidateWorkHistoryDto
         {
             Id              = w.Id,
             JobCandidateId  = w.JobCandidateId,
@@ -904,7 +904,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             ReasonForLeaving = w.ReasonForLeaving,
         }).ToList();
 
-        dto.Qualifications = c.Qualifications.Select(q => new JobCandidateQualificationDto
+        dto.Qualifications = c.Qualifications.Where(q => !q.IsDeleted).Select(q => new JobCandidateQualificationDto
         {
             Id                    = q.Id,
             JobCandidateId        = q.JobCandidateId,
@@ -915,7 +915,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             Grade                 = q.Grade,
         }).ToList();
 
-        dto.Referees = c.Referees.Select(r => new JobCandidateRefereeDto
+        dto.Referees = c.Referees.Where(r => !r.IsDeleted).Select(r => new JobCandidateRefereeDto
         {
             Id             = r.Id,
             JobCandidateId = r.JobCandidateId,
@@ -928,7 +928,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             YearsKnown     = r.YearsKnown,
         }).ToList();
 
-        dto.Skills = c.Skills.Select(s => new JobCandidateSkillDto
+        dto.Skills = c.Skills.Where(s => !s.IsDeleted).Select(s => new JobCandidateSkillDto
         {
             Id                = s.Id,
             JobCandidateId    = s.JobCandidateId,
@@ -939,7 +939,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
             CertificationName = s.CertificationName,
         }).ToList();
 
-        dto.Languages = c.Languages.Select(l => new JobCandidateLanguageDto
+        dto.Languages = c.Languages.Where(l => !l.IsDeleted).Select(l => new JobCandidateLanguageDto
         {
             Id             = l.Id,
             JobCandidateId = l.JobCandidateId,
@@ -947,14 +947,14 @@ public sealed class CandidatePortalService : ICandidatePortalService
             Proficiency    = l.Proficiency,
         }).ToList();
 
-        dto.Interests = c.Interests.Select(i => new JobCandidateInterestDto
+        dto.Interests = c.Interests.Where(i => !i.IsDeleted).Select(i => new JobCandidateInterestDto
         {
             Id             = i.Id,
             JobCandidateId = i.JobCandidateId,
             Detail         = i.Detail,
         }).ToList();
 
-        dto.Documents = c.Documents.Select(d => new JobCandidateDocumentDto
+        dto.Documents = c.Documents.Where(d => !d.IsDeleted).Select(d => new JobCandidateDocumentDto
         {
             Id             = d.Id,
             TenantId       = d.TenantId,

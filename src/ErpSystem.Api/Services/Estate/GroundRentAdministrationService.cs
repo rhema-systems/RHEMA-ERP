@@ -14,6 +14,7 @@ namespace ErpSystem.Api.Services.Estate;
 public interface IGroundRentAdministrationService
 {
     Task<EstateGroundRentOptionsDto> GetOptionsAsync(CancellationToken cancellationToken);
+    Task<EstateGroundRentAssetOptionDto> AssessAssetAsync(AssessEstateGroundRentDto request, CancellationToken cancellationToken);
     Task<IReadOnlyList<EstateGroundRentAccountDto>> GetAccountsAsync(CancellationToken cancellationToken);
     Task<EstateGroundRentAccountDto> UpsertAccountAsync(UpsertEstateGroundRentAccountDto request, CancellationToken cancellationToken);
     Task<EstateGroundRentActionResultDto> GenerateInvoiceAsync(Guid accountId, GenerateEstateGroundRentInvoiceDto request, CancellationToken cancellationToken);
@@ -70,8 +71,7 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             .Where(item =>
                 item.TenantId == tenantId
                 && !item.IsDeleted
-                && item.AssetType == EstateManagedAssetType.Land
-                && item.CustomerBusinessPartnerId.HasValue)
+                && item.AssetType == EstateManagedAssetType.Land)
             .OrderBy(item => item.AssetCode)
             .ToListAsync(cancellationToken);
 
@@ -128,6 +128,65 @@ public sealed class GroundRentAdministrationService : IGroundRentAdministrationS
             .ToListAsync(cancellationToken);
 
         return new EstateGroundRentOptionsDto(assetOptions, incomeAccounts);
+    }
+
+    public async Task<EstateGroundRentAssetOptionDto> AssessAssetAsync(
+        AssessEstateGroundRentDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request.RatePerAcre <= 0)
+        {
+            throw new InvalidOperationException("Enter an approved rate per acre greater than zero.");
+        }
+
+        var tenantId = TenantId;
+        var asset = await _db.EstateManagedAssets
+            .FirstOrDefaultAsync(item =>
+                item.Id == request.EstateManagedAssetId
+                && item.TenantId == tenantId
+                && !item.IsDeleted,
+                cancellationToken)
+            ?? throw new KeyNotFoundException("The selected land parcel was not found.");
+
+        if (asset.AssetType != EstateManagedAssetType.Land)
+        {
+            throw new InvalidOperationException("Ground rent can only be assessed for a land parcel.");
+        }
+
+        var areaAcres = GetAreaAcres(asset);
+        if (areaAcres is not > 0)
+        {
+            throw new InvalidOperationException("Record the parcel area before assessing ground rent.");
+        }
+
+        asset.GroundRentRatePerAcre = request.RatePerAcre;
+        asset.GroundRentComputed = areaAcres.Value * request.RatePerAcre;
+        asset.GroundRentPayable = decimal.Ceiling(asset.GroundRentComputed.Value);
+        asset.Currency = NormalizeCurrency(request.CurrencyCode);
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+        asset.LastModifiedById = Guid.TryParse(_currentUserService.UserId, out var userId)
+            ? userId
+            : null;
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return new EstateGroundRentAssetOptionDto(
+            asset.Id,
+            asset.AssetCode,
+            asset.Name,
+            asset.Location,
+            areaAcres,
+            asset.CustomerBusinessPartnerId,
+            asset.LesseeName,
+            asset.GroundRentPayable,
+            asset.GroundRentRatePerAcre,
+            NormalizeCurrency(asset.Currency),
+            await _db.EstateGroundRentAccounts.AnyAsync(item =>
+                item.TenantId == tenantId
+                && item.EstateManagedAssetId == asset.Id
+                && !item.IsDeleted,
+                cancellationToken));
     }
 
     public async Task<IReadOnlyList<EstateGroundRentAccountDto>> GetAccountsAsync(CancellationToken cancellationToken)

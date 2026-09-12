@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/shift-definitions")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class ShiftDefinitionsController : AttendanceControllerBase
 {
     private readonly IShiftDefinitionService _service;
@@ -47,6 +48,7 @@ public class ShiftDefinitionsController : AttendanceControllerBase
         => Ok(await _service.GetByTypeAsync(type, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftDefinitionDto>> Create(
         [FromBody] CreateShiftDefinitionDto dto, CancellationToken ct = default)
     {
@@ -58,6 +60,7 @@ public class ShiftDefinitionsController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<ShiftDefinitionDto>> Update(
         Guid id, [FromBody] UpdateShiftDefinitionDto dto, CancellationToken ct = default)
     {
@@ -69,6 +72,7 @@ public class ShiftDefinitionsController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

@@ -19,6 +19,7 @@ public class PeerNominationService : IPeerNominationService
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IGenericRepository<EvaluatorEvaluation> _evaluatorEvaluationRepository;
+    private readonly IAppraisalNotificationService _notifications;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<PeerNominationService> _logger;
@@ -28,6 +29,7 @@ public class PeerNominationService : IPeerNominationService
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<Employee> employeeRepository,
         IGenericRepository<EvaluatorEvaluation> evaluatorEvaluationRepository,
+        IAppraisalNotificationService notifications,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<PeerNominationService> logger)
@@ -36,9 +38,26 @@ public class PeerNominationService : IPeerNominationService
         _appraisalRepository = appraisalRepository;
         _employeeRepository = employeeRepository;
         _evaluatorEvaluationRepository = evaluatorEvaluationRepository;
+        _notifications = notifications;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Raises notifications without letting a notification failure undo the nomination change
+    /// that produced it — the same best-effort contract used elsewhere in the appraisal run.
+    /// </summary>
+    private async Task NotifyQuietlyAsync(IEnumerable<AppraisalNotificationRequest> requests, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _notifications.RaiseAsync(requests, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to raise peer nomination notification(s); the nomination change stands.");
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -439,8 +458,35 @@ public class PeerNominationService : IPeerNominationService
             .Where(n => createdNominations.Select(c => c.Id).Contains(n.Id))
             .ToListAsync(cancellationToken);
 
-        _logger.LogInformation("Batch created {count} peer nominations for appraisal {appraisalId}", 
+        _logger.LogInformation("Batch created {count} peer nominations for appraisal {appraisalId}",
             createdNominations.Count, batchDto.AppraisalId);
+
+        // Nominations sit at Pending until someone approves them, so the approver is told there
+        // is something waiting. Who that is follows the cycle's nomination mode: when the
+        // employee nominates, their manager signs the list off.
+        var appraisee = await _employeeRepository.GetQueryable()
+            .Where(e => e.Id == appraisal.EmployeeId && e.TenantId == tenantId)
+            .Select(e => new { e.FullName, e.ManagerId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var appraiseeName = appraisee?.FullName;
+        var approverId = settings.PeerNominationMode == PeerNominationMode.Employee ? appraisee?.ManagerId : null;
+
+        if (approverId is Guid managerId && managerId != Guid.Empty)
+        {
+            await NotifyQuietlyAsync(new[]
+            {
+                new AppraisalNotificationRequest(
+                    managerId,
+                    AppraisalNotificationType.PeerNominationSubmitted,
+                    $"{createdNominations.Count} peer nomination(s) awaiting your approval",
+                    "Approve or reject the nominated peers to open their feedback forms.",
+                    appraisal.AppraisalCycle?.CycleName,
+                    $"/hr/performance/team-appraisals/{appraisal.Id}",
+                    appraisal.Id,
+                    appraiseeName),
+            }, cancellationToken);
+        }
 
         return reloadedNominations.ToDtoList();
     }
@@ -509,10 +555,31 @@ public class PeerNominationService : IPeerNominationService
             .Where(n => approvalDto.NominationIds.Contains(n.Id))
             .ToListAsync(cancellationToken);
 
-        _logger.LogInformation("Approved {count} peer nominations for appraisal {appraisalId}", 
+        _logger.LogInformation("Approved {count} peer nominations for appraisal {appraisalId}",
             nominations.Count, approvalDto.AppraisalId);
 
-        // TODO: Send email notifications to approved peers
+        // Approval is what creates the peer's EvaluatorEvaluation, so it is the first moment the
+        // peer has anything to do. In AfterSelfEval mode the form is not open yet — the employee
+        // submitting their self-evaluation raises the "now open" notification instead.
+        var appraiseeName = await _employeeRepository.GetQueryable()
+            .Where(e => e.Id == appraisal.EmployeeId && e.TenantId == tenantId)
+            .Select(e => e.FullName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var opensNow = settings.PeerEvaluationOpenMode == PeerEvaluationOpenMode.WithSelfEval;
+        var dueText = approvalDto.DueDate.HasValue ? $" Due {approvalDto.DueDate.Value:d MMM yyyy}." : string.Empty;
+
+        await NotifyQuietlyAsync(nominations.Select(n => new AppraisalNotificationRequest(
+            n.PeerEmployeeId,
+            AppraisalNotificationType.PeerEvaluationAssigned,
+            $"You have been asked to review {appraiseeName ?? "a colleague"}",
+            opensNow
+                ? $"Your peer feedback form is open.{dueText}"
+                : $"Your peer feedback form opens once they submit their self-evaluation.{dueText}",
+            appraisal.AppraisalCycle?.CycleName,
+            "/me/performance/peer-reviews",
+            appraisal.Id,
+            appraiseeName)), cancellationToken);
 
         return reloadedNominations.ToDtoList();
     }
@@ -549,10 +616,34 @@ public class PeerNominationService : IPeerNominationService
             .Where(n => rejectionDto.NominationIds.Contains(n.Id))
             .ToListAsync(cancellationToken);
 
-        _logger.LogInformation("Rejected {count} peer nominations for appraisal {appraisalId} with reason: {reason}", 
+        _logger.LogInformation("Rejected {count} peer nominations for appraisal {appraisalId} with reason: {reason}",
             nominations.Count, rejectionDto.AppraisalId, rejectionDto.RejectionReason);
 
-        // TODO: Send notification to employee about rejection
+        // The appraisee has to know: a rejected nomination may leave them below the cycle's
+        // minimum, and their self-evaluation cannot be submitted until the list is back in range.
+        // They are the one who has to nominate someone else, so silence here would strand them.
+        var appraisal = await _appraisalRepository.GetQueryable()
+            .Where(a => a.Id == rejectionDto.AppraisalId && a.TenantId == tenantId)
+            .Include(a => a.AppraisalCycle)
+            .Include(a => a.Employee)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (appraisal is not null)
+        {
+            await NotifyQuietlyAsync(new[]
+            {
+                new AppraisalNotificationRequest(
+                    appraisal.EmployeeId,
+                    AppraisalNotificationType.ActionRequired,
+                    $"{nominations.Count} of your peer nomination(s) were not approved",
+                    $"Reason: {rejectionDto.RejectionReason}. Nominate a replacement if you are now below the minimum.",
+                    appraisal.AppraisalCycle?.CycleName,
+                    $"/me/performance/appraisals/{appraisal.Id}",
+                    appraisal.Id,
+                    appraisal.Employee?.FullName,
+                    NotificationUrgency.Warning),
+            }, cancellationToken);
+        }
 
         return reloadedNominations.ToDtoList();
     }

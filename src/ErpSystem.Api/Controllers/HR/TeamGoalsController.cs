@@ -21,7 +21,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/performance/team-goals")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class TeamGoalsController : ControllerBase
 {
     private readonly ITeamGoalsQueryService _teamGoalsQueryService;

@@ -59,7 +59,7 @@ public interface IMeetingRoomService
     Task<MeetingRoomDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<MeetingRoomDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<PagedResult<MeetingRoomDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
-    Task<IEnumerable<MeetingRoomSummaryDto>> GetByStationAsync(Guid stationId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<MeetingRoomSummaryDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default);
     Task<IEnumerable<MeetingRoomSummaryDto>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null, CancellationToken cancellationToken = default);
     Task<IEnumerable<MeetingRoomSummaryDto>> GetActiveRoomsAsync(CancellationToken cancellationToken = default);
     Task<MeetingRoomDto> CreateAsync(CreateMeetingRoomDto createDto, CancellationToken cancellationToken = default);
@@ -116,9 +116,9 @@ public interface IBusinessClosureService
     Task<PagedResult<BusinessClosureDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<IEnumerable<BusinessClosureDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
     Task<IEnumerable<BusinessClosureDto>> GetByTypeAsync(ClosureType type, CancellationToken cancellationToken = default);
-    Task<IEnumerable<BusinessClosureDto>> GetByStationAsync(Guid stationId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<BusinessClosureDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default);
     Task<IEnumerable<BusinessClosureDto>> GetUpcomingClosuresAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
-    Task<bool> IsClosureDateAsync(DateTime date, Guid? stationId = null, Guid? departmentId = null, CancellationToken cancellationToken = default);
+    Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? departmentId = null, CancellationToken cancellationToken = default);
     Task<BusinessClosureDto> CreateAsync(CreateBusinessClosureDto createDto, Guid announcedById, CancellationToken cancellationToken = default);
     Task<BusinessClosureDto> UpdateAsync(UpdateBusinessClosureDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);

@@ -82,6 +82,7 @@ public class SheWasteDisposalRecordDto : BaseDto
     public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
     public string? GenerationArea { get; set; }
+    public string? StorageLocation { get; set; }
     public DateTime DisposalDate { get; set; }
     public decimal Quantity { get; set; }
     public SheWasteMeasurementUnit Unit { get; set; }
@@ -114,8 +115,9 @@ public class SheWasteDisposalRecordSummaryDto
 
 public class CreateSheWasteDisposalRecordDto : CreateDtoBase
 {
-    [Required, MaxLength(30)]
-    public string RecordNumber { get; set; } = string.Empty;
+    /// <summary>Optional — left blank, the server assigns the next number in sequence.</summary>
+    [MaxLength(30)]
+    public string? RecordNumber { get; set; }
 
     [Required]
     public Guid WasteTypeId { get; set; }
@@ -124,6 +126,10 @@ public class CreateSheWasteDisposalRecordDto : CreateDtoBase
 
     [MaxLength(200)]
     public string? GenerationArea { get; set; }
+
+    /// <summary>On-site interim storage before disposal (FR-ENV-020).</summary>
+    [MaxLength(200)]
+    public string? StorageLocation { get; set; }
 
     [Required]
     public DateTime DisposalDate { get; set; }
@@ -164,6 +170,10 @@ public class UpdateSheWasteDisposalRecordDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? GenerationArea { get; set; }
+
+    /// <summary>On-site interim storage before disposal (FR-ENV-020).</summary>
+    [MaxLength(200)]
+    public string? StorageLocation { get; set; }
 
     [Required]
     public DateTime DisposalDate { get; set; }
@@ -230,6 +240,8 @@ public class SheEnvironmentalIncidentDto : BaseDto
     public DateTime ReportedDate { get; set; }
     public string? InvestigationFindings { get; set; }
     public string? CorrectiveActions { get; set; }
+    public string? PreventiveActions { get; set; }
+    public string? LessonsLearned { get; set; }
     public DateTime? ClosedDate { get; set; }
     public Guid? ClosedById { get; set; }
     public string? ClosedByName { get; set; }
@@ -254,8 +266,9 @@ public class SheEnvironmentalIncidentSummaryDto
 
 public class CreateSheEnvironmentalIncidentDto : CreateDtoBase
 {
-    [Required, MaxLength(30)]
-    public string IncidentNumber { get; set; } = string.Empty;
+    /// <summary>Optional — left blank, the server assigns the next number in sequence.</summary>
+    [MaxLength(30)]
+    public string? IncidentNumber { get; set; }
 
     public Guid? SafetyIncidentId { get; set; }
 
@@ -341,6 +354,12 @@ public class UpdateSheEnvironmentalIncidentDto : UpdateDtoBase
 
     [MaxLength(2000)]
     public string? CorrectiveActions { get; set; }
+
+    [MaxLength(2000)]
+    public string? PreventiveActions { get; set; }
+
+    [MaxLength(2000)]
+    public string? LessonsLearned { get; set; }
 }
 
 /// <summary>Closes an environmental incident.</summary>
@@ -356,6 +375,13 @@ public class CloseSheEnvironmentalIncidentDto
 
     [MaxLength(2000)]
     public string? CorrectiveActions { get; set; }
+
+    [MaxLength(2000)]
+    public string? PreventiveActions { get; set; }
+
+    /// <summary>FR-ENV-027 — captured at close-out.</summary>
+    [MaxLength(2000)]
+    public string? LessonsLearned { get; set; }
 }
 
 #endregion
@@ -368,6 +394,9 @@ public class SheEnvironmentalMonitoringRecordDto : BaseDto
     public string RecordNumber { get; set; } = string.Empty;
     public SheEnvironmentalMonitoringType MonitoringType { get; set; }
     public string MonitoringTypeName => MonitoringType.ToString();
+    /// <summary>Set when the record completed a scheduled monitoring activity (FR-ENV-023).</summary>
+    public Guid? ScheduleId { get; set; }
+    public string? ScheduleNumber { get; set; }
     public Guid? LocationId { get; set; }
     public string? LocationName { get; set; }
     public string? MonitoringPoint { get; set; }
@@ -388,11 +417,15 @@ public class SheEnvironmentalMonitoringRecordDto : BaseDto
 
 public class CreateSheEnvironmentalMonitoringRecordDto : CreateDtoBase
 {
-    [Required, MaxLength(30)]
-    public string RecordNumber { get; set; } = string.Empty;
+    /// <summary>Optional — left blank, the server assigns the next number in sequence.</summary>
+    [MaxLength(30)]
+    public string? RecordNumber { get; set; }
 
     [Required]
     public SheEnvironmentalMonitoringType MonitoringType { get; set; }
+
+    /// <summary>Optional — links the record to the schedule cycle it satisfies (FR-ENV-023/024).</summary>
+    public Guid? ScheduleId { get; set; }
 
     public Guid? LocationId { get; set; }
 
@@ -409,8 +442,6 @@ public class CreateSheEnvironmentalMonitoringRecordDto : CreateDtoBase
 
     public decimal? RegulatoryLimit { get; set; }
     public decimal? ActionLevel { get; set; }
-    public bool ExceedsLimit { get; set; }
-    public bool ExceedsActionLevel { get; set; }
 
     [MaxLength(500)]
     public string? InstrumentUsed { get; set; }
@@ -433,6 +464,9 @@ public class UpdateSheEnvironmentalMonitoringRecordDto : UpdateDtoBase
     [Required]
     public SheEnvironmentalMonitoringType MonitoringType { get; set; }
 
+    /// <summary>Optional — links the record to the schedule cycle it satisfies (FR-ENV-023/024).</summary>
+    public Guid? ScheduleId { get; set; }
+
     public Guid? LocationId { get; set; }
 
     [MaxLength(200)]
@@ -448,8 +482,6 @@ public class UpdateSheEnvironmentalMonitoringRecordDto : UpdateDtoBase
 
     public decimal? RegulatoryLimit { get; set; }
     public decimal? ActionLevel { get; set; }
-    public bool ExceedsLimit { get; set; }
-    public bool ExceedsActionLevel { get; set; }
 
     [MaxLength(500)]
     public string? InstrumentUsed { get; set; }

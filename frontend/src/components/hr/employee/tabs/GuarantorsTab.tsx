@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
+import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { Badge } from '@/components/ui/badge';
 import { countryService } from '@/services/hr/country.service';
 import { employeeService } from '@/services/hr/employee.service';
@@ -38,6 +39,9 @@ const schema = z.object({
   employerAddress: z.string().max(300).optional().or(z.literal('')),
   employerPhone: z.string().max(30).optional().or(z.literal('')),
   monthlyIncome: z.string().optional().or(z.literal('')),
+  amountGuaranteed: z.string().optional().or(z.literal('')),
+  amountGuaranteedCurrencyCode: z.string().optional().or(z.literal('')),
+  genderDescription: z.string().optional().or(z.literal('')),
   nationalIdType: z.string().max(50).optional().or(z.literal('')),
   nationalIdNumber: z.string().max(50).optional().or(z.literal('')),
   nationalIdExpiryDate: z.string().optional().or(z.literal('')),
@@ -69,6 +73,9 @@ const empty: FormValues = {
   employerAddress: '',
   employerPhone: '',
   monthlyIncome: '',
+  amountGuaranteed: '',
+  amountGuaranteedCurrencyCode: '',
+  genderDescription: '',
   nationalIdType: '',
   nationalIdNumber: '',
   nationalIdExpiryDate: '',
@@ -100,6 +107,9 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   employerAddress: v.employerAddress || null,
   employerPhone: v.employerPhone || null,
   monthlyIncome: v.monthlyIncome ? Number(v.monthlyIncome) : null,
+  amountGuaranteed: v.amountGuaranteed ? Number(v.amountGuaranteed) : null,
+  amountGuaranteedCurrencyCode: v.amountGuaranteedCurrencyCode || null,
+  genderDescription: v.genderDescription || null,
   nationalIdType: v.nationalIdType || null,
   nationalIdNumber: v.nationalIdNumber || null,
   nationalIdExpiryDate: v.nationalIdExpiryDate || null,
@@ -113,6 +123,13 @@ export function GuarantorsTab({ employeeId }: { employeeId: string }) {
   const { data: countries } = useQuery({
     queryKey: ['hr', 'countries', 'active'],
     queryFn: () => countryService.getActive(),
+  });
+
+  // Only currencies Finance actually holds — the server refuses anything else, so a free-text box
+  // would be offering a way to fail. Same read the succession development panel uses.
+  const { data: currencies } = useQuery({
+    queryKey: ['finance', 'currencies'],
+    queryFn: () => hrCurrencyService.getActive(),
   });
 
   const countryOptions = (countries ?? []).map((c) => ({ value: c.id, label: c.name }));
@@ -199,6 +216,9 @@ export function GuarantorsTab({ employeeId }: { employeeId: string }) {
         employerAddress: g.employerAddress ?? '',
         employerPhone: g.employerPhone ?? '',
         monthlyIncome: g.monthlyIncome != null ? String(g.monthlyIncome) : '',
+        amountGuaranteed: g.amountGuaranteed != null ? String(g.amountGuaranteed) : '',
+        amountGuaranteedCurrencyCode: g.amountGuaranteedCurrencyCode ?? '',
+        genderDescription: g.genderDescription ?? '',
         nationalIdType: g.nationalIdType ?? '',
         // Masked on read — leave blank so an edit does not overwrite the stored value
         // with the mask. Enter a new number only to replace it.
@@ -255,7 +275,30 @@ export function GuarantorsTab({ employeeId }: { employeeId: string }) {
             <TextField form={form} name="employerAddress" label="Employer address" />
             <TextField form={form} name="employerPhone" label="Employer phone" type="tel" />
           </FieldRow>
-          <NumberField form={form} name="monthlyIncome" label="Monthly income" step="0.01" />
+          <FieldRow>
+            <NumberField form={form} name="monthlyIncome" label="Monthly income" step="0.01" />
+            {/* ⚠ Distinct from income: what they EARN versus what they have UNDERTAKEN. The row
+                could say how solvent a guarantor was and never what they stood surety for — the
+                only figure that matters if the guarantee is ever called. */}
+            <NumberField
+              form={form}
+              name="amountGuaranteed"
+              label="Amount guaranteed"
+              step="0.01"
+            />
+            <SelectField
+              form={form}
+              name="amountGuaranteedCurrencyCode"
+              label="Currency"
+              // Finance owns this list; the server refuses a code it does not hold.
+              options={(currencies ?? []).map((c) => ({
+                value: c.code,
+                label: `${c.code} — ${c.name}`,
+              }))}
+              allowEmpty
+              emptyLabel="HR default"
+            />
+          </FieldRow>
           <FieldRow>
             <TextField
               form={form}

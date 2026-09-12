@@ -33,7 +33,7 @@ public interface IHealthcareFacilityService
     Task<IEnumerable<PhysicianSummaryDto>> SearchPhysiciansAsync(string searchTerm, CancellationToken cancellationToken = default);
     Task<PhysicianDto> CreatePhysicianAsync(CreatePhysicianDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<PhysicianDto> UpdatePhysicianAsync(UpdatePhysicianDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> VerifyPhysicianAsync(VerifyPhysicianDto verifyDto, CancellationToken cancellationToken = default);
+    Task<bool> VerifyPhysicianAsync(VerifyPhysicianDto verifyDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeletePhysicianAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Facility service
@@ -82,7 +82,7 @@ public interface IMedicalInsuranceService
     Task<IEnumerable<EmployeeMedicalInsurancePolicySummaryDto>> GetExpiringPoliciesAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
     Task<EmployeeMedicalInsurancePolicyDto> CreatePolicyAsync(CreateEmployeeMedicalInsurancePolicyDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<EmployeeMedicalInsurancePolicyDto> UpdatePolicyAsync(UpdateEmployeeMedicalInsurancePolicyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> CancelPolicyAsync(CancelEmployeeMedicalInsurancePolicyDto cancelDto, CancellationToken cancellationToken = default);
+    Task<bool> CancelPolicyAsync(CancelEmployeeMedicalInsurancePolicyDto cancelDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeletePolicyAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Policy dependent
@@ -96,8 +96,8 @@ public interface IMedicalInsuranceService
     Task<IEnumerable<MedicalInsuranceClaimSummaryDto>> GetInsuranceClaimsByPolicyAsync(Guid policyId, CancellationToken cancellationToken = default);
     Task<IEnumerable<MedicalInsuranceClaimSummaryDto>> GetInsuranceClaimsByExpenseClaimAsync(Guid medicalExpenseClaimId, CancellationToken cancellationToken = default);
     Task<MedicalInsuranceClaimDto> CreateInsuranceClaimAsync(CreateMedicalInsuranceClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-    Task<MedicalInsuranceClaimDto> UpdateInsuranceClaimStatusAsync(UpdateMedicalInsuranceClaimStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<MedicalInsuranceClaimDto> RecordInsuranceClaimPaymentAsync(RecordMedicalInsuranceClaimPaymentDto paymentDto, CancellationToken cancellationToken = default);
+    Task<MedicalInsuranceClaimDto> UpdateInsuranceClaimStatusAsync(UpdateMedicalInsuranceClaimStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<MedicalInsuranceClaimDto> RecordInsuranceClaimPaymentAsync(RecordMedicalInsuranceClaimPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     // Provider network facility
     Task<MedicalInsuranceProviderFacilityDto> AddNetworkFacilityAsync(AddMedicalInsuranceProviderFacilityDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
@@ -113,9 +113,9 @@ public interface IMedicalInsuranceService
 
     // Premium record
     Task<MedicalInsurancePremiumRecordDto> GetPremiumRecordByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<MedicalInsurancePremiumRecordDto>> GetPremiumRecordsByProviderAsync(Guid providerId, CancellationToken cancellationToken = default);
     Task<MedicalInsurancePremiumRecordDto> CreatePremiumRecordAsync(CreateMedicalInsurancePremiumRecordDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-    Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(RecordMedicalInsurancePremiumPaymentDto paymentDto, CancellationToken cancellationToken = default);
+    Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(RecordMedicalInsurancePremiumPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<MedicalInsurancePremiumRecordSummaryDto>> GetOverduePremiumsAsync(CancellationToken cancellationToken = default);
 }
 
@@ -210,8 +210,8 @@ public interface IMedicalClinicalService
     Task<IEnumerable<MedicalClaimPreAuthorizationSummaryDto>> GetPendingPreAuthorizationsAsync(CancellationToken cancellationToken = default);
     Task<MedicalClaimPreAuthorizationDto> CreatePreAuthorizationAsync(CreateMedicalClaimPreAuthorizationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalClaimPreAuthorizationDto> UpdatePreAuthorizationAsync(UpdateMedicalClaimPreAuthorizationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, CancellationToken cancellationToken = default);
-    Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, CancellationToken cancellationToken = default);
+    Task<bool> ApprovePreAuthorizationAsync(ApproveMedicalClaimPreAuthorizationDto approveDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> RejectPreAuthorizationAsync(RejectMedicalClaimPreAuthorizationDto rejectDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeletePreAuthorizationAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Referral
@@ -222,8 +222,8 @@ public interface IMedicalClinicalService
     Task<IEnumerable<MedicalReferralSummaryDto>> GetPendingReferralsAsync(CancellationToken cancellationToken = default);
     Task<MedicalReferralDto> CreateReferralAsync(CreateMedicalReferralDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalReferralDto> UpdateReferralAsync(UpdateMedicalReferralDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, CancellationToken cancellationToken = default);
+    Task<bool> UpdateReferralStatusAsync(UpdateMedicalReferralStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CompleteReferralAsync(CompleteMedicalReferralDto completeDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteReferralAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Appointment
@@ -234,10 +234,10 @@ public interface IMedicalClinicalService
     Task<IEnumerable<MedicalAppointmentSummaryDto>> GetUpcomingAppointmentsAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
     Task<MedicalAppointmentDto> CreateAppointmentAsync(CreateMedicalAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalAppointmentDto> UpdateAppointmentAsync(UpdateMedicalAppointmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, CancellationToken cancellationToken = default);
-    Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, CancellationToken cancellationToken = default);
-    Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, CancellationToken cancellationToken = default);
+    Task<bool> UpdateAppointmentStatusAsync(UpdateMedicalAppointmentStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CancelAppointmentAsync(CancelMedicalAppointmentDto cancelDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CheckInAppointmentAsync(CheckInMedicalAppointmentDto checkInDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> CheckOutAppointmentAsync(CheckOutMedicalAppointmentDto checkOutDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAppointmentAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
@@ -259,9 +259,9 @@ public interface INHISService
     Task<IEnumerable<NHISClaimSummaryDto>> GetPendingClaimsAsync(CancellationToken cancellationToken = default);
     Task<NHISClaimDto> CreateClaimAsync(CreateNHISClaimDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<NHISClaimDto> UpdateClaimAsync(UpdateNHISClaimDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> UpdateClaimStatusAsync(UpdateNHISClaimStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<bool> SubmitClaimAsync(SubmitNHISClaimDto submitDto, CancellationToken cancellationToken = default);
-    Task<bool> RecordClaimPaymentAsync(RecordNHISClaimPaymentDto paymentDto, CancellationToken cancellationToken = default);
+    Task<bool> UpdateClaimStatusAsync(UpdateNHISClaimStatusDto statusDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> SubmitClaimAsync(SubmitNHISClaimDto submitDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> RecordClaimPaymentAsync(RecordNHISClaimPaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteClaimAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task<NHISClaimDocumentDto> AddClaimDocumentAsync(CreateNHISClaimDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
@@ -289,9 +289,9 @@ public interface IMedicalExpenseClaimService
     Task<MedicalExpenseClaimDto> CreateClaimAsync(CreateMedicalExpenseClaimDto createDto, Guid employeeId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<MedicalExpenseClaimDto> UpdateClaimAsync(UpdateMedicalExpenseClaimDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> ProcessApprovalAsync(ProcessMedicalExpenseClaimDto processDto, Guid tenantId, Guid approverEmployeeId, Guid processedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> ProcessPaymentAsync(ProcessMedicalExpensePaymentDto paymentDto, CancellationToken cancellationToken = default);
-    Task<bool> FlagClaimAsync(FlagMedicalExpenseClaimDto flagDto, CancellationToken cancellationToken = default);
-    Task<bool> UnflagClaimAsync(UnflagMedicalExpenseClaimDto unflagDto, CancellationToken cancellationToken = default);
+    Task<bool> ProcessPaymentAsync(ProcessMedicalExpensePaymentDto paymentDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> FlagClaimAsync(FlagMedicalExpenseClaimDto flagDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    Task<bool> UnflagClaimAsync(UnflagMedicalExpenseClaimDto unflagDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteClaimAsync(Guid id, CancellationToken cancellationToken = default);
 
     Task<MedicalExpenseItemDto> AddItemAsync(CreateMedicalExpenseItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);

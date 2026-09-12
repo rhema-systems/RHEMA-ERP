@@ -96,43 +96,66 @@ public class OrientationSessionService : IOrientationSessionService
         return dto;
     }
 
+    /// <summary>
+    /// Fills EnrolledCount on session summaries from one grouped query. List reads do not include the
+    /// enrollments collection, and an un-included collection is empty rather than null — so every
+    /// session on every list used to report 0 enrolled, which is exactly the number the enrolment
+    /// picker subtracts from capacity to show remaining seats.
+    /// </summary>
+    private async Task<List<OrientationSessionSummaryDto>> HydrateSeatCountsAsync(
+        List<OrientationSessionSummaryDto> summaries, Guid tenantId)
+    {
+        if (summaries.Count == 0) return summaries;
+
+        var counts = await _sessionRepository.GetEnrolledCountsAsync(tenantId, summaries.Select(s => s.Id));
+        foreach (var summary in summaries)
+            summary.EnrolledCount = counts.TryGetValue(summary.Id, out var c) ? c : 0;
+
+        return summaries;
+    }
+
     public async Task<OrientationSessionDto?> GetBySessionCodeAsync(string sessionCode, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entity = await _sessionRepository.GetBySessionCodeAsync(sessionCode);
-        return entity != null && entity.TenantId == tenantId ? entity.ToDto() : null;
+        if (entity == null || entity.TenantId != tenantId) return null;
+
+        var dto = entity.ToDto();
+        var map = await _unitOfWork.ResolveEmployeesAsync(tenantId, dto.Facilitators.Select(f => f.EmployeeId));
+        dto.Facilitators.FillNames(map);
+        return dto;
     }
 
     public async Task<IEnumerable<OrientationSessionSummaryDto>> GetByProgramIdAsync(Guid programId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _sessionRepository.GetByProgramIdAsync(programId))
-            .Where(s => s.TenantId == tenantId)
-            .ToSummaryDtoList();
+        return await HydrateSeatCountsAsync(
+            (await _sessionRepository.GetByProgramIdAsync(programId))
+                .Where(s => s.TenantId == tenantId).ToSummaryDtoList().ToList(), tenantId);
     }
 
     public async Task<IEnumerable<OrientationSessionSummaryDto>> GetByStatusAsync(OrientationSessionStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _sessionRepository.GetByStatusAsync(status))
-            .Where(s => s.TenantId == tenantId)
-            .ToSummaryDtoList();
+        return await HydrateSeatCountsAsync(
+            (await _sessionRepository.GetByStatusAsync(status))
+                .Where(s => s.TenantId == tenantId).ToSummaryDtoList().ToList(), tenantId);
     }
 
     public async Task<IEnumerable<OrientationSessionSummaryDto>> GetUpcomingAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _sessionRepository.GetUpcomingAsync(daysAhead))
-            .Where(s => s.TenantId == tenantId)
-            .ToSummaryDtoList();
+        return await HydrateSeatCountsAsync(
+            (await _sessionRepository.GetUpcomingAsync(daysAhead))
+                .Where(s => s.TenantId == tenantId).ToSummaryDtoList().ToList(), tenantId);
     }
 
     public async Task<IEnumerable<OrientationSessionSummaryDto>> GetOpenForEnrollmentAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _sessionRepository.GetOpenForEnrollmentAsync())
-            .Where(s => s.TenantId == tenantId)
-            .ToSummaryDtoList();
+        return await HydrateSeatCountsAsync(
+            (await _sessionRepository.GetOpenForEnrollmentAsync())
+                .Where(s => s.TenantId == tenantId).ToSummaryDtoList().ToList(), tenantId);
     }
 
     // ====================================================================
@@ -152,8 +175,7 @@ public class OrientationSessionService : IOrientationSessionService
             ? await GenerateSessionCodeAsync(tenantId, cancellationToken)
             : createDto.SessionCode.Trim();
 
-        var codeExists = await _sessionRepository.GetQueryable()
-            .AnyAsync(s => s.TenantId == tenantId && s.SessionCode == entity.SessionCode && !s.IsDeleted, cancellationToken);
+        var codeExists = await _sessionRepository.SessionCodeExistsAsync(tenantId, entity.SessionCode);
         if (codeExists)
             throw new InvalidOperationException($"Session code '{entity.SessionCode}' is already in use.");
 
@@ -224,7 +246,20 @@ public class OrientationSessionService : IOrientationSessionService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _facilitatorRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await HydrateFacilitatorAsync(entity.ToDto(), tenantId);
+    }
+
+    /// <summary>
+    /// Facilitators reference employees by id with no navigation, so a write response has to go through
+    /// the same name lookup the list read uses — otherwise adding a facilitator returns a blank name
+    /// and the row only acquires one on the next refetch.
+    /// </summary>
+    private async Task<OrientationSessionFacilitatorDto> HydrateFacilitatorAsync(OrientationSessionFacilitatorDto dto, Guid tenantId)
+    {
+        var list = new List<OrientationSessionFacilitatorDto> { dto };
+        var map = await _unitOfWork.ResolveEmployeesAsync(tenantId, list.Select(f => f.EmployeeId));
+        list.FillNames(map);
+        return dto;
     }
 
     public async Task<IEnumerable<OrientationSessionFacilitatorDto>> GetFacilitatorsAsync(Guid sessionId, CancellationToken cancellationToken = default)
@@ -246,7 +281,7 @@ public class OrientationSessionService : IOrientationSessionService
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _facilitatorRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await HydrateFacilitatorAsync(entity.ToDto(), entity.TenantId);
     }
 
     public async Task<bool> RemoveFacilitatorAsync(Guid facilitatorId, CancellationToken cancellationToken = default)
@@ -274,6 +309,12 @@ public class OrientationSessionService : IOrientationSessionService
             var enrollment = await _enrollmentRepository.GetByIdAsync(entry.EnrollmentId);
             if (enrollment == null || enrollment.TenantId != tenantId)
                 throw new ArgumentException($"Orientation enrollment with ID '{entry.EnrollmentId}' not found.");
+
+            // The route says which session's register this is; without this check an entry could mark
+            // attendance against an enrollment belonging to an entirely different session.
+            if (enrollment.SessionId != session.Id)
+                throw new InvalidOperationException(
+                    $"Enrollment '{entry.EnrollmentId}' is not enrolled in session '{session.SessionCode}'.");
 
             var record = await _attendanceRepository.GetByEnrollmentAndDayAsync(entry.EnrollmentId, markDto.SessionDay);
 
@@ -304,7 +345,15 @@ public class OrientationSessionService : IOrientationSessionService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return results.Select(r => r.ToDto());
+
+        // Re-read through the includes chain: the DTO's EmployeeId comes off the enrollment navigation,
+        // which these tracked entities never loaded, and that id is also the key the name hydrator uses
+        // — so returning them raw blanked the employee on every row the register had just saved.
+        return await HydrateAttendanceAsync(
+            (await _attendanceRepository.GetBySessionIdAsync(session.Id))
+                .Where(a => a.TenantId == tenantId && a.SessionDay == markDto.SessionDay)
+                .Select(a => a.ToDto())
+                .ToList());
     }
 
     public async Task<IEnumerable<OrientationAttendanceRecordDto>> GetAttendanceForSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
@@ -353,19 +402,27 @@ public class OrientationSessionService : IOrientationSessionService
             : record.AttendedMinutes;
     }
 
+    /// <summary>
+    /// Numbers off the highest code ever issued, soft-deleted sessions included.
+    /// (TenantId, SessionCode) is UNIQUE and a soft delete does not release the value, so counting live
+    /// rows produced a code the database still held — deleting one session made the next create die on
+    /// a duplicate key. The old while-loop only skipped *live* collisions, which is precisely the case
+    /// that was never the problem.
+    /// </summary>
     private async Task<string> GenerateSessionCodeAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var prefix = $"OSN-{DateTime.UtcNow.Year}-";
-        var count = await _sessionRepository.GetQueryable()
-            .CountAsync(s => s.TenantId == tenantId && s.SessionCode.StartsWith(prefix), cancellationToken);
-        var next = count + 1;
-        var code = $"{prefix}{next:D4}";
-        while (await _sessionRepository.GetQueryable()
-            .AnyAsync(s => s.TenantId == tenantId && s.SessionCode == code && !s.IsDeleted, cancellationToken))
+        var issued = await _sessionRepository
+            .GetQueryableIncludingDeleted(s => s.TenantId == tenantId && s.SessionCode.StartsWith(prefix))
+            .Select(s => s.SessionCode)
+            .ToListAsync(cancellationToken);
+
+        var max = 0;
+        foreach (var code in issued)
         {
-            next++;
-            code = $"{prefix}{next:D4}";
+            if (int.TryParse(code[prefix.Length..], out var n) && n > max) max = n;
         }
-        return code;
+
+        return $"{prefix}{(max + 1):D4}";
     }
 }

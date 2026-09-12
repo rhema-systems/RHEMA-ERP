@@ -26,6 +26,8 @@ export interface User {
   profilePictureUrl?: string;
   twoFactorEnabled?: boolean;
   authenticationProvider?: 'Local' | 'LDAP';
+  /** Area 25: the user↔employee link. Null/absent = not linked; the /me portal gate reads this. */
+  employeeId?: string | null;
   mustChangePassword?: boolean;
   temporaryPasswordExpiresAtUtc?: string;
   accessibleTenants?: Array<{

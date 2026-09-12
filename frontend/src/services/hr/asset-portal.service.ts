@@ -1,0 +1,152 @@
+import { apiService } from '../api.service';
+import type {
+  AssetAssignmentSummary,
+  AssetRequisition,
+  AssetRequisitionSummary,
+  AssetSurcharge,
+  AssetSurchargeSummary,
+  AssetTermsLetter,
+  AssetTypeSummary,
+  CreateAssetRequisitionRequest,
+  EmployeeAssetSummary,
+  UpdateAssetRequisitionRequest,
+} from '@/types/hr/assets';
+
+/**
+ * The employee's own company assets. Backend route: `api/employee-portal`.
+ *
+ * ⚠ **No method here takes an employee id, and none ever should.** The register at `api/Assets`
+ * exposes the same data through `assignments/employee/{id}` and it is correctly gated — but a
+ * client that has to know its own employee id in order to ask a question can pass someone else's,
+ * and that is how several of this module's authorization holes started. The portal derives the
+ * employee from the JWT and the client has nothing to get wrong.
+ *
+ * Each route delegates server-side to the same service `api/Assets` calls, so the rules are the
+ * ones the register enforces — including the one that surprises people: **acknowledgement is
+ * refused for everybody but the assignment's own holder, HR included.** It is the employee's
+ * testimony that they received the thing, not an administrative tick.
+ */
+class AssetPortalService {
+  private readonly baseUrl = '/employee-portal';
+
+  // ── What I hold ────────────────────────────────────────────────────────────
+
+  // `getMyAssets` (the plain held list) and `getMyAsset` (one assignment by id) were deleted in
+  // slice 14. Both endpoints remain and both work; slice 9 decided they stay screen-less because
+  // their content is already the held table plus the terms letter, and neither had ever been
+  // called. Re-add a client method when a screen genuinely needs one, rather than keeping two
+  // that only look like coverage.
+
+  /** Everything they have ever held, returned assets included. */
+  getMyAssetHistory(): Promise<AssetAssignmentSummary[]> {
+    return apiService.get<AssetAssignmentSummary[]>(`${this.baseUrl}/assets/history`);
+  }
+
+  /** The landing counters and the three short lists behind them, in one call. */
+  getMyAssetSummary(): Promise<EmployeeAssetSummary> {
+    return apiService.get<EmployeeAssetSummary>(`${this.baseUrl}/assets/summary`);
+  }
+
+  /**
+   * The employee signs for what they were given — AST-8.
+   *
+   * Refused for anyone but the holder, and refused once the assignment has been closed.
+   */
+  acknowledge(assignmentId: string): Promise<void> {
+    return apiService.post<void>(`${this.baseUrl}/assets/${assignmentId}/acknowledge`, {});
+  }
+
+  /** The responsibility-and-terms document for one of their own assignments — AST-5. */
+  getTermsDocument(assignmentId: string): Promise<AssetTermsLetter> {
+    return apiService.get<AssetTermsLetter>(`${this.baseUrl}/assets/${assignmentId}/terms-document`);
+  }
+
+  // ── What I have asked for ──────────────────────────────────────────────────
+
+  /**
+   * Requests the employee raised **and** requests raised for them.
+   *
+   * Both actor columns, deliberately: filtering on the requester alone means the employee a manager
+   * raised a laptop request for is the only person who cannot see it.
+   */
+  getMyRequisitions(): Promise<AssetRequisitionSummary[]> {
+    return apiService.get<AssetRequisitionSummary[]>(`${this.baseUrl}/asset-requisitions`);
+  }
+
+  getMyRequisition(id: string): Promise<AssetRequisition> {
+    return apiService.get<AssetRequisition>(`${this.baseUrl}/asset-requisitions/${id}`);
+  }
+
+  /**
+   * Raise a request — AST-6, and AST-6b when `beneficiaryEmployeeId` names somebody else.
+   *
+   * What comes back is a **draft**. Nothing reaches an approver until `submit`.
+   */
+  createRequisition(payload: CreateAssetRequisitionRequest): Promise<AssetRequisition> {
+    return apiService.post<AssetRequisition>(`${this.baseUrl}/asset-requisitions`, payload);
+  }
+
+  updateRequisition(id: string, payload: UpdateAssetRequisitionRequest): Promise<AssetRequisition> {
+    return apiService.put<AssetRequisition>(`${this.baseUrl}/asset-requisitions/${id}`, payload);
+  }
+
+  submitRequisition(id: string): Promise<AssetRequisition> {
+    return apiService.post<AssetRequisition>(`${this.baseUrl}/asset-requisitions/${id}/submit`, {});
+  }
+
+  recallRequisition(id: string, reason?: string): Promise<AssetRequisition> {
+    return apiService.post<AssetRequisition>(`${this.baseUrl}/asset-requisitions/${id}/recall`, {
+      reason,
+    });
+  }
+
+  withdrawRequisition(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/asset-requisitions/${id}`);
+  }
+
+  // ── What I am being charged for (AST-3, decision D9) ───────────────────────
+
+  /**
+   * Charges raised against the employee that have been **served on them**.
+   *
+   * A charge HR is still drafting is invisible here and answers 404 rather than 403 — a 403 would
+   * confirm that a charge against them is being written, which is the one thing a draft is not
+   * ready to say.
+   */
+  getMySurcharges(): Promise<AssetSurchargeSummary[]> {
+    return apiService.get<AssetSurchargeSummary[]>(`${this.baseUrl}/asset-surcharges`);
+  }
+
+  getMySurcharge(id: string): Promise<AssetSurcharge> {
+    return apiService.get<AssetSurcharge>(`${this.baseUrl}/asset-surcharges/${id}`);
+  }
+
+  /**
+   * Accept or dispute a charge — the employee's right of reply.
+   *
+   * Refused for everybody else, **HR included**. Both answers send the charge on for approval;
+   * they differ in what the approver reads. A dispute does not stop the employer — what it does is
+   * oblige them to decide with the employee's account in front of them, and leave a record that
+   * they did. An approver may then lower the charge; they may never raise it.
+   */
+  respondToSurcharge(id: string, accepted: boolean, comments?: string): Promise<AssetSurcharge> {
+    return apiService.post<AssetSurcharge>(`${this.baseUrl}/asset-surcharges/${id}/respond`, {
+      accepted,
+      comments,
+    });
+  }
+
+  // ── The one picker that is not on the portal ───────────────────────────────
+
+  /**
+   * The asset-type catalogue for the request form.
+   *
+   * Lives on the register (`api/Assets/types`) rather than the portal because it is not
+   * employee-scoped — it is the same list for everybody, and it carries only `[Authorize]`.
+   */
+  getAssetTypes(): Promise<AssetTypeSummary[]> {
+    return apiService.get<AssetTypeSummary[]>('/Assets/types');
+  }
+}
+
+export const assetPortalService = new AssetPortalService();

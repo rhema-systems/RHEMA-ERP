@@ -78,14 +78,31 @@ public interface IStaffRequisitionService
 
     // ── Workflow ─────────────────────────────────────────────────────────────
 
-    /// <summary>Submits a Draft or Rejected requisition for review. Records a history entry.</summary>
+    /// <summary>
+    /// Submits a Draft or Rejected requisition for approval, after budget enforcement. Starts the
+    /// <c>StaffRequisition</c> workflow — the resulting status comes from the engine's outcome, not
+    /// from this method — and records a history entry.
+    /// </summary>
     Task<bool> SubmitAsync(SubmitStaffRequisitionDto submitDto, Guid submittedByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Approves a Submitted or UnderReview requisition. Records a history entry.</summary>
+    /// <summary>
+    /// Processes an approval step on a Submitted or UnderReview requisition. Refuses unless the
+    /// caller is an approver for the current workflow step, and unless they are someone other than
+    /// the requester. Records a history entry.
+    /// </summary>
     Task<bool> ApproveAsync(ApproveStaffRequisitionDto approveDto, Guid approvedByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Rejects a Submitted or UnderReview requisition. Records a history entry.</summary>
+    /// <summary>
+    /// Rejects a Submitted or UnderReview requisition through the workflow engine, returning it to
+    /// the requester as Rejected (editable and re-submittable). Records a history entry.
+    /// </summary>
     Task<bool> RejectAsync(RejectStaffRequisitionDto rejectDto, Guid rejectedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Withdraws a requisition awaiting approval back to Draft, at the requester's own request.
+    /// Records a history entry.
+    /// </summary>
+    Task<bool> RecallAsync(Guid requisitionId, string? reason, Guid recalledByUserId, CancellationToken cancellationToken = default);
 
     /// <summary>Puts an active requisition on hold. Records a history entry.</summary>
     Task<bool> PutOnHoldAsync(HoldStaffRequisitionDto holdDto, Guid userId, CancellationToken cancellationToken = default);
@@ -132,8 +149,25 @@ public interface IStaffRequisitionService
 
     // ── Attachment operations ─────────────────────────────────────────────────
 
-    /// <summary>Attaches a document record to a requisition.</summary>
-    Task<StaffRequisitionAttachmentDto> AddAttachmentAsync(CreateStaffRequisitionAttachmentDto createDto, Guid tenantId, Guid uploadedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records an attachment against a requisition, from a file the controlled-upload gate has
+    /// already scanned and registered.
+    ///
+    /// <para>This used to take a <c>CreateStaffRequisitionAttachmentDto</c> carrying a
+    /// caller-supplied <c>filePath</c>, so the endpoint stored no file and recorded whatever path
+    /// was posted to it. The DTO is gone rather than ignored, so it cannot drift back — the same
+    /// treatment the five appraisal-domain attachment paths got.</para>
+    /// </summary>
+    Task<StaffRequisitionAttachmentDto> AddAttachmentAsync(
+        Guid requisitionId,
+        Guid uploadedById,
+        string fileName,
+        long fileSize,
+        string? description,
+        CancellationToken cancellationToken = default,
+        Guid? fileUploadRecordId = null,
+        Guid? documentRecordId = null,
+        Guid? documentVersionId = null);
 
     /// <summary>Returns all attachments for the given requisition.</summary>
     Task<IEnumerable<StaffRequisitionAttachmentDto>> GetAttachmentsAsync(Guid requisitionId, CancellationToken cancellationToken = default);

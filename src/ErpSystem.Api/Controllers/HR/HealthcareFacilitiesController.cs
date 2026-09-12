@@ -3,14 +3,25 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// The register of hospitals, clinics and pharmacies the organisation deals with.
+/// </summary>
+/// <remarks>
+/// <b>Reads are deliberately open to any authenticated user.</b> This is a directory of
+/// institutions, not patient data — and an employee filing their own medical expense claim has to
+/// name a facility (<c>CreateMedicalExpenseClaimDto.FacilityId</c> is required), so putting reads
+/// behind a medical permission would make self-service filing impossible. Maintaining the register
+/// is an HR task, so writes require the medical write permission and deletes the admin one.
+/// </remarks>
 [ApiController]
 [Route("api/healthcare-facilities")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class HealthcareFacilitiesController : MedicalControllerBase
 {
     private readonly IHealthcareFacilityService _service;
@@ -73,6 +84,7 @@ public class HealthcareFacilitiesController : MedicalControllerBase
     // CRUD
     // =========================================================================
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost]
     public async Task<ActionResult<HealthcareFacilityDto>> Create([FromBody] CreateHealthcareFacilityDto dto, CancellationToken ct)
     {
@@ -83,6 +95,7 @@ public class HealthcareFacilitiesController : MedicalControllerBase
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
+    [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<HealthcareFacilityDto>> Update(Guid id, [FromBody] UpdateHealthcareFacilityDto dto, CancellationToken ct)
     {
@@ -93,6 +106,7 @@ public class HealthcareFacilitiesController : MedicalControllerBase
         return Ok(await _service.UpdateFacilityAsync(dto, userId, ct));
     }
 
+    [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {

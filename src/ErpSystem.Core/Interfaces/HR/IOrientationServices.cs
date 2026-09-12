@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -144,6 +144,17 @@ public interface IEmployeeOrientationService
     Task<OrientationContentProgressDto> TrackContentProgressAsync(TrackOrientationContentProgressDto trackDto, Guid tenantId, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationContentProgressDto>> GetContentProgressAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The live module and content-item structure of the program behind an enrollment, for the person
+    /// working through it.
+    ///
+    /// The catalogue reads on <c>IOrientationProgramService</c> are HR-only, and content progress rows
+    /// only exist once an item has been tracked — so without this a participant had no way to discover
+    /// what they were meant to work through, nor the content item ids that
+    /// <see cref="TrackContentProgressAsync"/> requires.
+    /// </summary>
+    Task<IEnumerable<OrientationModuleDto>> GetProgramContentAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
+
     // Assessment
     Task<IEnumerable<OrientationAssessmentQuestionDto>> GetAssessmentForEnrollmentAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
     Task<OrientationAssessmentResultDto> SubmitAssessmentAsync(SubmitOrientationAssessmentDto submitDto, Guid tenantId, Guid submittedByUserId, CancellationToken cancellationToken = default);
@@ -157,6 +168,11 @@ public interface IEmployeeOrientationService
     // Feedback
     Task<OrientationFeedbackDto> SubmitFeedbackAsync(CreateOrientationFeedbackDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationFeedbackDto>> GetFeedbackAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
+
+    /// <summary>The caller's own orientation feedback, across every enrollment they have had.</summary>
+    /// <remarks>Lane 6: the read the portal form needed before it could exist. Without it a
+    /// submission was write-only, and a second press of the button filed a second row.</remarks>
+    Task<IEnumerable<OrientationFeedbackDto>> GetMyFeedbackAsync(CancellationToken cancellationToken = default);
 
     // Certificates
     Task<OrientationCertificateDto> IssueCertificateAsync(IssueOrientationCertificateDto issueDto, Guid tenantId, Guid issuedByUserId, CancellationToken cancellationToken = default);
@@ -186,7 +202,11 @@ public interface IOrientationNotificationService
     Task<int> GetUnreadCountAsync(Guid recipientEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<OrientationNotificationDto>> GetByEnrollmentIdAsync(Guid enrollmentId, CancellationToken cancellationToken = default);
     Task<OrientationNotificationDto> CreateAsync(CreateOrientationNotificationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-    Task<bool> MarkAsReadAsync(Guid notificationId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Marks a notification read on behalf of its recipient. Refuses an id belonging to anyone else —
+    /// read state is per-recipient, so this is not an operation one user performs on another's inbox.
+    /// </summary>
+    Task<bool> MarkAsReadAsync(Guid notificationId, Guid recipientEmployeeId, CancellationToken cancellationToken = default);
     Task<int> MarkAllAsReadAsync(Guid recipientEmployeeId, CancellationToken cancellationToken = default);
 }
 

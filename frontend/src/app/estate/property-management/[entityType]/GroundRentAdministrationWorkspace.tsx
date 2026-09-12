@@ -135,6 +135,9 @@ export function GroundRentAdministrationWorkspace() {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [actionKey, setActionKey] = React.useState('');
   const [setupOpen, setSetupOpen] = React.useState(false);
+  const [assessmentAssetId, setAssessmentAssetId] = React.useState('');
+  const [assessmentRate, setAssessmentRate] = React.useState('');
+  const [assessmentCurrency, setAssessmentCurrency] = React.useState('GHS');
   const [setupForm, setSetupForm] =
     React.useState<UpsertGroundRentAccount>(emptyForm);
   const [reviewAccount, setReviewAccount] =
@@ -224,6 +227,13 @@ export function GroundRentAdministrationWorkspace() {
   const selectedAsset = options.assets.find(
     (asset) => asset.id === setupForm.estateManagedAssetId
   );
+  const assessmentAsset = options.assets.find(
+    (asset) => asset.id === assessmentAssetId
+  );
+  const assessmentAmount =
+    assessmentAsset?.areaAcres && Number(assessmentRate) > 0
+      ? Math.ceil(assessmentAsset.areaAcres * Number(assessmentRate))
+      : null;
 
   const totals = React.useMemo(
     () => ({
@@ -331,6 +341,32 @@ export function GroundRentAdministrationWorkspace() {
         error instanceof Error
           ? error.message
           : 'Unable to save the ground-rent schedule.'
+      );
+    } finally {
+      setActionKey('');
+    }
+  };
+
+  const saveAssessment = async () => {
+    if (!assessmentAssetId || Number(assessmentRate) <= 0) {
+      toast.error('Select a land parcel and enter the approved rate per acre.');
+      return;
+    }
+
+    setActionKey('save-assessment');
+    try {
+      await estateGroundRentService.assessAsset({
+        estateManagedAssetId: assessmentAssetId,
+        ratePerAcre: Number(assessmentRate),
+        currencyCode: assessmentCurrency,
+      });
+      toast.success('Pre-listing ground-rent assessment saved.');
+      await loadWorkspace();
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to save the pre-listing ground-rent assessment.'
       );
     } finally {
       setActionKey('');
@@ -521,6 +557,87 @@ export function GroundRentAdministrationWorkspace() {
           </CardHeader>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <TrendingUp className="h-5 w-5 text-primary" />
+            Pre-listing Ground Rent Assessment
+          </CardTitle>
+          <CardDescription>
+            Calculate and approve the annual ground rent before publishing an
+            unallocated land parcel to the customer portal.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-[2fr_1fr_1fr_auto] lg:items-end">
+          <div className="space-y-2">
+            <Label>Land parcel</Label>
+            <Select
+              value={assessmentAssetId}
+              onValueChange={(value) => {
+                const asset = options.assets.find((item) => item.id === value);
+                setAssessmentAssetId(value);
+                setAssessmentRate(
+                  asset?.approvedRatePerAcre == null
+                    ? ''
+                    : String(asset.approvedRatePerAcre)
+                );
+                setAssessmentCurrency(asset?.currencyCode || 'GHS');
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a land parcel" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.assets.map((asset) => (
+                  <SelectItem key={asset.id} value={asset.id}>
+                    {asset.assetCode} - {asset.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Approved rate per acre</Label>
+            <Input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={assessmentRate}
+              onChange={(event) => setAssessmentRate(event.target.value)}
+            />
+          </div>
+          <div className="rounded-md border bg-muted/30 p-3">
+            <div className="text-xs text-muted-foreground">
+              Annual ground rent
+            </div>
+            <div className="mt-1 font-semibold">
+              {assessmentAmount == null
+                ? 'Select parcel and rate'
+                : formatMoney(assessmentAmount, assessmentCurrency)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {assessmentAsset?.areaAcres
+                ? `${assessmentAsset.areaAcres.toFixed(4)} acres`
+                : 'Parcel area required'}
+            </div>
+          </div>
+          <Button
+            type="button"
+            onClick={() => void saveAssessment()}
+            disabled={
+              actionKey === 'save-assessment' || assessmentAmount == null
+            }
+          >
+            {actionKey === 'save-assessment' ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Banknote className="mr-2 h-4 w-4" />
+            )}
+            Save Assessment
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -1002,12 +1119,14 @@ export function GroundRentAdministrationWorkspace() {
                   <SelectValue placeholder="Select a property with a linked customer" />
                 </SelectTrigger>
                 <SelectContent>
-                  {options.assets.map((asset) => (
+                  {options.assets
+                    .filter((asset) => asset.customerBusinessPartnerId)
+                    .map((asset) => (
                     <SelectItem key={asset.id} value={asset.id}>
                       {asset.assetCode} · {asset.name}
                       {asset.customerName ? ` · ${asset.customerName}` : ''}
                     </SelectItem>
-                  ))}
+                    ))}
                 </SelectContent>
               </Select>
               {selectedAsset ? (

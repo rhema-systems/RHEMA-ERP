@@ -1,7 +1,9 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.JobAnalysis;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Extensions;
@@ -29,6 +31,8 @@ public class JobDescriptionService : IJobDescriptionService
     private readonly IJobResponsibilityKpiRepository _kpiRepository;
     private readonly ISalaryGradeRepository _salaryGradeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobDescriptionService> _logger;
 
@@ -48,6 +52,8 @@ public class JobDescriptionService : IJobDescriptionService
         IJobResponsibilityKpiRepository kpiRepository,
         ISalaryGradeRepository salaryGradeRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegration,
+        IWorkflowStatusAdapterRegistry workflowAdapters,
         IUnitOfWork unitOfWork,
         ILogger<JobDescriptionService> logger)
     {
@@ -66,6 +72,8 @@ public class JobDescriptionService : IJobDescriptionService
         _kpiRepository = kpiRepository;
         _salaryGradeRepository = salaryGradeRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegration = workflowIntegration;
+        _workflowAdapters = workflowAdapters;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -87,28 +95,72 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _jobDescriptionRepository.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Job description with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Job description with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>
+    /// The statuses in which a job description's content may still be written. An approved, in-force
+    /// description is a signed document: changing it needs a new version, not an edit.
+    /// </summary>
+    private static readonly JobDescriptionStatus[] AuthorableStatuses =
+    {
+        JobDescriptionStatus.Draft,
+        JobDescriptionStatus.UnderRevision,
+    };
+
+    /// <summary>
+    /// Ownership plus authorability, for the twelve child collections.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ledger D-03. Every child write used to stop at <see cref="GetOwnedJobDescriptionAsync"/>,
+    /// which checks the tenant and nothing else — so the duties, qualifications and PPE of an
+    /// APPROVED description could be rewritten with no new version and no trace. The detail screen
+    /// refuses it client-side (AUTHORABLE_JOB_DESCRIPTION_STATUSES) and that was the only thing
+    /// stopping it; a screen is not a rule. Deletes are gated too: removing a duty from an approved
+    /// description is the same act as rewriting one.
+    /// </remarks>
+    private async Task<JobDescription> RequireAuthorableJobDescriptionAsync(Guid id)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(id);
+
+        if (!AuthorableStatuses.Contains(entity.Status))
+            throw JobArchitectureException.InvalidState(
+                $"Job description '{entity.JobTitle}' is {entity.Status} and its content can no longer be " +
+                "changed. Raise a new version to revise it.");
+
+        return entity;
+    }
+
+    /// <summary>The same gate for a KPI, which reaches its job description through its responsibility.</summary>
+    private async Task<JobDescription> RequireAuthorableForResponsibilityAsync(Guid responsibilityId)
+    {
+        var responsibility = await _responsibilityRepository.GetByIdAsync(responsibilityId);
+        if (responsibility == null || responsibility.TenantId != GetTenantId())
+            throw JobArchitectureException.NotFound("Responsibility not found");
+
+        return await RequireAuthorableJobDescriptionAsync(responsibility.JobDescriptionId);
+    }
+
+    /// <summary>The same gate for equipment training, which hangs off an equipment tool.</summary>
+    private async Task<JobDescription> RequireAuthorableForEquipmentToolAsync(Guid equipmentToolId)
+    {
+        var tool = await _equipmentToolRepository.GetByIdAsync(equipmentToolId);
+        if (tool == null || tool.TenantId != GetTenantId())
+            throw JobArchitectureException.NotFound("Equipment tool not found");
+
+        return await RequireAuthorableJobDescriptionAsync(tool.JobDescriptionId);
     }
 
     public async Task<JobDescriptionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entity = await _jobDescriptionRepository.GetQueryable()
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
-            .Include(jd => jd.ReviewedBy)
-            .Include(jd => jd.ApprovedBy)
-            .Include(jd => jd.StaffLevel)
-            .Include(jd => jd.Union)
-            .Include(jd => jd.SuggestedSalaryGrade)
-            .Include(jd => jd.JobFamily)
-            .Include(jd => jd.JobSubFamily)
-            .Include(jd => jd.JobLevel)
+            .WithLookups()
             .FirstOrDefaultAsync(jd => jd.Id == id && jd.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
-            throw new ArgumentException($"Job description with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Job description with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -117,13 +169,15 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var tenantId = GetTenantId();
         var entity = await _jobDescriptionRepository.GetQueryable()
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
-            .Include(jd => jd.ReviewedBy)
-            .Include(jd => jd.ApprovedBy)
+            // ⚠ SPLIT, not one query. Thirteen sibling collections hang off a job description, and a
+            // single-query include materialises their CARTESIAN PRODUCT — the row count is the
+            // collections multiplied together, not added. It crossed the 30-second command timeout
+            // as fixtures accumulated, and by 2026-09-01 this endpoint returned 500 for every one of
+            // the tenant's 46 documents. Nothing had changed in the code; the data had grown into it,
+            // which is why it passed its own suite when the area closed.
+            .AsSplitQuery()
+            .WithLookups()
             .Include(jd => jd.DutyItems)
-            .Include(jd => jd.StaffLevel)
-            .Include(jd => jd.Union)
             .Include(jd => jd.Responsibilities).ThenInclude(r => r.Qualifications).ThenInclude(q => q.Qualification)
             .Include(jd => jd.Responsibilities).ThenInclude(r => r.Competencies)
             .Include(jd => jd.Responsibilities).ThenInclude(r => r.Kpis)
@@ -133,14 +187,10 @@ public class JobDescriptionService : IJobDescriptionService
             .Include(jd => jd.EquipmentTools).ThenInclude(e => e.TrainingRequirements).ThenInclude(t => t.TrainingProgram)
             .Include(jd => jd.ReportingRelationships).ThenInclude(r => r.RelatedPosition)
             .Include(jd => jd.MedicalRequirements)
-            .Include(jd => jd.SuggestedSalaryGrade)
-            .Include(jd => jd.JobFamily)
-            .Include(jd => jd.JobSubFamily)
-            .Include(jd => jd.JobLevel)
             .FirstOrDefaultAsync(jd => jd.Id == id && jd.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
-            throw new ArgumentException($"Job description with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Job description with ID '{id}' not found.");
 
         var qualifications = (await _qualificationRepository.GetByJobDescriptionIdAsync(id))
             .Where(q => q.TenantId == tenantId);
@@ -164,8 +214,7 @@ public class JobDescriptionService : IJobDescriptionService
         var tenantId = GetTenantId();
         var entities = await _jobDescriptionRepository.GetQueryable()
             .Where(jd => jd.TenantId == tenantId)
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy)
+            .WithLookups()
             .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -176,8 +225,7 @@ public class JobDescriptionService : IJobDescriptionService
         var tenantId = GetTenantId();
         var query = _jobDescriptionRepository.GetQueryable()
             .Where(jd => jd.TenantId == tenantId)
-            .Include(jd => jd.Position)
-            .Include(jd => jd.PreparedBy);
+            .WithLookups();
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -231,6 +279,57 @@ public class JobDescriptionService : IJobDescriptionService
         return entities.Where(j => j.TenantId == tenantId).ToSummaryDtoList();
     }
 
+    /// <inheritdoc />
+    public async Task<IEnumerable<UncoveredPositionDto>> GetUncoveredPositionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var covered = await _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId
+                      && (jd.Status == JobDescriptionStatus.Approved || jd.Status == JobDescriptionStatus.Active))
+            .Select(jd => jd.PositionId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        // A position with a draft sitting on it is a different conversation from one nobody has
+        // started: the first needs an approval, the second needs an author.
+        var drafted = await _jobDescriptionRepository.GetQueryable()
+            .Where(jd => jd.TenantId == tenantId
+                      && (jd.Status == JobDescriptionStatus.Draft
+                       || jd.Status == JobDescriptionStatus.PendingReview
+                       || jd.Status == JobDescriptionStatus.UnderRevision))
+            .Select(jd => jd.PositionId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(pos => pos.TenantId == tenantId && !covered.Contains(pos.Id))
+            .Include(pos => pos.OrganizationUnit)
+            .ToListAsync(cancellationToken);
+
+        var positionIds = positions.Select(pos => pos.Id).ToList();
+        var occupancy = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == tenantId && positionIds.Contains(e.PositionId) && e.IsActive)
+            .GroupBy(e => e.PositionId)
+            .Select(g => new { PositionId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        return positions
+            .Select(pos => new UncoveredPositionDto
+            {
+                PositionId = pos.Id,
+                PositionTitle = pos.Title,
+                OrganizationUnitName = pos.OrganizationUnit?.Name,
+                CurrentlyFilled = occupancy.FirstOrDefault(o => o.PositionId == pos.Id)?.Count ?? 0,
+                HasUnapprovedDraft = drafted.Contains(pos.Id),
+            })
+            // Most people doing an undescribed job first: that is where the risk is.
+            .OrderByDescending(p => p.CurrentlyFilled)
+            .ThenBy(p => p.PositionTitle)
+            .ToList();
+    }
+
     public async Task<JobAnalyticsDto> GetAnalyticsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -254,6 +353,36 @@ public class JobDescriptionService : IJobDescriptionService
             ValuedRoleCount = jds.Count(j => j.EstimatedSalaryLow != null),
             MissionCriticalRoleCount = jds.Count(j => j.RoleCriticality == RoleCriticalityLevel.MissionCritical),
         };
+
+        // ⚠ Coverage needs its denominator. "1 position covered" says nothing without knowing
+        // whether that is 1 of 2 or 1 of 146, and FR-HR-134 is a question about positions, not
+        // about documents.
+        var livePositions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(pos => pos.TenantId == tenantId)
+            .Select(pos => new { pos.Id, pos.ExpectedHeadcount, pos.EstablishmentApprovedOn })
+            .ToListAsync(cancellationToken);
+
+        analytics.TotalPositions = livePositions.Count;
+        analytics.PositionsUncovered = analytics.TotalPositions - analytics.PositionsCovered;
+        analytics.PositionsEstablished = livePositions.Count(pos => pos.EstablishmentApprovedOn != null);
+
+        var establishedIds = livePositions
+            .Where(pos => pos.EstablishmentApprovedOn != null)
+            .Select(pos => pos.Id)
+            .ToList();
+        if (establishedIds.Count > 0)
+        {
+            var occupancy = await _unitOfWork.Repository<Employee>().GetQueryable()
+                .Where(e => e.TenantId == tenantId && establishedIds.Contains(e.PositionId) && e.IsActive)
+                .GroupBy(e => e.PositionId)
+                .Select(g => new { PositionId = g.Key, Count = g.Count() })
+                .ToListAsync(cancellationToken);
+
+            analytics.PositionsOverStrength = livePositions
+                .Where(pos => pos.EstablishmentApprovedOn != null)
+                .Count(pos => (occupancy.FirstOrDefault(o => o.PositionId == pos.Id)?.Count ?? 0)
+                              > pos.ExpectedHeadcount);
+        }
 
         var valued = jds.Where(j => j.EstimatedSalaryLow != null && j.EstimatedSalaryHigh != null)
             .Select(j => (j.EstimatedSalaryLow!.Value + j.EstimatedSalaryHigh!.Value) / 2m).ToList();
@@ -279,11 +408,52 @@ public class JobDescriptionService : IJobDescriptionService
         return analytics;
     }
 
+    /// <summary>
+    /// Refuses a classification that does not hang together: a sub-family that belongs to a
+    /// different family, or either naming a row that is not there.
+    /// </summary>
+    /// <remarks>
+    /// The two ids arrive independently on the DTO and nothing related them, so a job description
+    /// could be filed under family "Finance" and sub-family "Architecture" at the same time. Neither
+    /// value is wrong on its own, which is why no foreign key catches it and why a screen with two
+    /// dropdowns will produce it the first time someone changes the family and not the sub-family.
+    /// </remarks>
+    private async Task RequireCoherentClassificationAsync(
+        Guid? jobFamilyId, Guid? jobSubFamilyId, Guid? jobLevelId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        if (jobFamilyId.HasValue && !await _unitOfWork.Repository<JobFamily>().GetQueryable()
+                .AnyAsync(f => f.Id == jobFamilyId && f.TenantId == tenantId, cancellationToken))
+            throw JobArchitectureException.NotFound("Job family not found");
+
+        if (jobLevelId.HasValue && !await _unitOfWork.Repository<CareerLevel>().GetQueryable()
+                .AnyAsync(l => l.Id == jobLevelId && l.TenantId == tenantId, cancellationToken))
+            throw JobArchitectureException.NotFound("Job level not found");
+
+        if (!jobSubFamilyId.HasValue) return;
+
+        var subFamily = await _unitOfWork.Repository<JobSubFamily>().GetQueryable()
+            .FirstOrDefaultAsync(sf => sf.Id == jobSubFamilyId && sf.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound("Sub-family not found");
+
+        if (!jobFamilyId.HasValue)
+            throw JobArchitectureException.Invalid(
+                "A sub-family cannot be set without the job family it belongs to.");
+
+        if (subFamily.JobFamilyId != jobFamilyId.Value)
+            throw JobArchitectureException.Invalid(
+                "The sub-family belongs to a different job family. Choose one from the selected family.");
+    }
+
     public async Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
+        await RequireCoherentClassificationAsync(
+            createDto.JobFamilyId, createDto.JobSubFamilyId, createDto.JobLevelId, cancellationToken);
+
         entity.JobDescriptionNumber = await GenerateJobDescriptionNumberAsync(cancellationToken);
         entity.VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(createDto.PositionId);
         entity.PreparedById = preparedById;
@@ -383,7 +553,10 @@ public class JobDescriptionService : IJobDescriptionService
 
         _logger.LogInformation("Job description created: {JobDescriptionNumber}", entity.JobDescriptionNumber);
 
-        return entity.ToDto();
+        // Re-read through the shared chain: the entity above was built from the DTO, so its
+        // navigations are unloaded and every resolved name on the response would be blank while
+        // the same row read a moment later comes back complete.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<JobDescriptionDto> UpdateAsync(UpdateJobDescriptionDto updateDto, CancellationToken cancellationToken = default)
@@ -394,10 +567,13 @@ public class JobDescriptionService : IJobDescriptionService
             .FirstOrDefaultAsync(jd => jd.Id == updateDto.Id && jd.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
-            throw new ArgumentException($"Job description with ID '{updateDto.Id}' not found.");
+            throw JobArchitectureException.NotFound($"Job description with ID '{updateDto.Id}' not found.");
 
         if (entity.Status == JobDescriptionStatus.Approved)
-            throw new InvalidOperationException("Cannot update an approved job description. Create a new version instead.");
+            throw JobArchitectureException.InvalidState("Cannot update an approved job description. Create a new version instead.");
+
+        await RequireCoherentClassificationAsync(
+            updateDto.JobFamilyId, updateDto.JobSubFamilyId, updateDto.JobLevelId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
 
@@ -406,17 +582,33 @@ public class JobDescriptionService : IJobDescriptionService
 
         _logger.LogInformation("Job description updated: {JobDescriptionNumber}", entity.JobDescriptionNumber);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> SubmitForReviewAsync(SubmitJobDescriptionForReviewDto submitDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedJobDescriptionAsync(submitDto.JobDescriptionId);
 
-        if (entity.Status != JobDescriptionStatus.Draft)
-            throw new InvalidOperationException("Only draft job descriptions can be submitted for review.");
+        if (entity.Status != JobDescriptionStatus.Draft && entity.Status != JobDescriptionStatus.UnderRevision)
+            throw JobArchitectureException.InvalidState("Only draft job descriptions can be submitted for review.");
 
-        entity.Status = JobDescriptionStatus.PendingReview;
+        // On the engine when the tenant has published a definition; the direct path otherwise. Asked
+        // rather than assumed so one build serves a tenant that has configured its approval chain
+        // and one that has not — the same conditional the probation confirmation uses.
+        if (await IsApprovalWorkflowConfiguredAsync(cancellationToken))
+        {
+            var submitResult = await _workflowIntegration.SubmitAsync(WorkflowEntityType, entity.Id);
+            if (!submitResult.ExecutionResult.Success)
+                throw JobArchitectureException.InvalidState(
+                    submitResult.ExecutionResult.Message ?? "Failed to start the job description approval workflow.");
+
+            _workflowAdapters.GetAdapter(WorkflowEntityType)
+                .ApplySubmitOutcome(entity, submitResult.Outcome, _currentUserProvider.UserId);
+        }
+        else
+        {
+            entity.Status = JobDescriptionStatus.PendingReview;
+        }
 
         await _jobDescriptionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -426,12 +618,108 @@ public class JobDescriptionService : IJobDescriptionService
         return true;
     }
 
+    // ── Approval on the workflow engine (slice 3) ─────────────────────────────
+
+    private const string WorkflowEntityType = "JobDescription";
+
+    /// <summary>
+    /// Whether this tenant has published a job-description approval workflow.
+    /// </summary>
+    /// <remarks>
+    /// Treated as "not configured" if the engine cannot answer: refusing to approve a job
+    /// description because a workflow lookup failed would be worse than allowing the direct path.
+    /// </remarks>
+    private async Task<bool> IsApprovalWorkflowConfiguredAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _unitOfWork.Repository<Entities.Workflow.WorkflowDefinition>().GetQueryable()
+                .AnyAsync(d => d.TenantId == GetTenantId()
+                            && !d.IsDeleted
+                            && d.IsActive
+                            && d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+                            && d.EntityType != null
+                            && d.EntityType.Code == "JOB_DESCRIPTION",
+                    cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not determine whether a job description approval workflow is published; allowing the direct path.");
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ApproveViaWorkflowAsync(Guid jobDescriptionId, Guid approvedById, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var result = await _workflowIntegration.ProcessApprovalAsync(WorkflowEntityType, jobDescriptionId, userId, "Approve");
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the job description approval.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+
+        // ⚠ The consequences, which the adapter cannot apply because it sees only this one entity.
+        // Superseding matters beyond tidiness: OfferLetterService selects a position's job
+        // description by SupersededByVersionId == null, so two unsuperseded approved versions make
+        // an offer letter ambiguous. Only run when the engine actually approved — an intermediate
+        // step returns Pending, and a mid-chain approval must not retire anything.
+        if (result.Outcome == WorkflowOutcome.Approved)
+            await ApplyApprovalConsequencesAsync(entity, approvedById, cancellationToken);
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description {Number} approval step processed: {Outcome}",
+            entity.JobDescriptionNumber, result.Outcome);
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RejectViaWorkflowAsync(Guid jobDescriptionId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
+        var result = await _workflowIntegration.ProcessApprovalAsync(
+            WorkflowEntityType, jobDescriptionId, userId, "Reject", rejectionText);
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the job description rejection.");
+
+        _workflowAdapters.GetAdapter(WorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description {Number} rejected on the workflow: {Reason}",
+            entity.JobDescriptionNumber, rejectionText);
+
+        return true;
+    }
+
     public async Task<bool> ReviewAsync(ReviewJobDescriptionDto reviewDto, Guid reviewedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedJobDescriptionAsync(reviewDto.JobDescriptionId);
 
         if (entity.Status != JobDescriptionStatus.PendingReview)
-            throw new InvalidOperationException("Only job descriptions pending review can be reviewed.");
+            throw JobArchitectureException.InvalidState("Only job descriptions pending review can be reviewed.");
 
         entity.ReviewedById = reviewedById;
         entity.ReviewedDate = DateTime.UtcNow;
@@ -451,14 +739,48 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await GetOwnedJobDescriptionAsync(approveDto.JobDescriptionId);
 
         if (entity.Status != JobDescriptionStatus.PendingReview)
-            throw new InvalidOperationException("Only job descriptions pending review can be approved.");
+            throw JobArchitectureException.InvalidState("Only job descriptions pending review can be approved.");
+
+        // ⚠ Once a tenant publishes an approval workflow, the direct route closes. Leaving both open
+        // would mean an Admin permission could quietly bypass the chain the tenant configured, which
+        // defeats the point of configuring it — the same gate the probation confirmation applies.
+        if (await IsApprovalWorkflowConfiguredAsync(cancellationToken))
+            throw JobArchitectureException.InvalidState(
+                "This tenant approves job descriptions through the workflow engine. "
+                + "Approve it from the workflow queue instead.");
+
+        entity.Status = JobDescriptionStatus.Approved;
+        entity.ApprovalDate = DateTime.UtcNow;
+        await ApplyApprovalConsequencesAsync(entity, approvedById, cancellationToken);
+
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job description approved: {JobDescriptionNumber}", entity.JobDescriptionNumber);
+
+        return true;
+    }
+
+    /// <summary>
+    /// What approving a job description means beyond its own status: it becomes the version in
+    /// force for its position, which retires the one it replaces.
+    /// </summary>
+    /// <remarks>
+    /// Extracted in slice 3 so the workflow route and the direct route apply identical
+    /// consequences. An <c>IWorkflowStatusAdapter</c> is synchronous and sees only the entity it is
+    /// handed, so it cannot supersede siblings — and superseding is not cosmetic here:
+    /// <c>OfferLetterService</c> selects a position's job description by
+    /// <c>SupersededByVersionId == null</c>, so two unsuperseded approved versions make an offer
+    /// letter ambiguous rather than merely untidy.
+    /// </remarks>
+    private async Task ApplyApprovalConsequencesAsync(
+        JobDescription entity, Guid approvedById, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
 
         entity.ApprovedById = approvedById;
-        entity.ApprovalDate = DateTime.UtcNow;
-        entity.Status = JobDescriptionStatus.Approved;
         entity.NextReviewDate = DateTime.Today.AddMonths(entity.ReviewCycleMonths);
 
-        // Expire any existing approved versions for this position
         var existingApproved = await _jobDescriptionRepository.GetQueryable()
             .Where(jd => jd.TenantId == tenantId &&
                         jd.PositionId == entity.PositionId &&
@@ -473,13 +795,6 @@ public class JobDescriptionService : IJobDescriptionService
             existing.ExpiryDate = DateTime.Today;
             await _jobDescriptionRepository.UpdateAsync(existing);
         }
-
-        await _jobDescriptionRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Job description approved: {JobDescriptionNumber}", entity.JobDescriptionNumber);
-
-        return true;
     }
 
     public async Task<JobDescriptionDto> CreateNewVersionAsync(CreateJobDescriptionVersionDto versionDto, Guid preparedById, CancellationToken cancellationToken = default)
@@ -495,7 +810,7 @@ public class JobDescriptionService : IJobDescriptionService
             .FirstOrDefaultAsync(jd => jd.Id == versionDto.OriginalJobDescriptionId && jd.TenantId == tenantId, cancellationToken);
 
         if (original == null)
-            throw new ArgumentException($"Original job description with ID '{versionDto.OriginalJobDescriptionId}' not found.");
+            throw JobArchitectureException.NotFound($"Original job description with ID '{versionDto.OriginalJobDescriptionId}' not found.");
 
         var newVersion = new JobDescription
         {
@@ -510,7 +825,29 @@ public class JobDescriptionService : IJobDescriptionService
             ReviewCycleMonths = original.ReviewCycleMonths,
             PreparedById = preparedById,
             PreparedDate = DateTime.UtcNow,
-            Status = JobDescriptionStatus.Draft
+            Status = JobDescriptionStatus.Draft,
+            // ⚠ These were absent, so revising a job description silently emptied its
+            // classification, valuation and authority — while CloneAsync, the *less* important
+            // path, copied all of them. Versioning is the annual-review route: it is the one that
+            // must not lose the record.
+            RoleIntrinsicValue = original.RoleIntrinsicValue,
+            RoleCriticality = original.RoleCriticality,
+            IndustryBenchmarkSalary = original.IndustryBenchmarkSalary,
+            ValuationNotes = original.ValuationNotes,
+            AutonomyLevel = original.AutonomyLevel,
+            DecisionMakingScope = original.DecisionMakingScope,
+            FinancialAuthorityLimit = original.FinancialAuthorityLimit,
+            ApprovalAuthorityNotes = original.ApprovalAuthorityNotes,
+            StaffLevelId = original.StaffLevelId,
+            SuggestedSalaryGradeId = original.SuggestedSalaryGradeId,
+            IntendedEmploymentType = original.IntendedEmploymentType,
+            IsBargainingUnitRole = original.IsBargainingUnitRole,
+            UnionId = original.UnionId,
+            OccupationCode = original.OccupationCode,
+            EssentialFunctionsSummary = original.EssentialFunctionsSummary,
+            JobFamilyId = original.JobFamilyId,
+            JobSubFamilyId = original.JobSubFamilyId,
+            JobLevelId = original.JobLevelId
         };
 
         await _jobDescriptionRepository.AddAsync(newVersion);
@@ -652,7 +989,7 @@ public class JobDescriptionService : IJobDescriptionService
             .Include(jd => jd.MedicalRequirements)
             .FirstOrDefaultAsync(jd => jd.Id == id && jd.TenantId == tenantId, cancellationToken);
         if (src == null)
-            throw new ArgumentException($"Job description with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Job description with ID '{id}' not found.");
 
         var qualifications = (await _qualificationRepository.GetByJobDescriptionIdAsync(id))
             .Where(q => q.TenantId == tenantId).ToList();
@@ -751,7 +1088,7 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await GetOwnedJobDescriptionAsync(id);
 
         if (entity.Status == JobDescriptionStatus.Approved)
-            throw new InvalidOperationException("Cannot delete an approved job description.");
+            throw JobArchitectureException.InvalidState("Cannot delete an approved job description.");
 
         await _jobDescriptionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -765,7 +1102,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobResponsibilityDto> AddResponsibilityAsync(CreateJobResponsibilityDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -790,7 +1127,9 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await _responsibilityRepository.GetByIdAsync(updateDto.Id);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Responsibility not found");
+            throw JobArchitectureException.NotFound("Responsibility not found");
+
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
 
         updateDto.UpdateEntity(entity);
 
@@ -807,7 +1146,9 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await _responsibilityRepository.GetByIdAsync(responsibilityId);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Responsibility not found");
+            throw JobArchitectureException.NotFound("Responsibility not found");
+
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
 
         await _responsibilityRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -823,7 +1164,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobQualificationDto> AddQualificationAsync(CreateJobQualificationDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -854,7 +1195,9 @@ public class JobDescriptionService : IJobDescriptionService
             .FirstOrDefaultAsync(q => q.Id == updateDto.Id, cancellationToken);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Qualification not found");
+            throw JobArchitectureException.NotFound("Qualification not found");
+
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
 
         updateDto.UpdateEntity(entity);
 
@@ -871,7 +1214,9 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await _qualificationRepository.GetByIdAsync(qualificationId);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Qualification not found");
+            throw JobArchitectureException.NotFound("Qualification not found");
+
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
 
         await _qualificationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -887,7 +1232,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobCompetencyDto> AddCompetencyAsync(CreateJobCompetencyDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
 
@@ -912,7 +1257,9 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await _competencyRepository.GetByIdAsync(updateDto.Id);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Competency not found");
+            throw JobArchitectureException.NotFound("Competency not found");
+
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
 
         updateDto.UpdateEntity(entity);
 
@@ -929,7 +1276,9 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await _competencyRepository.GetByIdAsync(competencyId);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Competency not found");
+            throw JobArchitectureException.NotFound("Competency not found");
+
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
 
         await _competencyRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -945,7 +1294,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobPhysicalDemandDto> AddPhysicalDemandAsync(CreateJobPhysicalDemandDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _physicalDemandRepository.AddAsync(entity);
@@ -965,7 +1314,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobPhysicalDemandDto> UpdatePhysicalDemandAsync(UpdateJobPhysicalDemandDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await _physicalDemandRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Physical demand not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Physical demand not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _physicalDemandRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -976,7 +1326,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeletePhysicalDemandAsync(Guid demandId, CancellationToken cancellationToken = default)
     {
         var entity = await _physicalDemandRepository.GetByIdAsync(demandId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Physical demand not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Physical demand not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _physicalDemandRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Physical demand deleted: {Id}", demandId);
@@ -989,7 +1340,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobWorkingConditionDto> AddWorkingConditionAsync(CreateJobWorkingConditionDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _workingConditionRepository.AddAsync(entity);
@@ -1009,7 +1360,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobWorkingConditionDto> UpdateWorkingConditionAsync(UpdateJobWorkingConditionDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await _workingConditionRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Working condition not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Working condition not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _workingConditionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1020,7 +1372,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeleteWorkingConditionAsync(Guid conditionId, CancellationToken cancellationToken = default)
     {
         var entity = await _workingConditionRepository.GetByIdAsync(conditionId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Working condition not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Working condition not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _workingConditionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Working condition deleted: {Id}", conditionId);
@@ -1033,7 +1386,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobEquipmentToolDto> AddEquipmentToolAsync(CreateJobEquipmentToolDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _equipmentToolRepository.AddAsync(entity);
@@ -1053,7 +1406,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobEquipmentToolDto> UpdateEquipmentToolAsync(UpdateJobEquipmentToolDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await _equipmentToolRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment tool not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment tool not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _equipmentToolRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1064,7 +1418,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeleteEquipmentToolAsync(Guid toolId, CancellationToken cancellationToken = default)
     {
         var entity = await _equipmentToolRepository.GetByIdAsync(toolId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment tool not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment tool not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _equipmentToolRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Equipment tool deleted: {Id}", toolId);
@@ -1077,7 +1432,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobReportingRelationshipDto> AddReportingRelationshipAsync(CreateJobReportingRelationshipDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _reportingRelationshipRepository.AddAsync(entity);
@@ -1097,7 +1452,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobReportingRelationshipDto> UpdateReportingRelationshipAsync(UpdateJobReportingRelationshipDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await _reportingRelationshipRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Reporting relationship not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Reporting relationship not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _reportingRelationshipRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1108,7 +1464,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeleteReportingRelationshipAsync(Guid relationshipId, CancellationToken cancellationToken = default)
     {
         var entity = await _reportingRelationshipRepository.GetByIdAsync(relationshipId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Reporting relationship not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Reporting relationship not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _reportingRelationshipRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Reporting relationship deleted: {Id}", relationshipId);
@@ -1121,7 +1478,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobDutyItemDto> AddDutyItemAsync(CreateJobDutyItemDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         if (entity.SequenceNumber <= 0)
@@ -1143,7 +1500,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobDutyItemDto> UpdateDutyItemAsync(UpdateJobDutyItemDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await _dutyItemRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Duty item not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Duty item not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _dutyItemRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1154,7 +1512,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeleteDutyItemAsync(Guid dutyItemId, CancellationToken cancellationToken = default)
     {
         var entity = await _dutyItemRepository.GetByIdAsync(dutyItemId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Duty item not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Duty item not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _dutyItemRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Duty item deleted: {Id}", dutyItemId);
@@ -1167,7 +1526,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobPpeRequirementDto> AddPpeRequirementAsync(CreateJobPpeRequirementDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _ppeRequirementRepository.AddAsync(entity);
@@ -1194,7 +1553,8 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await _ppeRequirementRepository.GetQueryable()
             .Include(p => p.PpeType)
             .FirstOrDefaultAsync(p => p.Id == updateDto.Id, cancellationToken);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("PPE requirement not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("PPE requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _ppeRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1205,7 +1565,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeletePpeRequirementAsync(Guid ppeRequirementId, CancellationToken cancellationToken = default)
     {
         var entity = await _ppeRequirementRepository.GetByIdAsync(ppeRequirementId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("PPE requirement not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("PPE requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _ppeRequirementRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("PPE requirement deleted: {Id}", ppeRequirementId);
@@ -1218,9 +1579,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobEquipmentTrainingDto> AddEquipmentTrainingAsync(CreateJobEquipmentTrainingDto createDto, CancellationToken cancellationToken = default)
     {
-        var tool = await _equipmentToolRepository.GetByIdAsync(createDto.JobEquipmentToolId);
-        if (tool == null || tool.TenantId != GetTenantId())
-            throw new ArgumentException("Equipment tool not found");
+        await RequireAuthorableForEquipmentToolAsync(createDto.JobEquipmentToolId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _equipmentTrainingRepository.AddAsync(entity);
@@ -1238,7 +1597,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var tool = await _equipmentToolRepository.GetByIdAsync(jobEquipmentToolId);
         if (tool == null || tool.TenantId != GetTenantId())
-            throw new ArgumentException("Equipment tool not found");
+            throw JobArchitectureException.NotFound("Equipment tool not found");
         var tenantId = GetTenantId();
         var entities = await _equipmentTrainingRepository.GetByEquipmentToolIdAsync(jobEquipmentToolId);
         return entities.Where(e => e.TenantId == tenantId).ToDtoList();
@@ -1249,7 +1608,8 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await _equipmentTrainingRepository.GetQueryable()
             .Include(t => t.TrainingProgram)
             .FirstOrDefaultAsync(t => t.Id == updateDto.Id, cancellationToken);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment training not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment training not found");
+        await RequireAuthorableForEquipmentToolAsync(entity.JobEquipmentToolId);
         updateDto.UpdateEntity(entity);
         await _equipmentTrainingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1260,7 +1620,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeleteEquipmentTrainingAsync(Guid equipmentTrainingId, CancellationToken cancellationToken = default)
     {
         var entity = await _equipmentTrainingRepository.GetByIdAsync(equipmentTrainingId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Equipment training not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Equipment training not found");
+        await RequireAuthorableForEquipmentToolAsync(entity.JobEquipmentToolId);
         await _equipmentTrainingRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Equipment training deleted: {Id}", equipmentTrainingId);
@@ -1273,7 +1634,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobMedicalRequirementDto> AddMedicalRequirementAsync(CreateJobMedicalRequirementDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         await _medicalRequirementRepository.AddAsync(entity);
@@ -1293,7 +1654,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobMedicalRequirementDto> UpdateMedicalRequirementAsync(UpdateJobMedicalRequirementDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await _medicalRequirementRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Medical requirement not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Medical requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         updateDto.UpdateEntity(entity);
         await _medicalRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1304,7 +1666,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeleteMedicalRequirementAsync(Guid medicalRequirementId, CancellationToken cancellationToken = default)
     {
         var entity = await _medicalRequirementRepository.GetByIdAsync(medicalRequirementId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("Medical requirement not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("Medical requirement not found");
+        await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
         await _medicalRequirementRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Medical requirement deleted: {Id}", medicalRequirementId);
@@ -1322,7 +1685,7 @@ public class JobDescriptionService : IJobDescriptionService
             .Include(x => x.SuggestedSalaryGrade)
             .FirstOrDefaultAsync(x => x.Id == jobDescriptionId && x.TenantId == tenantId, cancellationToken);
         if (jd == null)
-            throw new ArgumentException($"Job description with ID '{jobDescriptionId}' not found.");
+            throw JobArchitectureException.NotFound($"Job description with ID '{jobDescriptionId}' not found.");
 
         var qualifications = (await _qualificationRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
             .Where(q => q.TenantId == tenantId).ToList();
@@ -1393,9 +1756,7 @@ public class JobDescriptionService : IJobDescriptionService
 
     public async Task<JobResponsibilityKpiDto> AddResponsibilityKpiAsync(CreateJobResponsibilityKpiDto createDto, CancellationToken cancellationToken = default)
     {
-        var responsibility = await _responsibilityRepository.GetByIdAsync(createDto.JobResponsibilityId);
-        if (responsibility == null || responsibility.TenantId != GetTenantId())
-            throw new ArgumentException("Responsibility not found");
+        await RequireAuthorableForResponsibilityAsync(createDto.JobResponsibilityId);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         if (entity.SequenceNumber <= 0)
@@ -1413,7 +1774,7 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var responsibility = await _responsibilityRepository.GetByIdAsync(responsibilityId);
         if (responsibility == null || responsibility.TenantId != GetTenantId())
-            throw new ArgumentException("Responsibility not found");
+            throw JobArchitectureException.NotFound("Responsibility not found");
         var tenantId = GetTenantId();
         var entities = await _kpiRepository.GetByResponsibilityIdAsync(responsibilityId);
         return entities.Where(e => e.TenantId == tenantId).ToDtoList();
@@ -1422,7 +1783,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobResponsibilityKpiDto> UpdateResponsibilityKpiAsync(UpdateJobResponsibilityKpiDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await _kpiRepository.GetByIdAsync(updateDto.Id);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("KPI not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("KPI not found");
+        await RequireAuthorableForResponsibilityAsync(entity.JobResponsibilityId);
         updateDto.UpdateEntity(entity);
         await _kpiRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1433,7 +1795,8 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<bool> DeleteResponsibilityKpiAsync(Guid kpiId, CancellationToken cancellationToken = default)
     {
         var entity = await _kpiRepository.GetByIdAsync(kpiId);
-        if (entity == null || entity.TenantId != GetTenantId()) throw new ArgumentException("KPI not found");
+        if (entity == null || entity.TenantId != GetTenantId()) throw JobArchitectureException.NotFound("KPI not found");
+        await RequireAuthorableForResponsibilityAsync(entity.JobResponsibilityId);
         await _kpiRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("KPI deleted: {Id}", kpiId);
@@ -1448,10 +1811,28 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var year = DateTime.UtcNow.Year;
         var tenantId = GetTenantId();
-        var count = await _jobDescriptionRepository.GetQueryable()
-            .CountAsync(jd => jd.TenantId == tenantId && jd.CreatedAt.Year == year, cancellationToken);
+        var prefix = $"JD-{year}-";
 
-        return $"JD-{year}-{(count + 1):D5}";
+        // ⚠ This counted live rows and returned count + 1, which repeats a number the moment any
+        // row is deleted — measured 2026-08-19: two job descriptions came back as JD-2026-00058.
+        // There is no unique index on JobDescriptionNumber, so the collision does not fail; it just
+        // produces two documents with one number, and the register shows them as duplicates.
+        //
+        // Take the highest number already issued instead of counting, and read through the soft
+        // delete: a deleted job description has still consumed its number, and a document number
+        // that gets reissued is worse than one with a gap. Same reasoning as the succession
+        // document-number fix (a soft delete does not release what a counter assumes it released).
+        var issued = await _jobDescriptionRepository.GetQueryableIncludingDeleted(
+                jd => jd.TenantId == tenantId && jd.JobDescriptionNumber.StartsWith(prefix))
+            .Select(jd => jd.JobDescriptionNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[prefix.Length..], out var value) ? value : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{prefix}{(highest + 1):D5}";
     }
 
     #endregion
@@ -1466,6 +1847,8 @@ public class ManpowerBudgetService : IManpowerBudgetService
     private readonly IManpowerBudgetRepository _budgetRepository;
     private readonly IManpowerBudgetLineRepository _budgetLineRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<ManpowerBudgetService> _logger;
 
@@ -1473,12 +1856,16 @@ public class ManpowerBudgetService : IManpowerBudgetService
         IManpowerBudgetRepository budgetRepository,
         IManpowerBudgetLineRepository budgetLineRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegration,
+        IWorkflowStatusAdapterRegistry workflowAdapters,
         IUnitOfWork unitOfWork,
         ILogger<ManpowerBudgetService> logger)
     {
         _budgetRepository = budgetRepository;
         _budgetLineRepository = budgetLineRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegration = workflowIntegration;
+        _workflowAdapters = workflowAdapters;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -1498,7 +1885,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
     {
         var entity = await _budgetRepository.GetByIdAsync(id);
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Manpower budget with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Manpower budget with ID '{id}' not found.");
         return entity;
     }
 
@@ -1512,7 +1899,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
             .FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
-            throw new ArgumentException($"Manpower budget with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Manpower budget with ID '{id}' not found.");
 
         return entity.ToDto();
     }
@@ -1528,7 +1915,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
             .FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
-            throw new ArgumentException($"Manpower budget with ID '{id}' not found.");
+            throw JobArchitectureException.NotFound($"Manpower budget with ID '{id}' not found.");
 
         return entity.ToDetailDto();
     }
@@ -1538,8 +1925,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var tenantId = GetTenantId();
         var entities = await _budgetRepository.GetQueryable()
             .Where(b => b.TenantId == tenantId)
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit)
+            .WithLookups()
             .ToListAsync(cancellationToken);
 
         return entities.ToDtoList();
@@ -1550,8 +1936,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var tenantId = GetTenantId();
         var query = _budgetRepository.GetQueryable()
             .Where(b => b.TenantId == tenantId)
-            .Include(b => b.OrganizationLevel)
-            .Include(b => b.OrganizationUnit);
+            .WithLookups();
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -1652,10 +2037,10 @@ public class ManpowerBudgetService : IManpowerBudgetService
             .FirstOrDefaultAsync(b => b.Id == updateDto.Id && b.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
-            throw new ArgumentException($"Manpower budget with ID '{updateDto.Id}' not found.");
+            throw JobArchitectureException.NotFound($"Manpower budget with ID '{updateDto.Id}' not found.");
 
         if (entity.Status == ManpowerBudgetStatus.Approved)
-            throw new InvalidOperationException("Cannot update an approved budget.");
+            throw JobArchitectureException.InvalidState("Cannot update an approved budget.");
 
         updateDto.UpdateEntity(entity);
         entity.TotalBudget = updateDto.SalaryBudget + updateDto.BenefitsBudget + updateDto.RecruitmentBudget + updateDto.TrainingBudget;
@@ -1674,9 +2059,36 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var entity = await GetOwnedBudgetAsync(budgetId);
 
         if (entity.Status != ManpowerBudgetStatus.Draft)
-            throw new InvalidOperationException("Only draft budgets can be submitted for approval.");
+            throw JobArchitectureException.InvalidState("Only draft budgets can be submitted for approval.");
 
-        entity.Status = ManpowerBudgetStatus.Submitted;
+        // ⚠ Refuse an empty budget before troubling anyone with it. A manpower budget with no lines
+        // authorises no posts, so sending one up FR-HR-135's three-step chain wastes three people's
+        // time and — because slice 8 derives the establishment from the lines — would approve an
+        // establishment of nothing.
+        var lineCount = await _budgetLineRepository.GetQueryable()
+            .CountAsync(l => l.ManpowerBudgetId == entity.Id && !l.IsDeleted, cancellationToken);
+        if (lineCount == 0)
+            throw JobArchitectureException.InvalidState(
+                "This budget has no lines, so it authorises no posts. Add at least one before submitting it.");
+
+        await RequireEstablishmentIsAchievableAsync(entity, cancellationToken);
+
+        if (await IsBudgetWorkflowConfiguredAsync(cancellationToken))
+        {
+            var submitResult = await _workflowIntegration.SubmitAsync(BudgetWorkflowEntityType, entity.Id);
+            if (!submitResult.ExecutionResult.Success)
+                throw JobArchitectureException.InvalidState(
+                    submitResult.ExecutionResult.Message ?? "Failed to start the manpower budget approval workflow.");
+
+            _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
+                .ApplySubmitOutcome(entity, submitResult.Outcome, _currentUserProvider.UserId);
+        }
+        else
+        {
+            entity.Status = ManpowerBudgetStatus.Submitted;
+        }
+
+        entity.RejectionReason = null;
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1686,16 +2098,117 @@ public class ManpowerBudgetService : IManpowerBudgetService
         return true;
     }
 
+    // ── Approval on the workflow engine (slice 7, FR-HR-135) ──────────────────
+
+    private const string BudgetWorkflowEntityType = "ManpowerBudget";
+
+    /// <summary>Whether this tenant has published a manpower-budget approval workflow.</summary>
+    private async Task<bool> IsBudgetWorkflowConfiguredAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _unitOfWork.Repository<Entities.Workflow.WorkflowDefinition>().GetQueryable()
+                .AnyAsync(d => d.TenantId == GetTenantId()
+                            && !d.IsDeleted
+                            && d.IsActive
+                            && d.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
+                            && d.EntityType != null
+                            && d.EntityType.Code == "MANPOWER_BUDGET",
+                    cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not determine whether a manpower budget approval workflow is published; allowing the direct path.");
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> ApproveViaWorkflowAsync(Guid budgetId, Guid approvedById, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(budgetId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var result = await _workflowIntegration.ProcessApprovalAsync(BudgetWorkflowEntityType, budgetId, userId, "Approve");
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the manpower budget approval.");
+
+        _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+
+        // ⚠ Only when the chain actually completes. FR-HR-135 has three steps, and a Department
+        // Head approving the first must not stamp the budget as approved — the engine returns
+        // Pending for a mid-chain step, and an approver is not the approver until the last one.
+        if (result.Outcome == WorkflowOutcome.Approved)
+        {
+            entity.ApprovedById = approvedById;
+            // Only now. A department head approving step 1 of 3 has authorised nothing yet, and
+            // writing the establishment there would let the first approver set the headcount the
+            // other two are still deciding on.
+            await ApplyEstablishmentAsync(entity, cancellationToken);
+        }
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget {Number} approval step processed: {Outcome}",
+            entity.BudgetNumber, result.Outcome);
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RejectViaWorkflowAsync(Guid budgetId, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedBudgetAsync(budgetId);
+        var userId = _currentUserProvider.UserId;
+
+        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
+            throw new UnauthorizedAccessException(
+                "You are not assigned as an approver for the current workflow step.");
+
+        var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
+        var result = await _workflowIntegration.ProcessApprovalAsync(
+            BudgetWorkflowEntityType, budgetId, userId, "Reject", rejectionText);
+        if (!result.ExecutionResult.Success)
+            throw JobArchitectureException.InvalidState(
+                result.ExecutionResult.Message ?? "Failed to process the manpower budget rejection.");
+
+        _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
+            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+
+        await _budgetRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget {Number} rejected on the workflow", entity.BudgetNumber);
+
+        return true;
+    }
+
     public async Task<bool> ApproveAsync(ApproveManpowerBudgetDto approveDto, Guid approvedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(approveDto.BudgetId);
 
         if (entity.Status != ManpowerBudgetStatus.Submitted && entity.Status != ManpowerBudgetStatus.UnderReview)
-            throw new InvalidOperationException("Only submitted budgets can be approved.");
+            throw JobArchitectureException.InvalidState("Only submitted budgets can be approved.");
+
+        if (await IsBudgetWorkflowConfiguredAsync(cancellationToken))
+            throw JobArchitectureException.InvalidState(
+                "This tenant approves manpower budgets through the workflow engine (FR-HR-135). "
+                + "Approve it from the workflow queue instead.");
 
         entity.ApprovedById = approvedById;
+        entity.RejectionReason = null;
         entity.ApprovalDate = DateTime.UtcNow;
         entity.Status = ManpowerBudgetStatus.Approved;
+
+        await ApplyEstablishmentAsync(entity, cancellationToken);
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1705,11 +2218,236 @@ public class ManpowerBudgetService : IManpowerBudgetService
         return true;
     }
 
+    /// <inheritdoc />
+    public async Task<PositionEstablishmentResultDto> SetPositionEstablishmentAsync(
+        Guid positionId, SetPositionEstablishmentDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound($"Position with ID '{positionId}' not found.");
+
+        // ⚠ Refuse to establish a post below the number of people already in it. The establishment
+        // is what a later requisition or movement is measured against, and one that is already
+        // breached on the day it is set makes every subsequent action fail for a reason nobody took.
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .CountAsync(e => e.TenantId == tenantId && e.PositionId == positionId && e.IsActive,
+                cancellationToken);
+        if (dto.ExpectedHeadcount < occupied)
+            throw JobArchitectureException.Invalid(
+                $"{position.Title} already has {occupied} employee(s) in post, so it cannot be "
+                + $"established for {dto.ExpectedHeadcount}. Move them first, or establish it for at least {occupied}.");
+
+        position.ExpectedHeadcount = dto.ExpectedHeadcount;
+        position.EstablishmentApprovedOn = DateTime.UtcNow;
+        // Null on purpose: this number did NOT come from a budget, and a screen has to be able to
+        // say so rather than implying an approval chain that never ran.
+        position.EstablishmentSourceBudgetId = null;
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Establishment for position {PositionId} set to {Headcount} directly by HR: {Reason}",
+            positionId, dto.ExpectedHeadcount, dto.Reason);
+
+        return await GetPositionEstablishmentAsync(positionId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionEstablishmentResultDto> WithdrawPositionEstablishmentAsync(
+        Guid positionId, string reason, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound($"Position with ID '{positionId}' not found.");
+
+        if (position.EstablishmentApprovedOn == null)
+            throw JobArchitectureException.InvalidState(
+                $"{position.Title} has no approved establishment to withdraw.");
+
+        position.EstablishmentApprovedOn = null;
+        position.EstablishmentSourceBudgetId = null;
+        // ⚠ ExpectedHeadcount is deliberately LEFT AS IT IS. Withdrawing an establishment says "this
+        // number is no longer authorised", not "this number is wrong" — and the column has no
+        // meaningful null. Every rule keys off EstablishmentApprovedOn, so clearing that is what
+        // actually releases the constraint; blanking the count as well would destroy the planning
+        // figure for no benefit.
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Establishment withdrawn for position {PositionId}: {Reason}", positionId, reason);
+
+        return await GetPositionEstablishmentAsync(positionId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionEstablishmentResultDto> GetPositionEstablishmentAsync(
+        Guid positionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId, cancellationToken)
+            ?? throw JobArchitectureException.NotFound($"Position with ID '{positionId}' not found.");
+
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .CountAsync(e => e.TenantId == tenantId && e.PositionId == positionId && e.IsActive,
+                cancellationToken);
+
+        string? sourceNumber = null;
+        if (position.EstablishmentSourceBudgetId != null)
+        {
+            sourceNumber = await _budgetRepository.GetQueryable()
+                .Where(b => b.Id == position.EstablishmentSourceBudgetId)
+                .Select(b => b.BudgetNumber)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return new PositionEstablishmentResultDto
+        {
+            PositionId = position.Id,
+            PositionTitle = position.Title,
+            ExpectedHeadcount = position.ExpectedHeadcount,
+            CurrentlyFilled = occupied,
+            EstablishmentApprovedOn = position.EstablishmentApprovedOn,
+            EstablishmentSourceBudgetId = position.EstablishmentSourceBudgetId,
+            EstablishmentSourceBudgetNumber = sourceNumber,
+            // ⚠ The whole point of the column. An unestablished post is not constrained by anything,
+            // whatever its ExpectedHeadcount happens to say.
+            IsEstablished = position.EstablishmentApprovedOn != null,
+        };
+    }
+
+    /// <summary>
+    /// Refuses a budget that would establish a post for fewer people than are already in it.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Written after the area-8 movements harness caught the omission: the <b>admin</b>
+    /// establishment path had this guard from the start and the <b>budget</b> path did not, so an
+    /// approved budget quietly established a post for 1 while 62 employees stood in it. Every
+    /// movement into that post was then refused, correctly and unhelpfully, by a rule enforcing a
+    /// number that had never been achievable.</para>
+    ///
+    /// <para>The budget path is the one that will carry most of the organisation, so it needed the
+    /// stricter guard, not the looser one. An approved budget that establishes fewer posts than
+    /// exist is a data error either way — either the planned count is wrong or people are in the
+    /// wrong posts — and creating an immediately-breached establishment resolves neither.</para>
+    ///
+    /// <para>⚠ Checked at <b>submit</b> as well as at approval. Failing at step 3 of FR-HR-135's
+    /// chain, after a department head, HR and the Managing Director have each spent time on it, is
+    /// the worst moment to discover a number that was wrong when it was typed.</para>
+    /// </remarks>
+    private async Task RequireEstablishmentIsAchievableAsync(
+        ManpowerBudget budget, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        var lines = await _budgetLineRepository.GetQueryable()
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted && l.TenantId == tenantId)
+            .Select(l => new { l.PositionId, l.PlannedCount })
+            .ToListAsync(cancellationToken);
+        if (lines.Count == 0) return;
+
+        var positionIds = lines.Select(l => l.PositionId).Distinct().ToList();
+
+        var occupancy = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == tenantId && positionIds.Contains(e.PositionId) && e.IsActive)
+            .GroupBy(e => e.PositionId)
+            .Select(g => new { PositionId = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+
+        var titles = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(p => positionIds.Contains(p.Id) && p.TenantId == tenantId)
+            .Select(p => new { p.Id, p.Title })
+            .ToListAsync(cancellationToken);
+
+        var breaches = new List<string>();
+        foreach (var positionId in positionIds)
+        {
+            var planned = lines.Where(l => l.PositionId == positionId).Max(l => l.PlannedCount);
+            var filled = occupancy.FirstOrDefault(o => o.PositionId == positionId)?.Count ?? 0;
+            if (planned >= filled) continue;
+
+            var title = titles.FirstOrDefault(t => t.Id == positionId)?.Title ?? positionId.ToString();
+            breaches.Add($"{title} is budgeted for {planned} but {filled} are in post");
+        }
+
+        if (breaches.Count > 0)
+            throw JobArchitectureException.Invalid(
+                "This budget would establish fewer posts than are currently filled: "
+                + string.Join("; ", breaches)
+                + ". Raise the planned count, or move the employees first.");
+    }
+
+    /// <summary>
+    /// Writes the approved budget's planned headcount onto each position it covers — decision D-2,
+    /// and what makes FR-HR-136 enforceable at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>The budget IS the approved establishment. Once Department Head, HR and the Managing
+    /// Director have signed off <c>PlannedCount</c> for a position (FR-HR-135), that number is what
+    /// the organisation has authorised, and there is no second artefact to keep in step with it.</para>
+    ///
+    /// <para>⚠ <c>EstablishmentApprovedOn</c> is the load-bearing part, not the headcount.
+    /// <c>ExpectedHeadcount</c> already existed and already held a number for every position — the
+    /// default, 1, on 132 of 146. Stamping the date is what lets every downstream rule tell an
+    /// authorised establishment from an untouched column, and therefore have teeth on the first
+    /// without refusing everything on the second.</para>
+    ///
+    /// <para>Runs on both approval routes, from the one place, for the same reason superseding a
+    /// job description does.</para>
+    /// </remarks>
+    private async Task ApplyEstablishmentAsync(ManpowerBudget budget, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+
+        await RequireEstablishmentIsAchievableAsync(budget, cancellationToken);
+
+        var lines = await _budgetLineRepository.GetQueryable()
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted && l.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        if (lines.Count == 0) return;
+
+        var positionIds = lines.Select(l => l.PositionId).Distinct().ToList();
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .Where(pos => positionIds.Contains(pos.Id) && pos.TenantId == tenantId)
+            .ToListAsync(cancellationToken);
+
+        var stamped = DateTime.UtcNow;
+        foreach (var position in positions)
+        {
+            // Highest planned count wins if a budget names a position twice — a budget that
+            // contradicts itself should authorise the larger number rather than whichever row the
+            // query happened to return last.
+            position.ExpectedHeadcount = lines
+                .Where(l => l.PositionId == position.Id)
+                .Max(l => l.PlannedCount);
+            position.EstablishmentApprovedOn = stamped;
+            position.EstablishmentSourceBudgetId = budget.Id;
+        }
+
+        _logger.LogInformation(
+            "Manpower budget {Number} set the establishment for {Count} position(s)",
+            budget.BudgetNumber, positions.Count);
+    }
+
     public async Task<bool> RejectAsync(Guid budgetId, string reason, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(budgetId);
 
+        if (await IsBudgetWorkflowConfiguredAsync(cancellationToken))
+            throw JobArchitectureException.InvalidState(
+                "This tenant approves manpower budgets through the workflow engine (FR-HR-135). "
+                + "Reject it from the workflow queue instead.");
+
         entity.Status = ManpowerBudgetStatus.Rejected;
+        // ⚠ This took a reason and threw it away — the budget holder could see it had been refused
+        // and had no way to find out why, which makes the rejection unactionable.
+        entity.RejectionReason = string.IsNullOrWhiteSpace(reason)
+            ? "Rejected without a stated reason."
+            : reason.Trim();
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1724,7 +2462,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var entity = await GetOwnedBudgetAsync(id);
 
         if (entity.Status == ManpowerBudgetStatus.Approved)
-            throw new InvalidOperationException("Cannot delete an approved budget.");
+            throw JobArchitectureException.InvalidState("Cannot delete an approved budget.");
 
         await _budgetRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1769,7 +2507,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
             .FirstOrDefaultAsync(l => l.Id == updateDto.Id, cancellationToken);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Budget line not found");
+            throw JobArchitectureException.NotFound("Budget line not found");
 
         updateDto.UpdateEntity(entity);
 
@@ -1786,7 +2524,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var entity = await _budgetLineRepository.GetByIdAsync(lineId);
 
         if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Budget line not found");
+            throw JobArchitectureException.NotFound("Budget line not found");
 
         await _budgetLineRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

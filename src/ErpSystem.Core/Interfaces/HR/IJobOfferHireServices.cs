@@ -25,6 +25,14 @@ public interface IJobOfferService
 
     // Workflow
     Task<bool> SubmitForApprovalAsync(Guid offerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The preparer withdrawing an offer that is out for approval, returning it to Draft.
+    /// ⚠ The generic recall button in <c>WorkflowApprovalActions</c> calls the engine directly, so
+    /// any rule added here is enforced for API callers but bypassed by that button — the same split
+    /// PIP and requisitions have.
+    /// </summary>
+    Task<bool> RecallApprovalAsync(Guid offerId, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveJobOfferDto dto, Guid approvedByUserId, CancellationToken cancellationToken = default);
     Task<bool> RejectApprovalAsync(RejectJobOfferDto dto, Guid rejectedByUserId, CancellationToken cancellationToken = default);
     Task<bool> IssueAsync(IssueJobOfferDto dto, Guid issuedByUserId, CancellationToken cancellationToken = default);

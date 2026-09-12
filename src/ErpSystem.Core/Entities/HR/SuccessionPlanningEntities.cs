@@ -558,7 +558,27 @@ public class SuccessionDocument : TenantEntity
     
     public string DocumentName { get; set; } = string.Empty;
     public string DocumentType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Legacy storage location. This was <c>[Required]</c> on the create DTO and copied verbatim
+    /// onto the entity, which made it a path-injection sink — the fourth instance of the defect
+    /// <c>MedicalExpenseDocument</c>, <c>EmployeeMedicalExamDocument</c> and
+    /// <c>MedicalInsuranceProviderDocument</c> were each fixed for (D-10). There was no upload
+    /// route and no download route either, so a row was unreadable even when the path was honest.
+    /// Files now arrive through <c>POST api/succession-documents/upload</c> and this stays empty on
+    /// new rows. Kept non-nullable so existing rows are untouched.
+    /// </summary>
     public string DocumentUrl { get; set; } = string.Empty;
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
+
     public string? Description { get; set; }
 
 	/// <summary>Narrows the document to a specific plan candidate.</summary>

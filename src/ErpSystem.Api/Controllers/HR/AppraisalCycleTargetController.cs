@@ -3,12 +3,13 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class AppraisalCycleTargetController : ControllerBase
 {
     private readonly IAppraisalCycleTargetService _targetService;
@@ -88,6 +89,7 @@ public class AppraisalCycleTargetController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(AppraisalCycleTargetDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalCycleTargetDto createDto)
     {
         try
@@ -119,6 +121,7 @@ public class AppraisalCycleTargetController : ControllerBase
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(AppraisalCycleTargetDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalCycleTargetDto updateDto)
     {
         try
@@ -179,6 +182,7 @@ public class AppraisalCycleTargetController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
         try
@@ -220,6 +224,7 @@ public class AppraisalCycleTargetController : ControllerBase
     [HttpPost("{targetId:guid}/exclusions")]
     [ProducesResponseType(typeof(AppraisalCycleTargetExclusionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddExclusion(Guid targetId, [FromBody] CreateAppraisalCycleTargetExclusionDto dto)
     {
         try
@@ -241,6 +246,7 @@ public class AppraisalCycleTargetController : ControllerBase
     /// <summary>Update an exclusion</summary>
     [HttpPut("{targetId:guid}/exclusions/{exclusionId:guid}")]
     [ProducesResponseType(typeof(AppraisalCycleTargetExclusionDto), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateExclusion(Guid targetId, Guid exclusionId, [FromBody] UpdateAppraisalCycleTargetExclusionDto dto)
     {
         try
@@ -262,6 +268,7 @@ public class AppraisalCycleTargetController : ControllerBase
     /// <summary>Remove an exclusion</summary>
     [HttpDelete("{targetId:guid}/exclusions/{exclusionId:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> RemoveExclusion(Guid targetId, Guid exclusionId)
     {
         try

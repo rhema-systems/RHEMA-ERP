@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -11,7 +12,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class LocationController : ControllerBase
 {
     private readonly ILocationService _locationService;
@@ -291,6 +292,7 @@ public class LocationController : ControllerBase
     /// Creates a new location
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(LocationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateLocationDto createDto)
@@ -307,6 +309,12 @@ public class LocationController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (InvalidOperationException ex)
+        {
+            // The service's rules (one root per structure, unique code, coordinates in pairs) used to
+            // fall through to the 500 below with a fixed string. Added 2026-09-03.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating location");
@@ -318,6 +326,7 @@ public class LocationController : ControllerBase
     /// Updates an existing location
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(LocationDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -340,6 +349,12 @@ public class LocationController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // Rule refusals (deactivating with active children, cycles, coordinates in pairs) used
+            // to fall through to the 500 below with a fixed string. Added 2026-09-03.
+            return BadRequest(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating location with ID {Id}", id);
@@ -351,6 +366,7 @@ public class LocationController : ControllerBase
     /// Deletes a location
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id)
@@ -375,6 +391,7 @@ public class LocationController : ControllerBase
     /// Moves a location to a new parent
     /// </summary>
     [HttpPost("{locationId:guid}/move")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> MoveLocation(Guid locationId, [FromBody] MoveLocationRequest request)

@@ -56,7 +56,7 @@ function getEstateSopControls(procedure: EstateProcedure): EstateSopControl[] {
     {
       title: 'Central DMS',
       description:
-        'Publish source documents, final letters, search reports, signed instruments, file movement evidence, and record amendments into Central DMS.',
+        'File source documents, final letters, search reports, signed instruments, file movement evidence, and record amendments in Central DMS.',
       href: `/document-management?module=Estate&entityType=${encodedEntityType}`,
       action: 'Open DMS',
       icon: FileText,

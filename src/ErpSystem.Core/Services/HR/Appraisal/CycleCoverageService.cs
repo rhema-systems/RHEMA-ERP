@@ -95,25 +95,23 @@ public class CycleCoverageService : ICycleCoverageService
             HasActiveTargets = activeTargets.Count > 0,
         };
 
-        // Pre-flight: bail early if the cycle isn't configured yet
-        if (!result.HasActiveTemplates || !result.HasActiveTargets)
-        {
-            result.IsGenerationSafe = false;
-            result.PageNumber = pageNumber;
-            result.PageSize = pageSize;
-            result.TotalPages = 0;
-            return result;
-        }
-
         // ──────────────────────────────────────────────────────────────
         // 3. Resolve employee population from targets (inclusions then exclusions)
         // ──────────────────────────────────────────────────────────────
-        var rawIds = await ResolveEmployeesInScopeAsync(activeTargets, tenantId, cancellationToken);
+        // Resolved before the not-yet-configured bail below, because the scope overlaps only
+        // need targets — and a cycle that has targets but no templates yet is exactly when a
+        // clash with another cycle is most worth knowing about, while it is still being built.
+        var rawIds = activeTargets.Count > 0
+            ? await ResolveEmployeesInScopeAsync(activeTargets, tenantId, cancellationToken)
+            : new HashSet<Guid>();
         var excludedWithReasons = await ApplyExclusionsAsync(activeTargets, rawIds, tenantId, cancellationToken);
         var includedIds = rawIds.Where(id => !excludedWithReasons.ContainsKey(id)).ToHashSet();
         var excludedIds = rawIds.Where(id => excludedWithReasons.ContainsKey(id)).ToHashSet();
 
-        if (rawIds.Count == 0)
+        result.ScopeOverlaps = await ComputeScopeOverlapsAsync(cycle, includedIds, tenantId, cancellationToken);
+
+        // Pre-flight: bail early if the cycle isn't configured yet
+        if (!result.HasActiveTemplates || !result.HasActiveTargets || rawIds.Count == 0)
         {
             result.IsGenerationSafe = false;
             result.TotalTargetedEmployees = 0;
@@ -200,7 +198,68 @@ public class CycleCoverageService : ICycleCoverageService
             .Take(pageSize)
             .ToList();
 
+        // Scope overlaps were computed up front, before the not-yet-configured bail.
+
         return result;
+    }
+
+    /// <summary>
+    /// Other cycles of the same type and year competing for these employees.
+    ///
+    /// Opening is refused only by the Open / InProgress ones — that is what
+    /// <c>AppraisalCycleService.OpenCycleAsync</c> enforces. Drafts are reported too but
+    /// marked as non-blocking, so a clash with a colleague's half-built cycle is visible here
+    /// while it is still cheap to fix, instead of stopping someone at the moment they open.
+    /// </summary>
+    private async Task<List<CycleScopeOverlapDto>> ComputeScopeOverlapsAsync(
+        AppraisalCycle cycle,
+        HashSet<Guid> includedIds,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var overlaps = new List<CycleScopeOverlapDto>();
+        if (includedIds.Count == 0) return overlaps;
+
+        var siblings = await _cycleRepo.GetQueryable()
+            .Where(c => c.TenantId == tenantId
+                     && c.Id != cycle.Id
+                     && c.AppraisalType == cycle.AppraisalType
+                     && c.Year == cycle.Year
+                     && c.Status != AppraisalCycleStatus.Closed
+                     && !c.IsDeleted)
+            .ToListAsync(cancellationToken);
+
+        foreach (var sibling in siblings)
+        {
+            var siblingTargets = await _targetRepo.GetQueryable()
+                .Where(t => t.AppraisalCycleId == sibling.Id && t.TenantId == tenantId && t.IsActive && !t.IsDeleted)
+                .Include(t => t.Exclusions)
+                .ToListAsync(cancellationToken);
+
+            if (siblingTargets.Count == 0) continue;
+
+            var siblingRaw = await ResolveEmployeesInScopeAsync(siblingTargets, tenantId, cancellationToken);
+            var siblingExcluded = await ApplyExclusionsAsync(siblingTargets, siblingRaw, tenantId, cancellationToken);
+            var siblingScope = siblingRaw.Where(id => !siblingExcluded.ContainsKey(id));
+
+            var shared = siblingScope.Count(includedIds.Contains);
+            if (shared == 0) continue;
+
+            overlaps.Add(new CycleScopeOverlapDto
+            {
+                CycleId = sibling.Id,
+                CycleCode = sibling.CycleCode,
+                CycleName = sibling.CycleName,
+                Status = sibling.Status,
+                SharedEmployeeCount = shared,
+                BlocksOpening = sibling.Status is AppraisalCycleStatus.Open or AppraisalCycleStatus.InProgress,
+            });
+        }
+
+        return overlaps
+            .OrderByDescending(o => o.BlocksOpening)
+            .ThenByDescending(o => o.SharedEmployeeCount)
+            .ToList();
     }
 
     // ──────────────────────────────────────────────────────────────────

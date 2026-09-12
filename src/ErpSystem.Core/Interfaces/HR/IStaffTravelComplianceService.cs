@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -18,7 +18,7 @@ public interface IStaffTravelComplianceService
     Task<IEnumerable<StaffTravelDocumentDto>> GetExpiringDocumentsAsync(int daysAhead = 90, CancellationToken cancellationToken = default);
     Task<StaffTravelDocumentDto> CreateDocumentAsync(CreateStaffTravelDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelDocumentDto> UpdateDocumentAsync(UpdateStaffTravelDocumentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> VerifyDocumentAsync(VerifyStaffTravelDocumentDto verifyDto, CancellationToken cancellationToken = default);
+    Task<bool> VerifyDocumentAsync(VerifyStaffTravelDocumentDto verifyDto, Guid verifierEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Visa requirements (reference data)
@@ -44,16 +44,18 @@ public interface IStaffTravelComplianceService
     Task<IEnumerable<StaffTravelRiskAssessmentDto>> GetRiskAssessmentsByRequestAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<StaffTravelRiskAssessmentDto?> GetCurrentRiskAssessmentAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRiskAssessmentDto>> GetAssessmentsRequiringAcknowledgementAsync(CancellationToken cancellationToken = default);
-    Task<StaffTravelRiskAssessmentDto> CreateRiskAssessmentAsync(CreateStaffTravelRiskAssessmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <param name="assessorEmployeeId">The caller. `AssessedById` on the payload is ignored — it names who judged a destination safe.</param>
+    Task<StaffTravelRiskAssessmentDto> CreateRiskAssessmentAsync(CreateStaffTravelRiskAssessmentDto createDto, Guid tenantId, Guid createdByUserId, Guid? assessorEmployeeId = null, CancellationToken cancellationToken = default);
     Task<StaffTravelRiskAssessmentDto> UpdateRiskAssessmentAsync(UpdateStaffTravelRiskAssessmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> AcknowledgeRiskAssessmentAsync(AcknowledgeStaffTravelRiskAssessmentDto acknowledgeDto, CancellationToken cancellationToken = default);
+    /// <param name="acknowledgerEmployeeId">The caller. Must be the traveller — see the implementation.</param>
+    Task<bool> AcknowledgeRiskAssessmentAsync(AcknowledgeStaffTravelRiskAssessmentDto acknowledgeDto, Guid acknowledgerEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteRiskAssessmentAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Alerts
     Task<StaffTravelAlertDto> GetAlertByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelAlertSummaryDto>> GetActiveAlertsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelAlertSummaryDto>> GetAlertsByCountryAsync(Guid countryId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<StaffTravelAlertSummaryDto>> GetCurrentAlertsForCountryAsync(Guid countryId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<StaffTravelAlertDto>> GetCurrentAlertsForCountryAsync(Guid countryId, CancellationToken cancellationToken = default);
     Task<StaffTravelAlertDto> CreateAlertAsync(CreateStaffTravelAlertDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelAlertDto> UpdateAlertAsync(UpdateStaffTravelAlertDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAlertAsync(Guid id, CancellationToken cancellationToken = default);
@@ -62,7 +64,8 @@ public interface IStaffTravelComplianceService
     Task<StaffTravelAlertNotificationDto> CreateAlertNotificationAsync(CreateStaffTravelAlertNotificationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelAlertNotificationDto>> GetNotificationsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelAlertNotificationDto>> GetUnacknowledgedNotificationsAsync(Guid employeeId, CancellationToken cancellationToken = default);
-    Task<bool> AcknowledgeNotificationAsync(AcknowledgeStaffTravelAlertNotificationDto acknowledgeDto, CancellationToken cancellationToken = default);
+    /// <param name="acknowledgerEmployeeId">The caller. Must be the employee the alert was sent to.</param>
+    Task<bool> AcknowledgeNotificationAsync(AcknowledgeStaffTravelAlertNotificationDto acknowledgeDto, Guid acknowledgerEmployeeId, CancellationToken cancellationToken = default);
 
     // Insurance policies
     Task<StaffTravelInsurancePolicyDto> GetInsuranceByIdAsync(Guid id, CancellationToken cancellationToken = default);

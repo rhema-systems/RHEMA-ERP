@@ -293,6 +293,14 @@ public interface ITrainingAttendanceRepository : IGenericRepository<TrainingAtte
     /// <summary>Gets the attendance history for an employee across all schedules.</summary>
     Task<IEnumerable<TrainingAttendance>> GetByEmployeeIdAsync(Guid employeeId);
 
+    /// <summary>
+    /// Untracked re-read by id through the full navigation chain, for building a write response.
+    /// Tracked re-reads return the same instance from the identity map with its stale navigations —
+    /// e.g. a just-changed ManagerId would still map the previous manager's name.
+    /// </summary>
+    Task<TrainingAttendance?> GetByIdWithNavigationsAsync(Guid id);
+
+
     /// <summary>Gets the attendance register for a specific schedule on a specific date.</summary>
     Task<IEnumerable<TrainingAttendance>> GetByScheduleAndDateAsync(Guid scheduleId, DateTime date);
 
@@ -311,6 +319,14 @@ public interface ITrainingFeedbackRepository : IGenericRepository<TrainingFeedba
 
     /// <summary>Gets all feedback submitted by a specific employee.</summary>
     Task<IEnumerable<TrainingFeedback>> GetByEmployeeIdAsync(Guid employeeId);
+
+    /// <summary>
+    /// Untracked re-read by id through the full navigation chain, for building a write response.
+    /// Tracked re-reads return the same instance from the identity map with its stale navigations —
+    /// e.g. a just-changed ManagerId would still map the previous manager's name.
+    /// </summary>
+    Task<TrainingFeedback?> GetByIdWithNavigationsAsync(Guid id);
+
 }
 
 #endregion
@@ -324,6 +340,14 @@ public interface ITrainingFollowUpAssessmentRepository : IGenericRepository<Trai
 
     /// <summary>Gets all follow-up assessments for an employee.</summary>
     Task<IEnumerable<TrainingFollowUpAssessment>> GetByEmployeeIdAsync(Guid employeeId);
+
+    /// <summary>
+    /// Untracked re-read by id through the full navigation chain, for building a write response.
+    /// Tracked re-reads return the same instance from the identity map with its stale navigations —
+    /// e.g. a just-changed ManagerId would still map the previous manager's name.
+    /// </summary>
+    Task<TrainingFollowUpAssessment?> GetByIdWithNavigationsAsync(Guid id);
+
 
     /// <summary>Gets follow-up assessments of a specific type for a training schedule.</summary>
     Task<IEnumerable<TrainingFollowUpAssessment>> GetByAssessmentTypeAsync(Guid scheduleId, TrainingAssessmentType assessmentType);
@@ -387,6 +411,13 @@ public interface IEmployeeCertificateRepository : IGenericRepository<EmployeeCer
 
     /// <summary>Gets employee certificates with the specified status.</summary>
     Task<IEnumerable<EmployeeCertificate>> GetByStatusAsync(CertificateStatus status);
+
+    /// <summary>
+    /// Untracked re-read by id through the navigation chain, for building a write response.
+    /// A tracked re-read hands back the identity-map instance with its stale navigations — after
+    /// verification sets VerifiedById, that instance still maps a null verifier.
+    /// </summary>
+    Task<EmployeeCertificate?> GetByIdWithNavigationsAsync(Guid id);
 }
 
 #endregion
@@ -447,6 +478,12 @@ public interface IEmployeeComplianceRecordRepository : IGenericRepository<Employ
 
     /// <summary>Gets all exempt compliance records.</summary>
     Task<IEnumerable<EmployeeComplianceRecord>> GetExemptAsync();
+
+    /// <summary>
+    /// Untracked re-read by id through the navigation chain, for building a write response.
+    /// Exemption sets ExemptedById, so a tracked re-read still maps a null exempter.
+    /// </summary>
+    Task<EmployeeComplianceRecord?> GetByIdWithNavigationsAsync(Guid id);
 
     /// <summary>Gets the compliance record for a specific employee and requirement combination.</summary>
     Task<EmployeeComplianceRecord?> GetEmployeeRecordAsync(Guid employeeId, Guid requirementId);
@@ -720,6 +757,12 @@ public interface ILearningPathRepository : IGenericRepository<LearningPath>
 
 public interface ILearningPathProgramRepository : IGenericRepository<LearningPathProgram>
 {
+    /// <summary>
+    /// Untracked re-read through the navigation chain, for a write response. Changing the
+    /// prerequisite leaves the tracked instance mapping the previous one.
+    /// </summary>
+    Task<LearningPathProgram?> GetByIdWithNavigationsAsync(Guid id);
+
     /// <summary>Gets all programs in a learning path, ordered by sequence, including program details.</summary>
     Task<IEnumerable<LearningPathProgram>> GetByLearningPathIdAsync(Guid learningPathId);
 
@@ -777,6 +820,12 @@ public interface IEmployeeLearningPathRepository : IGenericRepository<EmployeeLe
 
 public interface IEmployeeLearningPathStepRepository : IGenericRepository<EmployeeLearningPathStep>
 {
+    /// <summary>
+    /// Untracked re-read through the navigation chain, for a write response. Linking a nomination
+    /// leaves the tracked instance mapping a null one.
+    /// </summary>
+    Task<EmployeeLearningPathStep?> GetByIdWithNavigationsAsync(Guid id);
+
     /// <summary>Gets all steps for a learning path enrollment, ordered by sequence.</summary>
     Task<IEnumerable<EmployeeLearningPathStep>> GetByEmployeeLearningPathIdAsync(Guid enrollmentId);
 
@@ -808,6 +857,13 @@ public interface IMentoringProgramRepository : IGenericRepository<MentoringProgr
 
     /// <summary>Gets a mentoring program with full details including coordinator and mentoring pairs.</summary>
     Task<MentoringProgram?> GetWithFullDetailsAsync(Guid id);
+
+    /// <summary>
+    /// As <see cref="GetWithFullDetailsAsync"/> but untracked — for building a write response after the
+    /// coordinator FK has changed, where a tracked re-read hands back the identity-map instance still
+    /// carrying the previous coordinator.
+    /// </summary>
+    Task<MentoringProgram?> GetWithFullDetailsUntrackedAsync(Guid id);
 }
 
 #endregion
@@ -836,6 +892,9 @@ public interface IMentoringPairRepository : IGenericRepository<MentoringPair>
 
     /// <summary>Gets a mentoring pair with full details including program, mentor, mentee, and sessions.</summary>
     Task<MentoringPair?> GetWithFullDetailsAsync(Guid id);
+
+    /// <summary>As <see cref="GetWithFullDetailsAsync"/> but untracked — for building a write response.</summary>
+    Task<MentoringPair?> GetWithFullDetailsUntrackedAsync(Guid id);
 }
 
 #endregion
@@ -852,6 +911,12 @@ public interface IMentoringSessionRepository : IGenericRepository<MentoringSessi
 
     /// <summary>Gets sessions where the mentor or mentee did not attend.</summary>
     Task<IEnumerable<MentoringSession>> GetMissedSessionsAsync(Guid pairId);
+
+    /// <summary>
+    /// A single session with its pair's mentor, mentee and programme loaded, untracked — for building a
+    /// write response, where the just-saved entity has no <c>Pair</c> loaded at all.
+    /// </summary>
+    Task<MentoringSession?> GetWithPairUntrackedAsync(Guid id);
 }
 
 #endregion

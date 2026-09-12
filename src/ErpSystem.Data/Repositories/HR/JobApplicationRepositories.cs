@@ -23,16 +23,29 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
     }
 
     /// <summary>
-    /// Overrides the generic GetByIdAsync to eagerly load the navigation properties
-    /// required by ToDto(): JobCandidate, JobVacancy, StageHistories → PipelineStage,
-    /// JobPosting, ShortlistedBy, and RejectedBy.
+    /// Everything <c>ToDto</c> and <c>ToSummaryDto</c> read through a navigation.
+    ///
+    /// <para>Factored out for the same reason as <c>JobVacancyRepository.WithSummaryNavigations</c>:
+    /// these reads had drifted, each including a different subset, so the same application came back
+    /// with a candidate name on one endpoint and an empty one on the next.</para>
+    ///
+    /// <para><c>JobVacancy.Requisition.JobDescription</c> is the load-bearing one.
+    /// <c>JobVacancy.JobTitle</c> is <c>[NotMapped]</c> and resolves as
+    /// <c>CustomAdvertTitle ?? Requisition.JobDescription.JobTitle</c> — the vacancy repository was
+    /// fixed for this, but none of the application reads included the chain, so <c>jobTitle</c> came
+    /// back empty on every application list and detail read for any vacancy without a custom advert
+    /// title. That is the column an application list is read by.</para>
     /// </summary>
+    private IQueryable<JobApplication> WithSummaryNavigations() =>
+        _dbSet
+            .Include(a => a.JobCandidate)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
+            .Include(a => a.StageHistories).ThenInclude(h => h.PipelineStage);
+
     public override async Task<JobApplication> GetByIdAsync(Guid id)
     {
-        return await _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy)
-            .Include(a => a.StageHistories).ThenInclude(h => h.PipelineStage)
+        return await WithSummaryNavigations()
             .Include(a => a.JobPosting)
             .Include(a => a.ShortlistedBy)
             .Include(a => a.RejectedBy)
@@ -41,18 +54,12 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public override IQueryable<JobApplication> GetQueryable()
     {
-        return _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy)
-            .Include(a => a.StageHistories).ThenInclude(h => h.PipelineStage)
-            .Where(e => !e.IsDeleted);
+        return WithSummaryNavigations().Where(e => !e.IsDeleted);
     }
 
     public async Task<JobApplication?> GetByApplicationNumberAsync(string applicationNumber)
     {
-        return await _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(a => a.ApplicationNumber == applicationNumber && !a.IsDeleted);
     }
 
@@ -71,6 +78,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
     {
         return await _dbSet
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Qualifications).ThenInclude(q => q.Qualification)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Skills)
@@ -90,9 +98,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public async Task<IEnumerable<JobApplication>> GetByVacancyIdAsync(Guid vacancyId)
     {
-        return await _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.StageHistories).ThenInclude(h => h.PipelineStage)
+        return await WithSummaryNavigations()
             .Where(a => a.JobVacancyId == vacancyId
                      && a.Status != ApplicationStatus.Draft
                      && !a.IsDeleted)
@@ -106,6 +112,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
         // same shape as GetWithFullDetailsAsync but scoped to the whole vacancy.
         return await _dbSet
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Qualifications).ThenInclude(q => q.Qualification)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Skills)
@@ -122,8 +129,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public async Task<IEnumerable<JobApplication>> GetByCandidateIdAsync(Guid candidateId)
     {
-        return await _dbSet
-            .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .Where(a => a.JobCandidateId == candidateId && !a.IsDeleted)
             .OrderByDescending(a => a.ApplicationDate)
             .ToListAsync();
@@ -131,10 +137,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public async Task<IEnumerable<JobApplication>> GetByStatusAsync(ApplicationStatus status, Guid? vacancyId = null)
     {
-        var query = _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
-            .Include(a => a.StageHistories).ThenInclude(h => h.PipelineStage)
+        var query = WithSummaryNavigations()
             .Where(a => a.Status == status && !a.IsDeleted);
 
         if (vacancyId.HasValue)
@@ -147,11 +150,8 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public async Task<IEnumerable<JobApplication>> GetShortlistedAsync(Guid? vacancyId = null)
     {
-        var query = _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy)
+        var query = WithSummaryNavigations()
             .Include(a => a.ShortlistedBy)
-            .Include(a => a.StageHistories).ThenInclude(h => h.PipelineStage)
             .Where(a => a.ShortlistedDate.HasValue
                      && a.Status != ApplicationStatus.Rejected
                      && a.Status != ApplicationStatus.Withdrawn
@@ -168,9 +168,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public async Task<IEnumerable<JobApplication>> GetByCurrentStageAsync(Guid pipelineStageId)
     {
-        return await _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
+        return await WithSummaryNavigations()
             .Where(a => !a.IsDeleted
                      && a.StageHistories.Any(h => h.PipelineStageId == pipelineStageId
                                                && h.IsCurrent
@@ -195,9 +193,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 
     public async Task<JobApplication?> GetByTrackingTokenAsync(string token)
     {
-        return await _dbSet
-            .Include(a => a.JobCandidate)
-            .Include(a => a.JobVacancy)
+        return await WithSummaryNavigations()
             .FirstOrDefaultAsync(a => a.ExternalTrackingToken == token && !a.IsDeleted);
     }
 }

@@ -39,8 +39,11 @@ public interface IOrientationProgramRepository : IGenericRepository<OrientationP
     /// <summary>Returns the program matching the unique program code, with category loaded.</summary>
     Task<OrientationProgram?> GetByProgramCodeAsync(string programCode);
 
-    /// <summary>Returns true if a program with the given code already exists (optionally excluding one id).</summary>
-    Task<bool> ProgramCodeExistsAsync(string programCode, Guid? excludeId = null);
+    /// <summary>
+    /// Returns true if a program code is taken (optionally excluding one id). Counts soft-deleted rows:
+    /// (TenantId, ProgramCode) is UNIQUE and a soft delete does not release the value.
+    /// </summary>
+    Task<bool> ProgramCodeExistsAsync(Guid tenantId, string programCode, Guid? excludeId = null);
 
     /// <summary>
     /// Returns a fully-loaded program: category, owner unit, modules + content items,
@@ -63,8 +66,11 @@ public interface IOrientationProgramRepository : IGenericRepository<OrientationP
     /// <summary>Returns programs owned by the specified organization unit.</summary>
     Task<IEnumerable<OrientationProgram>> GetByOwnerOrganizationUnitAsync(Guid organizationUnitId);
 
-    /// <summary>Returns the highest numeric suffix among existing program codes with the given prefix (for code generation).</summary>
-    Task<int> GetMaxProgramCodeSequenceAsync(string prefix);
+    /// <summary>
+    /// Returns the highest numeric suffix among existing program codes with the given prefix, counting
+    /// soft-deleted rows — a code that has been issued is spent, never reissued.
+    /// </summary>
+    Task<int> GetMaxProgramCodeSequenceAsync(Guid tenantId, string prefix);
 }
 
 #endregion
@@ -141,8 +147,11 @@ public interface IOrientationSessionRepository : IGenericRepository<OrientationS
     /// <summary>Returns the session matching the unique session code, with program loaded.</summary>
     Task<OrientationSession?> GetBySessionCodeAsync(string sessionCode);
 
-    /// <summary>Returns true if a session with the given code already exists (optionally excluding one id).</summary>
-    Task<bool> SessionCodeExistsAsync(string sessionCode, Guid? excludeId = null);
+    /// <summary>
+    /// Returns true if a session code is taken (optionally excluding one id). Counts soft-deleted rows:
+    /// (TenantId, SessionCode) is UNIQUE and a soft delete does not release the value.
+    /// </summary>
+    Task<bool> SessionCodeExistsAsync(Guid tenantId, string sessionCode, Guid? excludeId = null);
 
     /// <summary>Returns all sessions for a program, ordered by scheduled start.</summary>
     Task<IEnumerable<OrientationSession>> GetByProgramIdAsync(Guid programId);
@@ -159,8 +168,14 @@ public interface IOrientationSessionRepository : IGenericRepository<OrientationS
     /// <summary>Returns sessions currently open for enrollment.</summary>
     Task<IEnumerable<OrientationSession>> GetOpenForEnrollmentAsync();
 
-    /// <summary>Returns the number of (non-withdrawn/cancelled) enrollments for a session.</summary>
+    /// <summary>Returns the number of seat-occupying enrollments for a session.</summary>
     Task<int> GetEnrolledCountAsync(Guid sessionId);
+
+    /// <summary>
+    /// Seat counts for many sessions in one query, for list screens. Without it a summary read falls
+    /// back to counting an un-included collection, which is empty rather than null — a confident 0.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, int>> GetEnrolledCountsAsync(Guid tenantId, IEnumerable<Guid> sessionIds);
 }
 
 #endregion
@@ -202,6 +217,14 @@ public interface IOrientationAttendanceRecordRepository : IGenericRepository<Ori
 
 public interface IEmployeeOrientationRepository : IGenericRepository<EmployeeOrientation>
 {
+    /// <summary>
+    /// Enrollment and completed counts for many programs in one query. Program list reads never include
+    /// the enrollment collection (thousands of rows to produce one number), so without this every
+    /// program on the list reports 0 enrolled while its detail screen reports the truth.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, (int Enrolled, int Completed)>> GetProgramEnrollmentCountsAsync(
+        Guid tenantId, IEnumerable<Guid> programIds);
+
     /// <summary>
     /// Returns a fully-loaded enrollment: program, session, content progress, assessment
     /// responses, acknowledgements, feedback, attendance records and certificates.
@@ -350,7 +373,12 @@ public interface IOrientationCertificateRepository : IGenericRepository<Orientat
     Task<OrientationCertificate?> GetByCertificateNumberAsync(string certificateNumber);
 
     /// <summary>Returns true if a certificate with the given number already exists.</summary>
-    Task<bool> CertificateNumberExistsAsync(string certificateNumber);
+    /// <summary>
+    /// Returns true if a certificate number is taken. Counts soft-deleted rows:
+    /// (TenantId, CertificateNumber) is UNIQUE and a soft delete does not release the number.
+    /// A certificate serial is an audit identifier — once issued it is never reissued.
+    /// </summary>
+    Task<bool> CertificateNumberExistsAsync(Guid tenantId, string certificateNumber);
 
     /// <summary>Returns all certificates for an enrollment.</summary>
     Task<IEnumerable<OrientationCertificate>> GetByEnrollmentIdAsync(Guid employeeOrientationId);

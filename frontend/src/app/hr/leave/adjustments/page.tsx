@@ -16,7 +16,6 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
-import { useAuth } from '@/hooks/use-auth';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { reasonCodeService } from '@/services/hr/lookup.service';
@@ -40,14 +39,98 @@ const schema = z.object({
   // Signed: negative deducts. Zero would be a no-op, so it is rejected.
   days: z.coerce.number().refine((v) => v !== 0, 'Enter a non-zero number of days'),
   reasonCodeId: z.string().optional().or(z.literal('')),
-  reason: z.string().min(1, 'A reason is required').max(500),
+  reason: z.string().min(1, 'Remarks are required').max(500),
   adjustmentDate: z.string().optional().or(z.literal('')),
 });
 
 type FormValues = z.infer<typeof schema>;
 
+const fmtDays = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+/**
+ * The balance the adjustment is about to move, shown inside the form.
+ *
+ * Finish-plan lane 4: TDC's demo feedback was that the adjustment form did not show the employee's
+ * balance — the person correcting a balance had to open another screen to see what they were
+ * correcting. This reads the same row the Balances screen reads and previews the result of the
+ * signed `days` value before anything is saved.
+ */
+function BalancePreview({
+  employeeId,
+  leaveTypeId,
+  year,
+  days,
+}: {
+  employeeId: string;
+  leaveTypeId: string;
+  year: number;
+  days: number;
+}) {
+  const ready = !!employeeId && !!leaveTypeId && Number.isFinite(year) && year >= 2000;
+  const { data, isFetching } = useQuery({
+    queryKey: ['hr', 'leave-balances', 'employee', employeeId, year],
+    queryFn: () => leaveService.getEmployeeBalances(employeeId, year),
+    enabled: ready,
+  });
+
+  if (!ready) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Choose the employee, leave type and year to see the balance this adjustment will move.
+      </p>
+    );
+  }
+  if (isFetching && !data) {
+    return <p className="text-xs text-muted-foreground">Loading the current balance…</p>;
+  }
+
+  const balance = (data ?? []).find((b) => b.leaveTypeId === leaveTypeId);
+  if (!balance) {
+    return (
+      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+        No balance row exists yet for this leave type in {year}. Saving creates one at the type&apos;s
+        default entitlement, then applies this adjustment to it.
+      </div>
+    );
+  }
+
+  const after = balance.availableDays + (Number.isFinite(days) ? days : 0);
+  const cells: Array<[string, number]> = [
+    ['Entitled', balance.entitledDays],
+    ['Carried over', balance.carriedOverDays],
+    ['Adjustments', balance.adjustmentDays],
+    ['Used', balance.usedDays],
+    ['Pending', balance.pendingDays],
+    ['Encashed', balance.encashedDays],
+  ];
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-medium">
+          Current balance · {balance.leaveTypeName} {balance.year}
+        </p>
+        <Badge variant="secondary">{fmtDays(balance.availableDays)} available</Badge>
+      </div>
+      <dl className="grid grid-cols-3 gap-x-4 gap-y-1 text-xs sm:grid-cols-6">
+        {cells.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className="font-medium">{fmtDays(value)}</dd>
+          </div>
+        ))}
+      </dl>
+      {Number.isFinite(days) && days !== 0 && (
+        <p className={`mt-2 text-xs ${after < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+          After this adjustment: <span className="font-medium">{fmtDays(after)}</span> available
+          {after < 0 ? ' — the balance would go negative.' : '.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function LeaveAdjustmentsPage() {
-  const { user } = useAuth();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [leaveTypeId, setLeaveTypeId] = useState<string>(ALL);
   const [year, setYear] = useState<string>(String(currentYear));
@@ -129,7 +212,7 @@ export default function LeaveAdjustmentsPage() {
             <div className="space-y-2">
               <label className="text-sm font-medium">Search</label>
               <Input
-                placeholder="Reason or employee…"
+                placeholder="Remarks or employee…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -157,6 +240,8 @@ export default function LeaveAdjustmentsPage() {
             search || undefined,
           )
         }
+        // Who performed the adjustment is stamped server-side from the token: it is an Employee
+        // foreign key, and the login's user id this form used to send was never one.
         create={(_p, v) =>
           leaveService.createAdjustment({
             employeeId: v.employeeId,
@@ -165,7 +250,6 @@ export default function LeaveAdjustmentsPage() {
             days: v.days,
             reasonCodeId: v.reasonCodeId || null,
             reason: v.reason,
-            performedBy: (user?.id as string) ?? '',
             adjustmentDate: v.adjustmentDate || null,
           })
         }
@@ -194,13 +278,13 @@ export default function LeaveAdjustmentsPage() {
             ),
           },
           { header: 'Reason code', cell: (a) => a.reasonCodeName || '—' },
-          { header: 'Reason', cell: (a) => a.reason },
+          { header: 'Remarks', cell: (a) => a.reason },
           { header: 'Date', cell: (a) => a.adjustmentDate?.slice(0, 10) || '—' },
           { header: 'By', cell: (a) => a.performedByName || '—' },
         ]}
         schema={schema}
         emptyForm={empty}
-        dialogClassName="sm:max-w-[620px]"
+        dialogClassName="sm:max-w-[680px]"
         toForm={(a) => ({
           employeeId: a.employeeId,
           leaveTypeId: a.leaveTypeId,
@@ -232,6 +316,14 @@ export default function LeaveAdjustmentsPage() {
               />
               <NumberField form={form} name="year" label="Year" required />
             </FieldRow>
+
+            <BalancePreview
+              employeeId={form.watch('employeeId')}
+              leaveTypeId={form.watch('leaveTypeId')}
+              year={Number(form.watch('year'))}
+              days={Number(form.watch('days'))}
+            />
+
             <FieldRow>
               <NumberField
                 form={form}
@@ -249,7 +341,9 @@ export default function LeaveAdjustmentsPage() {
               options={adjustmentReasons.map((c) => ({ value: c.id, label: c.name }))}
               allowEmpty
             />
-            <TextareaField form={form} name="reason" label="Reason" rows={3} />
+            {/* The entity calls this Reason; TDC's feedback and the entity's own remark both say the
+                screen should call the free text "Remarks", beside the coded reason above. */}
+            <TextareaField form={form} name="reason" label="Remarks" rows={3} required />
           </>
         )}
       />

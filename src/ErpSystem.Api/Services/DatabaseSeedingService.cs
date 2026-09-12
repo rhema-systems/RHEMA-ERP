@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Api.Configuration;
 using ErpSystem.Core.DTOs.Workflow;
@@ -46,6 +46,7 @@ namespace ErpSystem.Web.Services
         private readonly ProcurementAccessControlSeeder? _procurementAccessControlSeeder;
         private readonly ProcurementStatutoryReportSeeder? _procurementStatutoryReportSeeder;
         private readonly InventoryStatutoryReportSeeder? _inventoryStatutoryReportSeeder;
+        private readonly HrAwardsReportSeeder? _hrAwardsReportSeeder;
         private readonly AuditComplianceReportSeeder? _auditComplianceReportSeeder;
         private readonly QuantitySurveyAccessControlSeeder? _quantitySurveyAccessControlSeeder;
         private readonly QuantitySurveyConfigurationProfileSeeder? _quantitySurveyConfigurationProfileSeeder;
@@ -128,6 +129,7 @@ namespace ErpSystem.Web.Services
             ProcurementConfigurationProfileSeeder? procurementConfigurationProfileSeeder = null,
             ProcurementAccessControlSeeder? procurementAccessControlSeeder = null,
             ProcurementStatutoryReportSeeder? procurementStatutoryReportSeeder = null,
+            HrAwardsReportSeeder? hrAwardsReportSeeder = null,
             InventoryStatutoryReportSeeder? inventoryStatutoryReportSeeder = null,
             IConfiguration? configuration = null,
             AuditComplianceReportSeeder? auditComplianceReportSeeder = null,
@@ -148,6 +150,7 @@ namespace ErpSystem.Web.Services
             _procurementAccessControlSeeder = procurementAccessControlSeeder;
             _procurementStatutoryReportSeeder = procurementStatutoryReportSeeder;
             _inventoryStatutoryReportSeeder = inventoryStatutoryReportSeeder;
+            _hrAwardsReportSeeder = hrAwardsReportSeeder;
             _auditComplianceReportSeeder = auditComplianceReportSeeder;
             _quantitySurveyAccessControlSeeder = quantitySurveyAccessControlSeeder;
             _quantitySurveyConfigurationProfileSeeder = quantitySurveyConfigurationProfileSeeder;
@@ -268,6 +271,11 @@ namespace ErpSystem.Web.Services
                     await _inventoryStatutoryReportSeeder.SeedAsync();
                 }
 
+                if (_hrAwardsReportSeeder is not null)
+                {
+                    _logger.LogInformation("Ensuring HR awards system reports (FR-HR-113) are seeded...");
+                    await _hrAwardsReportSeeder.SeedAsync();
+                }
                 if (_auditComplianceReportSeeder is not null)
                 {
                     _logger.LogInformation("Ensuring TDC audit and compliance report catalogue is seeded...");
@@ -405,6 +413,9 @@ namespace ErpSystem.Web.Services
             await EnsureProjectWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring Estate SOP example workflows are seeded...");
             await EnsureEstateSopWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring HR workflows are seeded...");
+            await EnsureHrWorkflowsSeededAsync();
+
             _logger.LogInformation("Ensuring Legal procedure workflows are seeded...");
             await EnsureLegalProcedureWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
@@ -412,6 +423,96 @@ namespace ErpSystem.Web.Services
 
             // Routine startup must not repair Draft user edits or publish a deliberately
             // disabled UAT workflow. Explicit UAT provisioning owns template publication.
+        }
+
+        /// <summary>
+        /// Baseline approval definitions for every HR entity type that submits to the workflow engine.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Why this exists.</b> Until 2026-09-02 <c>seed-workflows</c> installed 65
+        /// definitions — finance, estate, projects, procurement — and <b>not one for HR</b>. Every HR
+        /// area had been closed green because each dev-harness suite publishes its own definition
+        /// before it runs; on a database built from the seeders alone, submitting a requisition, a
+        /// travel request, a movement, a disciplinary decision or a resignation answered
+        /// <i>"No active workflow definition found for entity type"</i>. Found on the first demo
+        /// rehearsal, which is the only run that had ever used the seeded database as a user would.</para>
+        ///
+        /// <para><b>Shape.</b> The same Draft → PendingApproval → Approved ladder the other modules use,
+        /// via <see cref="EnsureWorkflowDefinitionSeededAsync"/>, with ROLE-based approvers. Roles are
+        /// what the engine can route on today (conditional routing does not route — cross-module
+        /// defect #3), so "the line manager approves" is expressed as "anyone in the Manager role
+        /// approves", and the record-level checks in each service (direct-report, self-approval) do
+        /// the narrowing. The Managing Director sits on separations (FR-HR-092), requisitions and
+        /// proposals; HR on everything staff raise; TenantAdmin as the operational backstop.</para>
+        ///
+        /// <para>Entity codes are the catalogue's <c>UPPER_SNAKE</c> codes; the matcher normalises,
+        /// so <c>STAFF_REQUISITION</c> and the <c>StaffRequisition</c> the service asks for are one
+        /// key. Class names are deliberately not passed: the catalogue seed owns them, and a wrong
+        /// <c>typeof</c> here would be a second source of truth for a fact it does not need.</para>
+        ///
+        /// <para>Idempotent and additive, like its siblings: an existing definition is kept and only
+        /// re-activated or re-pointed; a tenant that has authored its own definition for a type is
+        /// not overwritten. Payroll runs are excluded — payroll is another owner's module.</para>
+        /// </remarks>
+        private async Task EnsureHrWorkflowsSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
+
+                var staffRaised = new[] { Constants.Roles.Manager, Constants.Roles.Hr, Constants.Roles.TenantAdmin };
+                var hrControlled = new[] { Constants.Roles.Hr, Constants.Roles.Manager, Constants.Roles.TenantAdmin };
+                var executive = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin, Constants.Roles.Hr };
+                var mdOnly = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin };
+
+                var specs = new (string Code, string Name, string Definition, string Description, string[] Roles)[]
+                {
+                    ("LEAVE_REQUEST", "Leave Request", "Leave Approval", "Leave request: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
+                    ("LEAVE_PLAN", "Leave Plan", "Leave Plan Approval", "Annual leave plan: Draft -> PendingApproval -> Approved.", staffRaised),
+                    ("LEAVE_ENCASHMENT", "Leave Encashment", "Leave Encashment Approval", "Encashment of unused leave: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("STAFF_OVERTIME_REQUEST", "Staff Overtime Request", "Overtime Approval", "Pre-approval of overtime: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
+                    ("REMOTE_WORK_REQUEST", "Remote Work Request", "Remote Work Approval", "Remote-working request: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
+                    ("STAFF_ATTENDANCE_REGULARIZATION", "Staff Attendance Regularization", "Attendance Regularisation Approval", "Missed-punch and attendance corrections: Draft -> PendingApproval -> Approved.", staffRaised),
+                    ("STAFF_TRAVEL_REQUEST", "Staff Travel Request", "Staff Travel Approval", "Official travel: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
+                    ("TRAINING_NOMINATION", "Training Nomination", "Training Nomination Approval", "Nomination for a training schedule: Draft -> PendingApproval (supervisor, then HR) -> Approved.", staffRaised),
+                    ("CONSULTANT_TIMESHEET", "Consultant Timesheet", "Consultant Timesheet Approval", "Consultant timesheet: Draft -> PendingApproval -> Approved, before it is sent to the client.", staffRaised),
+                    ("HR_ASSET_REQUISITION", "HR Asset Requisition", "Asset Requisition Approval", "Request for a company asset: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
+                    ("HR_ASSET_TRANSFER", "HR Asset Transfer", "Asset Transfer Approval", "Transfer of a held asset between staff: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("HR_ASSET_SURCHARGE", "HR Asset Surcharge", "Asset Surcharge Approval", "Recovery of loss or damage from salary: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("STAFF_REQUISITION", "Staff Requisition", "Staff Requisition Approval", "Request to fill or create an established post: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("JOB_OFFER", "Job Offer", "Job Offer Approval", "Offer of appointment: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("MANPOWER_BUDGET", "Manpower Budget", "Manpower Budget Approval", "Annual manpower and recruitment budget: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("STAFF_MOVEMENT", "Staff Movement", "Staff Movement Approval", "Promotion, transfer, secondment or demotion: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("PROBATION_PERIOD", "Probation Period", "Probation Confirmation", "Confirmation at the end of probation: Draft -> PendingApproval (confirming authority) -> Approved.", hrControlled),
+                    ("PERFORMANCE_IMPROVEMENT_PLAN", "Performance Improvement Plan", "PIP Approval", "Performance improvement plan: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("SALARY_REVIEW_PROPOSAL", "Salary Review Proposal", "Salary Review Approval", "Post-appraisal salary proposal: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("EMPLOYMENT_ACTION_PROPOSAL", "Employment Action Proposal", "Employment Action Approval", "Post-appraisal employment action: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    ("SUCCESSION_PLAN", "Succession Plan", "Succession Plan Approval", "Succession plan for a critical post: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("STAFF_DISCIPLINARY_ACTION", "Staff Disciplinary Action", "Disciplinary Decision Confirmation", "Confirmation of a proposed disciplinary decision: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
+                    ("EMPLOYEE_SEPARATION", "Employee Separation", "Separation Approval", "Resignation, retirement or termination: Draft -> PendingApproval (Managing Director, FR-HR-092) -> Approved.", mdOnly),
+                    ("JOB_DESCRIPTION", "Job Description", "Job Description Approval", "Authoring or revising a job description: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                    ("APPRAISAL_TEMPLATE", "Appraisal Template", "Appraisal Template Approval", "Appraisal template publication: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
+                };
+
+                foreach (var tenant in tenants)
+                {
+                    foreach (var spec in specs)
+                    {
+                        await EnsureWorkflowDefinitionSeededAsync(
+                            tenant.Id,
+                            entityCode: spec.Code,
+                            entityName: spec.Name,
+                            entityClassName: null,
+                            definitionName: spec.Definition,
+                            description: spec.Description,
+                            approvalRoleNames: spec.Roles);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed HR workflows");
+            }
         }
 
         private async Task EnsureFinancePermissionAssignmentsAsync()
@@ -8053,8 +8154,59 @@ namespace ErpSystem.Web.Services
             return hasRoles && hasTenants;
         }
 
+        /// <summary>
+        /// Renames the legacy "HR User" role to "HR" so it matches what the HR controllers
+        /// actually authorize.
+        ///
+        /// Runs before the create-if-missing loop below: without it, changing the catalogue
+        /// entry would simply create a second, empty "HR" role and leave every existing HR
+        /// user sitting in the old one. Role membership is stored by role id, so renaming in
+        /// place keeps every assignment intact.
+        /// </summary>
+        private async Task MigrateLegacyHrRoleNameAsync()
+        {
+            var legacy = await _roleManager.FindByNameAsync(Constants.Roles.LegacyHrUser);
+            if (legacy == null) return;
+
+            var current = await _roleManager.FindByNameAsync(Constants.Roles.Hr);
+            if (current != null)
+            {
+                // Both exist — merging members is a data decision, not something to do
+                // silently on startup.
+                _logger.LogWarning(
+                    "Both '{Legacy}' and '{Current}' roles exist. Leaving them alone; assign users to '{Current}' and retire '{Legacy}' manually.",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr, Constants.Roles.Hr, Constants.Roles.LegacyHrUser);
+                return;
+            }
+
+            var result = await _roleManager.SetRoleNameAsync(legacy, Constants.Roles.Hr);
+            if (!result.Succeeded)
+            {
+                _logger.LogError("Failed to rename '{Legacy}' to '{Current}': {Errors}",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr,
+                    string.Join(", ", result.Errors.Select(e => e.Description)));
+                return;
+            }
+
+            // Identity keeps NormalizedName in step only when the role is saved through the manager.
+            var update = await _roleManager.UpdateAsync(legacy);
+            if (update.Succeeded)
+            {
+                _logger.LogInformation("Renamed role '{Legacy}' to '{Current}'; existing members keep their access.",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr);
+            }
+            else
+            {
+                _logger.LogError("Failed to persist the '{Legacy}' → '{Current}' rename: {Errors}",
+                    Constants.Roles.LegacyHrUser, Constants.Roles.Hr,
+                    string.Join(", ", update.Errors.Select(e => e.Description)));
+            }
+        }
+
         private async Task SeedRolesAsync()
         {
+            await MigrateLegacyHrRoleNameAsync();
+
             var roles = new[]
             {
                 new { Name = Constants.Roles.SuperAdmin, Description = "System Super Administrator with full access" },
@@ -8063,6 +8215,8 @@ namespace ErpSystem.Web.Services
                 new { Name = Constants.Roles.Employee, Description = "Standard employee with limited access" },
                 new { Name = Constants.Roles.ReadOnly, Description = "Read-only user for restricted system access" },
                 new { Name = Constants.Roles.ExternalUser, Description = "External portal user (customers/vendors/partners/citizens)" },
+                new { Name = Constants.Roles.Candidate, Description = "Job applicant self-registered on the public careers surface" },
+                new { Name = Constants.Roles.ConsultantClient, Description = "Consultant client contact invited by HR to confirm timesheets on the client portal" },
                 new { Name = Constants.Roles.HelpdeskAgent, Description = "Helpdesk agent for managing tickets" },
                 new { Name = Constants.Roles.HelpdeskSupervisor, Description = "Helpdesk supervisor for assignment and escalation" },
                 new { Name = Constants.Roles.HelpdeskManager, Description = "Helpdesk manager for dashboards and configuration" },
@@ -8077,7 +8231,9 @@ namespace ErpSystem.Web.Services
                 new { Name = "Chief Accountant", Description = "Maker-checker approval role for bank deposits, returned cheques, and treasury settlement controls" },
                 new { Name = "Managing Director", Description = "Restricted executive approval role for exceptional and high-value finance transactions" },
                 new { Name = "Budget Officer", Description = "Budget preparation role for scenario returns and worksheet coordination" },
-                new { Name = "HR User", Description = "User with access to HR module" },
+                new { Name = Constants.Roles.Hr, Description = "User with access to HR module" },
+                new { Name = Constants.Roles.SafetyOfficer, Description = "Safety, Health & Environment desk: works every SHE register and the occupational-health registers without the HR role" },
+                new { Name = Constants.Roles.SheManager, Description = "SHE desk administrator: everything the Safety Officer holds plus deletion of SHE records" },
                 new { Name = "Sales User", Description = "User with access to sales module" },
                 new { Name = "Inventory User", Description = "User with access to inventory module" },
                 new { Name = "Procurement User", Description = "User with access to procurement module" },
@@ -8296,6 +8452,30 @@ namespace ErpSystem.Web.Services
                 _logger.LogInformation("Default tenant modules already up to date for {TenantName}.", defaultTenant.Name);
             }
         }
+
+        /// <summary>
+        /// The HR module gates. <c>hr.access</c> admits a user to the /hr UI shell —
+        /// granted broadly to internal roles because its purpose is excluding ExternalUser, not
+        /// rationing HR between staff. <c>admin.hr</c> admits to Administration → HR setup.
+        /// Split into two arrays because most roles get the first without the second.
+        /// </summary>
+        private static readonly string[] HrModuleAccessGrants = { "hr.access" };
+        private static readonly string[] HrModuleAdminGrants = { "admin.hr" };
+        private const string SheModuleAccessPermission = "she.access";
+        /// <summary>
+        /// The SHE desk menu gate. Held by the two SHE roles, by HR (read-only in SHE since
+        /// 2026-09-03) and by the administrators; NOT by Employee/Manager/ReadOnly - staff report
+        /// incidents, hazards and stop-work from My Self-Service, which needs no module gate.
+        /// The /hr layout still requires hr.access, so the SHE roles hold both.
+        /// </summary>
+        private static readonly string[] SheModuleAccessGrants = { SheModuleAccessPermission };
+        private const string SheModuleAdminPermission = "admin.she";
+        /// <summary>
+        /// The SHE settings tree (reference data, checklists, PPE catalogue, reminder engine).
+        /// Configuration is the SHE Manager's, not every officer's and not HR's: SHE Manager and
+        /// the administrators only. The API agrees — those writes are HR.She.Admin.
+        /// </summary>
+        private static readonly string[] SheModuleAdminGrants = { SheModuleAdminPermission };
 
         private async Task SeedRolePermissionAssignmentsAsync()
         {
@@ -8701,6 +8881,56 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            // Shared cross-module reference data (administrative geography). Read is InternalOnly
+            // by design, so only the write and delete tiers appear here.
+            .Concat(ReferenceDataPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
+            // HR module-access permissions. These are the platform's lowercase dotted
+            // module gates (like project.access / admin.maintenance in ApplicationDbContext's
+            // HasData block), NOT HR.* policy permissions — the HR role-fallback handler
+            // deliberately ignores them, so the frontend route gates they feed have no backend
+            // stand-in and depend on these rows being seeded and granted below. Seeded here at
+            // runtime rather than via HasData because the HasData block's fixed sequential GUIDs
+            // make mid-list insertion fragile and would demand a migration for no gain.
+            .Concat(new[]
+            {
+                new
+                {
+                    Name = "hr.access",
+                    DisplayName = "Access Human Resources",
+                    Description = "Access the human resources module",
+                    Category = "Module Access"
+                },
+                new
+                {
+                    Name = "admin.hr",
+                    DisplayName = "Admin Human Resources",
+                    Description = "Manage HR administration and reference-data settings",
+                    Category = "Administration Modules"
+                },
+                // SHE gets its own module gate so a tenant can show or hide the
+                // Safety (SHE) menu and /hr/safety routes per role without touching hr.access.
+                // Frontend-only, like hr.access: the API authorizes on HR.She.* / HR.Medical.*.
+                new
+                {
+                    Name = SheModuleAccessPermission,
+                    DisplayName = "Access Safety (SHE)",
+                    Description = "Access the Safety, Health & Environment module desk menu and screens",
+                    Category = "Module Access"
+                },
+                new
+                {
+                    Name = SheModuleAdminPermission,
+                    DisplayName = "Admin Safety (SHE)",
+                    Description = "Manage SHE configuration: incident, injury and body-part catalogues, corrective-action templates, regulatory bodies, inspection checklists, PPE types and requirements, and the reminder engine",
+                    Category = "Administration Modules"
+                }
+            })
             .GroupBy(permission => permission.Name, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Last())
             .ToArray();
@@ -8712,6 +8942,21 @@ namespace ErpSystem.Web.Services
 
                 if (existingPermission != null)
                 {
+                    // HR-owned rows follow their code definition's display metadata: the roles
+                    // screen groups by Category, and a re-label (SHE -> "Safety (SHE)")
+                    // must reach tenants seeded under the old label. Scoped to HR.* and its module
+                    // gates so no other team's rows are touched.
+                    var hrOwned = permissionInfo.Name.StartsWith(HrPermissions.Prefix, StringComparison.Ordinal)
+                        || string.Equals(permissionInfo.Name, SheModuleAccessPermission, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(permissionInfo.Name, SheModuleAdminPermission, StringComparison.OrdinalIgnoreCase);
+                    if (hrOwned && !string.IsNullOrWhiteSpace(permissionInfo.Category)
+                        && !string.Equals(existingPermission.Category, permissionInfo.Category, StringComparison.Ordinal))
+                    {
+                        existingPermission.Category = permissionInfo.Category;
+                        existingPermission.DisplayName = permissionInfo.DisplayName;
+                        existingPermission.Description = permissionInfo.Description;
+                        existingPermission.UpdatedAt = DateTime.UtcNow;
+                    }
                     continue;
                 }
 
@@ -8742,9 +8987,15 @@ namespace ErpSystem.Web.Services
 
             var rolePermissionMap = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
             {
+                // HR grants come from HrPermissions.RoleGrants, which the role-fallback
+                // authorization handler also reads — the fallback stands in for this seed, so the
+                // two must not drift.
                 [Constants.Roles.SuperAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
-                    .Concat(HrPermissions.AllNames)
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.SuperAdmin))
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.SuperAdmin))
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
+                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants)
                     .Concat(new[]
                     {
                         "facilities.access",
@@ -8762,7 +9013,10 @@ namespace ErpSystem.Web.Services
                     .ToArray(),
                 [Constants.Roles.TenantAdmin] = FinancePermissions.AllNames
                     .Concat(PropertyManagementPermissions.AllNames)
-                    .Concat(HrPermissions.AllNames)
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.TenantAdmin))
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.TenantAdmin))
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants)
+                    .Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants)
                     .Concat(new[]
                     {
                         "facilities.access",
@@ -9109,6 +9363,11 @@ namespace ErpSystem.Web.Services
                     // distribution. Export remains separately permission-gated at the API/UI.
                     "Finance.Reports.Export"
                 },
+                // ⚠ "Managing Director" and Constants.Roles.ManagingDirector are the SAME string,
+                // and this initializer's [key] = value syntax silently overwrites duplicates. The
+                // Finance and HR grants for the MD therefore live in ONE entry here — a second
+                // entry lower down would erase this one (which is exactly what happened once:
+                // the HR entry clobbered the Finance set until they were merged).
                 ["Managing Director"] = new[]
                 {
                     // Deliberately narrow: executive approvers can inspect the finance record and
@@ -9121,7 +9380,11 @@ namespace ErpSystem.Web.Services
                     "Finance.Workflow.RequestChanges",
                     "Finance.Reports.Run",
                     "Finance.Reports.Export"
-                },
+                }
+                    // HR side: READ on the separations the MD signs (FR-HR-092) — see the remarks
+                    // on HrPermissions.RoleGrants — plus the hr.access module gate.
+                    .Concat(HrPermissions.GrantsFor(Constants.Roles.ManagingDirector))
+                    .Concat(HrModuleAccessGrants).ToArray(),
                 ["Financial Controller"] = FinancePermissions.AllNames,
                 ["Budget Officer"] = new[]
                 {
@@ -9132,16 +9395,60 @@ namespace ErpSystem.Web.Services
                     "Finance.BudgetReturns.Edit",
                     "Finance.BudgetReturns.Submit"
                 },
-                // "HR User" is the role this seeder actually creates; note the HR controllers'
-                // [Authorize(Roles = "HR")] attributes reference a bare "HR" that is not seeded
-                // here. Both names are covered by HrPermissions.MedicalFallbackRoles.
                 // HR staff maintain occupational-health records but do not administer them:
                 // deleting a medical record stays with tenant administrators.
-                ["HR User"] = new[]
-                {
-                    HrPermissions.ViewMedicalRecords,
-                    HrPermissions.MaintainMedicalRecords
-                }
+                //
+                // hr.access / admin.hr: HR practitioners get the module gate and the
+                // Administration → HR reference-data screens (leave types, org structures) —
+                // maintaining their own reference data is HR work, while destructive/decisive
+                // acts stay with the HR.X.Admin permission tier. The legacy "HR User" spelling is
+                // seeded too: unlike the HR.* permissions, the module gates have no role-fallback
+                // handler standing in for the seed, and the seeder loop skips roles that do not
+                // exist, so listing it costs nothing on a migrated tenant.
+                [Constants.Roles.Hr] = HrPermissions.GrantsFor(Constants.Roles.Hr)
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.Hr))
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
+                [Constants.Roles.LegacyHrUser] = HrPermissions.GrantsFor(Constants.Roles.Hr)
+                    .Concat(ReferenceDataPermissions.GrantsFor(Constants.Roles.Hr))
+                    .Concat(HrModuleAccessGrants).Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).ToArray(),
+
+                // The safety function's own roles. hr.access because the SHE
+                // routes live under the /hr layout; she.access for the SHE menu itself.
+                [Constants.Roles.SafetyOfficer] = HrPermissions.GrantsFor(Constants.Roles.SafetyOfficer)
+                    .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).ToArray(),
+                [Constants.Roles.SheManager] = HrPermissions.GrantsFor(Constants.Roles.SheManager)
+                    .Concat(HrModuleAccessGrants).Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
+
+                // hr.access for the broad internal roles. The /hr layout was previously
+                // ungated, and non-HR staff legitimately use surfaces under it (peer evaluations,
+                // team goals, acknowledgements, payroll screens), so the module gate is granted
+                // to every general internal role. Its purpose is excluding ExternalUser — the
+                // self-registering public of the candidate portal — not rationing HR
+                // between internal staff; per-screen gates and the API keep doing that.
+                // "Admin" is the same bare literal HrPermissions.RoleGrants carries, kept for
+                // any environment that has such a role; the loop skips it where absent.
+                [Constants.Roles.Manager] = HrModuleAccessGrants,
+                [Constants.Roles.Employee] = HrModuleAccessGrants,
+                [Constants.Roles.ReadOnly] = HrModuleAccessGrants,
+                ["Admin"] = HrModuleAccessGrants.Concat(HrModuleAdminGrants).Concat(SheModuleAccessGrants).Concat(SheModuleAdminGrants).ToArray(),
+
+                // The two approval authorities, who hold READ on the HR records they decide:
+                // the Managing Director signs separations (FR-HR-092) and Internal Audit reviews
+                // their settlements (FR-HR-185). Their authority to decide is read off the record
+                // by the service, not granted here — see the remarks on HrPermissions.RoleGrants.
+                //
+                // ⚠ These must be listed for the same reason every other role is: this map is the
+                // SEED, and HrPermissions.RoleGrants is what the role-fallback handler reads. The
+                // fallback exists to stand in for the seed, so a role present in one and missing
+                // from the other is a drift — access that works until somebody trusts the database
+                // rows. Adding to RoleGrants alone is not enough.
+                // Constants.Roles.ManagingDirector ("Managing Director") is deliberately ABSENT
+                // here — its Finance + HR grants are merged into the single entry above, because
+                // a duplicate key in this initializer overwrites rather than throws.
+                [Constants.Roles.TdcManagingDirector] = HrPermissions.GrantsFor(Constants.Roles.TdcManagingDirector)
+                    .Concat(HrModuleAccessGrants).ToArray(),
+                [Constants.Roles.InternalAudit] = HrPermissions.GrantsFor(Constants.Roles.InternalAudit)
+                    .Concat(HrModuleAccessGrants).ToArray()
             };
 
             foreach (var (roleName, permissionNames) in rolePermissionMap)
@@ -9176,6 +9483,42 @@ namespace ErpSystem.Web.Services
                 }
 
                 _context.RolePermissions.AddRange(missingPermissions);
+            }
+
+            // The loop above is add-only, so a role that SHRINKS in HrPermissions.RoleGrants keeps
+            // its old rows on an already-seeded tenant. HrPermissions.RoleRevocations lists what a
+            // role must not hold; delete those rows so the seed, the fallback handler and the
+            // database agree (HR loses HR.She.Write).
+            foreach (var (roleName, revokedNames) in HrPermissions.RoleRevocations)
+            {
+                var role = await _roleManager.FindByNameAsync(roleName);
+                if (role == null)
+                {
+                    continue;
+                }
+
+                var revokedSet = revokedNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var revokedIds = permissions
+                    .Where(permission => revokedSet.Contains(permission.Name))
+                    .Select(permission => permission.Id)
+                    .ToList();
+                if (revokedIds.Count == 0)
+                {
+                    continue;
+                }
+
+                var rows = await _context.RolePermissions
+                    .Where(rp => rp.RoleId == role.Id && revokedIds.Contains(rp.PermissionId))
+                    .ToListAsync();
+                if (rows.Count == 0)
+                {
+                    continue;
+                }
+
+                _context.RolePermissions.RemoveRange(rows);
+                _logger.LogInformation(
+                    "Revoked {Count} permission grant(s) from role {Role} per HrPermissions.RoleRevocations: {Permissions}",
+                    rows.Count, roleName, string.Join(", ", revokedNames));
             }
 
             await _context.SaveChangesAsync();

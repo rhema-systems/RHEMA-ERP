@@ -1,5 +1,6 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -23,6 +24,7 @@ public class TrainingDashboardService : ITrainingDashboardService
     private readonly ITrainingFollowUpAssessmentRepository _followUpRepository;
     private readonly ITrainingAttendanceRepository _attendanceRepository;
     private readonly ITrainerProfileRepository _trainerRepository;
+    private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<TrainingDashboardService> _logger;
 
@@ -40,6 +42,7 @@ public class TrainingDashboardService : ITrainingDashboardService
         ITrainingFollowUpAssessmentRepository followUpRepository,
         ITrainingAttendanceRepository attendanceRepository,
         ITrainerProfileRepository trainerRepository,
+        IGenericRepository<Employee> employeeRepository,
         ICurrentUserProvider currentUserProvider,
         ILogger<TrainingDashboardService> logger)
     {
@@ -56,6 +59,7 @@ public class TrainingDashboardService : ITrainingDashboardService
         _followUpRepository = followUpRepository;
         _attendanceRepository = attendanceRepository;
         _trainerRepository = trainerRepository;
+        _employeeRepository = employeeRepository;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -98,12 +102,14 @@ public class TrainingDashboardService : ITrainingDashboardService
             .Where(s => s.TenantId == tenantId)
             .CountAsync(s => s.StartDate.Year == targetYear, cancellationToken);
 
-        var upcomingSchedules = (await _scheduleRepository.GetUpcomingSchedulesAsync(90))
+        var upcomingScheduleEntities = (await _scheduleRepository.GetUpcomingSchedulesAsync(90))
             .Where(s => s.TenantId == tenantId)
-            .Take(10)
-            .ToSummaryDtoList();
+            .ToList();
 
-        var upcomingSchedulesCount = upcomingSchedules.Count();
+        // Counted before the take. The tile used to count the truncated display list, so it read "10"
+        // for any tenant with more than ten upcoming runs — a wrong number rather than a missing one.
+        var upcomingSchedulesCount = upcomingScheduleEntities.Count;
+        var upcomingSchedules = upcomingScheduleEntities.Take(10).ToSummaryDtoList();
 
         // ── Nominations ───────────────────────────────────────────────────────
         var totalNominationsThisYear = await _nominationRepository.GetQueryable()
@@ -121,20 +127,31 @@ public class TrainingDashboardService : ITrainingDashboardService
             .Where(n => n.TenantId == tenantId)
             .CountAsync(n => pendingStatuses.Contains(n.Status), cancellationToken);
 
+        // Includes are the point here: the summary mapper reads Employee.FullName, the schedule number
+        // and the programme name, so the dashboard's "recent nominations" table rendered rows of dates
+        // with every other column blank.
         var recentNominations = await _nominationRepository.GetQueryable()
             .Where(n => n.TenantId == tenantId)
+            .Include(n => n.Employee)
+            .Include(n => n.Schedule).ThenInclude(s => s.Program)
             .OrderByDescending(n => n.NominationDate)
             .Take(10)
             .ToListAsync(cancellationToken);
 
         // ── Completions ───────────────────────────────────────────────────────
+        // CompletionDate, not CreatedAt. CreatedAt is when somebody typed the row in, so a December
+        // course recorded in January counted against the wrong year — and the analytics endpoint next
+        // door already used CompletionDate, so the two screens disagreed about the same figure.
         var completionsThisYear = await _completionRepository.GetQueryable()
-            .Where(c => c.TenantId == tenantId && c.CreatedAt.Year == targetYear)
+            .Where(c => c.TenantId == tenantId && c.CompletionDate.Year == targetYear)
             .ToListAsync(cancellationToken);
 
-        var completedTrainingsThisYear = completionsThisYear.Count(c => c.IsPassed);
+        // Every completion, passed or not. Counting only passes here made the pass-rate tile beside it
+        // incoherent: both were derived from the same set, so the rate could never read below 100%.
+        var completedTrainingsThisYear = completionsThisYear.Count;
+        var passedThisYear = completionsThisYear.Count(c => c.IsPassed);
         var overallPassRate = completionsThisYear.Count > 0
-            ? Math.Round((double)completedTrainingsThisYear / completionsThisYear.Count * 100, 1)
+            ? Math.Round((double)passedThisYear / completionsThisYear.Count * 100, 1)
             : 0.0;
 
         // ── Certificates ──────────────────────────────────────────────────────
@@ -196,6 +213,7 @@ public class TrainingDashboardService : ITrainingDashboardService
             EmployeesCertifiedThisYear = employeesCertifiedThisYear,
             ExpiringCertificatesIn30Days = expiringCertificatesIn30Days,
             OverallComplianceRate = (decimal)overallComplianceRate,
+            ComplianceRecordsCount = totalComplianceRecords,
             NonCompliantEmployeesCount = nonCompliantEmployeesCount,
             ActiveMentoringPairsCount = activeMentoringPairsCount,
             ActiveLearningPathEnrollmentsCount = activeLearningPathEnrollmentsCount,
@@ -323,6 +341,7 @@ public class TrainingDashboardService : ITrainingDashboardService
             PassedYtd = passedYtd,
             PassRate = passRate,
             ComplianceRate = complianceRate,
+            ComplianceRecordsCount = compliance.Count,
             CertificatesIssuedYtd = certsIssued,
             BudgetAllocated = allocated,
             BudgetSpent = spent,
@@ -350,9 +369,20 @@ public class TrainingDashboardService : ITrainingDashboardService
         };
     }
 
+    /// <summary>
+    /// The read model behind the "My Training" hub.
+    ///
+    /// It previously returned only the scalar counts: the employee's own name and number were never
+    /// assigned, hours were always 0, and all three collections came back empty — so the page had a
+    /// blank heading over three empty tables and no way to tell that from a genuinely empty record.
+    /// </summary>
     public async Task<EmployeeTrainingSummaryDto> GetEmployeeSummaryAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+
+        var employee = await _employeeRepository.GetByIdAsync(employeeId);
+        if (employee == null || employee.TenantId != tenantId)
+            throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
 
         var completions = await _completionRepository.GetByEmployeeIdAsync(employeeId);
         var completionsList = completions.Where(c => c.TenantId == tenantId).ToList();
@@ -370,17 +400,38 @@ public class TrainingDashboardService : ITrainingDashboardService
             .Where(p => p.TenantId == tenantId)
             .CountAsync(p => (p.MentorId == employeeId || p.MenteeId == employeeId) && p.Status == MentoringStatus.Active, cancellationToken);
 
+        // Hours come off the programme behind each completion, so the chain has to be loaded rather
+        // than inferred from the completion row, which carries no duration of its own.
+        var totalHours = await _completionRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && c.EmployeeId == employeeId)
+            .Select(c => (int?)c.Nomination.Schedule.Program.DurationHours)
+            .SumAsync(cancellationToken) ?? 0;
+
+        var recentTrainings = (await _nominationRepository.GetByEmployeeIdAsync(employeeId))
+            .Where(n => n.TenantId == tenantId)
+            .OrderByDescending(n => n.NominationDate)
+            .Take(10)
+            .ToSummaryDtoList()
+            .ToList();
+
         return new EmployeeTrainingSummaryDto
         {
             EmployeeId = employeeId,
-            TotalTrainingsCompleted = completionsList.Count(c => c.IsPassed),
+            EmployeeName = employee.FullName,
+            EmployeeNumber = employee.EmployeeNumber,
+            TotalTrainingsCompleted = completionsList.Count,
+            TrainingsPassed = completionsList.Count(c => c.IsPassed),
+            TotalTrainingHours = totalHours,
             ActiveCertificatesCount = certList.Count(c => c.Status == CertificateStatus.Active),
             ExpiringCertificatesCount = certList.Count(c => c.Status == CertificateStatus.Active && c.ExpiryDate.HasValue && c.ExpiryDate.Value <= DateTime.UtcNow.AddDays(30)),
             ComplianceRequirementsCount = complianceList.Count,
             CompliantRequirementsCount = complianceList.Count(r => r.Status == ComplianceStatus.Compliant),
             LearningPathsEnrolledCount = enrollmentList.Count,
             LearningPathsCompletedCount = enrollmentList.Count(e => e.IsCompleted),
-            HasActiveMentoringPair = activeMentoringPairs > 0
+            HasActiveMentoringPair = activeMentoringPairs > 0,
+            RecentTrainings = recentTrainings,
+            Certificates = certList.ToSummaryDtoList().ToList(),
+            ComplianceRecords = complianceList.ToSummaryDtoList().ToList(),
         };
     }
 }

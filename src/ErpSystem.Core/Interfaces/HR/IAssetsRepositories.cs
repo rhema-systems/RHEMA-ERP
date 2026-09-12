@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.Assets;
+﻿using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.HR;
@@ -15,6 +15,17 @@ public interface IAssetTypeRepository : IGenericRepository<AssetType>
 
 public interface IAssetTypeAttributeRepository : IGenericRepository<AssetTypeAttribute>
 {
+    /// <summary>
+    /// One attribute with its asset type loaded — D-o(b).
+    /// </summary>
+    /// <remarks>
+    /// The by-id read went through the generic <c>GetByIdAsync</c>, which loads no navigations, so
+    /// <c>GET attributes/{id}</c> answered with a blank <c>assetTypeName</c> while the list beside
+    /// it filled the same field in. Two fillings of one DTO, and nothing in the payload to tell a
+    /// screen which it was holding.
+    /// </remarks>
+    Task<AssetTypeAttribute?> GetWithTypeAsync(Guid id);
+
     Task<IEnumerable<AssetTypeAttribute>> GetByAssetTypeIdAsync(Guid assetTypeId);
     Task<IEnumerable<AssetTypeAttribute>> GetRequiredAttributesAsync(Guid assetTypeId);
 }
@@ -35,12 +46,35 @@ public interface ICompanyAssetRepository : IGenericRepository<CompanyAsset>
     Task<IEnumerable<CompanyAsset>> GetByLocationAsync(Guid locationId);
     Task<IEnumerable<CompanyAsset>> GetByEmployeeAsync(Guid employeeId);
     Task<IEnumerable<CompanyAsset>> GetAvailableForAssignmentAsync(Guid tenantId);
-    Task<IEnumerable<CompanyAsset>> GetDueForMaintenanceAsync(Guid tenantId, int daysAhead = 30);
+    /// <summary>Assets whose next maintenance falls on or before the supplied date. Area 16 slice 9.</summary>
+    Task<IEnumerable<CompanyAsset>> GetDueForMaintenanceAsync(Guid tenantId, DateOnly onOrBefore);
+
+    /// <summary>Assets that require regular maintenance and have no next date at all. Area 16 slice 9.</summary>
+    Task<IEnumerable<CompanyAsset>> GetUnscheduledMaintenanceAsync(Guid tenantId);
+
+    // ── insurance, area 16 slice 11 ───────────────────────────────────────────
+
+    /// <summary>Insured assets whose cover lapses on or before a date, soonest first.</summary>
+    Task<IEnumerable<CompanyAsset>> GetInsuranceExpiringAsync(Guid tenantId, DateOnly onOrBefore);
+
+    /// <summary>Assets marked insured that have never been given an expiry date.</summary>
+    Task<IEnumerable<CompanyAsset>> GetInsuranceUndatedAsync(Guid tenantId);
     Task<IEnumerable<CompanyAsset>> GetWarrantyExpiringAsync(Guid tenantId, int daysAhead = 30);
 }
 
 public interface IAssetAttributeValueRepository : IGenericRepository<AssetAttributeValue>
 {
+    /// <summary>
+    /// One attribute value with its defining attribute loaded — D-o(b).
+    /// </summary>
+    /// <remarks>
+    /// Same shape as <see cref="IAssetTypeAttributeRepository.GetWithTypeAsync"/>, and worse in one
+    /// respect: without the navigation the DTO's <c>dataType</c> is read off a null attribute and
+    /// falls back to the enum's default, so the by-id read did not merely lose a label — it reported
+    /// the wrong type for the value it was returning.
+    /// </remarks>
+    Task<AssetAttributeValue?> GetWithAttributeAsync(Guid id);
+
     Task<IEnumerable<AssetAttributeValue>> GetByAssetIdAsync(Guid assetId);
     Task<AssetAttributeValue?> GetByAssetAndAttributeAsync(Guid assetId, Guid attributeId);
     Task DeleteByAssetIdAsync(Guid assetId);
@@ -59,13 +93,32 @@ public interface IAssetAssignmentRepository : IGenericRepository<AssetAssignment
 {
     Task<IEnumerable<AssetAssignment>> GetByTenantAsync(Guid tenantId);
     Task<AssetAssignment?> GetWithDetailsAsync(Guid id);
+
+    /// <summary>Everything a requisition produced, with the asset and holder loaded — D-e.</summary>
+    Task<IEnumerable<AssetAssignment>> GetByRequisitionIdAsync(Guid requisitionId);
     Task<AssetAssignment?> GetByAssignmentNumberAsync(Guid tenantId, string assignmentNumber);
     Task<IEnumerable<AssetAssignment>> GetByAssetIdAsync(Guid assetId);
     Task<IEnumerable<AssetAssignment>> GetByEmployeeIdAsync(Guid employeeId);
     Task<AssetAssignment?> GetActiveAssignmentForAssetAsync(Guid assetId);
     Task<IEnumerable<AssetAssignment>> GetActiveAssignmentsForEmployeeAsync(Guid employeeId);
-    Task<IEnumerable<AssetAssignment>> GetOverdueAssignmentsAsync(Guid tenantId);
+    /// <summary>Custodies past their expected return date as at a day, most overdue first.</summary>
+    Task<IEnumerable<AssetAssignment>> GetOverdueAssignmentsAsync(Guid tenantId, DateOnly? asOf = null);
+
+    /// <summary>Custodies coming due back inside a window — slice 11.</summary>
+    Task<IEnumerable<AssetAssignment>> GetAssignmentsDueForReturnAsync(
+        Guid tenantId, DateOnly from, DateOnly toInclusive);
     Task<IEnumerable<AssetAssignment>> GetByStatusAsync(Guid tenantId, AssignmentStatus status);
+
+    /// <summary>
+    /// Rental arrangements whose effective window overlaps a period — AST-10, slice 8.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Deliberately NOT filtered to active assignments. A tenancy that ran for half the month and
+    /// ended when the employee handed the keys back is owed for that half; filtering on the custody
+    /// would silently drop the last period of every arrangement the module has ever carried.
+    /// </remarks>
+    Task<IEnumerable<AssetAssignment>> GetRentalArrangementsAsync(
+        Guid tenantId, DateOnly periodStart, DateOnly periodEnd);
 }
 
 #endregion
@@ -103,6 +156,9 @@ public interface IAssetRequisitionRepository : IGenericRepository<AssetRequisiti
     Task<AssetRequisition?> GetWithDetailsAsync(Guid id);
     Task<AssetRequisition?> GetByRequisitionNumberAsync(Guid tenantId, string requisitionNumber);
     Task<IEnumerable<AssetRequisition>> GetByRequestedByIdAsync(Guid employeeId);
+
+    /// <summary>Raised BY the employee or FOR them — the portal's list, AST-6b.</summary>
+    Task<IEnumerable<AssetRequisition>> GetForEmployeeAsync(Guid employeeId);
     Task<IEnumerable<AssetRequisition>> GetByStatusAsync(Guid tenantId, AssetRequisitionStatus status);
     Task<IEnumerable<AssetRequisition>> GetPendingApprovalsAsync(Guid tenantId);
 }

@@ -3,6 +3,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -10,7 +11,7 @@ namespace ErpSystem.Api.Controllers.HR;
 [Route("api/hr/staff-levels")]
 // No global fallback policy exists, so require authentication explicitly (matches sibling HR
 // controllers) — otherwise these endpoints, including writes, are reachable anonymously.
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffLevelsController : ControllerBase
 {
     private readonly IStaffLevelService _staffLevelService;
@@ -137,6 +138,7 @@ public class StaffLevelsController : ControllerBase
     /// Create a new staff level.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(StaffLevelDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -167,6 +169,7 @@ public class StaffLevelsController : ControllerBase
     /// Update an existing staff level.
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(StaffLevelDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -201,6 +204,7 @@ public class StaffLevelsController : ControllerBase
     /// Activate a staff level.
     /// </summary>
     [HttpPatch("{id:guid}/activate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(StaffLevelDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -224,6 +228,7 @@ public class StaffLevelsController : ControllerBase
     /// Deactivate a staff level.
     /// </summary>
     [HttpPatch("{id:guid}/deactivate")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(StaffLevelDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -247,6 +252,7 @@ public class StaffLevelsController : ControllerBase
     /// Delete a staff level.
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

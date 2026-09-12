@@ -1,17 +1,29 @@
+using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
-/// Controller for managing organization unit history
+/// The organisation-unit change log: who a unit reported to, who headed it, and when each changed.
 /// </summary>
+/// <remarks>
+/// Read-only. Rows are written by <c>OrganizationUnitService</c> as a side effect of a restructure
+/// or a change of head — there is no endpoint that creates one directly, because an audit trail
+/// somebody can author by hand is not one.
+///
+/// Gated because the log names the employees who have led each unit, which is org-structure
+/// information about identifiable people. W3 slice 13 converted the role gate to
+/// HR.Employee.Read (the foundation family, same reach) — a census gap: slice 11 swept the
+/// org-structure registers and missed this one.
+/// </remarks>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
 public class OrganizationUnitHistoryController : ControllerBase
 {
     private readonly IOrganizationUnitHistoryService _historyService;
@@ -25,16 +37,57 @@ public class OrganizationUnitHistoryController : ControllerBase
         _logger = logger;
     }
 
+    /// <summary>Largest page this endpoint will serve, however large a page the caller asks for.</summary>
+    private const int MaxPageSize = 200;
+
     /// <summary>
-    /// Retrieves organization unit history with pagination
+    /// The change-log register: every recorded change, newest first, optionally narrowed to one unit,
+    /// a date range, or a kind of change.
     /// </summary>
+    /// <remarks>
+    /// The four filters arrived in areas 19-23 slice 5 with the register that uses them. An
+    /// unrecognised <paramref name="changeType"/> is <b>refused</b> rather than ignored: a filter
+    /// that silently does nothing reads, from the screen, exactly like a filter that matched
+    /// everything.
+    /// </remarks>
     [HttpGet("paged")]
     [ProducesResponseType(typeof(PagedResult<OrganizationUnitHistoryDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20)
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetPaged(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] Guid? unitId = null,
+        [FromQuery] DateOnly? startDate = null,
+        [FromQuery] DateOnly? endDate = null,
+        [FromQuery] string? changeType = null)
     {
+        if (startDate.HasValue && endDate.HasValue && startDate > endDate)
+            return BadRequest(new { message = "The start date cannot be after the end date." });
+
+        var filter = new OrganizationUnitHistoryFilterDto
+        {
+            UnitId = unitId,
+            StartDate = startDate,
+            EndDate = endDate,
+        };
+
+        if (!string.IsNullOrWhiteSpace(changeType))
+        {
+            if (!OrganizationUnitChangeTypes.TryResolve(changeType, out var resolved))
+                return BadRequest(new
+                {
+                    message = $"Unknown change type '{changeType}'. Expected one of: {string.Join(", ", OrganizationUnitChangeTypes.All)}.",
+                });
+
+            filter.ChangeType = resolved;
+        }
+
         try
         {
-            var response = await _historyService.GetPagedAsync(pageNumber, pageSize);
+            var response = await _historyService.GetPagedAsync(
+                pageNumber < 1 ? 1 : pageNumber,
+                pageSize < 1 ? 1 : Math.Min(pageSize, MaxPageSize),
+                filter);
             return Ok(response);
         }
         catch (Exception ex)
@@ -92,8 +145,12 @@ public class OrganizationUnitHistoryController : ControllerBase
     /// </summary>
     [HttpGet("date-range")]
     [ProducesResponseType(typeof(IEnumerable<OrganizationUnitHistoryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetByDateRange([FromQuery] DateOnly startDate, [FromQuery] DateOnly endDate)
     {
+        if (startDate > endDate)
+            return BadRequest(new { message = "The start date cannot be after the end date." });
+
         try
         {
             var response = await _historyService.GetByDateRangeAsync(startDate, endDate);
@@ -106,49 +163,19 @@ public class OrganizationUnitHistoryController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Retrieves latest history record for a unit
-    /// </summary>
-    [HttpGet("unit/{unitId:guid}/latest")]
-    [ProducesResponseType(typeof(OrganizationUnitHistoryDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetLatestByUnitId(Guid unitId)
-    {
-        try
-        {
-            var response = await _historyService.GetLatestByUnitIdAsync(unitId);
-            if (response == null)
-                return NotFound(new { message = "No history found for this unit" });
-
-            return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving latest history for organization unit {UnitId}", unitId);
-            return StatusCode(500, "An error occurred while retrieving organization unit history");
-        }
-    }
-
-    /// <summary>
-    /// Retrieves active history record for a unit
-    /// </summary>
-    [HttpGet("unit/{unitId:guid}/active")]
-    [ProducesResponseType(typeof(OrganizationUnitHistoryDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetActiveHistory(Guid unitId)
-    {
-        try
-        {
-            var response = await _historyService.GetActiveHistoryAsync(unitId);
-            if (response == null)
-                return NotFound(new { message = "No active history found for this unit" });
-
-            return Ok(response);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving active history for organization unit {UnitId}", unitId);
-            return StatusCode(500, "An error occurred while retrieving organization unit history");
-        }
-    }
+    // ⚠ `unit/{id}/latest` and `unit/{id}/active` were deleted in areas 19–23 slice 12, and the
+    // reason is worth keeping: they provably returned the SAME row as each other, and that row
+    // could not answer the question either of them was named for.
+    //
+    // Slice 3 made this log effective-dated per SERIES — a reparent closes the open parent row, a
+    // change of head closes the open head row, and the two move independently. The newest row in a
+    // series is therefore always the open one, so filtering on `EffectiveTo == null` (`active`)
+    // never changed the top of the same ordering `latest` used. Worse, both returned ONE row where
+    // up to two arrangements are in force, so "the current arrangement" arrived as whichever series
+    // happened to change last — a caller asking who heads a unit that was reparented afterwards got
+    // a row with both head ids null.
+    //
+    // Neither had a caller. The unit's change-log tab reads `unit/{unitId}` — the whole log, which
+    // states both series honestly — and that is the right home for the question. Same call as slice
+    // 10 deleting `stats/by-department`: the wrong dimension, not a broken implementation.
 }

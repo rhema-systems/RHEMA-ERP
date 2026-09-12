@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { skillService } from '@/services/hr/skill.service';
+import { referenceDimensionService } from '@/services/hr/lookup.service';
 import { employeeService } from '@/services/hr/employee.service';
 import { SKILL_LEVEL_OPTIONS } from '@/types/hr/position';
 import type { EmployeeSkill } from '@/types/hr/employee-subresources';
@@ -17,6 +18,14 @@ const schema = z.object({
   certificationDate: z.string().optional().or(z.literal('')),
   certificationExpiryDate: z.string().optional().or(z.literal('')),
   certificationNumber: z.string().max(100).optional().or(z.literal('')),
+  /**
+   * The catalogued certifier. Empty means "not one of ours".
+   *
+   * ⚠ Kept ALONGSIDE the free-text field below rather than replacing it. Existing rows are free
+   * text, and a genuinely one-off certifier does not deserve a catalogue row — the catalogue makes
+   * the common case consistent, the text box carries the tail.
+   */
+  certifyingBodyId: z.string().optional().or(z.literal('')),
   certifyingBody: z.string().max(200).optional().or(z.literal('')),
   notes: z.string().max(1000).optional().or(z.literal('')),
 });
@@ -30,6 +39,7 @@ const empty: FormValues = {
   certificationDate: '',
   certificationExpiryDate: '',
   certificationNumber: '',
+  certifyingBodyId: '',
   certifyingBody: '',
   notes: '',
 };
@@ -43,6 +53,17 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
   const skillOptions = (skills ?? []).map((s) => ({
     value: s.id,
     label: s.category ? `${s.name} (${s.category})` : s.name,
+  }));
+
+  // Active bodies only — a retired one stops being offered on new rows, which is what retiring it
+  // means. A skill already citing a retired body keeps it: the value is on the record.
+  const { data: bodies } = useQuery({
+    queryKey: ['hr', 'certifying-bodies', 'active'],
+    queryFn: () => referenceDimensionService.getCertifyingBodies(true),
+  });
+  const bodyOptions = (bodies ?? []).map((b) => ({
+    value: b.id,
+    label: b.abbreviation ? `${b.name} (${b.abbreviation})` : b.name,
   }));
 
   return (
@@ -62,6 +83,7 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
           certificationDate: v.certificationDate || null,
           certificationExpiryDate: v.certificationExpiryDate || null,
           certificationNumber: v.certificationNumber || null,
+          certifyingBodyId: v.certifyingBodyId || null,
           certifyingBody: v.certifyingBody || null,
           notes: v.notes || null,
         })
@@ -75,6 +97,9 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
           certificationDate: v.certificationDate || null,
           certificationExpiryDate: v.certificationExpiryDate || null,
           certificationNumber: v.certificationNumber || null,
+          // Sent even when empty: the service applies this one unconditionally so a wrongly
+          // chosen body can be cleared. Every other field here treats null as "unchanged".
+          certifyingBodyId: v.certifyingBodyId || null,
           certifyingBody: v.certifyingBody || null,
           notes: v.notes || null,
         })
@@ -93,7 +118,12 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
         { header: 'Skill', cell: (s) => s.skillName },
         { header: 'Category', cell: (s) => s.skillCategory || '—' },
         { header: 'Level', cell: (s) => s.skillLevel },
-        { header: 'Certifying body', cell: (s) => s.certifyingBody || '—' },
+        {
+          header: 'Certifying body',
+          // The catalogued name where there is one, the free text otherwise. Showing only the
+          // former would blank every row recorded before the catalogue existed.
+          cell: (s) => s.certifyingBodyName || s.certifyingBody || '—',
+        },
         {
           header: 'Certification expiry',
           cell: (s) =>
@@ -124,6 +154,7 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
         certificationDate: s.certificationDate?.slice(0, 10) ?? '',
         certificationExpiryDate: s.certificationExpiryDate?.slice(0, 10) ?? '',
         certificationNumber: s.certificationNumber ?? '',
+        certifyingBodyId: s.certifyingBodyId ?? '',
         certifyingBody: s.certifyingBody ?? '',
         notes: s.notes ?? '',
       })}
@@ -152,8 +183,20 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
           </FieldRow>
           <FieldRow>
             <TextField form={form} name="certificationNumber" label="Certification number" />
-            <TextField form={form} name="certifyingBody" label="Certifying body" />
+            <SelectField
+              form={form}
+              name="certifyingBodyId"
+              label="Certifying body"
+              options={bodyOptions}
+              allowEmpty
+              emptyLabel="Not in the catalogue"
+            />
           </FieldRow>
+          <TextField
+            form={form}
+            name="certifyingBody"
+            label="Certifying body (if not catalogued)"
+          />
           <TextareaField form={form} name="notes" label="Notes" />
         </>
       )}

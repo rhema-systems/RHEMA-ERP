@@ -52,19 +52,43 @@ const toPayload = (employeeId: string, v: FormValues) => ({
  * defined in Payroll and mirrored into HR, so the pickers here are read-only lookups —
  * see salary-grade.service.
  */
-export function SalaryAssignmentsTab({ employeeId }: { employeeId: string }) {
+export function SalaryAssignmentsTab({
+  employeeId,
+  isOnPayroll = true,
+}: {
+  employeeId: string;
+  /**
+   * Off-payroll staff cannot be placed on a grade (the POST is refused with the same message), so
+   * the tab renders their history read-only with a banner saying why, rather than offering an add
+   * button that always fails.
+   */
+  isOnPayroll?: boolean;
+}) {
   const { data: grades } = useQuery({
     queryKey: ['hr', 'salary-grades', 'all'],
     queryFn: () => salaryGradeService.getAll(),
   });
 
   return (
+    <div className="space-y-3">
+      {!isOnPayroll && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+          This employee is not on payroll, so they cannot be placed on a salary grade. Any placement
+          below was closed when they left payroll. Put them on payroll (Edit → Compensation &amp; Tax)
+          to place them again.
+        </div>
+      )}
     <EmployeeSubResourceTab<EmployeeSalaryAssignment, FormValues>
       employeeId={employeeId}
       title="salary assignments"
       singular="salary assignment"
       queryKey="salary-assignments"
-      emptyDescription="Place the employee on a grade to resolve their basic pay."
+      readOnly={!isOnPayroll}
+      emptyDescription={
+        isOnPayroll
+          ? 'Place the employee on a grade to resolve their basic pay.'
+          : 'Not on payroll — no grade placement applies.'
+      }
       getId={(s) => s.id}
       list={employeeService.getSalaryAssignments.bind(employeeService)}
       create={(id, v) => employeeService.addSalaryAssignment(id, toPayload(id, v))}
@@ -103,6 +127,7 @@ export function SalaryAssignmentsTab({ employeeId }: { employeeId: string }) {
       })}
       renderFields={(form) => <SalaryAssignmentFields form={form} grades={grades ?? []} />}
     />
+    </div>
   );
 }
 

@@ -1,7 +1,90 @@
+using System.Linq.Expressions;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 
 namespace ErpSystem.Application.HR.Extensions;
+
+/// <summary>
+/// The two things the organisation-unit change log records, named once.
+/// </summary>
+/// <remarks>
+/// <para>Added in areas 19-23 slice 5. The classification itself is older: <c>ToDetailDto</c> has
+/// derived it since the port, and <b>nothing in the repository has ever called that mapper</b>, so
+/// the rule sat where no read could reach it. Lifting it here puts the log's own vocabulary in one
+/// place — the DTO, the register's filter and the screens' badges all read from this.</para>
+///
+/// <para>⚠ <see cref="Classify"/> runs in memory over a loaded entity and <see cref="Predicate"/>
+/// must run in SQL, so the same rule genuinely has to be written twice. They are kept adjacent
+/// deliberately, and the slice-5 harness asserts they agree — a filtered page must contain exactly
+/// the rows the classifier gives that type — because two statements of one rule is precisely the
+/// shape that drifts.</para>
+/// </remarks>
+public static class OrganizationUnitChangeTypes
+{
+    /// <summary>The unit reported somewhere new.</summary>
+    public const string Restructure = "Restructure";
+
+    /// <summary>The unit got a different head, or lost the one it had.</summary>
+    public const string LeadershipChange = "Leadership Change";
+
+    /// <summary>Neither — a row no current writer produces, kept so a legacy row still classifies.</summary>
+    public const string Other = "Other";
+
+    public static readonly IReadOnlyList<string> All = new[] { Restructure, LeadershipChange, Other };
+
+    /// <summary>In-memory classification of a loaded row.</summary>
+    public static string Classify(OrganizationUnitHistory entity)
+    {
+        if (entity.PreviousParentId != entity.NewParentId)
+            return Restructure;
+        if (entity.PreviousHeadEmployeeId != entity.NewHeadEmployeeId)
+            return LeadershipChange;
+        return Other;
+    }
+
+    /// <summary>
+    /// The SQL twin of <see cref="Classify"/>, for the register's change-type filter.
+    /// </summary>
+    /// <remarks>
+    /// EF Core rewrites <c>a != b</c> and <c>a == b</c> over nullable columns to C# semantics, so
+    /// two null parent ids compare equal here exactly as they do in <see cref="Classify"/>. Written
+    /// as an <c>Expression</c> rather than a method group for the reason slice 4 found the hard way:
+    /// a static predicate called inside <c>Where</c> compiles, reads correctly and throws at runtime.
+    /// </remarks>
+    public static Expression<Func<OrganizationUnitHistory, bool>> Predicate(string changeType) => changeType switch
+    {
+        Restructure => h => h.PreviousParentId != h.NewParentId,
+        LeadershipChange => h => h.PreviousParentId == h.NewParentId
+                                 && h.PreviousHeadEmployeeId != h.NewHeadEmployeeId,
+        Other => h => h.PreviousParentId == h.NewParentId
+                      && h.PreviousHeadEmployeeId == h.NewHeadEmployeeId,
+        _ => throw new ArgumentOutOfRangeException(nameof(changeType), changeType, "Unknown change type."),
+    };
+
+    /// <summary>
+    /// Resolves a caller-supplied change type onto one of the three constants, tolerating case and
+    /// the spaceless form a query string is likely to carry. Returns false for anything else, so the
+    /// endpoint can refuse rather than quietly ignore the filter.
+    /// </summary>
+    public static bool TryResolve(string? value, out string resolved)
+    {
+        resolved = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var needle = value.Replace(" ", string.Empty).Trim();
+        foreach (var candidate in All)
+        {
+            if (string.Equals(candidate.Replace(" ", string.Empty), needle, StringComparison.OrdinalIgnoreCase))
+            {
+                resolved = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
 
 public static class OrganizationStructureMappingExtensions
 {
@@ -381,6 +464,7 @@ public static class OrganizationStructureMappingExtensions
             EffectiveFrom = entity.EffectiveFrom,
             EffectiveTo = entity.EffectiveTo,
             ChangeReason = entity.ChangeReason,
+            ChangeType = OrganizationUnitChangeTypes.Classify(entity),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -421,22 +505,11 @@ public static class OrganizationStructureMappingExtensions
             UpdatedAt = entity.UpdatedAt,
             UpdatedBy = entity.UpdatedBy,
             ChangedBy = entity.CreatedBy,
-            ChangedAt = entity.CreatedAt
+            ChangedAt = entity.CreatedAt,
+            // One definition, in OrganizationUnitChangeTypes. This mapper used to hold the only copy
+            // of the rule and no read ever reached it.
+            ChangeType = OrganizationUnitChangeTypes.Classify(entity)
         };
-
-        // Determine change type
-        if (entity.PreviousParentId != entity.NewParentId)
-        {
-            dto.ChangeType = "Restructure";
-        }
-        else if (entity.PreviousHeadEmployeeId != entity.NewHeadEmployeeId)
-        {
-            dto.ChangeType = "Leadership Change";
-        }
-        else
-        {
-            dto.ChangeType = "Other";
-        }
 
         return dto;
     }

@@ -25,6 +25,13 @@ public sealed class GroundRentAdministrationController : ControllerBase
     public async Task<ActionResult<EstateGroundRentOptionsDto>> GetOptions(CancellationToken cancellationToken)
         => Ok(await _service.GetOptionsAsync(cancellationToken));
 
+    [HttpPost("assessments")]
+    [Authorize(Roles = EstateRoles)]
+    public async Task<ActionResult<EstateGroundRentAssetOptionDto>> AssessAsset(
+        [FromBody] AssessEstateGroundRentDto request,
+        CancellationToken cancellationToken)
+        => Ok(await _service.AssessAssetAsync(request, cancellationToken));
+
     [HttpGet("accounts")]
     [Authorize(Roles = EstateRoles)]
     public async Task<ActionResult<IReadOnlyList<EstateGroundRentAccountDto>>> GetAccounts(

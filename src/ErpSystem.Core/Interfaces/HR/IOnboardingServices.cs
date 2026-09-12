@@ -12,7 +12,6 @@ public interface IOnboardingPlanTemplateService
     Task<OnboardingPlanTemplateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<OnboardingPlanTemplateSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<OnboardingPlanTemplateDetailDto> GetWithTaskTemplatesAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<OnboardingPlanTemplateSummaryDto>> GetByPositionIdAsync(Guid positionId, CancellationToken cancellationToken = default);
     Task<OnboardingPlanTemplateDto?> GetDefaultAsync(CancellationToken cancellationToken = default);
 
     // CRUD
@@ -52,7 +51,19 @@ public interface IOnboardingPlanService
     Task<IEnumerable<OnboardingTaskDto>> GetTasksAsync(Guid planId, CancellationToken cancellationToken = default);
     Task<OnboardingTaskDto> AddTaskAsync(CreateOnboardingTaskDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<OnboardingTaskDto> UpdateTaskAsync(UpdateOnboardingTaskDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> CompleteTaskAsync(Guid taskId, Guid completedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks a task complete, recording the completion notes and evidence path the DTO carries.
+    /// A task flagged <c>RequiresVerification</c> lands in <c>PendingVerification</c> rather than
+    /// <c>Completed</c> — it is not done until someone signs it off via <see cref="VerifyTaskAsync"/>.
+    /// </summary>
+    Task<OnboardingTaskDto> CompleteTaskAsync(CompleteOnboardingTaskDto completeDto, Guid completedByEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Second-party sign-off for a task that requires verification. Refuses to verify a task that has
+    /// not been completed, and refuses to let the person who completed it verify their own work.
+    /// </summary>
+    Task<OnboardingTaskDto> VerifyTaskAsync(VerifyOnboardingTaskDto verifyDto, Guid verifiedByEmployeeId, CancellationToken cancellationToken = default);
 
     // Asset items
     Task<IEnumerable<OnboardingAssetDto>> GetAssetItemsAsync(Guid planId, CancellationToken cancellationToken = default);

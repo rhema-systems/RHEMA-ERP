@@ -1,11 +1,15 @@
 using ErpSystem.Core.DTOs.Estate;
+using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Estate;
+using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Models;
+using ErpSystem.Core.Services.Estate;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,6 +24,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
 {
     private readonly IEstateManagedAssetService _managedAssetService;
     private readonly IProjectService _projectService;
+    private readonly IProcedureCaseService _procedureCaseService;
     private readonly IFileStorageService _fileStorageService;
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
@@ -27,12 +32,14 @@ public sealed class EstateManagedAssetsController : ControllerBase
     public EstateManagedAssetsController(
         IEstateManagedAssetService managedAssetService,
         IProjectService projectService,
+        IProcedureCaseService procedureCaseService,
         IFileStorageService fileStorageService,
         ApplicationDbContext db,
         ICurrentUserService currentUserService)
     {
         _managedAssetService = managedAssetService;
         _projectService = projectService;
+        _procedureCaseService = procedureCaseService;
         _fileStorageService = fileStorageService;
         _db = db;
         _currentUserService = currentUserService;
@@ -150,6 +157,108 @@ public sealed class EstateManagedAssetsController : ControllerBase
         });
     }
 
+    [HttpGet("portal-listing-demarcations")]
+    public async Task<IActionResult> GetPortalListingDemarcations([FromQuery] string? search = null, [FromQuery] int take = 300)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return Ok(new { success = true, data = Array.Empty<object>() });
+        }
+
+        var normalizedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToLowerInvariant();
+        var limit = Math.Clamp(take <= 0 ? 300 : take, 1, 500);
+        var query = _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Include(item => item.EstateManagedAsset)
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && (item.IsPublishedToExternalPortal || item.ExternalListingType != "None"));
+
+        if (normalizedSearch != null)
+        {
+            query = query.Where(item =>
+                item.Description.ToLower().Contains(normalizedSearch)
+                || (item.ParentLandAssetReference != null
+                    && item.ParentLandAssetReference.ToLower().Contains(normalizedSearch))
+                || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
+                || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
+                || (item.EstateManagedAsset.Location != null && item.EstateManagedAsset.Location.ToLower().Contains(normalizedSearch)));
+        }
+
+        var candidates = await query
+            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .Take(limit)
+            .Select(item => new
+            {
+                ListingScope = "demarcation",
+                ParentAssetId = item.EstateManagedAssetId,
+                Id = item.Id,
+                AssetCode = item.ParentLandAssetReference ?? item.EstateManagedAsset.AssetCode,
+                Name = item.Description,
+                Description = $"Demarcation {item.DemarcationNumber} of {item.EstateManagedAsset.AssetCode} - {item.EstateManagedAsset.Name}",
+                Location = item.EstateManagedAsset.Location,
+                Purpose = item.EstateManagedAsset.Purpose,
+                ZoningClassification = item.EstateManagedAsset.ZoningClassification,
+                PlanningComplianceStatus = item.EstateManagedAsset.PlanningComplianceStatus,
+                GisLayerReference = item.EstateManagedAsset.GisLayerReference,
+                GisProvider = item.EstateManagedAsset.GisProvider,
+                GisFeatureId = item.EstateManagedAsset.GisFeatureId,
+                GisSourceCrs = item.EstateManagedAsset.GisSourceCrs,
+                GisSyncStatus = item.EstateManagedAsset.GisSyncStatus,
+                GisLastSyncedAt = item.EstateManagedAsset.GisLastSyncedAt,
+                BoundaryVerified = item.BoundaryVerified,
+                BoundaryCoordinates = item.BoundaryCoordinates,
+                SurveyPlanNumber = item.EstateManagedAsset.SurveyPlanNumber,
+                MapSheetNumber = item.EstateManagedAsset.MapSheetNumber,
+                CadastreDescription = item.EstateManagedAsset.CadastreDescription,
+                Region = item.EstateManagedAsset.Region,
+                District = item.EstateManagedAsset.District,
+                Town = item.EstateManagedAsset.Town,
+                AreaValue = item.AreaSquareFeet,
+                AreaUnit = "SqFt",
+                AreaSquareMeters = item.AreaSquareFeet / 10.7639m,
+                SurveyorName = item.EstateManagedAsset.SurveyorName,
+                SurveyDate = item.EstateManagedAsset.SurveyDate,
+                BeaconCount = item.BeaconCount,
+                DemarcationCount = 0,
+                VerifiedDemarcationCount = 0,
+                IsReadyForProjectManagement = item.IsReadyForProjectManagement,
+                AssetType = EstateManagedAssetType.Land,
+                Status = item.EstateManagedAsset.Status,
+                SourceType = item.EstateManagedAsset.SourceType,
+                LandAcquisitionId = item.EstateManagedAsset.LandAcquisitionId,
+                ProjectId = item.EstateManagedAsset.ProjectId,
+                ProjectCode = item.EstateManagedAsset.ProjectCode,
+                ProjectTitle = item.EstateManagedAsset.ProjectTitle,
+                AreaSquareFeet = item.AreaSquareFeet,
+                ValuationAmount = item.AllocatedCost,
+                TargetSalePrice = item.TargetSalePrice,
+                Currency = item.ExternalListingCurrency,
+                IsAvailableForLease = item.ExternalListingType == "Rent" || item.ExternalListingType == "SaleAndRent",
+                IsAvailableForSale = item.ExternalListingType == "Sale" || item.ExternalListingType == "SaleAndRent",
+                IsPublishedFromProject = item.EstateManagedAsset.IsPublishedFromProject,
+                PublishedFromProjectAt = item.EstateManagedAsset.PublishedFromProjectAt,
+                IsPublishedToExternalPortal = item.IsPublishedToExternalPortal,
+                ExternalListingType = item.ExternalListingType,
+                ExternalListingStatus = item.ExternalListingStatus,
+                ExternalListingPrice = item.ExternalListingPrice,
+                ExternalSalePrice = item.ExternalSalePrice,
+                ExternalMonthlyRent = item.ExternalMonthlyRent,
+                ExternalLeaseTermMonths = item.ExternalLeaseTermMonths,
+                ExternalListingCurrency = item.ExternalListingCurrency,
+                ExternalListingNotes = item.ExternalListingNotes,
+                ExternalPublishedAt = item.ExternalPublishedAt,
+                Notes = item.FixedAssetPostingStatus
+            })
+            .ToListAsync();
+
+        return Ok(new { success = true, data = candidates });
+    }
+
     [HttpPost("{id:guid}/demarcations")]
     [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Land Registry Officer,Survey Officer")]
     public async Task<IActionResult> CreateLandDemarcation(Guid id, [FromBody] SaveEstateLandDemarcationDto request)
@@ -191,6 +300,42 @@ public sealed class EstateManagedAssetsController : ControllerBase
         {
             await _managedAssetService.DeleteLandDemarcationAsync(id, demarcationId);
             return Ok(new { success = true, message = "Land demarcation deleted." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id:guid}/demarcations/{demarcationId:guid}/disposition")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> UpdateLandDemarcationDisposition(
+        Guid id,
+        Guid demarcationId,
+        [FromBody] UpdateEstateLandDemarcationDispositionDto request)
+    {
+        try
+        {
+            var demarcation = await _managedAssetService.UpdateLandDemarcationDispositionAsync(id, demarcationId, request);
+            return Ok(new { success = true, data = demarcation, message = "Land demarcation status updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id:guid}/demarcations/{demarcationId:guid}/costing")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Land Registry Officer,Survey Officer")]
+    public async Task<IActionResult> UpdateLandDemarcationCosting(
+        Guid id,
+        Guid demarcationId,
+        [FromBody] UpdateEstateLandDemarcationCostingDto request)
+    {
+        try
+        {
+            var demarcation = await _managedAssetService.UpdateLandDemarcationCostingAsync(id, demarcationId, request);
+            return Ok(new { success = true, data = demarcation, message = "Land demarcation costing updated." });
         }
         catch (InvalidOperationException ex)
         {
@@ -240,6 +385,152 @@ public sealed class EstateManagedAssetsController : ControllerBase
         {
             var asset = await _managedAssetService.UpdateOccupancyAsync(id, request);
             return Ok(new { success = true, data = asset, message = "Occupancy and availability updated." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost("sales-handoffs/listing-applications")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Sales Officer,Sales Manager")]
+    public async Task<IActionResult> CreateListingApplicationFromSales(
+        [FromBody] CreateEstateSalesListingApplicationHandoffDto request,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        if (request.ListingId == Guid.Empty)
+        {
+            return BadRequest(new { success = false, message = "Listing id is required." });
+        }
+
+        if (request.BusinessPartnerId == Guid.Empty)
+        {
+            return BadRequest(new { success = false, message = "Customer Business Partner id is required." });
+        }
+
+        var asset = await _db.EstateManagedAssets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == request.ListingId
+                && item.TenantId == tenantId
+                && !item.IsDeleted, cancellationToken);
+        var demarcation = asset is null
+            ? await _db.EstateLandDemarcations
+                .AsNoTracking()
+                .Include(item => item.EstateManagedAsset)
+                .FirstOrDefaultAsync(item => item.Id == request.ListingId
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.EstateManagedAsset.TenantId == tenantId
+                    && !item.EstateManagedAsset.IsDeleted, cancellationToken)
+            : null;
+        asset ??= demarcation?.EstateManagedAsset;
+
+        if (asset is null)
+        {
+            return NotFound(new { success = false, message = "Estate listing was not found." });
+        }
+
+        var customer = await _db.BusinessPartners
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == request.BusinessPartnerId
+                && item.TenantId == tenantId
+                && !item.IsDeleted, cancellationToken);
+        if (customer is null)
+        {
+            return BadRequest(new { success = false, message = "Customer Business Partner was not found." });
+        }
+
+        if (request.SalesOpportunityId.HasValue)
+        {
+            var existingCase = await _db.ProcedureCases
+                .AsNoTracking()
+                .Include(item => item.Fields.Where(field => !field.IsDeleted))
+                .FirstOrDefaultAsync(procedureCase => procedureCase.TenantId == tenantId
+                    && !procedureCase.IsDeleted
+                    && procedureCase.Module == "PropertyManagement"
+                    && procedureCase.EntityType == "EstatePropertyManagementListingApplication"
+                    && procedureCase.Fields.Any(field => !field.IsDeleted
+                        && field.Key == "salesOpportunityId"
+                        && field.Value == request.SalesOpportunityId.Value.ToString()), cancellationToken);
+
+            if (existingCase is not null)
+            {
+                return Ok(new { success = true, data = ToSalesHandoffCaseDto(existingCase), message = "Estate listing application already exists for this Sales opportunity." });
+            }
+        }
+
+        var listingReference = demarcation is null
+            ? asset.AssetCode
+            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcation.DemarcationNumber);
+        var listingName = demarcation is null
+            ? asset.Name
+            : $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}";
+        var requestType = NormalizeSalesHandoffRequestType(request.RequestType, demarcation?.ExternalListingType ?? asset.ExternalListingType);
+        var requestLabel = requestType == "Purchase" ? "Purchase enquiry" : "Lease enquiry";
+        var amount = request.AgreedAmount
+            ?? (requestType == "Purchase"
+                ? demarcation?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcation?.ExternalListingPrice ?? asset.ExternalListingPrice
+                : demarcation?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent ?? demarcation?.ExternalListingPrice ?? asset.ExternalListingPrice);
+        var currency = string.IsNullOrWhiteSpace(request.Currency)
+            ? demarcation?.ExternalListingCurrency ?? asset.ExternalListingCurrency ?? customer.Currency ?? "GHS"
+            : request.Currency.Trim().ToUpperInvariant();
+        var reference = BuildExternalReference("ESTATE");
+        var description = Truncate(
+            $"{requestLabel} accepted by Sales for {listingReference} - {listingName}. Customer: {customer.PartnerName} ({customer.CustomerAccountNumber}).",
+            1000);
+
+        var fieldValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["applicationReference"] = reference,
+            ["sourceWorkspace"] = "Sales - Estate Enquiry",
+            ["sourceReference"] = customer.Id.ToString(),
+            ["customerAccountReference"] = customer.CustomerAccountNumber,
+            ["customerName"] = customer.PartnerName,
+            ["propertyUnit"] = listingReference,
+            ["listingReference"] = listingReference,
+            ["listingType"] = demarcation?.ExternalListingType ?? asset.ExternalListingType,
+            ["requestType"] = requestLabel,
+            ["listingPrice"] = amount?.ToString("0.##"),
+            ["offerAmount"] = requestType == "Purchase" ? amount?.ToString("0.##") : null,
+            ["currency"] = currency,
+            ["requestMessage"] = request.Notes?.Trim(),
+            ["customerValidationStatus"] = "Validated by Sales",
+            ["listingValidationStatus"] = "Pending",
+            ["availabilityCheck"] = "Pending",
+            ["commercialReviewStatus"] = "Completed by Sales",
+            ["decisionStatus"] = "Pending Estate review",
+            ["reservationStatus"] = "Sales completed",
+            ["customerNotificationStatus"] = "Handled by Sales",
+            ["customerAcceptanceStatus"] = "Accepted in Sales",
+            ["customerAcceptanceDate"] = request.SalesCompletedAt?.ToString("yyyy-MM-dd"),
+            ["billingStartStatus"] = requestType == "Purchase"
+                ? "Sales payment handled"
+                : "Blocked - agreement pending",
+            ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+            ["applicationStatus"] = "Submitted from Sales",
+            ["salesOpportunityId"] = request.SalesOpportunityId?.ToString(),
+            ["salesReference"] = request.SalesReference,
+            ["salesCompletedAt"] = request.SalesCompletedAt?.ToString("O"),
+            ["notes"] = string.IsNullOrWhiteSpace(request.Notes)
+                ? description
+                : $"{description} {request.Notes.Trim()}"
+        };
+
+        try
+        {
+            var created = await _procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
+                "PropertyManagement",
+                "EstatePropertyManagementListingApplication",
+                $"{requestLabel} - {listingName}",
+                reference,
+                customer.PartnerName,
+                "Sales - Estate Enquiry",
+                DateTime.UtcNow,
+                description,
+                fieldValues));
+
+            return Ok(new { success = true, data = created, message = "Estate listing application created from Sales handoff." });
         }
         catch (InvalidOperationException ex)
         {
@@ -560,6 +851,49 @@ public sealed class EstateManagedAssetsController : ControllerBase
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
 
+    private static string NormalizeSalesHandoffRequestType(string? requestedType, string listingType)
+    {
+        var normalized = string.IsNullOrWhiteSpace(requestedType)
+            ? listingType
+            : requestedType.Trim();
+        normalized = normalized.Equals("Purchase", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("Buy", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("Sale", StringComparison.OrdinalIgnoreCase)
+            ? "Purchase"
+            : normalized.Equals("Lease", StringComparison.OrdinalIgnoreCase)
+                || normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
+                ? "Lease"
+                : listingType == "Sale" ? "Purchase" : "Lease";
+
+        if (listingType == "Sale" && normalized != "Purchase")
+        {
+            return "Purchase";
+        }
+
+        if (listingType == "Rent" && normalized != "Lease")
+        {
+            return "Lease";
+        }
+
+        return normalized;
+    }
+
+    private static string BuildExternalReference(string prefix)
+        => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();
+
+    private static object ToSalesHandoffCaseDto(ProcedureCase procedureCase) => new
+    {
+        procedureCase.Id,
+        procedureCase.Module,
+        procedureCase.EntityType,
+        procedureCase.Title,
+        procedureCase.ReferenceNumber,
+        procedureCase.Status,
+        procedureCase.CurrentStageName,
+        procedureCase.CurrentAssignedRole,
+        CreatedAt = procedureCase.CreatedAt
+    };
+
     private static object ToCentralDmsPublicationDto(CentralDocumentRecord record, DateTime? publishedAt) => new
     {
         record.Id,
@@ -583,3 +917,14 @@ public sealed class EstateManagedAssetsController : ControllerBase
         PublishedToCentralDmsAt = publishedAt ?? record.PublishedAt
     };
 }
+
+public sealed record CreateEstateSalesListingApplicationHandoffDto(
+    Guid ListingId,
+    Guid BusinessPartnerId,
+    string? RequestType,
+    Guid? SalesOpportunityId,
+    string? SalesReference,
+    decimal? AgreedAmount,
+    string? Currency,
+    DateTime? SalesCompletedAt,
+    string? Notes);

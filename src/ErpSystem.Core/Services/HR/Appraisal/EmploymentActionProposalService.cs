@@ -13,17 +13,30 @@ namespace ErpSystem.Core.Services.HR;
 public class EmploymentActionProposalService : IEmploymentActionProposalService
 {
     private readonly IGenericRepository<EmploymentActionProposal> _repository;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EmploymentActionProposalService> _logger;
 
+    /// <summary>
+    /// Entity type registered with the workflow engine. Must match the catalog entry in
+    /// <c>WorkflowEntityTypeCatalogService</c> and the aliases on
+    /// <c>EmploymentActionProposalWorkflowStatusAdapter</c>.
+    /// </summary>
+    private const string EntityType = "EmploymentActionProposal";
+
     public EmploymentActionProposalService(
         IGenericRepository<EmploymentActionProposal> repository,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<EmploymentActionProposalService> logger)
     {
         _repository = repository;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -66,23 +79,142 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         return items.Select(ToDto).ToList();
     }
 
-    public async Task<EmploymentActionProposalDto> SetStatusAsync(Guid id, EmploymentActionProposalStatus status, CancellationToken cancellationToken = default)
+    public async Task<EmploymentActionProposalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+        return ToDto(await ReloadAsync(entity.Id, entity.TenantId, cancellationToken));
+    }
+
+    // ── Approval workflow ──────────────────────────────────────────────────
+    // Submit / approve / reject / recall run through the generic workflow engine, so a
+    // recognition and a termination can route to different approvers without a code change.
+    // EmploymentActionProposalWorkflowStatusAdapter maps the engine's outcome onto the entity.
+    //
+    // ⚠ Inoperable until an EmploymentActionProposal workflow definition has been published.
+
+    public async Task<EmploymentActionProposalDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
 
-        entity.Status = status;
+        if (entity.Status == EmploymentActionProposalStatus.PendingApproval)
+            throw new InvalidOperationException("This proposal is already awaiting approval.");
+        if (entity.Status != EmploymentActionProposalStatus.Proposed)
+            throw new InvalidOperationException($"A {entity.Status} proposal cannot be submitted for approval.");
+
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the proposal approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Employment action proposal {Id} set to {Status}", id, status);
+        _logger.LogInformation("Employment action proposal {Id} submitted for approval", id);
+        return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
+    }
 
-        var reloaded = await _repository.GetQueryable()
-            .Where(p => p.TenantId == entity.TenantId)
+    public async Task<EmploymentActionProposalDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+        var userId = RequireUserId();
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+
+        await _repository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employment action proposal {Id} approval step processed", id);
+        return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
+    }
+
+    public async Task<EmploymentActionProposalDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+        var userId = RequireUserId();
+
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+
+        await _repository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employment action proposal {Id} rejected", id);
+        return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
+    }
+
+    public async Task<EmploymentActionProposalDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+        var userId = RequireUserId();
+
+        if (entity.Status != EmploymentActionProposalStatus.PendingApproval)
+            throw new InvalidOperationException("Only a proposal still awaiting approval can be recalled.");
+
+        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, id, userId);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the proposal.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
+
+        await _repository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employment action proposal {Id} recalled", id);
+        return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
+    }
+
+    public async Task<EmploymentActionProposalDto> MarkActionedAsync(Guid id, string? notes, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+
+        if (entity.Status != EmploymentActionProposalStatus.Approved)
+            throw new InvalidOperationException(
+                entity.Status == EmploymentActionProposalStatus.Actioned
+                    ? "This proposal has already been actioned."
+                    : $"Only an approved proposal can be marked actioned. This one is {entity.Status}.");
+
+        entity.Status = EmploymentActionProposalStatus.Actioned;
+        if (!string.IsNullOrWhiteSpace(notes)) entity.Notes = notes;
+
+        await _repository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Employment action proposal {Id} marked actioned", id);
+        return ToDto(await ReloadAsync(id, entity.TenantId, cancellationToken));
+    }
+
+    private Guid RequireUserId()
+    {
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new InvalidOperationException("No signed-in user could be resolved for this workflow action.");
+        return userId;
+    }
+
+    private Task<EmploymentActionProposal> ReloadAsync(Guid id, Guid tenantId, CancellationToken cancellationToken)
+        => _repository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
             .Include(p => p.Employee)
             .Include(p => p.SourceAppraisal)
             .FirstAsync(p => p.Id == id, cancellationToken);
-        return ToDto(reloaded);
-    }
 
     private static EmploymentActionProposalDto ToDto(EmploymentActionProposal p) => new()
     {

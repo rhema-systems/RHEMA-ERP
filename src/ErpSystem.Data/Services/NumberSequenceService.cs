@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -108,5 +108,87 @@ public class NumberSequenceService : INumberSequenceService
 
         // Unreachable — the loop either returns or throws on the final attempt.
         throw new InvalidOperationException($"Unable to generate a reference number for '{key}'.");
+    }
+
+    public async Task<long> AdvanceToAtLeastAsync(
+        string key, long minimum, int? year = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("Sequence key is required.", nameof(key));
+
+        var tenantId = _currentUser.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException(
+                $"Cannot advance the '{key}' counter without a tenant.");
+
+        if (minimum < 1) return await PeekAsync(key, year, cancellationToken);
+
+        var yearBucket = year ?? 0;
+
+        for (var attempt = 0; attempt < MaxRetries; attempt++)
+        {
+            try
+            {
+                var sequence = await _context.Set<NumberSequence>()
+                    .FirstOrDefaultAsync(
+                        s => s.TenantId == tenantId && s.SequenceKey == key && s.Year == yearBucket,
+                        cancellationToken);
+
+                if (sequence == null)
+                {
+                    sequence = new NumberSequence
+                    {
+                        TenantId = tenantId,
+                        SequenceKey = key,
+                        Year = yearBucket,
+                        NextValue = minimum
+                    };
+                    _context.Set<NumberSequence>().Add(sequence);
+                }
+                else if (sequence.NextValue >= minimum)
+                {
+                    // Already ahead. Never wound back: a lower watermark reissues numbers that are
+                    // already in the register, which is the failure this exists to prevent.
+                    return sequence.NextValue;
+                }
+                else
+                {
+                    sequence.NextValue = minimum;
+                }
+
+                await _context.SaveChangesAsync(cancellationToken);
+                return minimum;
+            }
+            catch (Exception ex) when (ex is DbUpdateConcurrencyException or DbUpdateException)
+            {
+                foreach (var entry in _context.ChangeTracker.Entries<NumberSequence>().ToList())
+                    entry.State = EntityState.Detached;
+
+                if (attempt == MaxRetries - 1)
+                {
+                    _logger.LogError(ex,
+                        "Failed to advance sequence {Key} to {Minimum} after {Attempts} attempts",
+                        key, minimum, MaxRetries);
+                    throw;
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Unable to advance the '{key}' counter.");
+    }
+
+    /// <summary>Where the counter stands, without moving it. Zero when it has never been used.</summary>
+    public async Task<long> PeekAsync(string key, int? year = null, CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUser.TenantId;
+        if (tenantId == Guid.Empty)
+            throw new InvalidOperationException($"Cannot read the '{key}' counter without a tenant.");
+
+        var yearBucket = year ?? 0;
+        var sequence = await _context.Set<NumberSequence>().AsNoTracking()
+            .FirstOrDefaultAsync(
+                s => s.TenantId == tenantId && s.SequenceKey == key && s.Year == yearBucket,
+                cancellationToken);
+        return sequence?.NextValue ?? 0;
     }
 }

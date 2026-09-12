@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums.Safety;
 using ErpSystem.Core.Interfaces;
@@ -152,6 +153,56 @@ public class SheReferenceDataService : ISheReferenceDataService
     {
         var entity = await GetOwnedIncidentTypeAsync(id);
         await _incidentTypeRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    // ── Default corrective actions on an incident type ──
+    public async Task<SheIncidentTypeCorrectiveActionDto> AddIncidentTypeCorrectiveActionAsync(CreateSheIncidentTypeCorrectiveActionDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        await GetOwnedIncidentTypeAsync(dto.IncidentTypeId);
+        var template = await GetOwnedTemplateAsync(dto.CorrectiveActionTemplateId);
+
+        // The same template twice would auto-populate the action twice on every new incident.
+        var duplicate = await _unitOfWork.Repository<SheIncidentTypeCorrectiveAction>().GetQueryable()
+            .AnyAsync(l => l.TenantId == tenantId
+                        && l.IncidentTypeId == dto.IncidentTypeId
+                        && l.CorrectiveActionTemplateId == dto.CorrectiveActionTemplateId
+                        && !l.IsDeleted, cancellationToken);
+        if (duplicate)
+            throw new InvalidOperationException($"Template '{template.Code}' is already a default action for this incident type.");
+
+        var entity = dto.ToEntity(tenantId, userId);
+        await _unitOfWork.Repository<SheIncidentTypeCorrectiveAction>().AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        entity.CorrectiveActionTemplate = template; // the write response carries the template's code/title
+        return entity.ToDto();
+    }
+
+    public async Task<SheIncidentTypeCorrectiveActionDto> UpdateIncidentTypeCorrectiveActionAsync(UpdateSheIncidentTypeCorrectiveActionDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<SheIncidentTypeCorrectiveAction>();
+        var entity = await repo.GetQueryable()
+            .Include(l => l.CorrectiveActionTemplate)
+            .FirstOrDefaultAsync(l => l.Id == dto.Id, cancellationToken);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Default corrective action with ID '{dto.Id}' not found.");
+
+        entity.UpdateEntity(dto, userId);
+        await repo.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<bool> RemoveIncidentTypeCorrectiveActionAsync(Guid linkId, CancellationToken cancellationToken = default)
+    {
+        var repo = _unitOfWork.Repository<SheIncidentTypeCorrectiveAction>();
+        var entity = await repo.GetByIdAsync(linkId);
+        if (entity == null || entity.TenantId != GetTenantId())
+            throw new ArgumentException($"Default corrective action with ID '{linkId}' not found.");
+
+        await repo.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -398,16 +449,23 @@ public class SafetyIncidentService : ISafetyIncidentService
     {
         var year = DateTime.UtcNow.Year;
         var prefix = $"INC-{year}-";
-        var last = await _incidentRepository.GetQueryable()
-            .Where(i => i.TenantId == tenantId && i.IncidentNumber.StartsWith(prefix))
-            .OrderByDescending(i => i.IncidentNumber)
-            .Select(i => i.IncidentNumber)
-            .FirstOrDefaultAsync(cancellationToken);
 
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
+        // Numeric max, not string ordering: the seeder wrote 3-digit suffixes while this generator
+        // emits wider ones, and across mixed widths string ordering picks the wrong "latest"
+        // ("001" sorts above "0009"), silently re-issuing taken numbers. Soft-deleted incidents
+        // keep their number, so they count toward the max too.
+        var numbers = await _incidentRepository
+            .GetQueryableIncludingDeleted(i => i.TenantId == tenantId && i.IncidentNumber.StartsWith(prefix))
+            .Select(i => i.IncidentNumber)
+            .ToListAsync(cancellationToken);
+
+        var max = numbers
+            .Select(n => int.TryParse(n[prefix.Length..], out var v) ? v : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        // Five digits per FR-INC-001 (INC-YYYY-00001). Older, narrower numbers remain valid.
+        return $"{prefix}{max + 1:D5}";
     }
 
     // ── Queries ──
@@ -555,9 +613,46 @@ public class SafetyIncidentService : ISafetyIncidentService
         var entity = dto.ToEntity(tenantId, userId);
         entity.IncidentNumber = await GenerateNextIncidentNumberAsync(tenantId, cancellationToken);
         await _incidentRepository.AddAsync(entity);
+
+        // FR-INC-004: an incident type's default corrective actions auto-populate onto the new
+        // incident. Ownership defaults to the supervisor (fallback: the reporter) until someone
+        // reassigns them; the due date runs from the incident date per the link's deadline.
+        if (entity.IncidentTypeId is Guid incidentTypeId)
+        {
+            var defaults = await _unitOfWork.Repository<SheIncidentTypeCorrectiveAction>()
+                .GetQueryable()
+                .Include(l => l.CorrectiveActionTemplate)
+                .Where(l => l.TenantId == tenantId && l.IncidentTypeId == incidentTypeId && !l.IsDeleted)
+                .OrderBy(l => l.DisplayOrder)
+                .ToListAsync(cancellationToken);
+
+            foreach (var link in defaults.Where(l => l.CorrectiveActionTemplate.IsActive))
+            {
+                await _correctiveActionRepository.AddAsync(new SafetyIncidentCorrectiveAction
+                {
+                    TenantId = tenantId,
+                    IncidentId = entity.Id,
+                    IncidentTypeCorrectiveActionId = link.Id,
+                    ActionDescription = string.IsNullOrWhiteSpace(link.CorrectiveActionTemplate.Description)
+                        ? link.CorrectiveActionTemplate.Title
+                        : $"{link.CorrectiveActionTemplate.Title} — {link.CorrectiveActionTemplate.Description}",
+                    Priority = entity.Severity >= SheIncidentSeverity.Major
+                        ? SheCorrectiveActionPriority.High
+                        : SheCorrectiveActionPriority.Medium,
+                    Status = SheCorrectiveActionStatus.Pending,
+                    ResponsiblePersonId = entity.SupervisorId ?? entity.ReportedById,
+                    DueDate = entity.IncidentDate.AddDays(link.DeadlineDays ?? link.CorrectiveActionTemplate.DefaultDeadlineDays ?? 14),
+                    CreatedBy = userId.ToString(),
+                });
+            }
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Safety incident created: {IncidentNumber}", entity.IncidentNumber);
-        return entity.ToDto();
+
+        // Re-read through the include-bearing path: the tracked entity's navs (type, location,
+        // reporter, the auto-populated corrective actions) are unloaded here and would map blank.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<SafetyIncidentDto> UpdateAsync(UpdateSafetyIncidentDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -569,7 +664,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         entity.UpdateEntity(dto, userId);
         await _incidentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Same nav-loading reasoning as CreateAsync.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -683,12 +779,114 @@ public class SafetyIncidentService : ISafetyIncidentService
         entity.ClosedById = dto.ClosedById;
         entity.ClosedDate = dto.ClosedDate;
         entity.ClosureNotes = dto.ClosureNotes;
+        // FR-ENV-027 — lessons are typically recorded at close-out; an omitted value
+        // keeps whatever was captured earlier via the update path.
+        if (!string.IsNullOrWhiteSpace(dto.LessonsLearned))
+            entity.LessonsLearned = dto.LessonsLearned;
         Touch(entity, userId);
 
         await _incidentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Safety incident closed: {IncidentNumber}", entity.IncidentNumber);
         return true;
+    }
+
+    // ── Statutory submissions (slice 15, FR-SHE-103) ──
+
+    /// <summary>The submission artefact is only meaningful for a reportable incident — flag first.</summary>
+    public async Task<SheStatutoryIncidentSubmissionDto> AddStatutorySubmissionAsync(CreateSheStatutoryIncidentSubmissionDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
+    {
+        tenantId = RequireCurrentTenant(tenantId);
+        var incident = await GetOwnedIncidentAsync(dto.IncidentId);
+
+        if (!incident.ReportableToAuthority)
+            throw new InvalidOperationException(
+                $"Incident '{incident.IncidentNumber}' is not flagged as reportable to an authority. Flag it (or use the notify-authority action) before recording a statutory submission.");
+
+        var body = await _unitOfWork.Repository<SheRegulatoryBody>().GetByIdAsync(dto.RegulatoryBodyId);
+        if (body == null || body.TenantId != tenantId || body.IsDeleted)
+            throw new ArgumentException($"Regulatory body with ID '{dto.RegulatoryBodyId}' not found.");
+
+        var submitter = await _unitOfWork.Repository<Employee>().GetByIdAsync(dto.SubmittedById);
+        if (submitter == null || submitter.TenantId != tenantId || submitter.IsDeleted)
+            throw new ArgumentException($"Employee with ID '{dto.SubmittedById}' not found.");
+
+        var entity = new SheStatutoryIncidentSubmission
+        {
+            TenantId = tenantId,
+            IncidentId = incident.Id,
+            RegulatoryBodyId = body.Id,
+            Type = dto.Type,
+            Method = dto.Method,
+            SubmissionDate = dto.SubmissionDate,
+            ReferenceNumber = dto.ReferenceNumber,
+            SubmittedById = submitter.Id,
+            DocumentPath = dto.DocumentPath,
+            Notes = dto.Notes,
+            CreatedBy = userId.ToString(),
+        };
+        await _unitOfWork.Repository<SheStatutoryIncidentSubmission>().AddAsync(entity);
+
+        // The first submission stamps the incident's denormalised notification fields —
+        // the statutory-pending queue empties on the artefact, not on a manual flag.
+        if (incident.AuthorityNotificationDate == null)
+        {
+            incident.ReportedToBodyId = body.Id;
+            incident.AuthorityNotificationDate = dto.SubmissionDate;
+            incident.AuthorityReferenceNumber = dto.ReferenceNumber;
+            incident.AuthorityNotifiedById = submitter.Id;
+            Touch(incident, userId);
+            await _incidentRepository.UpdateAsync(incident);
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Statutory submission recorded for incident {IncidentNumber} to {Body}", incident.IncidentNumber, body.Name);
+
+        // Guard-doubles-as-fixup: the validated navs are tracked, so the DTO resolves names.
+        entity.Incident = incident;
+        entity.RegulatoryBody = body;
+        entity.SubmittedBy = submitter;
+        return entity.ToDto();
+    }
+
+    public async Task<SheStatutoryIncidentSubmissionDto> UpdateStatutorySubmissionAsync(UpdateSheStatutoryIncidentSubmissionDto dto, Guid userId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _unitOfWork.Repository<SheStatutoryIncidentSubmission>()
+            .GetQueryable(s => s.Id == dto.Id && s.TenantId == tenantId && !s.IsDeleted)
+            .Include(s => s.Incident)
+            .Include(s => s.RegulatoryBody)
+            .Include(s => s.SubmittedBy)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (entity == null)
+            throw new ArgumentException($"Statutory submission with ID '{dto.Id}' not found.");
+
+        entity.ReferenceNumber = dto.ReferenceNumber;
+        entity.DocumentPath = dto.DocumentPath;
+        entity.AcknowledgementReceived = dto.AcknowledgementReceived;
+        entity.AcknowledgementDate = dto.AcknowledgementDate;
+        entity.AcknowledgementReference = dto.AcknowledgementReference;
+        entity.Notes = dto.Notes;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+
+        await _unitOfWork.Repository<SheStatutoryIncidentSubmission>().UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return entity.ToDto();
+    }
+
+    public async Task<IEnumerable<SheStatutoryIncidentSubmissionDto>> GetStatutorySubmissionsAsync(Guid incidentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await GetOwnedIncidentAsync(incidentId);
+        var rows = await _unitOfWork.Repository<SheStatutoryIncidentSubmission>()
+            .GetQueryable(s => s.IncidentId == incidentId && s.TenantId == tenantId && !s.IsDeleted)
+            .Include(s => s.Incident)
+            .Include(s => s.RegulatoryBody)
+            .Include(s => s.SubmittedBy)
+            .OrderBy(s => s.SubmissionDate)
+            .ToListAsync(cancellationToken);
+        return rows.Select(s => s.ToDto()).ToList();
     }
 
     // ── Involved persons ──
@@ -701,7 +899,10 @@ public class SafetyIncidentService : ISafetyIncidentService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await RecalculateLostTimeAsync(entity.IncidentId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        // Child write responses re-read through the parent's include-bearing path — the tracked
+        // entity's navs (employee, injury type, first-aid provider) are unloaded and map blank.
+        var full = await GetByIdAsync(entity.IncidentId, cancellationToken);
+        return full.InvolvedPersons.First(p => p.Id == entity.Id);
     }
 
     public async Task<SafetyIncidentInvolvedPersonDto> UpdateInvolvedPersonAsync(UpdateSafetyIncidentInvolvedPersonDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -713,7 +914,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await RecalculateLostTimeAsync(entity.IncidentId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(entity.IncidentId, cancellationToken);
+        return full.InvolvedPersons.First(p => p.Id == entity.Id);
     }
 
     public async Task<bool> DeleteInvolvedPersonAsync(Guid involvedPersonId, CancellationToken cancellationToken = default)
@@ -731,11 +933,12 @@ public class SafetyIncidentService : ISafetyIncidentService
     public async Task<SafetyIncidentInjuredBodyPartDto> AddInjuredBodyPartAsync(CreateSafetyIncidentInjuredBodyPartDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedInvolvedPersonAsync(dto.InvolvedPersonId);
+        var person = await GetOwnedInvolvedPersonAsync(dto.InvolvedPersonId);
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyIncidentInjuredBodyPart>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(person.IncidentId, cancellationToken);
+        return full.InvolvedPersons.SelectMany(p => p.InjuredBodyParts).First(b => b.Id == entity.Id);
     }
 
     public async Task<bool> DeleteInjuredBodyPartAsync(Guid injuredBodyPartId, CancellationToken cancellationToken = default)
@@ -755,7 +958,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyIncidentWitness>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(dto.IncidentId, cancellationToken);
+        return full.Witnesses.First(w => w.Id == entity.Id);
     }
 
     public async Task<SafetyIncidentWitnessDto> UpdateWitnessAsync(UpdateSafetyIncidentWitnessDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -765,7 +969,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         entity.UpdateEntity(dto, userId);
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(entity.IncidentId, cancellationToken);
+        return full.Witnesses.First(w => w.Id == entity.Id);
     }
 
     public async Task<bool> DeleteWitnessAsync(Guid witnessId, CancellationToken cancellationToken = default)
@@ -785,7 +990,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyIncidentInvestigationTeamMember>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(dto.IncidentId, cancellationToken);
+        return full.InvestigationTeam.First(m => m.Id == entity.Id);
     }
 
     public async Task<bool> RemoveInvestigationTeamMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
@@ -805,7 +1011,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         var entity = dto.ToEntity(tenantId, userId);
         await _correctiveActionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(dto.IncidentId, cancellationToken);
+        return full.CorrectiveActions.First(a => a.Id == entity.Id);
     }
 
     public async Task<SafetyIncidentCorrectiveActionDto> UpdateCorrectiveActionAsync(UpdateSafetyIncidentCorrectiveActionDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -814,7 +1021,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         entity.UpdateEntity(dto, userId);
         await _correctiveActionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(entity.IncidentId, cancellationToken);
+        return full.CorrectiveActions.First(a => a.Id == entity.Id);
     }
 
     public async Task<bool> VerifyCorrectiveActionAsync(VerifySafetyIncidentCorrectiveActionDto dto, Guid userId, CancellationToken cancellationToken = default)
@@ -874,7 +1082,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyIncidentFollowUp>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(dto.IncidentId, cancellationToken);
+        return full.FollowUps.First(f => f.Id == entity.Id);
     }
 
     public async Task<SafetyIncidentDocumentDto> AddDocumentAsync(CreateSafetyIncidentDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -884,7 +1093,8 @@ public class SafetyIncidentService : ISafetyIncidentService
         var entity = dto.ToEntity(tenantId, userId);
         await _unitOfWork.Repository<SafetyIncidentDocument>().AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        var full = await GetByIdAsync(dto.IncidentId, cancellationToken);
+        return full.Documents.First(d => d.Id == entity.Id);
     }
 
     public async Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)

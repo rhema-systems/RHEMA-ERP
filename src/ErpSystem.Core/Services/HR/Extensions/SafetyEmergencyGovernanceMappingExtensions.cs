@@ -555,6 +555,15 @@ public static class SafetyEmergencyGovernanceMappingExtensions
         ReviewedDate = e.ReviewedDate,
         ManagementComments = e.ManagementComments,
         ReportDocumentPath = e.ReportDocumentPath,
+        TotalRecordableIncidentRate = e.TotalRecordableIncidentRate,
+        NearMissFrequencyRate = e.NearMissFrequencyRate,
+        TrainingCompletionRate = e.TrainingCompletionRate,
+        FireDrillObjectivesMetRate = e.FireDrillObjectivesMetRate,
+        WasteRecyclingRate = e.WasteRecyclingRate,
+        AverageInspectionComplianceScore = e.AverageInspectionComplianceScore,
+        KpisComputedAt = e.KpisComputedAt,
+        KpisComputedById = e.KpisComputedById,
+        KpisComputedByName = e.KpisComputedBy?.FullName,
     };
 
     public static ShePerformanceSnapshotSummaryDto ToSummaryDto(this ShePerformanceSnapshot e) => new()
@@ -579,12 +588,88 @@ public static class SafetyEmergencyGovernanceMappingExtensions
         Year = dto.Year,
         PeriodNumber = dto.PeriodNumber,
         LocationId = dto.LocationId,
+        TotalAccidents = dto.TotalAccidents,
+        TotalIncidents = dto.TotalIncidents,
+        TotalNearMisses = dto.TotalNearMisses,
+        TotalDangerousOccurrences = dto.TotalDangerousOccurrences,
+        TotalFatalities = dto.TotalFatalities,
+        TotalLostTimeInjuries = dto.TotalLostTimeInjuries,
+        LostTimeInjuryFrequencyRate = dto.LostTimeInjuryFrequencyRate,
+        TotalManHoursWorked = dto.TotalManHoursWorked,
+        TotalLostDays = dto.TotalLostDays,
+        InspectionsPlanned = dto.InspectionsPlanned,
+        InspectionsConducted = dto.InspectionsConducted,
+        InspectionsOverdue = dto.InspectionsOverdue,
+        CorrectiveActionsIssued = dto.CorrectiveActionsIssued,
+        CorrectiveActionsCompleted = dto.CorrectiveActionsCompleted,
+        CorrectiveActionsOverdue = dto.CorrectiveActionsOverdue,
+        CorrectiveActionClosureRate = dto.CorrectiveActionClosureRate,
+        TrainingProgramsPlanned = dto.TrainingProgramsPlanned,
+        TrainingProgramsConducted = dto.TrainingProgramsConducted,
+        TotalTrainingHours = dto.TotalTrainingHours,
+        ContractorsOnSite = dto.ContractorsOnSite,
+        ContractorInspectionsConducted = dto.ContractorInspectionsConducted,
+        ContractorNonComplianceNoticesIssued = dto.ContractorNonComplianceNoticesIssued,
+        ContractorComplianceRate = dto.ContractorComplianceRate,
+        EnvironmentalIncidents = dto.EnvironmentalIncidents,
+        EnvironmentalIncidentsReportedToEpa = dto.EnvironmentalIncidentsReportedToEpa,
+        EmergencyDrillsPlanned = dto.EmergencyDrillsPlanned,
+        EmergencyDrillsConducted = dto.EmergencyDrillsConducted,
+        PpeComplianceRate = dto.PpeComplianceRate,
+        HousekeepingComplianceRating = dto.HousekeepingComplianceRating,
+        RegulatoryObligationsTotal = dto.RegulatoryObligationsTotal,
+        RegulatoryObligationsCompliant = dto.RegulatoryObligationsCompliant,
+        RegulatoryObligationsNonCompliant = dto.RegulatoryObligationsNonCompliant,
+        RegulatoryObligationsExpiringSoon = dto.RegulatoryObligationsExpiringSoon,
         PreparedById = dto.PreparedById,
         PreparedDate = dto.PreparedDate,
         ManagementComments = dto.ManagementComments,
         ReportDocumentPath = dto.ReportDocumentPath,
         CreatedBy = userId.ToString(),
     };
+
+    /// <summary>Rewrites the reported figures. Identity fields (number, period, location,
+    /// preparer) are deliberately not touched — see <see cref="UpdateShePerformanceSnapshotDto"/>.</summary>
+    public static void UpdateEntity(this ShePerformanceSnapshot e, UpdateShePerformanceSnapshotDto dto, Guid userId)
+    {
+        e.TotalAccidents = dto.TotalAccidents;
+        e.TotalIncidents = dto.TotalIncidents;
+        e.TotalNearMisses = dto.TotalNearMisses;
+        e.TotalDangerousOccurrences = dto.TotalDangerousOccurrences;
+        e.TotalFatalities = dto.TotalFatalities;
+        e.TotalLostTimeInjuries = dto.TotalLostTimeInjuries;
+        e.LostTimeInjuryFrequencyRate = dto.LostTimeInjuryFrequencyRate;
+        e.TotalManHoursWorked = dto.TotalManHoursWorked;
+        e.TotalLostDays = dto.TotalLostDays;
+        e.InspectionsPlanned = dto.InspectionsPlanned;
+        e.InspectionsConducted = dto.InspectionsConducted;
+        e.InspectionsOverdue = dto.InspectionsOverdue;
+        e.CorrectiveActionsIssued = dto.CorrectiveActionsIssued;
+        e.CorrectiveActionsCompleted = dto.CorrectiveActionsCompleted;
+        e.CorrectiveActionsOverdue = dto.CorrectiveActionsOverdue;
+        e.CorrectiveActionClosureRate = dto.CorrectiveActionClosureRate;
+        e.TrainingProgramsPlanned = dto.TrainingProgramsPlanned;
+        e.TrainingProgramsConducted = dto.TrainingProgramsConducted;
+        e.TotalTrainingHours = dto.TotalTrainingHours;
+        e.ContractorsOnSite = dto.ContractorsOnSite;
+        e.ContractorInspectionsConducted = dto.ContractorInspectionsConducted;
+        e.ContractorNonComplianceNoticesIssued = dto.ContractorNonComplianceNoticesIssued;
+        e.ContractorComplianceRate = dto.ContractorComplianceRate;
+        e.EnvironmentalIncidents = dto.EnvironmentalIncidents;
+        e.EnvironmentalIncidentsReportedToEpa = dto.EnvironmentalIncidentsReportedToEpa;
+        e.EmergencyDrillsPlanned = dto.EmergencyDrillsPlanned;
+        e.EmergencyDrillsConducted = dto.EmergencyDrillsConducted;
+        e.PpeComplianceRate = dto.PpeComplianceRate;
+        e.HousekeepingComplianceRating = dto.HousekeepingComplianceRating;
+        e.RegulatoryObligationsTotal = dto.RegulatoryObligationsTotal;
+        e.RegulatoryObligationsCompliant = dto.RegulatoryObligationsCompliant;
+        e.RegulatoryObligationsNonCompliant = dto.RegulatoryObligationsNonCompliant;
+        e.RegulatoryObligationsExpiringSoon = dto.RegulatoryObligationsExpiringSoon;
+        e.ManagementComments = dto.ManagementComments;
+        e.ReportDocumentPath = dto.ReportDocumentPath;
+        e.UpdatedAt = DateTime.UtcNow;
+        e.UpdatedBy = userId.ToString();
+    }
 
     public static IEnumerable<ShePerformanceSnapshotSummaryDto> ToSummaryDtoList(this IEnumerable<ShePerformanceSnapshot> entities)
         => entities.Select(e => e.ToSummaryDto());
@@ -987,7 +1072,6 @@ public static class SafetyEmergencyGovernanceMappingExtensions
         TenantId = tenantId,
         ReturnToWorkPlanId = dto.ReturnToWorkPlanId,
         PhaseName = dto.PhaseName,
-        PhaseNumber = dto.PhaseNumber,
         StartDate = dto.StartDate,
         EndDate = dto.EndDate,
         RequiresReducedHours = dto.RequiresReducedHours,
@@ -1003,7 +1087,6 @@ public static class SafetyEmergencyGovernanceMappingExtensions
     public static void UpdateEntity(this SheReturnToWorkPhase e, UpdateSheReturnToWorkPhaseDto dto, Guid userId)
     {
         e.PhaseName = dto.PhaseName;
-        e.PhaseNumber = dto.PhaseNumber;
         e.StartDate = dto.StartDate;
         e.EndDate = dto.EndDate;
         e.RequiresReducedHours = dto.RequiresReducedHours;
@@ -1049,7 +1132,6 @@ public static class SafetyEmergencyGovernanceMappingExtensions
         TenantId = tenantId,
         ReturnToWorkPlanId = dto.ReturnToWorkPlanId,
         ReviewDate = dto.ReviewDate,
-        ReviewNumber = dto.ReviewNumber,
         EmployeeCondition = dto.EmployeeCondition,
         WorkProgress = dto.WorkProgress,
         IssuesIdentified = dto.IssuesIdentified,

@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +21,7 @@ public class TrainingNominationService : ITrainingNominationService
     private readonly ITrainingFeedbackRepository _feedbackRepository;
     private readonly ITrainingFollowUpAssessmentRepository _followUpRepository;
     private readonly ITrainingScheduleRepository _scheduleRepository;
+    private readonly IGenericRepository<TrainerProfile> _trainerProfileRepository;
     private readonly ITrainingServiceBondService _bondService;
     private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IWorkflowStatusAdapterRegistry _adapterRegistry;
@@ -35,6 +37,7 @@ public class TrainingNominationService : ITrainingNominationService
         ITrainingFeedbackRepository feedbackRepository,
         ITrainingFollowUpAssessmentRepository followUpRepository,
         ITrainingScheduleRepository scheduleRepository,
+        IGenericRepository<TrainerProfile> trainerProfileRepository,
         ITrainingServiceBondService bondService,
         IWorkflowIntegrationService workflowIntegration,
         IWorkflowStatusAdapterRegistry adapterRegistry,
@@ -49,6 +52,7 @@ public class TrainingNominationService : ITrainingNominationService
         _feedbackRepository = feedbackRepository;
         _followUpRepository = followUpRepository;
         _scheduleRepository = scheduleRepository;
+        _trainerProfileRepository = trainerProfileRepository;
         _bondService = bondService;
         _workflowIntegration = workflowIntegration;
         _adapterRegistry = adapterRegistry;
@@ -204,7 +208,9 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Training nomination created: {NominationNumber}", entity.NominationNumber);
 
-        return entity.ToDto();
+        // A freshly written entity has no Schedule/Employee loaded, so mapping it directly returns a
+        // blank programme and nominee on the create response. Re-read through the includes chain.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<BulkNominationResultDto> BulkCreateAsync(BulkCreateTrainingNominationDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -288,7 +294,8 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Training nomination updated: {NominationNumber}", entity.NominationNumber);
 
-        return entity.ToDto();
+        // A changed ScheduleId does not refresh the loaded Schedule navigation — re-read.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainingNominationDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default)
@@ -315,7 +322,7 @@ public class TrainingNominationService : ITrainingNominationService
                 await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, _currentUser.EmployeeId.Value, cancellationToken);
 
             _logger.LogInformation("Training nomination {NominationNumber} submitted via configurable workflow", entity.NominationNumber);
-            return entity.ToDto();
+            return await GetByIdAsync(entity.Id, cancellationToken);
         }
 
         // Legacy fallback — no active workflow configured for this entity type.
@@ -327,7 +334,7 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Training nomination submitted (legacy chain): {NominationNumber}", entity.NominationNumber);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -386,6 +393,8 @@ public class TrainingNominationService : ITrainingNominationService
         }
 
         // ── Legacy Supervisor→HR path ─────────────────────────────────────────
+        EnsureLegacyDecisionAllowed();
+
         if (dto.ApproverRole.Equals("Supervisor", StringComparison.OrdinalIgnoreCase))
         {
             if (entity.Status != NominationStatus.Submitted && entity.Status != NominationStatus.SupervisorReview)
@@ -432,6 +441,26 @@ public class TrainingNominationService : ITrainingNominationService
     /// <summary>Current authenticated user's id (ApplicationUser id) for workflow-engine approver checks.</summary>
     private Guid GetCurrentUserId()
         => Guid.TryParse(_currentUser.UserId, out var uid) ? uid : Guid.Empty;
+
+    /// <summary>
+    /// W3 slice 8: the legacy no-workflow approve/reject path previously accepted ANY authenticated
+    /// caller — the approver role came from the request body, so any employee could post
+    /// <c>{"approverRole":"HR"}</c> and approve a nomination outright. The live path is
+    /// workflow-validated per request (<see cref="IWorkflowIntegrationService.CanUserApproveAsync"/>);
+    /// the legacy path survives only for nominations created before the workflow wiring, so it is
+    /// held to the HR-shaped roles (the MentoringService IsHr shape). A legacy line-supervisor
+    /// approval is deliberately not supported: the org holds no reporting lines to validate a
+    /// supervisor claim against, and new nominations all take the workflow path.
+    /// </summary>
+    private void EnsureLegacyDecisionAllowed()
+    {
+        var allowed = _currentUserProvider.HasRole(Constants.Roles.Hr)
+            || _currentUserProvider.HasRole(Constants.Roles.SuperAdmin)
+            || _currentUserProvider.HasRole(Constants.Roles.TenantAdmin);
+        if (!allowed)
+            throw new UnauthorizedAccessException(
+                "This nomination has no approval workflow; only HR or an administrator may decide it.");
+    }
 
     /// <summary>Blocks approval when the schedule has no remaining seats (confirmed/approved ≥ capacity).</summary>
     private async Task EnforceScheduleCapacityAsync(TrainingNomination entity, CancellationToken cancellationToken)
@@ -488,6 +517,8 @@ public class TrainingNominationService : ITrainingNominationService
         }
 
         // ── Legacy path ───────────────────────────────────────────────────────
+        EnsureLegacyDecisionAllowed();
+
         entity.Status = NominationStatus.Rejected;
         entity.RejectionReason = dto.RejectionReason;
         entity.RejectedDate = DateTime.UtcNow;
@@ -539,7 +570,10 @@ public class TrainingNominationService : ITrainingNominationService
         await _attendanceRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        // The written entity has no Schedule/Employee/MarkedBy loaded, so mapping it directly returns
+        // a row with a blank programme, nominee and marker.
+        var saved = await _attendanceRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<TrainingAttendanceDto>> BulkMarkAttendanceAsync(BulkMarkAttendanceDto dto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -599,14 +633,65 @@ public class TrainingNominationService : ITrainingNominationService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        // One feedback per person per schedule. Without this a trainee could file twice, and
+        // because CreditTrainerRatingAsync runs on EVERY submission each one was counted into the
+        // trainer's average — so one attendee could move a trainer's score simply by pressing the
+        // button again. That is the half of this that matters: a missing dedupe on an opinion is
+        // untidy, a repeatable vote is a broken statistic.
+        var already = await _feedbackRepository.GetQueryable()
+            .AnyAsync(f => f.TenantId == current
+                        && f.ScheduleId == dto.ScheduleId
+                        && f.EmployeeId == dto.EmployeeId
+                        && !f.IsDeleted,
+                      cancellationToken);
+        if (already)
+            throw new InvalidOperationException(
+                "You have already given feedback for this course. It cannot be submitted twice.");
+
         var entity = dto.ToEntity(current, createdByUserId);
 
         await _feedbackRepository.AddAsync(entity);
+        await CreditTrainerRatingAsync(entity, cancellationToken);
+
+        // One SaveChanges so the rating credit is atomic with the feedback it came from — a partial
+        // write would leave the trainer's average counting a review that does not exist.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Training feedback submitted for schedule {ScheduleId} by employee {EmployeeId}", dto.ScheduleId, dto.EmployeeId);
 
-        return entity.ToDto();
+        var saved = await _feedbackRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// The feedback this employee has given, newest first.
+    /// </summary>
+    /// <remarks>
+    /// The only read before this was <c>GetFeedbackForScheduleAsync</c>, which is HR's aggregate
+    /// over everybody on a course. A trainee could therefore file feedback and never see it again
+    /// — and, more to the point, a form had no way to know whether they had already answered.
+    /// That is why the portal feedback form was parked from slice 6 until now: the write existed,
+    /// the read did not, and a form built on the write alone would invite the double submission
+    /// this slice also closed.
+    /// </remarks>
+    public async Task<IEnumerable<TrainingFeedbackDto>> GetMyFeedbackAsync(
+        Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var list = (await _feedbackRepository.GetQueryable()
+                .Where(f => f.TenantId == tenantId && f.EmployeeId == employeeId && !f.IsDeleted)
+                // ⚠ `Schedule` alone is not enough. ToDto() reads ProgramName through
+                // Schedule.Program and EmployeeName through Employee, so a single Include leaves
+                // both as the empty string — present but blank, which the probe caught before
+                // this reached a screen. A row that names neither the course nor the person is
+                // useless to the form that reads it back.
+                .Include(f => f.Schedule).ThenInclude(sch => sch.Program)
+                .Include(f => f.Employee)
+                .OrderByDescending(f => f.CreatedAt)
+                .ToListAsync(cancellationToken))
+            .Select(f => f.ToDto())
+            .ToList();
+        return list;
     }
 
     public async Task<IEnumerable<TrainingFeedbackDto>> GetFeedbackForScheduleAsync(Guid scheduleId, CancellationToken cancellationToken = default)
@@ -631,7 +716,8 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Follow-up assessment submitted for schedule {ScheduleId} by employee {EmployeeId}", dto.ScheduleId, dto.EmployeeId);
 
-        return entity.ToDto();
+        var saved = await _followUpRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<TrainingFollowUpAssessmentDto> SubmitManagerObservationAsync(SubmitManagerObservationDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -649,7 +735,10 @@ public class TrainingNominationService : ITrainingNominationService
 
         _logger.LogInformation("Manager observation submitted for follow-up assessment {AssessmentId}", dto.AssessmentId);
 
-        return entity.ToDto();
+        // ManagerId was just set, so the tracked instance's Manager navigation is still null/stale —
+        // an untracked re-read is the only way to get ManagerName onto this response.
+        var saved = await _followUpRepository.GetByIdWithNavigationsAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<TrainingFollowUpAssessmentDto>> GetFollowUpAssessmentsAsync(Guid scheduleId, CancellationToken cancellationToken = default)
@@ -663,4 +752,38 @@ public class TrainingNominationService : ITrainingNominationService
 
     private Task<string> GenerateNominationNumberAsync(CancellationToken ct)
         => _numberSequence.GenerateAsync("NOM", ct);
+
+    /// <summary>
+    /// Folds a feedback form's trainer rating into the delivering trainer's running average.
+    /// <c>TrainerProfile.AverageRating</c> and <c>TotalRatingsCount</c> are read by the trainer list
+    /// and the dashboard leaderboard but nothing has ever written them.
+    /// </summary>
+    /// <remarks>
+    /// Uses <see cref="TrainingFeedback.TrainerKnowledgeRating"/> — the only rating on the form that
+    /// is about the trainer. Overall satisfaction covers venue, materials and content too, so folding
+    /// it into a *trainer's* score would blame them for a bad room. Ratings are kept as a running mean
+    /// (count + average) rather than recomputed, so this stays O(1) as feedback accumulates.
+    /// </remarks>
+    private async Task CreditTrainerRatingAsync(TrainingFeedback feedback, CancellationToken ct)
+    {
+        if (!feedback.TrainerKnowledgeRating.HasValue)
+            return;
+
+        var schedule = await _scheduleRepository.GetByIdAsync(feedback.ScheduleId);
+        if (schedule?.TrainerProfileId == null)
+            return;
+
+        var trainer = await _trainerProfileRepository.GetByIdAsync(schedule.TrainerProfileId.Value);
+        if (trainer == null || trainer.TenantId != feedback.TenantId)
+            return;
+
+        var previousTotal = (trainer.AverageRating ?? 0m) * trainer.TotalRatingsCount;
+        trainer.TotalRatingsCount += 1;
+        trainer.AverageRating = Math.Round(
+            (previousTotal + feedback.TrainerKnowledgeRating.Value) / trainer.TotalRatingsCount, 2);
+        trainer.UpdatedAt = DateTime.UtcNow;
+
+        await _trainerProfileRepository.UpdateAsync(trainer);
+    }
+
 }

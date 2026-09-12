@@ -107,13 +107,6 @@ public class OnboardingPlanTemplateService : IOnboardingPlanTemplateService
         return entity.ToDetailDto();
     }
 
-    public async Task<IEnumerable<OnboardingPlanTemplateSummaryDto>> GetByPositionIdAsync(Guid positionId, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entities = await _templateRepository.GetByPositionIdAsync(positionId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
-    }
-
     public async Task<OnboardingPlanTemplateDto?> GetDefaultAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -171,7 +164,7 @@ public class OnboardingPlanTemplateService : IOnboardingPlanTemplateService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _taskTemplateRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return (await _taskTemplateRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
     public async Task<IEnumerable<OnboardingTaskTemplateDto>> GetTaskTemplatesAsync(Guid planTemplateId, CancellationToken cancellationToken = default)
@@ -286,14 +279,59 @@ public class OnboardingPlanService : IOnboardingPlanService
         return entity;
     }
 
-    private async Task EnsureOwnedTemplateAsync(Guid? templatePlanId)
+    private async Task<OnboardingPlanTemplate?> EnsureOwnedTemplateAsync(Guid? templatePlanId)
     {
         if (!templatePlanId.HasValue || templatePlanId.Value == Guid.Empty)
-            return;
+            return null;
 
-        var template = await _templateRepository.GetByIdAsync(templatePlanId.Value);
+        var template = await _templateRepository.GetWithTaskTemplatesAsync(templatePlanId.Value);
         if (template == null || template.TenantId != GetTenantId())
             throw new ArgumentException($"Onboarding plan template with ID '{templatePlanId}' not found.");
+        return template;
+    }
+
+    /// <summary>
+    /// Materialises the template's task templates as real tasks on the plan. Both entities have always
+    /// documented this step ("Instantiated as an OnboardingTask when a plan is assigned to a new hire")
+    /// and nothing performed it, so every plan created from a template came out empty — the template
+    /// feature validated the id and then discarded it.
+    ///
+    /// Due dates are derived from the plan's start date plus the template's DueDaysFromStartDate, which
+    /// is the only reason that column exists. OwnerPositionId is carried across so an unassigned task
+    /// still records the role that owes it, which is what the entity's own remarks promise.
+    /// </summary>
+    private async Task InstantiateTemplateTasksAsync(
+        OnboardingPlan plan, OnboardingPlanTemplate template, Guid createdByUserId, CancellationToken cancellationToken)
+    {
+        var taskTemplates = template.TaskTemplates
+            .Where(t => !t.IsDeleted)
+            .OrderBy(t => t.DueDaysFromStartDate)
+            .ThenBy(t => t.DisplayOrder)
+            .ToList();
+
+        if (taskTemplates.Count == 0)
+            return;
+
+        var tasks = taskTemplates.Select((t, index) => new OnboardingTask
+        {
+            TenantId = plan.TenantId,
+            OnboardingPlanId = plan.Id,
+            TaskTemplateId = t.Id,
+            TaskName = t.TaskName,
+            Description = t.Description,
+            Category = t.Category,
+            Status = OnboardingTaskStatus.Pending,
+            DueDate = plan.StartDate.AddDays(t.DueDaysFromStartDate),
+            IsMandatory = t.IsMandatory,
+            OwnerPositionId = t.OwnerPositionId,
+            DisplayOrder = t.DisplayOrder != 0 ? t.DisplayOrder : index + 1,
+            CreatedBy = createdByUserId.ToString(),
+        }).ToList();
+
+        await _taskRepository.AddRangeAsync(tasks);
+        _logger.LogInformation(
+            "Instantiated {Count} task(s) from template {TemplateId} onto onboarding plan {PlanId}",
+            tasks.Count, template.Id, plan.Id);
     }
 
     public async Task<OnboardingPlanDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -331,17 +369,23 @@ public class OnboardingPlanService : IOnboardingPlanService
     public async Task<OnboardingPlanDto> CreateAsync(CreateOnboardingPlanDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await EnsureOwnedTemplateAsync(createDto.TemplatePlanId);
+        var template = await EnsureOwnedTemplateAsync(createDto.TemplatePlanId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.Status = OnboardingStatus.NotStarted;
 
         await _planRepository.AddAsync(entity);
 
+        if (template != null)
+            await InstantiateTemplateTasksAsync(entity, template, createdByUserId, cancellationToken);
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Onboarding plan created for employee {EmployeeId}", createDto.EmployeeId);
-        return entity.ToDto();
+
+        // Re-read: the in-memory entity has no Employee/TemplatePlan loaded and its Tasks collection is
+        // whatever we just attached, so returning it would blank the names and mis-state the roll-ups.
+        return (await _planRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
     public async Task<OnboardingPlanDto> UpdateAsync(UpdateOnboardingPlanDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -404,7 +448,10 @@ public class OnboardingPlanService : IOnboardingPlanService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _taskRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read for the assignee / owning-unit names the DTO promises; the entity we just built has
+        // FKs but no navigations, so returning it raw gives a row whose every name column is blank.
+        return (await _taskRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
     public async Task<OnboardingTaskDto> UpdateTaskAsync(UpdateOnboardingTaskDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -417,17 +464,55 @@ public class OnboardingPlanService : IOnboardingPlanService
         return entity.ToDto();
     }
 
-    public async Task<bool> CompleteTaskAsync(Guid taskId, Guid completedByUserId, CancellationToken cancellationToken = default)
+    public async Task<OnboardingTaskDto> CompleteTaskAsync(
+        CompleteOnboardingTaskDto completeDto, Guid completedByEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedTaskAsync(taskId);
+        var entity = await GetOwnedTaskAsync(completeDto.TaskId);
 
-        entity.Status = OnboardingTaskStatus.Completed;
+        if (entity.Status == OnboardingTaskStatus.Completed)
+            throw new InvalidOperationException("This task has already been completed.");
+
+        // A task that asks for a second-party sign-off is not finished until it gets one; parking it in
+        // Completed would make RequiresVerification a decorative flag that refuses nothing.
+        entity.Status = entity.RequiresVerification
+            ? OnboardingTaskStatus.PendingVerification
+            : OnboardingTaskStatus.Completed;
+
         entity.CompletedDate = DateOnly.FromDateTime(DateTime.UtcNow);
-        entity.CompletedById = completedByUserId;
+        entity.CompletedById = completedByEmployeeId;
+        entity.CompletionNotes = completeDto.CompletionNotes;
+        entity.EvidenceFilePath = completeDto.EvidenceFilePath;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = completedByEmployeeId.ToString();
 
         await _taskRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return true;
+
+        return (await _taskRepository.GetByIdAsync(entity.Id))!.ToDto();
+    }
+
+    public async Task<OnboardingTaskDto> VerifyTaskAsync(
+        VerifyOnboardingTaskDto verifyDto, Guid verifiedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedTaskAsync(verifyDto.TaskId);
+
+        if (!entity.RequiresVerification)
+            throw new InvalidOperationException("This task does not require verification.");
+        if (entity.CompletedById == null)
+            throw new InvalidOperationException("This task cannot be verified before it has been completed.");
+        if (entity.CompletedById == verifiedByEmployeeId)
+            throw new InvalidOperationException("A task cannot be verified by the person who completed it.");
+
+        entity.Status = OnboardingTaskStatus.Completed;
+        entity.VerifiedById = verifiedByEmployeeId;
+        entity.VerifiedDate = DateTime.UtcNow;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = verifiedByEmployeeId.ToString();
+
+        await _taskRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (await _taskRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
     // ── Asset items ───────────────────────────────────────────────────────────
@@ -448,7 +533,7 @@ public class OnboardingPlanService : IOnboardingPlanService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _assetItemRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return (await _assetItemRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
     public async Task<OnboardingAssetDto> UpdateAssetItemAsync(UpdateOnboardingAssetDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -471,7 +556,10 @@ public class OnboardingPlanService : IOnboardingPlanService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _commentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read for AuthorName — a comment thread that renders the new post with no author beside it
+        // reads as a bug to every user who posts one.
+        return (await _commentRepository.GetByIdAsync(entity.Id))!.ToDto();
     }
 
     public async Task<IEnumerable<OnboardingTaskCommentDto>> GetTaskCommentsAsync(Guid taskId, CancellationToken cancellationToken = default)

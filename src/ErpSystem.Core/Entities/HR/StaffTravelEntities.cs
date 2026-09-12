@@ -1,4 +1,5 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using ErpSystem.Core.Entities.Procurement;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
 
@@ -129,8 +130,6 @@ public class StaffTravelRequest : TenantEntity
 
     public virtual ICollection<StaffTravelItinerary> Itineraries { get; set; } = new List<StaffTravelItinerary>();
 
-    public virtual ICollection<StaffTravelApprovalInstance> ApprovalInstances { get; set; } = new List<StaffTravelApprovalInstance>();
-
     public virtual ICollection<StaffTravelFlightBooking> FlightBookings { get; set; } = new List<StaffTravelFlightBooking>();
 
     public virtual ICollection<StaffTravelHotelBooking> HotelBookings { get; set; } = new List<StaffTravelHotelBooking>();
@@ -227,9 +226,14 @@ public class StaffTravelRequestAttachment : TenantEntity
     [MaxLength(500)]
     public string FileName { get; set; } = null!;
 
-    [Required]
+    /// <summary>
+    /// Legacy free-text location. Retained for rows written before the controlled-upload gate and
+    /// no longer accepted from callers — a caller-supplied path is the injection sink the medical
+    /// exam and claim documents were both fixed for. New rows carry the three DMS ids below and
+    /// leave this empty.
+    /// </summary>
     [MaxLength(2000)]
-    public string FileUrl { get; set; } = null!;
+    public string FileUrl { get; set; } = string.Empty;
 
     public long FileSizeBytes { get; set; }
 
@@ -238,6 +242,15 @@ public class StaffTravelRequestAttachment : TenantEntity
     public string MimeType { get; set; } = null!;
 
     public TravelAttachmentType AttachmentType { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 
     public Guid UploadedById { get; set; }                // FK -> Employee
 
@@ -380,142 +393,6 @@ public class StaffTravelItineraryActivity : TenantEntity
     [ForeignKey(nameof(StaffTravelItineraryLegId))]
     public virtual StaffTravelItineraryLeg ItineraryLeg { get; set; } = null!;
 }
-
-
-// =========================================================================
-//  GROUP 3 — APPROVAL WORKFLOW
-// =========================================================================
-
-public class StaffTravelApprovalWorkflowTemplate : TenantEntity
-{
-    [Required]
-    [MaxLength(200)]
-    public string Name { get; set; } = null!;
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
-
-    public StaffTravelType? TravelType { get; set; }
-
-    public Guid? AppliesToLevelFromId { get; set; }       // FK -> StaffLevel
-
-    public Guid? AppliesToLevelToId { get; set; }         // FK -> StaffLevel
-
-    [Column(TypeName = "decimal(14,2)")]
-    public decimal? MinBudgetThreshold { get; set; }
-
-    [Column(TypeName = "decimal(14,2)")]
-    public decimal? MaxBudgetThreshold { get; set; }
-
-    public bool? IsInternational { get; set; }
-
-    public TravelRiskLevel? RiskLevel { get; set; }
-
-    public bool IsActive { get; set; }
-
-    [ForeignKey(nameof(AppliesToLevelFromId))]
-    public virtual StaffLevel? AppliesToLevelFrom { get; set; }
-
-    [ForeignKey(nameof(AppliesToLevelToId))]
-    public virtual StaffLevel? AppliesToLevelTo { get; set; }
-
-    public virtual ICollection<StaffTravelApprovalWorkflowStep> Steps { get; set; } = new List<StaffTravelApprovalWorkflowStep>();
-
-    public virtual ICollection<StaffTravelApprovalInstance> Instances { get; set; } = new List<StaffTravelApprovalInstance>();
-}
-
-public class StaffTravelApprovalWorkflowStep : TenantEntity
-{
-    public Guid WorkflowTemplateId { get; set; }
-
-    public int StepOrder { get; set; }
-
-    [Required]
-    [MaxLength(200)]
-    public string StepName { get; set; } = null!;
-
-    public TravelApproverType ApproverType { get; set; }
-
-    [MaxLength(100)]
-    public string? ApproverRole { get; set; }   // when ApproverType = RoleBased
-
-    public Guid? SpecificApproverId { get; set; }               // FK -> Employee, when SpecificPerson
-
-    public bool IsMandatory { get; set; }
-
-    public bool CanDelegate { get; set; }
-
-    public int? SlaHours { get; set; }
-
-    public Guid? EscalationApproverId { get; set; }             // FK -> Employee
-
-    [ForeignKey(nameof(WorkflowTemplateId))]
-    public virtual StaffTravelApprovalWorkflowTemplate WorkflowTemplate { get; set; } = null!;
-
-    [ForeignKey(nameof(SpecificApproverId))]
-    public virtual Employee? SpecificApprover { get; set; }
-
-    [ForeignKey(nameof(EscalationApproverId))]
-    public virtual Employee? EscalationApprover { get; set; }
-}
-
-public class StaffTravelApprovalInstance : TenantEntity
-{
-    public Guid StaffTravelRequestId { get; set; }
-
-    public Guid WorkflowTemplateId { get; set; }                // template the instance was created from
-
-    public int CurrentStepOrder { get; set; }
-
-    public TravelApprovalInstanceStatus Status { get; set; }
-
-    public DateTime InitiatedAt { get; set; }
-
-    public DateTime? CompletedAt { get; set; }
-
-    [ForeignKey(nameof(StaffTravelRequestId))]
-    public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
-
-    [ForeignKey(nameof(WorkflowTemplateId))]
-    public virtual StaffTravelApprovalWorkflowTemplate WorkflowTemplate { get; set; } = null!;
-
-    public virtual ICollection<StaffTravelApprovalDecision> Decisions { get; set; } = new List<StaffTravelApprovalDecision>();
-}
-
-public class StaffTravelApprovalDecision : TenantEntity
-{
-    public Guid ApprovalInstanceId { get; set; }
-
-    public int StepOrder { get; set; }
-
-    public Guid ApproverId { get; set; }                        // actual approver (may differ if delegated)
-
-    public Guid? OriginalApproverId { get; set; }               // template-defined approver
-
-    public TravelApprovalDecision Decision { get; set; }
-
-    [MaxLength(2000)]
-    public string? Comments { get; set; }
-
-    public DateTime? DecidedAt { get; set; }
-
-    public bool IsEscalated { get; set; }
-
-    public DateTime? EscalatedAt { get; set; }
-
-    public DateTime? SlaDeadline { get; set; }
-
-    [ForeignKey(nameof(ApprovalInstanceId))]
-    public virtual StaffTravelApprovalInstance ApprovalInstance { get; set; } = null!;
-
-    [ForeignKey(nameof(ApproverId))]
-    public virtual Employee Approver { get; set; } = null!;
-
-    [ForeignKey(nameof(OriginalApproverId))]
-    public virtual Employee? OriginalApprover { get; set; }
-}
-
-
 // =========================================================================
 //  GROUP 4 — BOOKINGS
 // =========================================================================
@@ -544,7 +421,7 @@ public class StaffTravelFlightBooking : TenantEntity
 
     public TravelBookingChannel BookedBy { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [Column(TypeName = "decimal(14,2)")]
     public decimal TotalFare { get; set; }
@@ -572,7 +449,7 @@ public class StaffTravelFlightBooking : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 
     public virtual ICollection<StaffTravelFlightSegment> Segments { get; set; } = new List<StaffTravelFlightSegment>();
 }
@@ -681,7 +558,7 @@ public class StaffTravelHotelBooking : TenantEntity
     [MaxLength(1000)]
     public string? RateExceptionReason { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     public TravelBookingChannel BookedBy { get; set; }
 
@@ -704,7 +581,7 @@ public class StaffTravelHotelBooking : TenantEntity
     public virtual Country Country { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelGroundTransport : TenantEntity
@@ -713,7 +590,20 @@ public class StaffTravelGroundTransport : TenantEntity
 
     public GroundTransportType TransportType { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (nullable)
+    /// <summary>
+    /// The fleet trip reserving a company vehicle for this leg. Null for every external mode —
+    /// taxi, rideshare, bus, train, metro, private hire — which stay travel-owned against a
+    /// supplier.
+    /// </summary>
+    /// <remarks>
+    /// Fleet already models a trip properly: vehicle, driver (an HR Employee FK, so the seam was
+    /// half-built), origin, destination, planned window, expected mileage and cost. Recording a
+    /// company-vehicle journey as free text here meant two people could be promised the same
+    /// vehicle and neither system would know.
+    /// </remarks>
+    public Guid? FleetTripId { get; set; }
+
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(100)]
     public string? BookingReference { get; set; }
@@ -747,14 +637,14 @@ public class StaffTravelGroundTransport : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelCarRentalBooking : TenantEntity
 {
     public Guid StaffTravelRequestId { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (rental company)
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(100)]
     public string? BookingReference { get; set; }
@@ -799,7 +689,7 @@ public class StaffTravelCarRentalBooking : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 // =========================================================================
@@ -1215,6 +1105,18 @@ public class StaffTravelPolicyException : TenantEntity
 
     public DateTime? DecidedAt { get; set; }
 
+    /// <summary>
+    /// Why the decision went the way it did.
+    /// </summary>
+    /// <remarks>
+    /// The requester's side was always recorded (<see cref="ExceptionReason"/>); the decider's was
+    /// not, and granting an exception is an authority to spend above a cap that HR deliberately
+    /// does not hold. The client was already sending a <c>notes</c> field that the model binder
+    /// dropped on the floor, because no such column existed.
+    /// </remarks>
+    [MaxLength(2000)]
+    public string? DecisionNotes { get; set; }
+
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
@@ -1225,53 +1127,6 @@ public class StaffTravelPolicyException : TenantEntity
     public virtual Employee? ApprovedBy { get; set; }
 }
 
-public class StaffTravelVendor : TenantEntity
-{
-    [Required]
-    [MaxLength(30)]
-    public string VendorCode { get; set; } = null!;
-
-    [Required]
-    [MaxLength(300)]
-    public string VendorName { get; set; } = null!;
-
-    public TravelVendorType VendorType { get; set; }
-
-    public Guid? CountryId { get; set; }                            // FK -> Country
-
-    [MaxLength(200)]
-    [EmailAddress]
-    public string? ContactEmail { get; set; }
-
-    [MaxLength(50)]
-    [Phone]
-    public string? ContactPhone { get; set; }
-
-    [MaxLength(100)]
-    public string? AccountNumber { get; set; }
-
-    public DateOnly? ContractStartDate { get; set; }
-
-    public DateOnly? ContractEndDate { get; set; }
-
-    public bool IsPreferred { get; set; }
-
-    public bool IsActive { get; set; }
-
-    [Range(0, 5)]
-    [Column(TypeName = "decimal(3,1)")]
-    public decimal? Rating { get; set; }
-
-    [MaxLength(200)]
-    public string? PaymentTerms { get; set; }
-
-    [ForeignKey(nameof(CountryId))]
-    public virtual Country? Country { get; set; }
-}
-
-// =========================================================================
-//  GROUP 7 — COMPLIANCE & SAFETY
-// =========================================================================
 
 public class StaffTravelDocument : TenantEntity
 {
@@ -1365,7 +1220,7 @@ public class StaffTravelVisaApplication : TenantEntity
     [Column(TypeName = "char(3)")]
     public string? CurrencyCode { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (visa processing agency)
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -1380,7 +1235,7 @@ public class StaffTravelVisaApplication : TenantEntity
     public virtual Country DestinationCountry { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelRiskAssessment : TenantEntity
@@ -1490,7 +1345,7 @@ public class StaffTravelInsurancePolicy : TenantEntity
 {
     public Guid StaffTravelRequestId { get; set; }
 
-    public Guid? VendorId { get; set; }                             // FK -> StaffTravelVendor (insurer)
+    public Guid? VendorId { get; set; }                             // FK -> Supplier (Procurement owns the vendor master)
 
     [MaxLength(100)]
     public string? PolicyNumber { get; set; }
@@ -1520,7 +1375,7 @@ public class StaffTravelInsurancePolicy : TenantEntity
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
-    public virtual StaffTravelVendor? Vendor { get; set; }
+    public virtual Supplier? Vendor { get; set; }
 }
 
 public class StaffTravelHealthRequirement : TenantEntity
@@ -1555,23 +1410,71 @@ public class StaffTravelHealthRequirement : TenantEntity
 //  GROUP 8 — CONFIGURATION
 // =========================================================================
 
-public class StaffTravelCurrencyExchangeRate : TenantEntity
+/// <summary>One execution of the staff-travel reminder sweep.</summary>
+public class StaffTravelReminderRun : TenantEntity
 {
-    [Required]
-    [Column(TypeName = "char(3)")]
-    public string FromCurrency { get; set; } = null!;
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
 
-    [Required]
-    [Column(TypeName = "char(3)")]
-    public string ToCurrency { get; set; } = null!;
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
 
-    [Column(TypeName = "decimal(18,8)")]
-    public decimal Rate { get; set; }
+    public Guid? TriggeredByUserId { get; set; }
 
-    public DateOnly RateDate { get; set; }
+    public int RemindersQueued { get; set; }
 
+    public virtual ICollection<StaffTravelReminderDispatchLog> DispatchLogs { get; set; }
+        = new List<StaffTravelReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a travel sweep.
+/// </summary>
+/// <remarks>
+/// <para>The unique (TenantId, DedupeKey) index is the send-once guarantee: a key encodes the item,
+/// the reminder kind, the date it is about and the escalation tier reached, so each rung fires
+/// exactly once — and moving a date re-arms the ladder, because it produces fresh keys.</para>
+///
+/// <para>⚠ Nothing here carries a passport number, a visa number, or an amount. A reminder travels
+/// further than the record it is about — into notification lists and email — and "your passport
+/// expires on the 3rd" is actionable without publishing the number itself. The same reasoning
+/// governs the travel notification templates and the workflow display resolver for this area.</para>
+/// </remarks>
+public class StaffTravelReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual StaffTravelReminderRun Run { get; set; } = null!;
+
+    /// <summary>
+    /// Machine kind: "TravelDocumentExpiring", "VisaExpiring", "AdvanceSettlementOverdue",
+    /// "TripDeparting".
+    /// </summary>
+    [MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item, e.g. "Passport", "Travel advance".</summary>
     [MaxLength(100)]
-    public string? RateSource { get; set; }        // ECB, XE, INTERNAL
+    public string ItemType { get; set; } = string.Empty;
 
-    public bool IsOfficial { get; set; }
+    /// <summary>Id of the swept record. No FK — the target table varies by kind.</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>What the notification shows: a request number or document type, and nothing more.</summary>
+    [MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time; negative when overdue.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
 }

@@ -2,12 +2,13 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeePositionsController : ControllerBase
 {
     private readonly IEmployeePositionService _service;
@@ -20,6 +21,7 @@ public class EmployeePositionsController : ControllerBase
     #region CRUD
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeePositionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeePositionDto>> GetById(Guid id)
@@ -39,6 +41,7 @@ public class EmployeePositionsController : ControllerBase
         => Ok(await _service.GetActivePositionsAsync());
 
     [HttpGet("code/{code}")]
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
     [ProducesResponseType(typeof(EmployeePositionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<EmployeePositionDto>> GetByCode(string code)
@@ -48,6 +51,7 @@ public class EmployeePositionsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeePositionDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeePositionDto>> Create([FromBody] CreateEmployeePositionDto dto)
@@ -58,6 +62,7 @@ public class EmployeePositionsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(EmployeePositionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<EmployeePositionDto>> Update(Guid id, [FromBody] UpdateEmployeePositionDto dto)
@@ -68,6 +73,7 @@ public class EmployeePositionsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Delete(Guid id)
     {

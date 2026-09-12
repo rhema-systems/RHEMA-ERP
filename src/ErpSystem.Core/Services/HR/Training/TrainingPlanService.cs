@@ -158,15 +158,17 @@ public class TrainingPlanService : ITrainingPlanService
 
         _logger.LogInformation("Training plan created: {PlanNumber}", entity.PlanNumber);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<TrainingPlanDto> UpdateAsync(UpdateTrainingPlanDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(dto.Id);
 
-        if (entity.Status == TrainingPlanStatus.Approved || entity.Status == TrainingPlanStatus.Completed)
-            throw new InvalidOperationException("Cannot update an approved or completed training plan.");
+        // Once submitted, the plan is what the approver sees — only a Draft can be edited directly;
+        // everything past that moves only through Submit/Approve. Matches DeleteAsync's own rule below.
+        if (entity.Status != TrainingPlanStatus.Draft)
+            throw new InvalidOperationException($"Cannot update a training plan with status '{entity.Status}'. Only draft plans can be edited.");
 
         entity.UpdateEntity(dto, updatedByUserId);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -175,7 +177,7 @@ public class TrainingPlanService : ITrainingPlanService
         await _planRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -251,7 +253,8 @@ public class TrainingPlanService : ITrainingPlanService
         await _planItemRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var reloaded = await _planItemRepository.GetByPlanIdAsync(dto.PlanId);
+        return reloaded.First(i => i.Id == entity.Id).ToDto();
     }
 
     public async Task<IEnumerable<TrainingPlanItemDto>> GetItemsAsync(Guid planId, CancellationToken cancellationToken = default)
@@ -273,7 +276,8 @@ public class TrainingPlanService : ITrainingPlanService
         await _planItemRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var reloaded = await _planItemRepository.GetByPlanIdAsync(entity.PlanId);
+        return reloaded.First(i => i.Id == entity.Id).ToDto();
     }
 
     public async Task<bool> DeleteItemAsync(Guid itemId, CancellationToken cancellationToken = default)
@@ -301,7 +305,8 @@ public class TrainingPlanService : ITrainingPlanService
         await _budgetLineRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var reloaded = await _budgetLineRepository.GetByPlanIdAsync(dto.PlanId);
+        return reloaded.First(b => b.Id == entity.Id).ToDto();
     }
 
     public async Task<IEnumerable<TrainingPlanBudgetLineDto>> GetBudgetLinesAsync(Guid planId, CancellationToken cancellationToken = default)
@@ -322,7 +327,8 @@ public class TrainingPlanService : ITrainingPlanService
         await _budgetLineRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        var reloaded = await _budgetLineRepository.GetByPlanIdAsync(entity.PlanId);
+        return reloaded.First(b => b.Id == entity.Id).ToDto();
     }
 
     public async Task<bool> DeleteBudgetLineAsync(Guid budgetLineId, CancellationToken cancellationToken = default)

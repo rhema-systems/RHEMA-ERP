@@ -1,31 +1,70 @@
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
+/// <summary>
+/// Manager feedback on a development plan — the timeline of observations that runs alongside the
+/// objectives. Entitlement follows the plan: HR, the employee, and the employee's line manager.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class DevelopmentPlanFeedbackController : ControllerBase
 {
     private readonly IDevelopmentPlanFeedbackService _feedbackService;
+    private readonly ApplicationDbContext _db;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<DevelopmentPlanFeedbackController> _logger;
 
     public DevelopmentPlanFeedbackController(
         IDevelopmentPlanFeedbackService feedbackService,
+        ApplicationDbContext db,
+        ICurrentUserService currentUserService,
         ILogger<DevelopmentPlanFeedbackController> logger)
     {
         _feedbackService = feedbackService;
+        _db              = db;
+        _currentUserService = currentUserService;
         _logger          = logger;
+    }
+
+    /// <summary>W3: whether the caller holds the given performance policy (seed and role fallback both count).</summary>
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>The employee whose plan it is, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessPlanAsync(Guid planId, string policy, CancellationToken ct = default)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<EmployeeDevelopmentPlan>()
+            .AsNoTracking()
+            .Where(p => p.Id == planId && p.TenantId == tenantId)
+            .AnyAsync(p => p.EmployeeId == me || p.Employee.ManagerId == me, ct);
     }
 
     /// <summary>Get all feedback entries for a development plan</summary>
     [HttpGet("by-plan/{planId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<EmployeeDevelopmentPlanFeedbackDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByPlan(Guid planId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessPlanAsync(planId, HrPermissions.PerformanceReadPolicy, cancellationToken)) return Forbid();
+
         try
         {
             var result = await _feedbackService.GetByPlanIdAsync(planId, cancellationToken);
@@ -50,6 +89,14 @@ public class DevelopmentPlanFeedbackController : ControllerBase
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
+        if (!await CanAccessPlanAsync(dto.DevelopmentPlanId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
+
+        // The author is whoever is signed in. Taking it from the body let any caller post feedback
+        // under someone else's name — and the client has no employee id of its own to send.
+        if (_currentUserService.EmployeeId is not Guid me)
+            return BadRequest(new { message = "Your account is not linked to an employee record, so feedback cannot be attributed." });
+        dto.ManagerId = me;
+
         try
         {
             var result = await _feedbackService.AddAsync(dto, cancellationToken);
@@ -69,9 +116,23 @@ public class DevelopmentPlanFeedbackController : ControllerBase
     /// <summary>Delete a feedback entry</summary>
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy))
+        {
+            // Feedback is a record of what was said. Its author can withdraw it; nobody else can
+            // edit someone else's out of the timeline.
+            if (_currentUserService.EmployeeId is not Guid me) return Forbid();
+            if (_currentUserService.TenantId is not Guid tenantId) return Forbid();
+
+            var isAuthor = await _db.Set<EmployeeDevelopmentPlanFeedback>()
+                .AsNoTracking()
+                .AnyAsync(f => f.Id == id && f.TenantId == tenantId && f.ManagerId == me, cancellationToken);
+            if (!isAuthor) return Forbid();
+        }
+
         try
         {
             await _feedbackService.DeleteAsync(id, cancellationToken);

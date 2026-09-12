@@ -57,6 +57,7 @@ public interface IPpeManagementService
     Task<bool> DeleteTypeAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Inventory
+    Task<IEnumerable<PpeInventoryDto>> GetInventoryAsync(CancellationToken cancellationToken = default);
     Task<PpeInventoryDto> GetInventoryItemAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<PpeInventoryDto>> GetInventoryByTypeAsync(Guid ppeTypeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<PpeInventoryDto>> GetBelowReorderLevelAsync(CancellationToken cancellationToken = default);
@@ -73,6 +74,7 @@ public interface IPpeManagementService
     Task<bool> ReturnAsync(ReturnPpeIssuanceDto dto, Guid userId, CancellationToken cancellationToken = default);
 
     // Job-role requirements
+    Task<IEnumerable<JobRolePpeRequirementDto>> GetRequirementsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<JobRolePpeRequirementDto>> GetRequirementsByJobRoleAsync(string jobRoleCode, CancellationToken cancellationToken = default);
     Task<JobRolePpeRequirementDto> AddRequirementAsync(CreateJobRolePpeRequirementDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<JobRolePpeRequirementDto> UpdateRequirementAsync(UpdateJobRolePpeRequirementDto dto, Guid userId, CancellationToken cancellationToken = default);

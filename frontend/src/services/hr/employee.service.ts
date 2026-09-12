@@ -7,6 +7,8 @@ import type {
   CreateEmployeeRequest,
   UpdateEmployeeRequest,
   TerminateEmployeeRequest,
+  EmployeePayrollStatus,
+  PayrollReconciliation,
 } from '@/types/hr/employee';
 import type {
   EmployeeContact,
@@ -39,6 +41,7 @@ import type {
   UpdateEmployeeContractRequest,
   TerminateContractRequest,
   ExpatriateAssignment,
+  ExpatriateFamilyMember,
   CreateExpatriateAssignmentRequest,
   UpdateExpatriateAssignmentRequest,
   EmployeePositionHistory,
@@ -88,6 +91,17 @@ class EmployeeService {
     return apiService.post<PagedResult<Employee>>(`${this.baseUrl}/paged?${params.toString()}`, search);
   }
 
+  /**
+   * The signed-in manager's own direct reports.
+   *
+   * Prefer this over the `manager/{id}/direct-reports` form: the client has no employee id of its
+   * own, and screens that fetch one in order to pass it back are how several of this module's
+   * authorization holes started.
+   */
+  getMyDirectReports(): Promise<Employee[]> {
+    return apiService.get<Employee[]>(`${this.baseUrl}/manager/me/direct-reports`);
+  }
+
   getById(id: string): Promise<Employee> {
     return apiService.get<Employee>(`${this.baseUrl}/${id}`);
   }
@@ -96,8 +110,32 @@ class EmployeeService {
     return apiService.get<EmployeeDetail>(`${this.baseUrl}/${id}/details`);
   }
 
+  // ── Payroll membership ──────────────────────────────────────────────────────
+  // HR's on-payroll flag is written through create/update; these read it beside payroll's own
+  // profile so the screen can say whether payroll agrees.
+  getPayrollStatus(id: string): Promise<EmployeePayrollStatus> {
+    return apiService.get<EmployeePayrollStatus>(`${this.baseUrl}/${id}/payroll-status`);
+  }
+
+  getPayrollReconciliation(): Promise<PayrollReconciliation> {
+    return apiService.get<PayrollReconciliation>(`${this.baseUrl}/payroll-reconciliation`);
+  }
+
   create(data: CreateEmployeeRequest): Promise<EmployeeDetail> {
     return apiService.post<EmployeeDetail>(this.baseUrl, data);
+  }
+
+  /**
+   * Records an employee who already exists elsewhere, keeping the staff number they came with.
+   *
+   * ⚠ Not a variant of `create` — a different act. `create` REFUSES a supplied number on an
+   * auto-numbered register, because a hand-typed value can occupy a number the sequence is about
+   * to issue. An existing employee's number is on their ID card and referenced by payroll, so it
+   * is not ours to reissue: this path requires it, honours it, and advances the register's counter
+   * past it so the next real hire does not collide with what was just loaded.
+   */
+  importExisting(data: CreateEmployeeRequest): Promise<EmployeeDetail> {
+    return apiService.post<EmployeeDetail>(`${this.baseUrl}/import`, data);
   }
 
   update(id: string, data: UpdateEmployeeRequest): Promise<EmployeeDetail> {
@@ -138,9 +176,10 @@ class EmployeeService {
     return apiService.get<Record<string, number>>(`${this.baseUrl}/stats/by-status`);
   }
 
-  getCountByDepartment(): Promise<Record<string, number>> {
-    return apiService.get<Record<string, number>>(`${this.baseUrl}/stats/by-department`);
-  }
+  // `getCountByDepartment` was removed in slice 10 with the endpoint behind it. Department is the
+  // deprecated dimension — an employee must have an organisation unit and need not have a
+  // department — and nothing ever called this. For headcount by unit use `organogramService`,
+  // whose `units` view carries `employeeCount` and a subtree rollup.
 
   // ── Contacts (addresses) ──────────────────────────────────────────────────────
 
@@ -534,6 +573,37 @@ class EmployeeService {
 
   removeExpatriateAssignment(employeeId: string, id: string): Promise<void> {
     return apiService.delete<void>(this.sub(employeeId, `expatriate-assignments/${id}`));
+  }
+
+  // ── Expatriate family members ──────────────────────────────────────────────
+  //
+  // ⚠ `familyAccompanying` was a bare bool: the posting could assert a family had come and never
+  // say who, so nobody could count the residence permits owed or see whose lapsed next. Recording
+  // a member SETS the flag server-side — the flag follows the facts rather than waiting to be
+  // ticked separately and then disagreeing with them.
+
+  getExpatriateFamily(employeeId: string, assignmentId: string) {
+    return apiService.get<ExpatriateFamilyMember[]>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family`));
+  }
+
+  addExpatriateFamilyMember(
+    employeeId: string, assignmentId: string, payload: Partial<ExpatriateFamilyMember>) {
+    return apiService.post<ExpatriateFamilyMember>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family`),
+      { ...payload, expatriateAssignmentId: assignmentId });
+  }
+
+  updateExpatriateFamilyMember(
+    employeeId: string, assignmentId: string, id: string, payload: Partial<ExpatriateFamilyMember>) {
+    return apiService.put<ExpatriateFamilyMember>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family/${id}`),
+      { ...payload, id });
+  }
+
+  removeExpatriateFamilyMember(employeeId: string, assignmentId: string, id: string): Promise<void> {
+    return apiService.delete<void>(
+      this.sub(employeeId, `expatriate-assignments/${assignmentId}/family/${id}`));
   }
 
   // ── Position histories ────────────────────────────────────────────────────────

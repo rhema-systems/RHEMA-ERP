@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -100,7 +101,7 @@ public class CompetencySkillIndicatorRepository : GenericRepository<CompetencySk
     public async Task<IEnumerable<CompetencySkillIndicator>> GetByCompetencyIdAsync(Guid competencyId)
     {
         return await _dbSet
-            .Include(i => i.Skill)
+            .WithLookups()
             .Where(i => i.CompetencyId == competencyId && !i.IsDeleted)
             .OrderBy(i => i.Skill.Name)
             .ToListAsync();
@@ -109,7 +110,7 @@ public class CompetencySkillIndicatorRepository : GenericRepository<CompetencySk
     public async Task<IEnumerable<CompetencySkillIndicator>> GetBySkillIdAsync(Guid skillId)
     {
         return await _dbSet
-            .Include(i => i.Competency)
+            .WithLookups()
             .Where(i => i.SkillId == skillId && !i.IsDeleted)
             .OrderBy(i => i.Competency.Name)
             .ToListAsync();
@@ -118,8 +119,7 @@ public class CompetencySkillIndicatorRepository : GenericRepository<CompetencySk
     public async Task<CompetencySkillIndicator?> GetByCompetencyAndSkillAsync(Guid competencyId, Guid skillId)
     {
         return await _dbSet
-            .Include(i => i.Competency)
-            .Include(i => i.Skill)
+            .WithLookups()
             .FirstOrDefaultAsync(i => i.CompetencyId == competencyId
                                    && i.SkillId == skillId
                                    && !i.IsDeleted);
@@ -128,8 +128,7 @@ public class CompetencySkillIndicatorRepository : GenericRepository<CompetencySk
     public async Task<IEnumerable<CompetencySkillIndicator>> GetByMinimumSkillLevelAsync(SkillLevel minimumLevel)
     {
         return await _dbSet
-            .Include(i => i.Competency)
-            .Include(i => i.Skill)
+            .WithLookups()
             .Where(i => !i.IsDeleted && i.MinimumSkillLevelRequired >= minimumLevel)
             .OrderBy(i => i.Competency.Name)
             .ThenBy(i => i.Skill.Name)
@@ -152,7 +151,7 @@ public class PositionCompetencyRepository : GenericRepository<PositionCompetency
     public async Task<IEnumerable<PositionCompetency>> GetByPositionIdAsync(Guid positionId)
     {
         return await _dbSet
-            .Include(pc => pc.Competency)
+            .WithLookups()
             .Where(pc => pc.PositionId == positionId && !pc.IsDeleted)
             .OrderBy(pc => pc.Competency.CompetencyCategory)
             .ThenBy(pc => pc.Competency.Name)
@@ -162,7 +161,7 @@ public class PositionCompetencyRepository : GenericRepository<PositionCompetency
     public async Task<IEnumerable<PositionCompetency>> GetByCompetencyIdAsync(Guid competencyId)
     {
         return await _dbSet
-            .Include(pc => pc.Position)
+            .WithLookups()
             .Where(pc => pc.CompetencyId == competencyId && !pc.IsDeleted)
             .OrderBy(pc => pc.Position.Title)
             .ToListAsync();
@@ -171,8 +170,7 @@ public class PositionCompetencyRepository : GenericRepository<PositionCompetency
     public async Task<PositionCompetency?> GetByPositionAndCompetencyAsync(Guid positionId, Guid competencyId)
     {
         return await _dbSet
-            .Include(pc => pc.Competency)
-            .Include(pc => pc.Position)
+            .WithLookups()
             .FirstOrDefaultAsync(pc => pc.PositionId == positionId
                                     && pc.CompetencyId == competencyId
                                     && !pc.IsDeleted);
@@ -181,8 +179,7 @@ public class PositionCompetencyRepository : GenericRepository<PositionCompetency
     public async Task<IEnumerable<PositionCompetency>> GetByMinimumRequiredLevelAsync(int minimumLevel)
     {
         return await _dbSet
-            .Include(pc => pc.Competency)
-            .Include(pc => pc.Position)
+            .WithLookups()
             .Where(pc => !pc.IsDeleted && pc.RequiredProficiencyLevel >= minimumLevel)
             .OrderByDescending(pc => pc.RequiredProficiencyLevel)
             .ThenBy(pc => pc.Position.Title)
@@ -225,8 +222,7 @@ public class EmployeeCompetencyRepository : GenericRepository<EmployeeCompetency
     public async Task<IEnumerable<EmployeeCompetency>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _dbSet
-            .Include(ec => ec.Competency)
-            .Include(ec => ec.AssessedBy)
+            .WithLookups()
             .Where(ec => ec.EmployeeId == employeeId && !ec.IsDeleted)
             .OrderBy(ec => ec.Competency.CompetencyCategory)
             .ThenBy(ec => ec.Competency.Name)
@@ -236,8 +232,7 @@ public class EmployeeCompetencyRepository : GenericRepository<EmployeeCompetency
     public async Task<IEnumerable<EmployeeCompetency>> GetByCompetencyIdAsync(Guid competencyId)
     {
         return await _dbSet
-            .Include(ec => ec.Employee)
-            .Include(ec => ec.AssessedBy)
+            .WithLookups()
             .Where(ec => ec.CompetencyId == competencyId && !ec.IsDeleted)
             .OrderBy(ec => ec.Employee.LastName)
             .ThenBy(ec => ec.Employee.FirstName)
@@ -247,9 +242,7 @@ public class EmployeeCompetencyRepository : GenericRepository<EmployeeCompetency
     public async Task<EmployeeCompetency?> GetByEmployeeAndCompetencyAsync(Guid employeeId, Guid competencyId)
     {
         return await _dbSet
-            .Include(ec => ec.Competency)
-            .Include(ec => ec.Employee)
-            .Include(ec => ec.AssessedBy)
+            .WithLookups()
             .FirstOrDefaultAsync(ec => ec.EmployeeId == employeeId
                                     && ec.CompetencyId == competencyId
                                     && !ec.IsDeleted);

@@ -95,61 +95,57 @@ public class ConsultantClient : TenantEntity
     public virtual ICollection<ClientEngagement> Engagements { get; set; } = new List<ClientEngagement>();
     public virtual ICollection<ConsultantTimesheet> Timesheets { get; set; } = new List<ConsultantTimesheet>();
     public virtual ICollection<TimesheetInvoice> Invoices { get; set; } = new List<TimesheetInvoice>();
-    public virtual ICollection<ConsultantClientPortalAccount> PortalAccounts { get; set; } = new List<ConsultantClientPortalAccount>();
+    public virtual ICollection<ConsultantClientContact> Contacts { get; set; } = new List<ConsultantClientContact>();
 }
 
 // =========================================================================
-// ConsultantClientPortalAccount
-// Lightweight auth for the external consultant client portal.
-// Linked to a ConsultantClient organisation for timesheet approval access.
+// ConsultantClientContact
+// Links a main-scheme Identity account (ConsultantClient role) to the
+// client organisation it may confirm timesheets for. Replaced the bespoke
+// ConsultantClientPortalAccount 2026-08-31 (dropped with zero rows) when
+// the PortalBearer portal was retired — Identity now owns every credential
+// concern (password, lockout, confirmation), and this row is purely the
+// authorisation anchor: no contact row, no client access. Invite-only;
+// a contact serving several clients holds one row per client.
 // =========================================================================
 
-public class ConsultantClientPortalAccount : TenantEntity
+public class ConsultantClientContact : TenantEntity
 {
-    [Required, MaxLength(200), EmailAddress]
-    public string Email { get; set; } = string.Empty;
-
-    [Required]
-    public string PasswordHash { get; set; } = string.Empty;
-
-    public bool IsEmailVerified { get; set; }
-
-    [MaxLength(512)]
-    public string? EmailVerificationToken { get; set; }
-    public DateTime? EmailVerificationExpiry { get; set; }
-
-    [MaxLength(512)]
-    public string? PasswordResetToken { get; set; }
-    public DateTime? PasswordResetExpiry { get; set; }
-
-    /// <summary>HR invite setup token — set until the contact completes initial password setup.</summary>
-    [MaxLength(512)]
-    public string? AccountSetupToken { get; set; }
-    public DateTime? AccountSetupExpiry { get; set; }
-
-    public DateTime? LastLoginAt { get; set; }
-    public int FailedLoginAttempts { get; set; }
-    public DateTime? LockedOutUntil { get; set; }
-
-    /// <summary>
-    /// When the last verification email was dispatched. Backs the resend cooldown —
-    /// without it, a resend endpoint is a mailbox-bombing tool aimed at a third party.
-    /// </summary>
-    public DateTime? LastVerificationEmailSentAtUtc { get; set; }
-
-    public bool IsActive { get; set; } = true;
-
     [Required]
     public Guid ConsultantClientId { get; set; }
 
     [ForeignKey(nameof(ConsultantClientId))]
     public virtual ConsultantClient ConsultantClient { get; set; } = null!;
 
+    /// <summary>The Identity account this contact signs in with.</summary>
+    [Required]
+    public Guid UserId { get; set; }
+
+    [ForeignKey(nameof(UserId))]
+    public virtual ApplicationUser User { get; set; } = null!;
+
     [MaxLength(200)]
     public string? ContactName { get; set; }
 
     [MaxLength(100)]
     public string? ContactRole { get; set; }
+
+    /// <summary>Deactivated contacts keep their history but lose portal access to this client.</summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>The HR employee who sent the invite — the actor, from the token, never the body.</summary>
+    public Guid? InvitedById { get; set; }
+
+    [ForeignKey(nameof(InvitedById))]
+    public virtual Employee? InvitedBy { get; set; }
+
+    public DateTime? InvitedAtUtc { get; set; }
+
+    /// <summary>
+    /// When the last invite/setup email was dispatched. Backs the resend cooldown —
+    /// without it, a resend endpoint is a mailbox-bombing tool aimed at a third party.
+    /// </summary>
+    public DateTime? LastInviteSentAtUtc { get; set; }
 }
 
 // =========================================================================

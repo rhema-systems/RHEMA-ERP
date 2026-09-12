@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +10,7 @@ namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/staff-attendance-devices")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class StaffAttendanceDevicesController : AttendanceControllerBase
 {
     private readonly IStaffAttendanceDeviceService _service;
@@ -21,10 +22,12 @@ public class StaffAttendanceDevicesController : AttendanceControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceDeviceSummaryDto>>> GetAll(CancellationToken ct = default)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<PagedResult<StaffAttendanceDeviceSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20,
@@ -32,30 +35,36 @@ public class StaffAttendanceDevicesController : AttendanceControllerBase
         => Ok(await _service.GetPagedAsync(pageNumber, pageSize, ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<StaffAttendanceDeviceDto>> GetById(Guid id, CancellationToken ct = default)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("external/{externalDeviceId}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<StaffAttendanceDeviceDto?>> GetByExternalDeviceId(
         string externalDeviceId, CancellationToken ct = default)
         => Ok(await _service.GetByExternalDeviceIdAsync(externalDeviceId, ct));
 
     [HttpGet("active")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceDeviceSummaryDto>>> GetActiveDevices(
         CancellationToken ct = default)
         => Ok(await _service.GetActiveDevicesAsync(ct));
 
     [HttpGet("location/{locationId:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceDeviceSummaryDto>>> GetByLocationId(
         Guid locationId, CancellationToken ct = default)
         => Ok(await _service.GetByLocationIdAsync(locationId, ct));
 
     [HttpGet("overdue-sync")]
+    [Authorize(Policy = HrPermissions.AttendanceReadPolicy)]
     public async Task<ActionResult<IEnumerable<StaffAttendanceDeviceSummaryDto>>> GetDevicesOverdueForSync(
         [FromQuery] int hoursThreshold = 24, CancellationToken ct = default)
         => Ok(await _service.GetDevicesOverdueForSyncAsync(hoursThreshold, ct));
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffAttendanceDeviceDto>> Register(
         [FromBody] CreateStaffAttendanceDeviceDto dto, CancellationToken ct = default)
     {
@@ -67,6 +76,7 @@ public class StaffAttendanceDevicesController : AttendanceControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffAttendanceDeviceDto>> Update(
         Guid id, [FromBody] UpdateStaffAttendanceDeviceDto dto, CancellationToken ct = default)
     {
@@ -78,6 +88,7 @@ public class StaffAttendanceDevicesController : AttendanceControllerBase
     }
 
     [HttpPost("{id:guid}/sync")]
+    [Authorize(Policy = HrPermissions.AttendanceWritePolicy)]
     public async Task<ActionResult<StaffAttendanceDeviceDto>> RecordSync(
         Guid id, [FromBody] RecordDeviceSyncRequest request, CancellationToken ct = default)
     {
@@ -87,6 +98,7 @@ public class StaffAttendanceDevicesController : AttendanceControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
     {
         await _service.DeleteAsync(id, ct);

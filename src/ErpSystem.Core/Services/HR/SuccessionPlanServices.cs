@@ -1,9 +1,13 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Performance;
+using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Application.HR.Extensions;
@@ -26,9 +30,15 @@ public class SuccessionPlanService : ISuccessionPlanService
     private readonly ISuccessionPlanHistoryRepository _historyRepository;
     private readonly ISuccessionDocumentRepository _documentRepository;
     private readonly ICompanyHrPolicyProvider _hrPolicyProvider;
+    private readonly IStaffMovementRepository _movementRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionPlanService> _logger;
+
+    /// <summary>The workflow entity type this service drives. Seeded by the catalog service.</summary>
+    private const string EntityType = "SuccessionPlan";
 
     public SuccessionPlanService(
         ISuccessionPlanRepository planRepository,
@@ -37,7 +47,10 @@ public class SuccessionPlanService : ISuccessionPlanService
         ISuccessionPlanHistoryRepository historyRepository,
         ISuccessionDocumentRepository documentRepository,
         ICompanyHrPolicyProvider hrPolicyProvider,
+        IStaffMovementRepository movementRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionPlanService> logger)
     {
@@ -47,7 +60,10 @@ public class SuccessionPlanService : ISuccessionPlanService
         _historyRepository = historyRepository;
         _documentRepository = documentRepository;
         _hrPolicyProvider = hrPolicyProvider;
+        _movementRepository = movementRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -152,17 +168,38 @@ public class SuccessionPlanService : ISuccessionPlanService
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// The navigations <c>ToSummaryDto</c> reads.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Every <i>filtered</i> list query on the repository (by status, year, criticality, risk,
+    /// due-for-review, no-successors …) already includes these. The two <i>default</i> views did
+    /// not: <c>GetAllAsync</c> went through the generic repository and the paged read used a bare
+    /// <c>GetQueryable()</c>. Both mapped through the same summary mapper, whose
+    /// <c>entity.Position?.Title ?? string.Empty</c> silently produced a blank — so the register,
+    /// the first screen anyone opens, showed an empty Position column on every row while every
+    /// filtered view beside it showed the title. The position is the subject of a succession plan;
+    /// a register without it is unreadable.
+    /// </remarks>
+    private IQueryable<SuccessionPlan> SummaryQuery(Guid tenantId)
+        => _planRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId)
+            .Include(p => p.Position)
+            .Include(p => p.CurrentIncumbent);
+
     public async Task<IEnumerable<SuccessionPlanSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _planRepository.GetAllAsync()).Where(p => p.TenantId == tenantId);
+        var entities = await SummaryQuery(GetTenantId())
+            .OrderByDescending(p => p.PlanYear)
+            .ThenByDescending(p => p.VersionNumber)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<PagedResult<SuccessionPlanSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var query = _planRepository.GetQueryable().Where(p => p.TenantId == tenantId);
+        var query = SummaryQuery(tenantId);
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -279,10 +316,33 @@ public class SuccessionPlanService : ISuccessionPlanService
     public async Task<SuccessionPlanDto> CreateAsync(CreateSuccessionPlanDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
+
+        // A position may carry only one plan that is still being worked on. Checked here so the
+        // rule can name the plan that blocks it; left to the database alone it surfaced as a bare
+        // 500 from UX_SuccessionPlan_ActiveVersion.
+        var openPlan = await _planRepository.GetQueryable()
+            .Where(p => p.TenantId == tenantId
+                        && p.PositionId == createDto.PositionId
+                        && (p.Status == SuccessionPlanStatus.Draft || p.Status == SuccessionPlanStatus.UnderReview))
+            .Select(p => new { p.PlanNumber, p.PlanYear, p.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (openPlan != null)
+            throw new SuccessionConflictException(
+                $"This position already has a succession plan in progress ({openPlan.PlanNumber}, {openPlan.PlanYear}, " +
+                $"{openPlan.Status}). Finish or delete that plan before starting another.");
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.PlanNumber = await GeneratePlanNumberAsync(tenantId, cancellationToken);
         entity.VersionNumber = await GetNextVersionNumberForPositionAsync(tenantId, createDto.PositionId, cancellationToken);
-        entity.IsActiveVersion = true;
+
+        // ⚠ A draft does NOT hold the position's active-version slot. It used to be set true here,
+        // which meant a position with an approved plan could never receive a successor version:
+        // the create tripped UX_SuccessionPlan_ActiveVersion and 500'd, so the supersede branch in
+        // ApproveAsync — which archives the previous version and sets SupersededByPlanId — could
+        // never be reached and versioning had never once worked. The flag is now raised on
+        // approval, which is what "active version" means.
+        entity.IsActiveVersion = false;
         entity.Status = SuccessionPlanStatus.Draft;
 
         await _planRepository.AddAsync(entity);
@@ -290,7 +350,11 @@ public class SuccessionPlanService : ISuccessionPlanService
 
         _logger.LogInformation("Succession plan created: {PlanNumber}", entity.PlanNumber);
 
-        return entity.ToDto();
+        // Re-read through the detail loader rather than mapping the tracked entity: its Position
+        // and incumbent navigations were never loaded, so ToDto() returned PositionTitle = "" and
+        // CurrentIncumbentName = null while the detail read of the very same row returned both.
+        // A create form that renders the response would show a blank position until refresh.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<SuccessionPlanDto> UpdateAsync(UpdateSuccessionPlanDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -317,6 +381,12 @@ public class SuccessionPlanService : ISuccessionPlanService
         if (entity.Status == SuccessionPlanStatus.Approved)
             throw new InvalidOperationException("An approved succession plan cannot be deleted.");
 
+        // ⚠ DeleteAsync is a soft delete, but UX_SuccessionPlan_ActiveVersion is filtered on
+        // IsActiveVersion alone and knows nothing about IsDeleted — so a deleted plan would keep
+        // holding its position's only active-version slot, and the position could never be
+        // planned for again. Stand the flag down as part of the delete.
+        entity.IsActiveVersion = false;
+
         await _planRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -325,75 +395,184 @@ public class SuccessionPlanService : ISuccessionPlanService
         return true;
     }
 
+    /// <summary>
+    /// Sends a plan out for approval on the generic workflow engine.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The service does not set the status itself — the engine decides the outcome and the
+    /// adapter maps it. A definition with two approval steps leaves the plan at UnderReview after
+    /// the first; one that auto-approves lands it at Approved. Writing the status here would make
+    /// the record disagree with the engine the moment a definition changed.
+    /// </remarks>
     public async Task<bool> SubmitForReviewAsync(Guid planId, Guid submittedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(planId);
 
-        if (entity.Status != SuccessionPlanStatus.Draft)
-            throw new InvalidOperationException("Only draft succession plans can be submitted for review.");
+        // Rejected is submittable too: a rejected plan is reworked and sent back, which is the
+        // whole reason rejection lands on Rejected rather than bouncing to Draft.
+        if (entity.Status != SuccessionPlanStatus.Draft && entity.Status != SuccessionPlanStatus.Rejected)
+            throw new SuccessionValidationException(
+                "Only draft or rejected succession plans can be submitted for approval.");
 
-        entity.Status = SuccessionPlanStatus.UnderReview;
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to start the succession plan approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
 
         await _planRepository.UpdateAsync(entity);
-        await CreateSnapshotAsync(entity, submittedByUserId, "Submitted for review", null, cancellationToken);
+        await CreateSnapshotAsync(entity, submittedByUserId, "Submitted for approval", null, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Succession plan submitted for review: {PlanNumber}", entity.PlanNumber);
+        _logger.LogInformation("Succession plan submitted: {PlanNumber} (now {Status})",
+            entity.PlanNumber, entity.Status);
 
         return true;
     }
 
-    public async Task<bool> ReviewAsync(ReviewSuccessionPlanDto reviewDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Rejects a plan that is out for approval, on the engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>This replaces the bespoke <c>Review</c> action, whose <c>NewStatus</c> field let a
+    /// caller move a plan to any status it liked — including straight to Approved, bypassing
+    /// whatever approval the organisation had configured. A status the caller chooses is not an
+    /// approval decision; it is a way around one.</para>
+    ///
+    /// <para>Rejection lands on <c>Rejected</c>, not <c>Draft</c>: the author needs to see that
+    /// someone ruled against the plan rather than that it was never sent. The reason is written to
+    /// the workflow history and echoed onto the plan's risk notes by the adapter, because the notes
+    /// are what the author reads on the form they are about to rework.</para>
+    /// </remarks>
+    public async Task<bool> RejectAsync(RejectSuccessionPlanDto rejectDto, Guid rejectedByEmployeeId, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedPlanAsync(reviewDto.PlanId);
+        var entity = await GetOwnedPlanAsync(rejectDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
-            throw new InvalidOperationException("Only plans under review can be reviewed.");
+            throw new SuccessionValidationException(
+                "Only a plan that is out for approval can be rejected.");
 
-        entity.ReviewedById = reviewDto.ReviewedById;
-        entity.ReviewDate = reviewDto.ReviewDate;
-        entity.Status = reviewDto.NewStatus;
+        // The engine resolves approvers by ApplicationUser; everything the entity stores is an
+        // Employee FK. See hr-attendance-actor-conventions for why these are two different ids.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Reject", rejectDto.RejectionReason);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, rejectDto.RejectionReason);
+
+        entity.ReviewedById = rejectedByEmployeeId;
+        entity.ReviewDate = DateTime.UtcNow;
 
         await _planRepository.UpdateAsync(entity);
-        await CreateSnapshotAsync(entity, reviewDto.ReviewedById, $"Reviewed — status set to {reviewDto.NewStatus}", reviewDto.ReviewNotes, cancellationToken);
+        await CreateSnapshotAsync(entity, rejectedByEmployeeId, "Rejected", rejectDto.RejectionReason, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Succession plan reviewed: {PlanNumber}, NewStatus: {Status}", entity.PlanNumber, entity.Status);
+        _logger.LogInformation("Succession plan rejected: {PlanNumber} (now {Status})",
+            entity.PlanNumber, entity.Status);
 
         return true;
     }
 
-    public async Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApproveAsync(ApproveSuccessionPlanDto approveDto, Guid approvedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(approveDto.PlanId);
 
         if (entity.Status != SuccessionPlanStatus.UnderReview)
-            throw new InvalidOperationException("Only plans under review can be approved.");
+            throw new SuccessionValidationException(
+                "Only a plan that is out for approval can be approved.");
 
-        entity.ApprovedById = approveDto.ApprovedById;
-        entity.ApprovalDate = approveDto.ApprovalDate;
-        entity.Status = SuccessionPlanStatus.Approved;
-        entity.IsActiveVersion = true;
+        // The engine resolves approvers by ApplicationUser; the entity's ApprovedById is an
+        // Employee FK. Two different ids for the same human — see hr-attendance-actor-conventions.
+        var actingUserId = _currentUserProvider.UserId;
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        // Supersede any previously approved active version for the same position (same tenant)
-        var previousVersions = await _planRepository.GetQueryable()
-            .Where(p => p.TenantId == entity.TenantId &&
-                        p.PositionId == entity.PositionId &&
-                        p.Id != entity.Id &&
-                        p.IsActiveVersion &&
-                        !p.IsDeleted)
-            .ToListAsync(cancellationToken);
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+            EntityType, entity.Id, actingUserId, "Approve", approveDto.ApprovalNotes);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(
+                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
 
-        foreach (var previous in previousVersions)
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
+
+        // ⚠ A multi-step definition leaves the plan at UnderReview after an intermediate approval.
+        // Superseding the previous version and raising the active-version flag are consequences of
+        // the plan being APPROVED, so they must not run until the engine says it is.
+        if (entity.Status != SuccessionPlanStatus.Approved)
         {
-            previous.IsActiveVersion = false;
-            previous.SupersededByPlanId = entity.Id;
-            previous.Status = SuccessionPlanStatus.Archived;
-            await _planRepository.UpdateAsync(previous);
+            entity.ReviewedById ??= approvedByEmployeeId;
+            entity.ReviewDate ??= DateTime.UtcNow;
+
+            await _planRepository.UpdateAsync(entity);
+            await CreateSnapshotAsync(entity, approvedByEmployeeId, "Approval step recorded", approveDto.ApprovalNotes, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Succession plan approval step processed: {PlanNumber} (now {Status})",
+                entity.PlanNumber, entity.Status);
+            return true;
         }
 
+        // Supersede any previously approved active version for the same position (same tenant).
+        //
+        // ⚠ This must be saved BEFORE the new version raises its own flag.
+        // UX_SuccessionPlan_ActiveVersion is a unique filtered index on (PositionId,
+        // IsActiveVersion) — two rows may not both be active, not even mid-transaction. Clearing
+        // the old flag and setting the new one in a single SaveChanges leaves the order to EF, and
+        // when it wrote the new row first the index rejected it: approving a successor version
+        // 500'd. Nobody had met this because a draft used to be unable to exist alongside an
+        // approved plan at all, so the supersede branch was unreachable code.
+        //
+        // The two saves are not atomic: if the second fails, the position is briefly left with no
+        // active version. That state is self-healing — re-approving finds nothing to supersede and
+        // raises the flag — and is strictly better than the permanent 500 it replaces.
+        // ⚠ Deleted rows are included on purpose. The index filters on IsActiveVersion alone, so a
+        // soft-deleted plan that still carries the flag occupies the slot just as firmly as a live
+        // one — and the delete path only started standing the flag down today, so rows deleted
+        // before that are still holding positions hostage. Whatever holds the flag must be cleared,
+        // alive or not; a deleted plan is archived silently rather than being marked superseded,
+        // because it was never anyone's predecessor.
+        var holdingTheSlot = await _planRepository
+            .GetQueryableIncludingDeleted(p => p.TenantId == entity.TenantId &&
+                                               p.PositionId == entity.PositionId &&
+                                               p.Id != entity.Id &&
+                                               p.IsActiveVersion)
+            .ToListAsync(cancellationToken);
+
+        if (holdingTheSlot.Count > 0)
+        {
+            foreach (var previous in holdingTheSlot)
+            {
+                previous.IsActiveVersion = false;
+
+                if (!previous.IsDeleted)
+                {
+                    previous.SupersededByPlanId = entity.Id;
+                    previous.Status = SuccessionPlanStatus.Archived;
+                }
+
+                await _planRepository.UpdateAsync(previous);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+
+        // The adapter set Status and ApprovalDate. ApprovedById is the service's to stamp, because
+        // it is an Employee FK and the engine only knows the ApplicationUser.
+        entity.ApprovedById = approvedByEmployeeId;
+        entity.IsActiveVersion = true;
+
         await _planRepository.UpdateAsync(entity);
-        await CreateSnapshotAsync(entity, approveDto.ApprovedById, "Approved", approveDto.ApprovalNotes, cancellationToken);
+        await CreateSnapshotAsync(entity, approvedByEmployeeId, "Approved", approveDto.ApprovalNotes, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Succession plan approved: {PlanNumber}", entity.PlanNumber);
@@ -423,10 +602,47 @@ public class SuccessionPlanService : ISuccessionPlanService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedPlanAsync(createDto.SuccessionPlanId);
+
+        // Requiring a competency again REVIVES the old row; it does not insert a second one.
+        //
+        // Removing a requirement is a soft delete, but
+        // IX_SuccessionCompetencyReq_Tenant_Plan_Competency is unique on
+        // (TenantId, SuccessionPlanId, CompetencyId) with no filter, so the deleted row occupies
+        // the slot as firmly as a live one: inserting hits the index and 500s naming nothing.
+        // Once a competency was removed from a plan it could never be required again. Same
+        // disagreement between the code's idea of "exists" and the schema's that produced the
+        // talent-pool rejoin defect, and fixed the same way rather than with a filtered index —
+        // reviving keeps the original CreatedAt instead of pretending this is the first time.
+        var existing = await _competencyRequirementRepository.GetIncludingDeletedAsync(
+            createDto.SuccessionPlanId, createDto.CompetencyId, tenantId);
+
+        if (existing != null)
+        {
+            if (!existing.IsDeleted)
+                throw new InvalidOperationException("That competency is already required by this plan.");
+
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.DeletedBy = null;
+            existing.RequiredLevel = createDto.RequiredLevel;
+            existing.UpdatedAt = DateTime.UtcNow;
+            existing.UpdatedBy = createdByUserId.ToString();
+
+            await _competencyRequirementRepository.UpdateAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return (await _competencyRequirementRepository.GetByIdWithCompetencyAsync(existing.Id))!.ToDto();
+        }
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _competencyRequirementRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the Competency loaded. Mapping the freshly-added entity returned a row
+        // whose code, name, category and scale maximum were all blank, so the panel showed an
+        // empty competency on the row it had just created and the right one after a refetch —
+        // the stale-nav-on-a-write-response shape.
+        return (await _competencyRequirementRepository.GetByIdWithCompetencyAsync(entity.Id))!.ToDto();
     }
 
     public async Task<IEnumerable<SuccessionCompetencyRequirementDto>> GetCompetencyRequirementsAsync(Guid planId, CancellationToken cancellationToken = default)
@@ -447,7 +663,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         await _competencyRequirementRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await _competencyRequirementRepository.GetByIdWithCompetencyAsync(entity.Id))!.ToDto();
     }
 
     public async Task<bool> DeleteCompetencyRequirementAsync(Guid requirementId, CancellationToken cancellationToken = default)
@@ -464,23 +680,34 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     #region Action Operations
 
-    public async Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<SuccessionActionDto> AddActionAsync(CreateSuccessionActionDto createDto, Guid tenantId, Guid createdByUserId, Guid assignedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedPlanAsync(createDto.SuccessionPlanId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+
+        // Who assigned an action is a fact about the signed-in user, not a field the caller gets
+        // to choose. It arrived on the body and was honoured — the sixth instance of the shape
+        // that produced the approval actor in slice 1, the assessor in slice 4, the pool
+        // nominator, and the document uploader in slice 13 (D-15).
+        entity.AssignedById = assignedByEmployeeId;
+
         await EnsureNoDependencyCycleAsync(entity.Id, entity.DependsOnActionId, cancellationToken);
         await _actionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the navigations loaded — mapping the freshly-added entity returned blanks
+        // in planNumber, candidateEmployeeName, responsiblePersonName, assignedByName and
+        // dependsOnActionDescription, all of which the panel binds.
+        return (await _actionRepository.GetByIdWithDetailsAsync(entity.Id))!.ToDto();
     }
 
-    public async Task<IEnumerable<SuccessionActionSummaryDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<SuccessionActionDto>> GetActionsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
     {
         await GetOwnedPlanAsync(planId);
         var tenantId = GetTenantId();
         var entities = (await _actionRepository.GetByPlanIdAsync(planId)).Where(a => a.TenantId == tenantId);
-        return entities.ToSummaryDtoList();
+        return entities.Select(a => a.ToDto()).ToList();
     }
 
     public async Task<SuccessionActionDto> UpdateActionAsync(UpdateSuccessionActionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -493,7 +720,7 @@ public class SuccessionPlanService : ISuccessionPlanService
         await _actionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await _actionRepository.GetByIdWithDetailsAsync(entity.Id))!.ToDto();
     }
 
     public async Task<bool> DeleteActionAsync(Guid actionId, CancellationToken cancellationToken = default)
@@ -532,16 +759,25 @@ public class SuccessionPlanService : ISuccessionPlanService
 
     #region Document Operations
 
-    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee, stamped onto the entity's <c>UploadedById</c> FK. Never
+    /// taken from the request body — that is the defect this parameter exists to close.
+    /// </param>
+    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         if (createDto.SuccessionPlanId.HasValue)
             await GetOwnedPlanAsync(createDto.SuccessionPlanId.Value);
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, uploadedByEmployeeId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the uploader resolved. Mapping `entity` directly returns a row whose
+        // uploadedByName is blank, because a just-added entity has no navigation loaded — the
+        // create response would disagree with the list read that follows it.
+        var saved = await _documentRepository.GetByIdWithUploaderAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForPlanAsync(Guid planId, CancellationToken cancellationToken = default)
@@ -569,6 +805,51 @@ public class SuccessionPlanService : ISuccessionPlanService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return true;
+    }
+
+    /// <summary>
+    /// The staff movements raised against this succession plan — the plan's actual outcome.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ **A read-only projection across an area boundary.** `StaffMovement.SuccessionPlanId`
+    /// is area 8's column and area 8 already resolves it in both directions on its own side: a
+    /// movement's detail shows the plan number it fulfils. What was missing was the reverse — a
+    /// plan that named a successor had no way to show that the successor *actually moved into the
+    /// post*, which is the only evidence the plan ever worked.</para>
+    ///
+    /// <para>Nothing here writes to a movement. The seam is crossed by reference, the same call
+    /// made for SHE↔Medical: succession reads movements, movements own them.</para>
+    ///
+    /// <para>Deliberately unfiltered by status. A movement still awaiting approval is exactly what
+    /// someone looking at the plan wants to see — "the successor is moving" is more useful than
+    /// "the successor has moved", and the movement's own status says which.</para>
+    /// </remarks>
+    public async Task<IEnumerable<SuccessionPlanMovementDto>> GetMovementsAsync(
+        Guid planId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await GetOwnedPlanAsync(planId);   // 404s for a plan in another tenant before reading across
+
+        var movements = await _movementRepository.GetQueryable()
+            .Where(m => m.TenantId == tenantId && m.SuccessionPlanId == planId)
+            .Include(m => m.Employee)
+            .Include(m => m.NewPosition)
+            .OrderByDescending(m => m.RequestDate)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
+        return movements.Select(m => new SuccessionPlanMovementDto
+        {
+            Id = m.Id,
+            MovementNumber = m.MovementNumber,
+            EmployeeId = m.EmployeeId,
+            EmployeeName = m.Employee?.FullName ?? string.Empty,
+            MovementType = m.MovementType,
+            NewPositionTitle = m.NewPosition?.Title,
+            RequestDate = m.RequestDate,
+            EffectiveDate = m.EffectiveDate,
+            Status = m.Status.ToString(),
+        }).ToList();
     }
 
     public async Task<SuccessionDashboardDto> GetDashboardAsync(int? planYear = null, CancellationToken cancellationToken = default)
@@ -916,6 +1197,22 @@ public class SuccessionPlanService : ISuccessionPlanService
         return maxVersion + 1;
     }
 
+    /// <summary>
+    /// Next plan number for the tenant, derived from the highest sequence already issued this year.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This deliberately counts <b>deleted rows too</b>. It used to be
+    /// <c>GetQueryable().CountAsync(...) + 1</c>, and <c>GetQueryable()</c> excludes soft-deleted
+    /// rows — but <c>IX_SuccessionPlan_Tenant_PlanNumber</c> is a plain unique index that does not,
+    /// so a deleted plan keeps its number reserved forever. The result was that deleting any plan
+    /// made the counter fall back onto a number the index still held, and <b>every subsequent
+    /// create failed</b> with a duplicate-key 500 — permanently, from one ordinary use of the
+    /// delete button. Measured 2026-08-18.
+    ///
+    /// Taking the maximum issued sequence rather than a live count also survives the other way a
+    /// count drifts: numbers are never reused, so two plans can never collide even if rows are
+    /// later purged.
+    /// </remarks>
     private async Task<string> GeneratePlanNumberAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var settings = await _hrPolicyProvider.GetAsync(cancellationToken);
@@ -923,8 +1220,19 @@ public class SuccessionPlanService : ISuccessionPlanService
             ? "SP"
             : settings.SuccessionPlanNumberPrefix.Trim();
 
-        var count = await _planRepository.GetQueryable().CountAsync(p => p.TenantId == tenantId, cancellationToken);
-        return $"{prefix}-{DateTime.UtcNow.Year}-{(count + 1):D4}";
+        var yearPrefix = $"{prefix}-{DateTime.UtcNow.Year}-";
+
+        var issued = await _planRepository
+            .GetQueryableIncludingDeleted(p => p.TenantId == tenantId && p.PlanNumber.StartsWith(yearPrefix))
+            .Select(p => p.PlanNumber)
+            .ToListAsync(cancellationToken);
+
+        var highest = issued
+            .Select(number => int.TryParse(number[yearPrefix.Length..], out var sequence) ? sequence : 0)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return $"{yearPrefix}{(highest + 1):D4}";
     }
 
     private async Task CreateSnapshotAsync(SuccessionPlan plan, Guid createdById, string changeReason, string? notes, CancellationToken cancellationToken)
@@ -959,6 +1267,51 @@ public class SuccessionPlanService : ISuccessionPlanService
 
 #region Succession Candidate Service
 
+/// <summary>
+/// Succession&apos;s read-only window onto Finance&apos;s currency master.
+/// </summary>
+/// <remarks>
+/// <para>Measured 2026-08-18: <c>currencyCode: "ZZZ"</c> was accepted on a development activity and
+/// stored. The only thing standing between the field and nonsense was <c>MaxLength(3)</c> —
+/// "banana" was rejected for being four characters long, not for being imaginary. A development
+/// budget denominated in a currency that does not exist cannot be totalled or reported against.</para>
+///
+/// <para><b>Static, and called from two services on purpose.</b> Development activities have two
+/// write paths — <c>SuccessionDevelopmentActivityService</c>, and the AddDevelopmentActivity /
+/// UpdateDevelopmentActivity methods on <c>SuccessionCandidateService</c> — so validating only one
+/// would leave the other as a way in.</para>
+///
+/// <para><b>Read-only</b>, like travel&apos;s <c>StaffTravelCurrencyBridge</c>: Finance owns the
+/// master. A missing code is fixed by adding it in Finance, not by letting succession invent one.
+/// No FK column is added — Finance&apos;s uniqueness is (TenantId, Code), and this buys the same
+/// guarantee without making a currency re-code a schema migration.</para>
+/// </remarks>
+internal static class SuccessionCurrencyGuard
+{
+    public static async Task RequireKnownAsync(
+        ICurrencyService currencies,
+        string? currencyCode,
+        decimal? amount,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(currencyCode))
+        {
+            // A cost with no currency is not a cost anyone can act on.
+            if (amount.HasValue)
+                throw new SuccessionValidationException(
+                    "A development activity that records a cost must say which currency it is in.");
+            return;
+        }
+
+        var currency = await currencies.GetByCodeAsync(
+            currencyCode.Trim().ToUpperInvariant(), cancellationToken);
+
+        if (currency is null)
+            throw new SuccessionValidationException(
+                $"'{currencyCode}' is not a currency this organisation holds. Add it in Finance before using it here.");
+    }
+}
+
 public class SuccessionCandidateService : ISuccessionCandidateService
 {
     private readonly ISuccessionCandidateRepository _candidateRepository;
@@ -967,6 +1320,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
     private readonly ISuccessionDevelopmentActivityRepository _activityRepository;
     private readonly ISuccessionDocumentRepository _documentRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrencyService _currencies;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionCandidateService> _logger;
 
@@ -986,6 +1340,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         IGenericRepository<PositionCompetency> positionCompetencyRepository,
         IGenericRepository<EmployeeCompetency> employeeCompetencyRepository,
         ICurrentUserProvider currentUserProvider,
+        ICurrencyService currencies,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionCandidateService> logger)
     {
@@ -999,6 +1354,7 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         _positionCompetencyRepository = positionCompetencyRepository;
         _employeeCompetencyRepository = employeeCompetencyRepository;
         _currentUserProvider = currentUserProvider;
+        _currencies = currencies;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -1210,17 +1566,22 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         return true;
     }
 
-    public async Task<bool> AssessAsync(AssessCandidateDto assessDto, CancellationToken cancellationToken = default)
+    public async Task<bool> AssessAsync(AssessCandidateDto assessDto, Guid assessedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(assessDto.CandidateId);
 
-        entity.AssessedById = assessDto.AssessedById;
-        entity.AssessmentDate = assessDto.AssessmentDate;
+        // Both the assessor and the date used to arrive on the body. Recommending a candidate is
+        // what unlocks selecting them, so a caller-declared assessor was a way to manufacture a
+        // recommendation in someone else's name.
+        var assessedOn = DateTime.UtcNow;
+
+        entity.AssessedById = assessedByEmployeeId;
+        entity.AssessmentDate = assessedOn;
         entity.AssessmentNotes = assessDto.AssessmentNotes;
         entity.IsRecommended = assessDto.IsRecommended;
         entity.RecommendationNotes = assessDto.RecommendationNotes;
-        entity.RecommendationDate = assessDto.IsRecommended ? assessDto.AssessmentDate : null;
-        entity.RecommendedById = assessDto.IsRecommended ? assessDto.AssessedById : null;
+        entity.RecommendationDate = assessDto.IsRecommended ? assessedOn : null;
+        entity.RecommendedById = assessDto.IsRecommended ? assessedByEmployeeId : null;
 
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1493,12 +1854,15 @@ public class SuccessionCandidateService : ISuccessionCandidateService
         if (createDto.CandidateId == null)
             throw new ArgumentException("CandidateId is required when adding a development activity through the candidate service.");
 
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, createDto.CurrencyCode, createDto.EstimatedCost, cancellationToken);
+
         tenantId = RequireCurrentTenant(tenantId);
         await GetOwnedCandidateAsync(createDto.CandidateId.Value);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _activityRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+        return await ReloadActivityAsync(entity);
     }
 
     public async Task<IEnumerable<SuccessionDevelopmentActivitySummaryDto>> GetDevelopmentActivitiesAsync(Guid candidateId, CancellationToken cancellationToken = default)
@@ -1514,12 +1878,31 @@ public class SuccessionCandidateService : ISuccessionCandidateService
     {
         var entity = await GetOwnedActivityAsync(updateDto.Id);
 
+        // Both costs on the update path, not just the estimate.
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, updateDto.CurrencyCode, updateDto.ActualCost ?? updateDto.EstimatedCost, cancellationToken);
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _activityRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await ReloadActivityAsync(entity);
+    }
+
+    /// <summary>
+    /// Re-reads an activity with its navigations so the write response carries resolved names.
+    /// </summary>
+    /// <remarks>
+    /// Without this the tracked entity maps to <c>candidateEmployeeName: null</c> and
+    /// <c>supervisorName: null</c> while the very next read of the same row returns both — the
+    /// stale-nav shape in section 3.7, fixed on the plan create in slice 2 and here for activities.
+    /// </remarks>
+    private async Task<SuccessionDevelopmentActivityDto> ReloadActivityAsync(
+        SuccessionDevelopmentActivity entity)
+    {
+        var reloaded = await _activityRepository.GetWithFullDetailsAsync(entity.Id);
+        return (reloaded ?? entity).ToDto();
     }
 
     public async Task<bool> DeleteDevelopmentActivityAsync(Guid activityId, CancellationToken cancellationToken = default)
@@ -1536,18 +1919,27 @@ public class SuccessionCandidateService : ISuccessionCandidateService
 
     #region Document Operations
 
-    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee, stamped onto the entity's <c>UploadedById</c> FK. Never
+    /// taken from the request body — that is the defect this parameter exists to close.
+    /// </param>
+    public async Task<SuccessionDocumentDto> AddDocumentAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         if (createDto.CandidateId.HasValue)
             await GetOwnedCandidateAsync(createDto.CandidateId.Value);
         if (createDto.SuccessionPlanId.HasValue)
             await GetOwnedPlanAsync(createDto.SuccessionPlanId.Value);
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, uploadedByEmployeeId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the uploader resolved. Mapping `entity` directly returns a row whose
+        // uploadedByName is blank, because a just-added entity has no navigation loaded — the
+        // create response would disagree with the list read that follows it.
+        var saved = await _documentRepository.GetByIdWithUploaderAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsAsync(Guid candidateId, CancellationToken cancellationToken = default)
@@ -1600,6 +1992,7 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
     private readonly ISuccessionDevelopmentActivityRepository _activityRepository;
     private readonly ISuccessionDevelopmentMilestoneRepository _milestoneRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrencyService _currencies;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SuccessionDevelopmentActivityService> _logger;
 
@@ -1607,12 +2000,14 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
         ISuccessionDevelopmentActivityRepository activityRepository,
         ISuccessionDevelopmentMilestoneRepository milestoneRepository,
         ICurrentUserProvider currentUserProvider,
+        ICurrencyService currencies,
         IUnitOfWork unitOfWork,
         ILogger<SuccessionDevelopmentActivityService> logger)
     {
         _activityRepository = activityRepository;
         _milestoneRepository = milestoneRepository;
         _currentUserProvider = currentUserProvider;
+        _currencies = currencies;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -1716,11 +2111,18 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
     public async Task<SuccessionDevelopmentActivityDto> CreateAsync(CreateSuccessionDevelopmentActivityDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
+        // These were ArgumentExceptions, whose message the middleware replaces with "Invalid
+        // argument provided." — a rule that fires correctly but cannot say what to change.
         if (createDto.CandidateId == null && createDto.TalentPoolMemberId == null)
-            throw new ArgumentException("A development activity must be linked to either a candidate or a talent pool member.");
+            throw new SuccessionValidationException(
+                "A development activity must belong to either a succession candidate or a talent pool member.");
 
         if (createDto.CandidateId != null && createDto.TalentPoolMemberId != null)
-            throw new ArgumentException("A development activity cannot be linked to both a candidate and a talent pool member.");
+            throw new SuccessionValidationException(
+                "A development activity belongs to a succession candidate or a talent pool member, not both.");
+
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, createDto.CurrencyCode, createDto.EstimatedCost, cancellationToken);
 
         tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
@@ -1729,19 +2131,27 @@ public class SuccessionDevelopmentActivityService : ISuccessionDevelopmentActivi
 
         _logger.LogInformation("Development activity created: {ActivityName}", entity.ActivityName);
 
-        return entity.ToDto();
+        // Re-read so the response carries resolved names. The tracked entity has never loaded its
+        // Candidate or Supervisor navigations, so ToDto() returned candidateEmployeeName: null and
+        // supervisorName: null while the very next read of the same row returned both — the same
+        // stale-nav shape as the plan create in slice 2.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<SuccessionDevelopmentActivityDto> UpdateAsync(UpdateSuccessionDevelopmentActivityDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedActivityAsync(updateDto.Id);
 
+        // Both costs on the update path, not just the estimate.
+        await SuccessionCurrencyGuard.RequireKnownAsync(
+            _currencies, updateDto.CurrencyCode, updateDto.ActualCost ?? updateDto.EstimatedCost, cancellationToken);
+
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _activityRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1926,9 +2336,19 @@ public class TalentPoolService : ITalentPoolService
         return entity;
     }
 
+    /// <remarks>
+    /// ⚠ Loads the members deliberately. This used to call <c>GetOwnedPoolAsync</c>, which includes
+    /// nothing, and the mapper derives <c>CurrentMemberCount</c> from <c>entity.Members</c> — so the
+    /// detail read of a pool with one member reported **zero members, no pool type and no owner**,
+    /// while <c>with-members</c> beside it reported all three correctly.
+    ///
+    /// A blank string at least looks like missing data. **A count derived from an unloaded
+    /// collection is silently `0`, which looks like a fact** — a manager reading this screen would
+    /// conclude the pool was empty.
+    /// </remarks>
     public async Task<TalentPoolDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedPoolAsync(id);
+        var entity = await GetOwnedPoolWithMembersAsync(id);
         return entity.ToDto();
     }
 
@@ -2008,7 +2428,9 @@ public class TalentPoolService : ITalentPoolService
 
         _logger.LogInformation("Talent pool created: {PoolName}", entity.Name);
 
-        return entity.ToDto();
+        // Re-read so the response carries poolTypeName and ownerName. Same stale-nav shape as the
+        // plan create in slice 2 and the activity create in slice 5.
+        return (await GetOwnedPoolWithMembersAsync(entity.Id)).ToDto();
     }
 
     public async Task<TalentPoolDto> UpdateAsync(UpdateTalentPoolDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -2022,7 +2444,7 @@ public class TalentPoolService : ITalentPoolService
 
         _logger.LogInformation("Talent pool updated: {PoolName}", entity.Name);
 
-        return entity.ToDto();
+        return (await GetOwnedPoolWithMembersAsync(entity.Id)).ToDto();
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -2039,25 +2461,91 @@ public class TalentPoolService : ITalentPoolService
 
     #region Member Operations
 
-    public async Task<TalentPoolMemberDto> AddMemberAsync(CreateTalentPoolMemberDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    public async Task<TalentPoolMemberDto> AddMemberAsync(
+        CreateTalentPoolMemberDto createDto,
+        Guid tenantId,
+        Guid createdByUserId,
+        Guid nominatedByEmployeeId,
+        CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedPoolAsync(createDto.TalentPoolId);
+        var pool = await GetOwnedPoolAsync(createDto.TalentPoolId);
 
-        // Check if employee is already an active member of this pool
-        var existing = await _memberRepository.GetMembershipAsync(createDto.TalentPoolId, createDto.EmployeeId);
-        if (existing != null && existing.TenantId == tenantId && existing.IsActive)
-            throw new InvalidOperationException("This employee is already an active member of the talent pool.");
+        // ⚠ Deleted rows included on purpose. GetMembershipAsync filters IsDeleted out, but
+        // IX_TalentPoolMember_Tenant_Pool_Employee does not — so a soft-deleted membership holds the
+        // slot with nothing visible to explain why the insert fails. Look for whatever the index
+        // can see, not whatever the repository is willing to show.
+        var existing = await _memberRepository
+            .GetQueryableIncludingDeleted(m => m.TenantId == tenantId
+                                            && m.TalentPoolId == createDto.TalentPoolId
+                                            && m.EmployeeId == createDto.EmployeeId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // Already a member? InvalidOperationException would have had its message replaced with
+        // "The operation is not valid for the current state of the object." — true, and useless.
+        if (existing != null && existing.TenantId == tenantId && existing.IsActive && !existing.IsDeleted)
+            throw new SuccessionConflictException(
+                $"That employee is already an active member of '{pool.Name}'.");
+
+        // A row that is IsActive but IsDeleted is a contradiction left by a cascading pool delete.
+        // Treat it as revivable rather than reporting a conflict the user cannot see or resolve.
+        if (existing != null && existing.TenantId == tenantId && existing.IsDeleted)
+            existing.IsActive = false;
+
+        // ⚠ Re-joining a pool REVIVES the old row; it does not insert a second one.
+        //
+        // Removing a member is a soft removal — the row stays with IsActive = false — but
+        // IX_TalentPoolMember_Tenant_Pool_Employee is unique on (TenantId, PoolId, EmployeeId) with
+        // no filter, so an inactive row occupies the slot just as firmly as a live one. Inserting
+        // hit that index and 500'd, which meant **once someone left a pool they could never rejoin
+        // it**. Measured 2026-08-18. Same disagreement between the code's idea of "exists" and the
+        // schema's that produced the plan-numbering and active-version defects in section 3.9.
+        //
+        // Reviving is also the better record: it keeps the original enrolment and the history of
+        // why they left, instead of pretending this is the first time.
+        if (existing != null && existing.TenantId == tenantId && !existing.IsActive)
+        {
+            existing.IsActive = true;
+            existing.IsDeleted = false;
+            existing.RemovedDate = null;
+            existing.RemovalReason = null;
+            existing.Rank = createDto.Rank;
+            existing.Readiness = createDto.Readiness;
+            existing.ReadyByDate = createDto.ReadyByDate;
+            existing.Justification = createDto.Justification;
+            existing.Strengths = createDto.Strengths;
+            existing.DevelopmentGaps = createDto.DevelopmentGaps;
+            existing.NominatedById = nominatedByEmployeeId;
+            existing.NominationNotes = createDto.NominationNotes;
+
+            await _memberRepository.UpdateAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Employee '{EmployeeId}' rejoined talent pool '{PoolId}' (membership revived)",
+                createDto.EmployeeId, createDto.TalentPoolId);
+
+            return (await GetOwnedMemberWithDetailsAsync(existing.Id)).ToDto();
+        }
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.IsActive = true;
+
+        // ⚠ Who nominated someone into a pool is a fact about the signed-in user, not a field the
+        // caller gets to choose. It arrived on the body and was honoured — the same shape as the
+        // approval actor in slice 1 and the assessor in slice 4.
+        //
+        // The one legitimate exception is area 5's SuccessionNominationHandler, which does not come
+        // through here: it writes TalentPoolMember directly and sets NominatedById to the person
+        // who approved the appraisal recommendation, which is the right answer for that path.
+        entity.NominatedById = nominatedByEmployeeId;
 
         await _memberRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Employee '{EmployeeId}' added to talent pool '{PoolId}'", createDto.EmployeeId, createDto.TalentPoolId);
 
-        return entity.ToDto();
+        return (await GetOwnedMemberWithDetailsAsync(entity.Id)).ToDto();
     }
 
     public async Task<IEnumerable<TalentPoolMemberSummaryDto>> GetMembersAsync(Guid poolId, CancellationToken cancellationToken = default)
@@ -2153,16 +2641,25 @@ public class TalentPoolService : ITalentPoolService
 
     #region Document Operations
 
-    public async Task<SuccessionDocumentDto> AddDocumentForMemberAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee, stamped onto the entity's <c>UploadedById</c> FK. Never
+    /// taken from the request body — that is the defect this parameter exists to close.
+    /// </param>
+    public async Task<SuccessionDocumentDto> AddDocumentForMemberAsync(CreateSuccessionDocumentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploadedByEmployeeId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
         if (createDto.TalentPoolMemberId.HasValue)
             await GetOwnedMemberAsync(createDto.TalentPoolMemberId.Value);
-        var entity = createDto.ToEntity(tenantId, createdByUserId);
+        var entity = createDto.ToEntity(tenantId, createdByUserId, uploadedByEmployeeId);
         entity.UploadDate = DateTime.UtcNow;
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return entity.ToDto();
+
+        // Re-read with the uploader resolved. Mapping `entity` directly returns a row whose
+        // uploadedByName is blank, because a just-added entity has no navigation loaded — the
+        // create response would disagree with the list read that follows it.
+        var saved = await _documentRepository.GetByIdWithUploaderAsync(entity.Id);
+        return (saved ?? entity).ToDto();
     }
 
     public async Task<IEnumerable<SuccessionDocumentDto>> GetDocumentsForMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
@@ -2200,6 +2697,8 @@ public class TalentReviewSessionService : ITalentReviewSessionService
     private readonly ITalentReviewSessionRepository _sessionRepository;
     private readonly ITalentReviewRatingRepository _ratingRepository;
     private readonly ITalentPoolMemberRepository _memberRepository;
+    private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly IPerformanceRatingResolver _ratingResolver;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TalentReviewSessionService> _logger;
@@ -2208,6 +2707,8 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         ITalentReviewSessionRepository sessionRepository,
         ITalentReviewRatingRepository ratingRepository,
         ITalentPoolMemberRepository memberRepository,
+        IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IPerformanceRatingResolver ratingResolver,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<TalentReviewSessionService> logger)
@@ -2215,6 +2716,8 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         _sessionRepository = sessionRepository;
         _ratingRepository = ratingRepository;
         _memberRepository = memberRepository;
+        _appraisalRepository = appraisalRepository;
+        _ratingResolver = ratingResolver;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -2263,9 +2766,29 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         return entity;
     }
 
+    /// <summary>
+    /// A rating with its employee, rater and calibration navigations loaded, for write responses.
+    /// </summary>
+    /// <remarks>
+    /// The bare lookup leaves the mapper producing <c>employeeName: ""</c> and
+    /// <c>ratedByName: null</c> — a grid that renders the response would show a nameless row.
+    /// </remarks>
+    private async Task<TalentReviewRating> GetOwnedRatingWithDetailsAsync(Guid id)
+    {
+        var entity = await GetOwnedRatingAsync(id);
+        var loaded = await _ratingRepository.GetBySessionAndEmployeeAsync(entity.SessionId, entity.EmployeeId);
+        return loaded ?? entity;
+    }
+
+    /// <remarks>
+    /// ⚠ Loads the navigations. This used the bare <c>GetOwnedSessionAsync</c>, so the detail read
+    /// of a finalized session showed <c>finalizedByName: null</c> — the audit trail of who closed a
+    /// calibration meeting, blank — while <c>with-ratings</c> beside it resolved it. The same
+    /// wrong-loader mistake as the talent pool detail in slice 6.
+    /// </remarks>
     public async Task<TalentReviewSessionDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedSessionAsync(id);
+        var entity = await GetOwnedSessionWithRatingsAsync(id);
         return entity.ToDto();
     }
 
@@ -2346,7 +2869,9 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
         _logger.LogInformation("Talent review session created: {SessionName}", entity.SessionName);
 
-        return entity.ToDto();
+        // Re-read so facilitatedByName and the org-unit name resolve. Fifth entity in this area
+        // with the stale-nav shape; the loader already existed and simply was not used.
+        return (await GetOwnedSessionWithRatingsAsync(entity.Id)).ToDto();
     }
 
     public async Task<TalentReviewSessionDto> UpdateAsync(UpdateTalentReviewSessionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -2364,16 +2889,76 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         return entity.ToDto();
     }
 
-    public async Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// What the grid can suggest for an employee before anyone types — decision D-4.
+    /// </summary>
+    /// <remarks>
+    /// A suggestion, never an answer. The rater may disagree, which is what a calibration session is
+    /// for. Potential is never suggested because area 5 has no notion of it.
+    /// </remarks>
+    public async Task<TalentRatingSuggestionDto> GetRatingSuggestionAsync(
+        Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        // The most recent appraisal that actually carries a score. An unscored draft suggests
+        // nothing — better an empty grid than a number derived from a blank.
+        var appraisal = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.EmployeeId == employeeId && a.OverallScore != null)
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var previous = await _ratingRepository.GetLatestConfirmedRatingForEmployeeAsync(employeeId);
+        if (previous != null && previous.TenantId != tenantId) previous = null;
+
+        return new TalentRatingSuggestionDto
+        {
+            EmployeeId = employeeId,
+            SuggestedPerformance = appraisal == null
+                ? null
+                : await _ratingResolver.ResolveAsync(appraisal.OverallScore, cancellationToken),
+            SourceAppraisalId = appraisal?.Id,
+            SourceAppraisalNumber = appraisal?.AppraisalNumber,
+            SourceOverallScore = appraisal?.OverallScore,
+            SourceAppraisalDate = appraisal?.CreatedAt,
+            PreviousPerformance = previous?.Performance,
+            PreviousPotential = previous?.Potential,
+            PreviousSessionName = previous?.Session?.SessionName,
+        };
+    }
+
+    /// <summary>
+    /// Refuses a change to a session that has been finalized.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Measured 2026-08-18: a finalized session still accepted new ratings and edits to existing
+    /// ones. That makes <c>IsFinalized</c> decorative — a calibration record that can be changed
+    /// after the meeting closed is not a record of what the meeting decided, and confirming
+    /// calibration publishes those numbers onto the talent pool member.
+    ///
+    /// Frozen-on-finalize matches the rules this codebase already applies elsewhere: an approved
+    /// succession plan cannot be edited (slice 2), and SHE's monthly environmental report freezes
+    /// on submit.
+    /// </remarks>
+    private static void RequireNotFinalized(TalentReviewSession session, string action)
+    {
+        if (session.IsFinalized)
+            throw new SuccessionConflictException(
+                $"'{session.SessionName}' was finalized on {session.FinalizedDate:d} and can no longer be changed. " +
+                $"Run a new review session to {action}.");
+    }
+
+    public async Task<bool> FinalizeAsync(FinalizeTalentReviewSessionDto finalizeDto, Guid finalizedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSessionAsync(finalizeDto.SessionId);
 
         if (entity.IsFinalized)
-            throw new InvalidOperationException("This talent review session is already finalized.");
+            throw new SuccessionConflictException(
+                $"'{entity.SessionName}' was already finalized on {entity.FinalizedDate:d}.");
 
         entity.IsFinalized = true;
-        entity.FinalizedDate = finalizeDto.FinalizedDate;
-        entity.FinalizedById = finalizeDto.FinalizedById;
+        entity.FinalizedDate = DateTime.UtcNow;
+        entity.FinalizedById = finalizedByEmployeeId;
         entity.SessionNotes = finalizeDto.SessionNotes;
 
         await _sessionRepository.UpdateAsync(entity);
@@ -2406,13 +2991,13 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         tenantId = RequireCurrentTenant(tenantId);
         var session = await GetOwnedSessionAsync(createDto.SessionId);
 
-        if (session.IsFinalized)
-            throw new InvalidOperationException("Cannot add ratings to a finalized talent review session.");
+        RequireNotFinalized(session, "rate someone new");
 
         // Check if this employee already has a rating in this session
         var existing = await _ratingRepository.GetBySessionAndEmployeeAsync(createDto.SessionId, createDto.EmployeeId);
         if (existing != null && existing.TenantId == tenantId)
-            throw new InvalidOperationException("This employee already has a rating in this session. Update the existing rating instead.");
+            throw new SuccessionConflictException(
+                $"{existing.Employee?.FullName ?? "That employee"} already has a rating in '{session.SessionName}'. Update it instead of adding another.");
 
         // Look up previous rating for trend tracking (same tenant)
         var previousRating = await _ratingRepository.GetLatestConfirmedRatingForEmployeeAsync(createDto.EmployeeId);
@@ -2433,7 +3018,7 @@ public class TalentReviewSessionService : ITalentReviewSessionService
 
         _logger.LogInformation("Talent review rating added for employee '{EmployeeId}' in session '{SessionId}'", createDto.EmployeeId, createDto.SessionId);
 
-        return entity.ToDto();
+        return (await GetOwnedRatingWithDetailsAsync(entity.Id)).ToDto();
     }
 
     public async Task<IEnumerable<TalentReviewRatingSummaryDto>> GetRatingsForSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
@@ -2462,13 +3047,19 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
 
+    /// <remarks>
+    /// ⚠ Uses the loader that resolves navigations. Slice 7 gave the *write* paths a detailed
+    /// loader and left this read on the bare one, so the single-rating detail returned
+    /// <c>employeeName: ""</c>, <c>sessionName: ""</c> and <c>ratedByName: null</c> while the list
+    /// beside it resolved all three. Found by the content audit, not by any status check.
+    /// </remarks>
     public async Task<TalentReviewRatingDto?> GetRatingByIdAsync(Guid ratingId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entity = await _ratingRepository.GetByIdAsync(ratingId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
-        return entity.ToDto();
+        return (await GetOwnedRatingWithDetailsAsync(entity.Id)).ToDto();
     }
 
     public async Task<TalentReviewRatingDto?> GetLatestConfirmedRatingForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
@@ -2502,27 +3093,35 @@ public class TalentReviewSessionService : ITalentReviewSessionService
     {
         var entity = await GetOwnedRatingAsync(updateDto.Id);
 
+        // ⚠ The session-level freeze was missing here. AddRatingAsync refused a finalized session
+        // but this did not, so an unconfirmed rating inside a closed session stayed editable —
+        // which is the half of the freeze that actually matters, since an uncalibrated row is
+        // exactly the one someone would be tempted to "tidy up" after the meeting.
+        var session = await GetOwnedSessionAsync(entity.SessionId);
+        RequireNotFinalized(session, "change a rating");
+
         if (entity.CalibrationConfirmed)
-            throw new InvalidOperationException("A calibration-confirmed rating cannot be modified.");
+            throw new SuccessionConflictException(
+                "This rating has been calibration-confirmed and can no longer be modified.");
 
         entity.UpdateEntity(updateDto, updatedByUserId);
 
         await _ratingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToDto();
+        return (await GetOwnedRatingWithDetailsAsync(entity.Id)).ToDto();
     }
 
-    public async Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ConfirmCalibrationAsync(ConfirmCalibrationDto confirmDto, Guid confirmedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRatingAsync(confirmDto.RatingId);
 
         if (entity.CalibrationConfirmed)
-            throw new InvalidOperationException("Calibration is already confirmed for this rating.");
+            throw new SuccessionConflictException("Calibration is already confirmed for this rating.");
 
         entity.CalibrationConfirmed = true;
-        entity.CalibrationConfirmedById = confirmDto.ConfirmedById;
-        entity.CalibrationConfirmedDate = confirmDto.ConfirmedDate;
+        entity.CalibrationConfirmedById = confirmedByEmployeeId;
+        entity.CalibrationConfirmedDate = DateTime.UtcNow;
         entity.CalibrationNotes = confirmDto.CalibrationNotes;
 
         await _ratingRepository.UpdateAsync(entity);
@@ -2551,8 +3150,12 @@ public class TalentReviewSessionService : ITalentReviewSessionService
     {
         var entity = await GetOwnedRatingAsync(ratingId);
 
+        var session = await GetOwnedSessionAsync(entity.SessionId);
+        RequireNotFinalized(session, "remove a rating");
+
         if (entity.CalibrationConfirmed)
-            throw new InvalidOperationException("A calibration-confirmed rating cannot be deleted.");
+            throw new SuccessionConflictException(
+                "This rating has been calibration-confirmed and can no longer be deleted.");
 
         await _ratingRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -65,10 +65,17 @@ public class StaffDisciplinaryActionType : TenantEntity
     public string Description { get; set; } = string.Empty;
 	
 	public bool IsActive { get; set; } = true;
-	
+
 	public int? DefaultSuspensionDays { get; set; }
-    
+
 	public decimal? DefaultFineAmount { get; set; }
+
+    /// <summary>
+    /// Who may issue this action, per FR-HR-080 (HODs limited to verbal warnings) and FR-HR-092
+    /// (the MD signs terminations). Defaults to <see cref="DisciplinaryActionAuthority.Hr"/> so an
+    /// unmaintained catalog row is restrictive rather than permissive.
+    /// </summary>
+    public DisciplinaryActionAuthority MinimumAuthority { get; set; } = DisciplinaryActionAuthority.Hr;
 }
 
 /// <summary>
@@ -150,6 +157,27 @@ public class StaffDisciplinaryAction : TenantEntity
     public string? DecisionRationale { get; set; }
 
     // Closure
+    /// <summary>
+    /// Recorded when HR proceeds to a decision without the employee having answered the written
+    /// query — because they have absconded, are unreachable, or refused service.
+    /// </summary>
+    /// <remarks>
+    /// The natural-justice gate refuses a decision until the employee has been queried and given a
+    /// chance to answer. Real cases exist where that chance cannot be given, so there is an override
+    /// — but it is RECORDED, not silent. An exception path that leaves a trace is standard practice;
+    /// one that does not exist at all just means people work around the system, and then there is no
+    /// trace of anything.
+    /// </remarks>
+    public DateTime? QueryOpportunityWaivedAt { get; set; }
+
+    public Guid? QueryOpportunityWaivedById { get; set; }
+
+    [ForeignKey(nameof(QueryOpportunityWaivedById))]
+    public virtual Employee? QueryOpportunityWaivedBy { get; set; }
+
+    [MaxLength(1000)]
+    public string? QueryOpportunityWaivedReason { get; set; }
+
     public DateTime? ClosedDate { get; set; }
 
     [MaxLength(4000)]

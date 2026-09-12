@@ -266,6 +266,19 @@ public class UpdateOrganizationUnitDto : UpdateDtoBase
     public int Sequence { get; set; }
 
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Why the unit was restructured or given a new head, recorded on the resulting
+    /// <c>OrganizationUnitHistory</c> row.
+    /// </summary>
+    /// <remarks>
+    /// Optional, and only consulted when this update actually changes the parent or the head —
+    /// renaming a unit writes no history and so has nothing to explain. The dedicated
+    /// <c>move</c> and <c>change-head</c> endpoints have always required a reason; this update path
+    /// recorded nothing at all before areas 19-23 slice 3, so a reason had nowhere to go.
+    /// </remarks>
+    [MaxLength(500)]
+    public string? ChangeReason { get; set; }
 }
 
 /// <summary>
@@ -364,6 +377,35 @@ public class OrganizationUnitHistoryDto : BaseDto
     public DateOnly EffectiveFrom { get; set; }
     public DateOnly? EffectiveTo { get; set; }
     public string? ChangeReason { get; set; }
+
+    /// <summary>
+    /// What kind of change this row records: <c>Restructure</c>, <c>Leadership Change</c> or <c>Other</c>.
+    /// </summary>
+    /// <remarks>
+    /// Derived, never stored. The classification already existed in <c>ToDetailDto</c>, which nothing
+    /// in the repository ever called, so every consumer of the log was left to re-derive "reparent or
+    /// change of head?" from four nullable ids — and the register could not filter by it at all.
+    /// It now comes off <c>OrganizationUnitChangeTypes.Classify</c>, the one definition the
+    /// filter predicate is written against too.
+    /// </remarks>
+    public string ChangeType { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Filter for the paged change-log read: the register's unit, date-range and change-type controls.
+/// </summary>
+/// <remarks>
+/// Added in areas 19-23 slice 5. <c>GetPagedAsync</c> took a page number and nothing else, so the
+/// only way to answer "what changed in this unit last quarter" — the question Decision 6 says the
+/// register exists for — was to page through the whole table client-side. Every property is
+/// optional and an unset filter is the previous behaviour exactly.
+/// </remarks>
+public class OrganizationUnitHistoryFilterDto
+{
+    public Guid? UnitId { get; set; }
+    public DateOnly? StartDate { get; set; }
+    public DateOnly? EndDate { get; set; }
+    public string? ChangeType { get; set; }
 }
 
 /// <summary>
@@ -384,7 +426,8 @@ public class OrganizationUnitHistorySummaryDto
 /// </summary>
 public class OrganizationUnitHistoryDetailDto : OrganizationUnitHistoryDto
 {
-    public string ChangeType { get; set; } = string.Empty; // "Restructure", "Leadership Change", etc.
+    // ChangeType moved to the base DTO in areas 19-23 slice 5 — it is useful on every read, and
+    // declaring it here as well would only hide the inherited one.
     public string? ChangedBy { get; set; }
     public DateTime? ChangedAt { get; set; }
 }
@@ -597,8 +640,16 @@ public class LocationDto : BaseDto
     public string? City { get; set; }
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+    /// <summary>The administrative area this site stands in.</summary>
+    public Guid? GeoAreaId { get; set; }
     public string? CountryName { get; set; }
     public string? DigitalAddress { get; set; }
+    /// <summary>Map pin of the site. Both coordinates are set together or not at all.</summary>
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
+    /// <summary>The geofence zone self-service punches from staff at this location are checked against.</summary>
+    public Guid? GeofenceZoneId { get; set; }
+    public string? GeofenceZoneName { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Website { get; set; }
@@ -645,8 +696,21 @@ public class CreateLocationDto : CreateDtoBase
 
     public Guid? CountryId { get; set; }
 
+    /// <summary>The administrative area this site stands in. City is rewritten from it on save.</summary>
+    public Guid? GeoAreaId { get; set; }
+
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
+    /// <summary>Map pin of the site. Supply both coordinates or neither.</summary>
+    [Range(-90, 90)]
+    public double? Latitude { get; set; }
+
+    [Range(-180, 180)]
+    public double? Longitude { get; set; }
+
+    /// <summary>Geofence zone that governs self-service punches from staff at this location.</summary>
+    public Guid? GeofenceZoneId { get; set; }
 
     [MaxLength(50)]
     public string? Phone { get; set; }
@@ -702,8 +766,21 @@ public class UpdateLocationDto : UpdateDtoBase
 
     public Guid? CountryId { get; set; }
 
+    /// <summary>The administrative area this site stands in. City is rewritten from it on save.</summary>
+    public Guid? GeoAreaId { get; set; }
+
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
+    /// <summary>Map pin of the site. Supply both coordinates or neither.</summary>
+    [Range(-90, 90)]
+    public double? Latitude { get; set; }
+
+    [Range(-180, 180)]
+    public double? Longitude { get; set; }
+
+    /// <summary>Geofence zone that governs self-service punches from staff at this location.</summary>
+    public Guid? GeofenceZoneId { get; set; }
 
     [MaxLength(50)]
     public string? Phone { get; set; }
@@ -783,6 +860,8 @@ public class LocationHierarchyDto
     public string? ParentLocationName { get; set; }
     public string? City { get; set; }
     public Guid? CountryId { get; set; }
+    /// <summary>The administrative area this site stands in.</summary>
+    public Guid? GeoAreaId { get; set; }
     public string? CountryName { get; set; }
     public string Path { get; set; } = string.Empty;
     public int Sequence { get; set; }

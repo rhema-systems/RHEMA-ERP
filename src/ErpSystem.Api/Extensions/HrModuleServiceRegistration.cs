@@ -1,4 +1,4 @@
-// <auto-ported> HR module — dependency injection registrations.
+﻿// <auto-ported> HR module — dependency injection registrations.
 //
 // Kept OUT of ServiceCollectionExtensions.cs (shared by all module developers) so that re-syncing
 // HR from HRApi only rewrites this file. Wired up with a single call:
@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR;
 using ErpSystem.Core.Services.HR.Appraisal;
+using ErpSystem.Core.Services.HR.Assets;
 using ErpSystem.Core.Services.HR.Handlers;
 using ErpSystem.Core.Services.HR.Benefits;
 using ErpSystem.Core.Services.Common;
@@ -69,6 +70,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAssetAttachmentRepository, AssetAttachmentRepository>();
         services.AddScoped<IAssetRequisitionRepository, AssetRequisitionRepository>();
         services.AddScoped<IAssetTransferRepository, AssetTransferRepository>();
+        // AST-3 — the surcharge and what has been collected against it (slice 7).
+        services.AddScoped<IAssetSurchargeRepository, AssetSurchargeRepository>();
+        services.AddScoped<IAssetSurchargeRecoveryRepository, AssetSurchargeRecoveryRepository>();
         services.AddScoped<IAwardTypeRepository, AwardTypeRepository>();
         services.AddScoped<IAwardLevelRepository, AwardLevelRepository>();
         services.AddScoped<IAwardBudgetRepository, AwardBudgetRepository>();
@@ -83,7 +87,24 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardCommitteeMemberRepository, AwardCommitteeMemberRepository>();
         services.AddScoped<IAwardNominationReviewRepository, AwardNominationReviewRepository>();
         services.AddScoped<ILongServiceAwardRepository, LongServiceAwardRepository>();
+        services.AddScoped<ILongServiceMilestoneRepository, LongServiceMilestoneRepository>();
         services.AddScoped<IAwardTypeTargetRepository, AwardTypeTargetRepository>();
+        services.AddScoped<IAwardCycleRepository, AwardCycleRepository>();
+        services.AddScoped<IAwardVoteRepository, AwardVoteRepository>();
+        // Who may vote. Mirrors the eligibility evaluator on purpose - same targets, same
+        // matching - so the two cannot drift into behaving differently.
+        services.AddScoped<IAwardElectorateEvaluator, AwardElectorateEvaluator>();
+        // Resolves the polymorphic AwardTypeTarget.TargetId to a name. Not a repository for an
+        // entity of its own — it reads four different tables depending on the target's kind.
+        services.AddScoped<IAwardTargetNameResolver, AwardTargetNameResolver>();
+        // Applies every criterion an award type carries - service years, age, target scoping and
+        // the per-employee cap - not just the target scoping the old check looked at.
+        services.AddScoped<IAwardEligibilityEvaluator, AwardEligibilityEvaluator>();
+        // Reads the appraisal and goal stores to decide who an award puts forward automatically.
+        services.AddScoped<IAwardPerformanceTriggerEvaluator, AwardPerformanceTriggerEvaluator>();
+        // Reads service years and disciplinary records to decide who has reached a long-service
+        // milestone. Shared by the preview and the run so the two cannot compute different answers.
+        services.AddScoped<ILongServiceSweepEvaluator, LongServiceSweepEvaluator>();
         services.AddScoped<ICompanyEventRepository, CompanyEventRepository>();
         services.AddScoped<IEventParticipantRepository, EventParticipantRepository>();
         services.AddScoped<IEventAttendanceRepository, EventAttendanceRepository>();
@@ -158,10 +179,6 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelItineraryRepository, StaffTravelItineraryRepository>();
         services.AddScoped<IStaffTravelItineraryLegRepository, StaffTravelItineraryLegRepository>();
         services.AddScoped<IStaffTravelItineraryActivityRepository, StaffTravelItineraryActivityRepository>();
-        services.AddScoped<IStaffTravelApprovalWorkflowTemplateRepository, StaffTravelApprovalWorkflowTemplateRepository>();
-        services.AddScoped<IStaffTravelApprovalWorkflowStepRepository, StaffTravelApprovalWorkflowStepRepository>();
-        services.AddScoped<IStaffTravelApprovalInstanceRepository, StaffTravelApprovalInstanceRepository>();
-        services.AddScoped<IStaffTravelApprovalDecisionRepository, StaffTravelApprovalDecisionRepository>();
         services.AddScoped<IStaffTravelFlightBookingRepository, StaffTravelFlightBookingRepository>();
         services.AddScoped<IStaffTravelFlightSegmentRepository, StaffTravelFlightSegmentRepository>();
         services.AddScoped<IStaffTravelHotelBookingRepository, StaffTravelHotelBookingRepository>();
@@ -175,7 +192,6 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelPolicyRepository, StaffTravelPolicyRepository>();
         services.AddScoped<IStaffTravelPolicyRuleRepository, StaffTravelPolicyRuleRepository>();
         services.AddScoped<IStaffTravelPolicyExceptionRepository, StaffTravelPolicyExceptionRepository>();
-        services.AddScoped<IStaffTravelVendorRepository, StaffTravelVendorRepository>();
         services.AddScoped<IStaffTravelDocumentRepository, StaffTravelDocumentRepository>();
         services.AddScoped<IStaffTravelVisaRequirementRepository, StaffTravelVisaRequirementRepository>();
         services.AddScoped<IStaffTravelVisaApplicationRepository, StaffTravelVisaApplicationRepository>();
@@ -184,7 +200,6 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelAlertNotificationRepository, StaffTravelAlertNotificationRepository>();
         services.AddScoped<IStaffTravelInsurancePolicyRepository, StaffTravelInsurancePolicyRepository>();
         services.AddScoped<IStaffTravelHealthRequirementRepository, StaffTravelHealthRequirementRepository>();
-        services.AddScoped<IStaffTravelCurrencyExchangeRateRepository, StaffTravelCurrencyExchangeRateRepository>();
         services.AddScoped<IJobCandidateRepository, JobCandidateRepository>();
         services.AddScoped<IJobCandidateQualificationRepository, JobCandidateQualificationRepository>();
         services.AddScoped<IJobCandidateWorkHistoryRepository, JobCandidateWorkHistoryRepository>();
@@ -414,11 +429,13 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAppraisalSettingsService, AppraisalSettingsService>();
         services.AddScoped<ICompanyHrPolicyProvider, CompanyHrPolicyProvider>();
         services.AddScoped<ICompanyHrPolicySettingsService, CompanyHrPolicySettingsService>();
+        services.AddScoped<IProbationLetterService, ProbationLetterService>();
         services.AddScoped<ICompanyProfileProvider, CompanyProfileProvider>();
         services.AddScoped<ICompanyProfileService, CompanyProfileService>();
         services.AddScoped<IAppraisalCycleService, AppraisalCycleService>();
         services.AddScoped<IAppraisalCycleTargetService, AppraisalCycleTargetService>();
         services.AddScoped<IPeerNominationService, PeerNominationService>();
+        services.AddScoped<IPeerEvaluationService, PeerEvaluationService>();
         services.AddScoped<IAppraisalTemplateService, AppraisalTemplateService>();
         services.AddScoped<IGoalLibraryService, GoalLibraryService>();
         services.AddScoped<IAppraisalCycleTemplateService, AppraisalCycleTemplateService>();
@@ -451,6 +468,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAtRiskGoalsQueryService, AtRiskGoalsQueryService>();
         services.AddScoped<IGoalWorkflowCommandService, GoalWorkflowCommandService>();
         services.AddScoped<IGoalRiskSettingsProvider, GoalRiskSettingsProvider>();
+        services.AddScoped<IGoalRiskSettingsService, GoalRiskSettingsService>();
         services.AddScoped<IGoalRiskEvaluator, GoalRiskEvaluator>();
         services.AddScoped<ICheckInService, CheckInService>();
         services.AddScoped<IPerformanceJournalService, PerformanceJournalService>();
@@ -468,6 +486,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IOrganizationUnitService, OrganizationUnitService>();
         services.AddScoped<IOrganizationUnitHistoryService, OrganizationUnitHistoryService>();
         services.AddScoped<IOrganogramService, OrganogramService>();
+        // Slice 4b. Until this line the Team/TeamMember/TeamMemberHistory entities had DbSets,
+        // tables and EF configuration but no way at all to write them.
+        services.AddScoped<ITeamService, TeamService>();
         services.AddScoped<ILocationStructureService, LocationStructureService>();
         services.AddScoped<ILocationLevelService, LocationLevelService>();
         services.AddScoped<ILocationService, LocationService>();
@@ -482,7 +503,17 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAssetAttachmentService, AssetAttachmentService>();
         services.AddScoped<IAssetRequisitionService, AssetRequisitionService>();
         services.AddScoped<IAssetTransferService, AssetTransferService>();
+        // AST-5 / AST-5b — the responsibility document, rendered from the HR-editable template.
+        // Its email-event catalog is registered with the other catalogs further down.
+        services.AddScoped<IAssetTermsLetterService, AssetTermsLetterService>();
+        // AST-3 / D-d — charging an employee for an asset they damaged, lost or never returned.
+        services.AddScoped<IAssetSurchargeService, AssetSurchargeService>();
         services.AddScoped<IAwardTypeService, AwardTypeService>();
+        services.AddScoped<IAwardCycleService, AwardCycleService>();
+        services.AddScoped<IAwardEligibilityService, AwardEligibilityService>();
+        services.AddScoped<IAwardVotingService, AwardVotingService>();
+        services.AddScoped<IAwardCommitteeScoringService, AwardCommitteeScoringService>();
+        services.AddScoped<IAwardCandidateGenerationService, AwardCandidateGenerationService>();
         services.AddScoped<IAwardLevelService, AwardLevelService>();
         services.AddScoped<IAwardBudgetService, AwardBudgetService>();
         services.AddScoped<IEmployeeAwardService, EmployeeAwardService>();
@@ -495,6 +526,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAwardCommitteeMemberService, AwardCommitteeMemberService>();
         services.AddScoped<IAwardCommitteeReviewService, AwardCommitteeReviewService>();
         services.AddScoped<ILongServiceAwardService, LongServiceAwardService>();
+        services.AddScoped<ILongServiceMilestoneService, LongServiceMilestoneService>();
+        services.AddScoped<ILongServiceSweepService, LongServiceSweepService>();
         services.AddScoped<IAwardTypeTargetService, AwardTypeTargetService>();
         services.AddScoped<ICompanyEventService, CompanyEventService>();
         services.AddScoped<IMeetingRoomService, MeetingRoomService>();
@@ -539,6 +572,17 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IShePerformanceService, ShePerformanceService>();
         services.AddScoped<ISafetyCommitteeService, SafetyCommitteeService>();
         services.AddScoped<ISheReturnToWorkService, SheReturnToWorkService>();
+        services.AddScoped<ISheReminderService, SheReminderService>();
+        services.AddScoped<IStaffMovementReminderService, StaffMovementReminderService>();
+        services.AddScoped<ISheCorrectiveActionTrackerService, SheCorrectiveActionTrackerService>();
+        services.AddScoped<ISheKpiComputationService, SheKpiComputationService>();
+        services.AddScoped<ISheAuditService, SheAuditService>();
+        services.AddScoped<ISheStopWorkService, SheStopWorkService>();
+        services.AddScoped<ISheControlledDocumentService, SheControlledDocumentService>();
+        services.AddScoped<ISheEnvironmentalPermitService, SheEnvironmentalPermitService>();
+        services.AddScoped<ISheEnvironmentalGovernanceService, SheEnvironmentalGovernanceService>();
+        services.AddScoped<ISheEnvironmentalReviewService, SheEnvironmentalReviewService>();
+        services.AddScoped<ISheMonthlyEnvironmentalReportService, SheMonthlyEnvironmentalReportService>();
         services.AddScoped<IOrientationCategoryService, OrientationCategoryService>();
         services.AddScoped<IOrientationProgramService, OrientationProgramService>();
         services.AddScoped<IOrientationSessionService, OrientationSessionService>();
@@ -547,12 +591,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IOrientationDashboardService, OrientationDashboardService>();
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
-        services.AddScoped<IStaffTravelApprovalService, StaffTravelApprovalService>();
         services.AddScoped<IStaffTravelBookingService, StaffTravelBookingService>();
         services.AddScoped<IStaffTravelFinanceService, StaffTravelFinanceService>();
         services.AddScoped<IStaffTravelPolicyService, StaffTravelPolicyService>();
         services.AddScoped<IStaffTravelComplianceService, StaffTravelComplianceService>();
-        services.AddScoped<IStaffTravelConfigurationService, StaffTravelConfigurationService>();
         services.AddScoped<IHealthcareFacilityService, HealthcareFacilityService>();
         services.AddScoped<IMedicalInsuranceService, MedicalInsuranceService>();
         services.AddScoped<IMedicalBenefitSchemeService, MedicalBenefitSchemeService>();
@@ -591,6 +633,87 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IOnboardingPlanService, OnboardingPlanService>();
         services.AddScoped<IProbationService, ProbationService>();
         services.AddScoped<IRecruitmentAnalyticsService, RecruitmentAnalyticsService>();
+        // Working days for HR's statutory deadlines (FR-HR-180's appeal windows). Org-level by
+        // design — Monday to Friday less the tenant's public holidays, never the appellant's own
+        // roster, or the same deadline would fall on different dates for different people.
+        services.AddScoped<IHrWorkingDayCalculator, HrWorkingDayCalculator>();
+
+        // FR-HR-181's grievance ladder. Separate from the disciplinary case on purpose: a grievance
+        // is raised BY an employee and a case ABOUT one, which gives them opposite read rules.
+        services.AddScoped<IStaffGrievanceService, StaffGrievanceService>();
+        // Area 9c slice 5 — FR-HR-084's responder matrix. StaffGrievanceService depends on it
+        // to name a rung's responder on file and on escalate.
+        services.AddScoped<IEmployeeRelationsResponderService, EmployeeRelationsResponderService>();
+        // Area 9c slice 6 — anonymous / whistleblower intake.
+        services.AddScoped<IEmployeeRelationsConcernService, EmployeeRelationsConcernService>();
+        // Area 9c slice 8 — ER analytics.
+        services.AddScoped<IEmployeeRelationsAnalyticsService, EmployeeRelationsAnalyticsService>();
+
+        // Area 25 slice 12 (D6) — the employee's own profile, and the approval path for the parts
+        // of it that carry identity or payment consequences. Registered beside the grievance
+        // service because it is the other surface an employee raises ABOUT their own record.
+        services.AddScoped<IEmployeeProfileChangeService, EmployeeProfileChangeService>();
+
+        // Area 25 slice 12b (D7) — letters an employee asks HR for. The catalog registration is
+        // what makes the built-in templates resolvable, so a tenant that has never opened the
+        // template editor can still issue a letter.
+        services.AddScoped<IHrLetterRequestService, ErpSystem.Core.Services.HR.Letters.HrLetterRequestService>();
+
+        // Area 25 slice 12c — staff announcements, and the audience resolver they share with
+        // whatever broadcasts next. The resolver is the shared one on purpose: the only working
+        // rule-to-employee expansion before this was private to AppraisalCycleService, and
+        // OrientationAudienceRule has never had one at all.
+        services.AddScoped<IHrAudienceResolver, HrAudienceResolver>();
+        services.AddScoped<IHrAnnouncementService, HrAnnouncementService>();
+
+        // Area 25 slice 12d — the policy library and its acknowledgements. Shares the resolver
+        // above: a policy applies to whoever is in scope now, so the outstanding roster is
+        // computed rather than pre-seeded.
+        services.AddScoped<IHrPolicyService, HrPolicyService>();
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog,
+            ErpSystem.Core.Services.HR.Letters.HrLettersEmailEventCatalog>();
+
+        // Area 25 slice 13a — the staff directory and "my team". Third consumer of the audience
+        // resolver, for its unit-subtree walk: browsing a unit means the unit AND everything
+        // under it, and that walk already existed here rather than being copied a fourth time.
+        services.AddScoped<IStaffDirectoryService, StaffDirectoryService>();
+
+        // The reminder sweep spans both halves of the area — disciplinary clocks and unanswered
+        // grievance rungs. Scoped so the daily host and the run-now endpoint share one code path.
+        services.AddScoped<IDisciplineReminderService, DisciplineReminderService>();
+        services.AddScoped<IProbationConfirmingAuthorityService, ProbationConfirmingAuthorityService>();
+        services.AddScoped<IEmployeeOathOfSecrecyService, EmployeeOathOfSecrecyService>();
+
+        // Finish plan lane 3c — the employee document file, its shared vocabulary and the position
+        // requirements that make it answerable.
+        services.AddScoped<IEmployeeDocumentService, EmployeeDocumentService>();
+        // The exit register (area 9b) — one separation record per employee leaving, by any route.
+        services.AddScoped<ISeparationService, SeparationService>();
+        // HR Assets' read-only answer to "what has this leaver not given back?" — FR-HR-183, the
+        // seam area 9b's decision D4 left open because area 16 did not exist yet. Registered beside
+        // the separation service it feeds rather than with the asset services it reads, so that the
+        // one place this crosses areas is visible from the side that consumes it.
+        services.AddScoped<AssetCustodyClearanceBridge>();
+        // The sixth reminder engine in the system, after SHE, movements, discipline, travel and
+        // probation. Same shape: a run header, one dispatch row per reminder, a dedupe key.
+        services.AddScoped<ISeparationReminderService, SeparationReminderService>();
+        services.AddScoped<IProbationReminderService, ProbationReminderService>();
+        services.AddScoped<IStaffTravelReminderService, StaffTravelReminderService>();
+        // Asset reminder engine (area 16 slice 9, AST-1): maintenance due, overdue, and
+        // never scheduled. Slice 11 adds insurance expiry and overdue returns to this one
+        // rather than starting a seventh.
+        services.AddScoped<IAssetReminderService, AssetReminderService>();
+        // Travel's read-only window onto Finance's currency and exchange-rate masters —
+        // replaces the retired StaffTravelCurrencyExchangeRate table (slice 6).
+        services.AddScoped<HrCurrencyBridge>();
+        // Area 12's alias for the same bridge — registered separately so its existing constructor
+        // injections resolve unchanged. Retire with the alias.
+        services.AddScoped<StaffTravelCurrencyBridge>();
+        // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
+        services.AddScoped<StaffTravelPolicyGuard>();
+        // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).
+        services.AddScoped<StaffTravelBudgetRollup>();
+
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();
         services.AddScoped<IStaffDisciplinaryCaseService, StaffDisciplinaryCaseService>();
@@ -700,21 +823,33 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IClientEngagementService, ClientEngagementService>();
         services.AddScoped<IConsultantTimesheetService, ConsultantTimesheetService>();
         services.AddScoped<ITimesheetInvoiceService, TimesheetInvoiceService>();
-        services.AddScoped<ICandidatePortalAuthService, CandidatePortalAuthService>();
+        // The candidate portal's own auth (PortalBearer scheme, CandidatePortalAuthService,
+        // CandidateJwtService) was retired 2026-08-30 — candidates move onto the main JWT scheme
+        // with the Candidate role. ICandidatePortalService survives: its application/profile/
+        // document logic is reused by the main-scheme candidate surface.
         services.AddScoped<ICandidatePortalService, CandidatePortalService>();
-        services.AddScoped<IConsultantClientPortalAuthService, ConsultantClientPortalAuthService>();
+        // The consultant-client portal's own auth (the PortalBearer scheme's LAST tenant —
+        // ConsultantClientPortalAuthService, ConsultantClientPortalJwtService) was retired
+        // 2026-08-31: contacts are invited by HR onto main-scheme Identity accounts with the
+        // ConsultantClient role. IConsultantClientPortalService survives on new signatures for
+        // the rebuilt api/client-portal surface; the contact service owns the invite lifecycle.
+        services.AddScoped<IConsultantClientContactService, ConsultantClientContactService>();
         services.AddScoped<IConsultantClientPortalService, ConsultantClientPortalService>();
 
         // HR support services (implementations outside Core/Data or outside Interfaces/HR)
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IDateTimeProvider, ErpSystem.Api.Services.SystemDateTimeProvider>();
         services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Recruitment.RecruitmentEmailEventCatalog>();
+        // The probation module ships one document (FR-HR-032's confirmation letter). Registering the
+        // catalog is what gives TemplatedEmailService a built-in default, so the letter renders on a
+        // tenant that has never opened the template editor.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Probation.ProbationEmailEventCatalog>();
+        // Staff assets ship one document too (AST-5's responsibility-and-terms form), and register
+        // for the same reason: the built-in default is what makes it render before anyone has
+        // opened the template editor.
+        services.AddSingleton<ErpSystem.Core.Interfaces.Common.IEmailEventCatalog, ErpSystem.Core.Services.HR.Assets.AssetsEmailEventCatalog>();
         services.AddScoped<ErpSystem.Core.Interfaces.Common.ITemplatedEmailService, ErpSystem.Core.Services.Common.TemplatedEmailService>();
         services.AddScoped<ErpSystem.Core.Interfaces.INumberSequenceService, ErpSystem.Data.Services.NumberSequenceService>();
-        services.AddScoped<ErpSystem.Core.Interfaces.ICandidateJwtService, ErpSystem.Api.Services.CandidateJwtService>();
-        services.AddScoped<ErpSystem.Core.Interfaces.IConsultantClientPortalJwtService, ErpSystem.Api.Services.ConsultantClientPortalJwtService>();
         services.AddSingleton<ErpSystem.Core.Services.Common.IEmailTemplateRenderer, ErpSystem.Core.Services.Common.EmailTemplateRenderer>();
-        services.AddScoped<IPasswordHasher<ErpSystem.Core.Entities.HR.Recruitment.CandidatePortalAccount>, PasswordHasher<ErpSystem.Core.Entities.HR.Recruitment.CandidatePortalAccount>>();
-        services.AddScoped<IPasswordHasher<ErpSystem.Core.Entities.HR.ConsultantClientPortalAccount>, PasswordHasher<ErpSystem.Core.Entities.HR.ConsultantClientPortalAccount>>();
 
         return services;
     }

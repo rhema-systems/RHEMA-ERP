@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 
 namespace ErpSystem.Core.Enums;
 
@@ -301,6 +301,12 @@ public enum RefereeType
     Personal
 }
 
+/// <summary>
+/// Why an employee's position changed, as recorded on their position-history timeline.
+///
+/// Stored as an int with no lookup table or check constraint, so members are APPENDED and never
+/// renumbered — an existing row's meaning must not shift under it.
+/// </summary>
 public enum PositionChangeReason
 {
     InitialAssignment = 0,
@@ -315,7 +321,17 @@ public enum PositionChangeReason
 
     Termination = 5,
 
-    Other = 6
+    Other = 6,
+
+    // Added with area 8. Three of the seven staff-movement types had no reason of their own and
+    // landed on Other, which loses the fact in the one place people look for it: a secondment and a
+    // permanent transfer are not the same event, and a timeline that calls both "Other" cannot say
+    // whether someone ever actually left their post.
+    Secondment = 7,
+
+    ActingAppointment = 8,
+
+    Redesignation = 9
 }
 
 public enum EmployeeBankAccountType
@@ -1064,13 +1080,22 @@ public enum SalaryReviewProposalType
     Bonus = 2
 }
 
-/// <summary>Lifecycle of a salary review proposal handed off to payroll/comp (Theme 11).</summary>
+/// <summary>
+/// Lifecycle of a salary review proposal handed off to payroll/comp (Theme 11).
+///
+/// <para>Proposed → PendingApproval (out on the workflow engine) → Approved | Rejected, and an
+/// approved proposal is marked Applied once payroll has made the change.</para>
+/// </summary>
 public enum SalaryReviewProposalStatus
 {
     Proposed = 1,
     Approved = 2,
     Rejected = 3,
-    Applied = 4
+    Applied = 4,
+
+    /// <summary>Submitted and out for approval on the workflow engine.</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 5
 }
 
 /// <summary>
@@ -1087,13 +1112,22 @@ public enum EmploymentActionType
     Recognition = 5
 }
 
-/// <summary>Lifecycle of an employment-action proposal raised from an appraisal recommendation.</summary>
+/// <summary>
+/// Lifecycle of an employment-action proposal raised from an appraisal recommendation.
+///
+/// <para>Proposed → PendingApproval (out on the workflow engine) → Approved | Rejected, and an
+/// approved proposal is marked Actioned once the owning module has created the real record.</para>
+/// </summary>
 public enum EmploymentActionProposalStatus
 {
     Proposed = 1,
     Approved = 2,
     Rejected = 3,
-    Actioned = 4
+    Actioned = 4,
+
+    /// <summary>Submitted and out for approval on the workflow engine.</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 5
 }
 
 public enum AppraisalCycleStatus
@@ -1346,7 +1380,10 @@ public enum AppraisalAttachmentEntityType
 
     KpiEvaluation = 6,
 
-    CalibrationSession = 7
+    CalibrationSession = 7,
+
+    /// <summary>Evidence attached to an interim (quarterly/mid-year) review event.</summary>
+    ReviewEvent = 8
 }
 
 public enum EvaluatorRole
@@ -1486,6 +1523,16 @@ public enum CalibrationStatus
     Cancelled = 4
 }
 
+/// <summary>
+/// Lifecycle of a performance improvement plan.
+///
+/// <para><c>Draft</c> and <c>PendingApproval</c> were added when the PIP was put on the generic
+/// workflow engine. A PIP is an employment record served on a named employee, so it is written in
+/// draft, approved through a published <c>PerformanceImprovementPlan</c> workflow definition, and
+/// only then becomes <c>Active</c> — the engine owns those three states and nothing else may set
+/// them. Everything from <c>Active</c> onwards is the plan actually running, and stays a direct
+/// action on the record.</para>
+/// </summary>
 public enum PipStatus
 {
     [Description("Active")]
@@ -1501,7 +1548,15 @@ public enum PipStatus
     Unsuccessful = 4,
 
     [Description("Cancelled")]
-    Cancelled = 5
+    Cancelled = 5,
+
+    /// <summary>Being written. Not yet visible to the employee and not yet in force.</summary>
+    [Description("Draft")]
+    Draft = 6,
+
+    /// <summary>Out for approval on the workflow engine.</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 7
 }
 
 public enum PerformanceRating
@@ -2169,6 +2224,28 @@ public enum EmploymentType
     Freelance = 9
 }
 
+/// <summary>
+/// Why an employee is NOT paid through the payroll run. Recorded alongside
+/// <c>Employee.IsOnPayroll = false</c>, because a bare "off" cannot answer the question the payroll
+/// owner will ask of every active person missing from a run — and because the answer decides how
+/// that person IS paid (an invoice, an allowance, another employer).
+/// </summary>
+public enum OffPayrollReason
+{
+    /// <summary>Paid against invoices — consultants, freelancers, contractors on a fee.</summary>
+    PaidByInvoice = 1,
+    /// <summary>Paid a stipend or allowance outside the run — interns, national service personnel.</summary>
+    Allowance = 2,
+    /// <summary>Paid by a parent organisation — secondees, attached staff.</summary>
+    PaidByParentOrganisation = 3,
+    /// <summary>Unpaid — volunteers, honorary appointments.</summary>
+    Unpaid = 4,
+    /// <summary>Board and committee members remunerated by sitting allowance, not payroll.</summary>
+    BoardOrCommittee = 5,
+    /// <summary>Anything else; the note says what.</summary>
+    Other = 99
+}
+
 public enum JobApplicantCommunicationType
 {
     Email = 1,
@@ -2277,7 +2354,14 @@ public enum OnboardingTaskStatus
     Completed = 3,
     Overdue = 4,
     Waived = 5,
-    Blocked = 6
+    Blocked = 6,
+
+    /// <summary>
+    /// Done by the assignee, awaiting the second-party sign-off that <c>RequiresVerification</c> asks
+    /// for. Deliberately distinct from <see cref="Completed"/>: a task nobody has verified is not
+    /// finished, and the plan's "completed tasks" roll-up must not count it.
+    /// </summary>
+    PendingVerification = 7
 }
 
 public enum OnboardingAssetType
@@ -2305,11 +2389,56 @@ public enum OnboardingAssetProvisionStatus
     NotRequired = 6
 }
 
+/// <summary>How an oath of secrecy reached the record (FR-HR-030).</summary>
+/// <remarks>
+/// The two are kept apart deliberately. An oath affirmed in the system carries a server-stamped
+/// time, the affirmer's IP and a tamper hash; one sworn on paper carries a witness and, usually, a
+/// scan. Collapsing them into a single "recorded" state would let an HR-entered row be mistaken
+/// later for the employee's own act — which is the distinction the whole record exists to preserve.
+/// </remarks>
+public enum OathAdministrationMethod
+{
+    /// <summary>The employee affirmed it themselves in the system.</summary>
+    Affirmed = 1,
+
+    /// <summary>Sworn on paper before a witness, and recorded afterwards by HR.</summary>
+    Administered = 2
+}
+
 public enum ProbationStatus
 {
+    /// <summary>Running. Reviews are held, and the outcome has not been asked for yet.</summary>
     Active = 1,
+
+    /// <summary>Confirmed: the employee's appointment is permanent.</summary>
     Completed = 2,
-    Terminated = 3
+
+    /// <summary>Ended without confirmation. Area 15b records the decision and hands off.</summary>
+    Terminated = 3,
+
+    /// <summary>
+    /// Submitted to the confirming authority and awaiting their decision (area 15b slice 8b).
+    /// </summary>
+    /// <remarks>
+    /// Added because nothing could otherwise tell "running" from "out for confirmation" — on a
+    /// screen or in a query — and the reminder engine would have kept chasing a form that had
+    /// already gone out. Statuses are stored as int and the DB is built from the EF model, so
+    /// adding members is schema-safe.
+    /// </remarks>
+    PendingConfirmation = 4,
+
+    /// <summary>
+    /// The authority has approved confirmation; HR has yet to record it and issue the letter.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This exists because the FRD chain has two human steps — <i>head confirms → HR issues the
+    /// confirmation letter</i> — and because a workflow status adapter is synchronous and sees only
+    /// the entity, so it cannot write the employee record. Approval lands here; HR's confirm call
+    /// applies <c>StaffStatus</c> and <c>ConfirmationDate</c> and moves it to <c>Completed</c>.
+    /// Same shape as the proposals: leave the terminal step off the engine, because it records that
+    /// the work was DONE rather than that anyone approved it.
+    /// </remarks>
+    ConfirmationApproved = 5
 }
 
 public enum ProbationReviewStatus
@@ -2623,6 +2752,385 @@ public enum DisciplineLegalRiskLevel
     Critical = 4
 }
 
+/// <summary>
+/// Who may issue a disciplinary action of a given type, per FR-HR-080 and FR-HR-092.
+/// </summary>
+/// <remarks>
+/// This lives on <see cref="ErpSystem.Core.Entities.HR.StaffDiscipline.StaffDisciplinaryActionType"/>
+/// rather than being hard-coded against sanction names, because what counts as a head-of-department
+/// sanction is a policy each tenant sets in its own catalog — TDC's rule is that HODs are limited to
+/// verbal warnings, but the mechanism should not assume the rule.
+///
+/// The values are ordered by increasing authority so a comparison reads naturally
+/// (<c>type.MinimumAuthority > DisciplinaryActionAuthority.HeadOfDepartment</c>). Append only:
+/// this is a plain int column with no lookup table, so renumbering would silently change what
+/// existing rows mean.
+/// </remarks>
+public enum DisciplinaryActionAuthority
+{
+    /// <summary>A head of department may issue this directly. FR-HR-080 puts verbal warnings here.</summary>
+    [Description("Head of Department")]
+    HeadOfDepartment = 1,
+
+    /// <summary>HR issues it. The default, and the safe one for an unmaintained catalog row.</summary>
+    [Description("HR")]
+    Hr = 2,
+
+    /// <summary>
+    /// Requires management sign-off. FR-HR-092 puts terminations here — the MD signs all of them
+    /// except the procedural cases HR approves automatically per policy.
+    /// </summary>
+    [Description("Management")]
+    Management = 3
+}
+
+/// <summary>
+/// FR-HR-181's escalation ladder: Employee → Supervisor → HOD → HR → GM Finance &amp; Administration →
+/// Managing Director → Board.
+/// </summary>
+/// <remarks>
+/// The employee is the origin, not a rung — these are the levels a grievance is answered AT, in the
+/// order the requirement names them. Ordered so <c>next = current + 1</c> is the escalation, and
+/// Board is the ceiling.
+///
+/// ⚠ These rungs are NOT resolved to people by the system. TDC's org data cannot support it: on
+/// 2026-08-16, 0 of 41 organisation units had a head recorded and 175 of 1,486 active employees had a
+/// manager, so deriving "this employee's HOD" would resolve to nobody for almost everyone. A
+/// grievance therefore sits AT a rung and whoever answers it is recorded from their own token, with
+/// HR able to name a responder explicitly per step. When an org-authority model exists it can add
+/// routing on top; the ladder and the record work without it. See [[hr-deferred-modules]] #3.
+/// </remarks>
+public enum GrievanceEscalationLevel
+{
+    [Description("Supervisor")]
+    Supervisor = 1,
+
+    [Description("Head of Department")]
+    HeadOfDepartment = 2,
+
+    [Description("Human Resources")]
+    HumanResources = 3,
+
+    [Description("GM Finance & Administration")]
+    GeneralManagerFinanceAdmin = 4,
+
+    [Description("Managing Director")]
+    ManagingDirector = 5,
+
+    [Description("Board")]
+    Board = 6
+}
+
+public enum GrievanceStatus
+{
+    [Description("Filed")]
+    Filed = 1,
+
+    [Description("Under Review")]
+    UnderReview = 2,
+
+    [Description("Escalated")]
+    Escalated = 3,
+
+    [Description("Resolved")]
+    Resolved = 4,
+
+    [Description("Withdrawn")]
+    Withdrawn = 5,
+
+    /// <summary>Closed without resolution — the ladder was exhausted at Board level.</summary>
+    [Description("Closed")]
+    Closed = 6
+}
+
+/// <summary>What the responder at a rung decided to do with the grievance.</summary>
+public enum GrievanceStepOutcome
+{
+    [Description("Awaiting Response")]
+    AwaitingResponse = 1,
+
+    [Description("Resolved At This Level")]
+    Resolved = 2,
+
+    [Description("Escalated")]
+    Escalated = 3
+}
+
+/// <summary>
+/// What an anonymously-reported concern is about — area 9c slice 6, decision D-2.
+/// </summary>
+/// <remarks>
+/// Kept deliberately coarse. A reporter choosing a category is telling HR how to triage, not
+/// classifying themselves out of anonymity — a fine-grained list would narrow the field of possible
+/// reporters, which is the opposite of the point.
+/// </remarks>
+public enum ConcernCategory
+{
+    [Description("Harassment")]
+    Harassment = 1,
+
+    [Description("Discrimination")]
+    Discrimination = 2,
+
+    [Description("Bullying")]
+    Bullying = 3,
+
+    [Description("Safety Risk")]
+    SafetyRisk = 4,
+
+    [Description("Fraud or Malpractice")]
+    FraudOrMalpractice = 5,
+
+    [Description("Misconduct")]
+    Misconduct = 6,
+
+    [Description("Other")]
+    Other = 7
+}
+
+/// <summary>Where an anonymously-reported concern has got to — area 9c slice 6.</summary>
+public enum ConcernStatus
+{
+    /// <summary>Reported, nobody has looked at it yet.</summary>
+    [Description("New")]
+    New = 1,
+
+    /// <summary>HR has read it and is deciding what to do.</summary>
+    [Description("Under Triage")]
+    UnderTriage = 2,
+
+    /// <summary>Being looked into, without a case having been opened.</summary>
+    [Description("Under Review")]
+    UnderReview = 3,
+
+    [Description("Closed")]
+    Closed = 4,
+
+    /// <summary>Became a named employee-relations case. Terminal for the concern itself.</summary>
+    [Description("Converted To Case")]
+    ConvertedToCase = 5
+}
+
+/// <summary>
+/// Which part of an employee-relations case a document belongs to — area 9c slice 3.
+/// </summary>
+/// <remarks>
+/// Mirrors <see cref="DisciplinaryDocumentScope"/>, which area 9 built for the disciplinary case
+/// and the grievance half never got: before slice 3 a grievance had no document surface at all, so
+/// FR-HR-181's "final signed agreement" could not be held anywhere.
+///
+/// <para>⚠ There is deliberately no <c>Conference</c> member yet. Slice 4 builds the conference
+/// entity, and a scope pointing at a table that does not exist would be an FK with nowhere to go.
+/// It is appended there — this enum is append-only, like every other in this file.</para>
+/// </remarks>
+public enum GrievanceDocumentScope
+{
+    /// <summary>Belongs to the case as a whole — the complaint as filed on paper, correspondence.</summary>
+    [Description("Case")]
+    Case = 1,
+
+    /// <summary>Attached to one rung's answer.</summary>
+    [Description("Ladder Step")]
+    Step = 2,
+
+    /// <summary>Evidence gathered during the investigation, or the report itself.</summary>
+    [Description("Investigation")]
+    Investigation = 3,
+
+    /// <summary>FR-HR-181 obligation 9 — the final signed agreement. At most one per case.</summary>
+    [Description("Signed Agreement")]
+    Agreement = 4,
+
+    /// <summary>Papers tabled at, or minutes of, a conference — appended by slice 4 as promised.</summary>
+    [Description("Conference")]
+    Conference = 5
+}
+
+/// <summary>
+/// What kind of meeting was convened on an employee-relations case — area 9c slice 4, decision D-8.
+/// </summary>
+/// <remarks>
+/// One entity for three uses rather than three tables: a case conference, a mediation and a union
+/// consultation are the same shape — a meeting convened on a date, at a place, chaired by somebody,
+/// attended by named people, producing notes and an outcome. What differs is why it was called, and
+/// that is this enum.
+///
+/// <para><see cref="UnionConsultation"/> is FR-HR-181's sixth obligation: the requirement names
+/// "union consultation notes" among the things a grievance must retain, and before slice 4 there was
+/// nowhere in the schema to put them.</para>
+/// </remarks>
+public enum GrievanceConferenceType
+{
+    /// <summary>The parties and the desk sit down to review the case.</summary>
+    [Description("Case Conference")]
+    CaseConference = 1,
+
+    /// <summary>A neutral third party works to settle it between the parties.</summary>
+    [Description("Mediation")]
+    Mediation = 2,
+
+    /// <summary>FR-HR-181 obligation 6 — consultation with a recognised union.</summary>
+    [Description("Union Consultation")]
+    UnionConsultation = 3
+}
+
+/// <summary>Where a convened meeting got to — area 9c slice 4.</summary>
+public enum GrievanceConferenceStatus
+{
+    [Description("Scheduled")]
+    Scheduled = 1,
+
+    /// <summary>It happened, and its notes and outcome are on the record.</summary>
+    [Description("Held")]
+    Held = 2,
+
+    [Description("Cancelled")]
+    Cancelled = 3
+}
+
+/// <summary>
+/// What a resolved employee-relations case actually decided — FR-HR-181's "resolution decision",
+/// area 9c slice 2.
+/// </summary>
+/// <remarks>
+/// <para><b>Why <see cref="NotRecorded"/> exists, and why it is member 1.</b> Before slice 2 the
+/// only way to resolve a case was <c>respond(resolvesGrievance: true)</c>, which copied the
+/// responder's answer into <c>ResolutionSummary</c> and captured no outcome at all — an answer and a
+/// decision were the same field. That path still works, so that the portal screen calling it does
+/// not break, but it now produces a resolution artefact marked <c>NotRecorded</c>.</para>
+///
+/// <para>That is deliberately an honest gap rather than an invented value: it says "this case was
+/// resolved and nobody captured what was decided", which HR can be asked to fill in — and
+/// <c>POST resolve</c> permits exactly that one transition, filling a <c>NotRecorded</c> outcome
+/// while refusing to amend a real one. A real decision, once recorded, is frozen.</para>
+/// </remarks>
+public enum GrievanceResolutionOutcome
+{
+    /// <summary>Resolved, but what was decided was never captured. ⚠ Not selectable — see remarks.</summary>
+    [Description("Not Recorded")]
+    NotRecorded = 1,
+
+    [Description("Upheld In Full")]
+    UpheldInFull = 2,
+
+    [Description("Upheld In Part")]
+    UpheldInPart = 3,
+
+    [Description("Not Upheld")]
+    NotUpheld = 4,
+
+    /// <summary>The parties reached an agreement rather than the case being adjudicated.</summary>
+    [Description("Settled By Agreement")]
+    SettledByAgreement = 5,
+
+    [Description("No Further Action")]
+    NoFurtherAction = 6
+}
+
+/// <summary>
+/// What kind of employee-relations case this is — area 9c slice 1, decision D-4.
+/// </summary>
+/// <remarks>
+/// <para>Area 9 slice 7 built one store for one thing: the FR-HR-181 grievance. An employee-relations
+/// function handles more than grievances — a conflict two people want mediated, a welfare or
+/// counselling matter, a consultation with the union — and before this enum existed those had
+/// nowhere to live at all, so they were kept off the system entirely.</para>
+///
+/// <para><b>Grievance is deliberately member 1</b>, so that the column defaults to it and every row
+/// written before this existed is correct without a data fix. Nothing else may be renumbered for the
+/// same reason.</para>
+///
+/// <para>⚠ The case type is <i>not</i> a permission boundary and must never become one. What may be
+/// read is decided by who is on the case (the primary party, HR, or somebody named on a step or as a
+/// party), exactly as it was for the grievance alone.</para>
+/// </remarks>
+public enum EmployeeRelationsCaseType
+{
+    /// <summary>FR-HR-181's formal grievance, escalating up the six-rung ladder.</summary>
+    [Description("Grievance")]
+    Grievance = 1,
+
+    /// <summary>A dispute between colleagues that is being mediated rather than adjudicated.</summary>
+    [Description("Conflict / Mediation")]
+    ConflictMediation = 2,
+
+    /// <summary>A welfare or counselling matter — hardship, bereavement, wellbeing support.</summary>
+    [Description("Welfare / Counselling")]
+    WelfareCounselling = 3,
+
+    /// <summary>A consultation with a recognised union, which FR-HR-181 requires be retained.</summary>
+    [Description("Union Consultation")]
+    UnionConsultation = 4,
+
+    /// <summary>Employee-relations work that fits none of the above. Kept last.</summary>
+    [Description("Other")]
+    Other = 5
+}
+
+/// <summary>
+/// The kinds of record an employee-relations case can be cross-referenced to — area 9c slice 9.
+/// </summary>
+/// <remarks>
+/// <para>Deliberately a CLOSED enum with one real foreign key behind each member, not a
+/// polymorphic (type-name, id) pair. A polymorphic link cannot be enforced by the database, so it
+/// rots the first time a source row is deleted and nothing complains; these three have real FKs,
+/// real referential integrity, and no way to point at a table that does not exist.</para>
+///
+/// <para><b>The link is a POINTER, never a window.</b> Following it takes the reader into the
+/// source module, where that module's own permission decides what they see. Nothing about the
+/// source's substance — an offence, a set of findings, an injury — is copied onto the
+/// employee-relations case file.</para>
+/// </remarks>
+public enum EmployeeRelationsLinkSource
+{
+    /// <summary>A SHE incident the case arose from or concerns.</summary>
+    [Description("Safety Incident")]
+    SafetyIncident = 1,
+
+    /// <summary>A performance improvement plan the case arose from or concerns.</summary>
+    [Description("Performance Improvement Plan")]
+    PerformanceImprovementPlan = 2,
+
+    /// <summary>A disciplinary case the case arose from or concerns.</summary>
+    [Description("Disciplinary Case")]
+    DisciplinaryCase = 3
+}
+
+/// <summary>
+/// The part somebody plays in an employee-relations case, beyond the primary party — area 9c
+/// slice 1, decision D-7.
+/// </summary>
+/// <remarks>
+/// The case's own <c>EmployeeId</c> is the primary party and is never repeated here; adding them as
+/// a party is refused. Everybody else on a case — the person complained of, a representative, a
+/// union official, a witness, a mediator — is one of these.
+/// </remarks>
+public enum GrievancePartyRole
+{
+    /// <summary>A further employee the case concerns, alongside the primary party.</summary>
+    [Description("Affected Employee")]
+    AffectedEmployee = 1,
+
+    /// <summary>The person the case is about. ⚠ Being a respondent does NOT confer a right to read.</summary>
+    [Description("Respondent")]
+    Respondent = 2,
+
+    /// <summary>Acts for another party — a colleague, a friend, a lawyer.</summary>
+    [Description("Representative")]
+    Representative = 3,
+
+    /// <summary>Acts for another party on behalf of a recognised union.</summary>
+    [Description("Union Representative")]
+    UnionRepresentative = 4,
+
+    [Description("Witness")]
+    Witness = 5,
+
+    /// <summary>Convenes and chairs a mediation between the parties.</summary>
+    [Description("Mediator")]
+    Mediator = 6
+}
+
 public enum EmployeeTerminationType
 {
     [Description("Involuntary For Cause")]
@@ -2649,6 +3157,376 @@ public enum EmployeeTerminationType
     [Description("Death")]
     Death = 8,
 
+    /// <summary>
+    /// FR-HR-179's sanction ladder names summary dismissal separately from termination, and it is a
+    /// distinct thing: dismissal without notice or pay in lieu, for conduct grave enough to end the
+    /// contract immediately.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ "Summary" means without NOTICE, not without PROCESS. A summary dismissal still requires the
+    /// employee to have been queried and heard — the natural-justice gate in
+    /// <c>StaffDisciplinaryCaseService</c> has no carve-out for it, deliberately.
+    ///
+    /// Appended as 9, immediately after Death=8 and before Other=99. This column is a plain int with
+    /// no lookup table or check constraint, so appending is schema-safe and needs no migration — but
+    /// members must be APPENDED, never renumbered, or existing rows silently change meaning. The same
+    /// call was made for PositionChangeReason in area 8 slice 4.
+    /// </remarks>
+    [Description("Summary Dismissal")]
+    SummaryDismissal = 9,
+
+    /// <summary>
+    /// Retirement on reaching the compulsory age — 60 at TDC, effective on the birthday
+    /// (FR-HR-093). Distinct from <see cref="VoluntaryRetirement"/>, which the employee elects
+    /// from the voluntary age (55 by default): one is the organisation applying a rule, the other
+    /// is a person exercising a choice, and they differ in notice, approval and entitlement.
+    /// </summary>
+    /// <remarks>
+    /// Appended as 10 for area 9b. FR-HR-182 requires compulsory and medical retirement as
+    /// separate separation types and neither existed — the enum offered only VoluntaryRetirement,
+    /// so a compulsory retirement had to be recorded as something it was not. Appended, never
+    /// renumbered, per the note on <see cref="SummaryDismissal"/>.
+    /// </remarks>
+    [Description("Compulsory Retirement")]
+    CompulsoryRetirement = 10,
+
+    /// <summary>
+    /// Retirement on medical grounds — the employee is permanently unfit to continue, evidenced by
+    /// a medical report, before either retirement age is reached (FR-HR-182).
+    /// </summary>
+    /// <remarks>
+    /// Appended as 11 for area 9b; see <see cref="CompulsoryRetirement"/>. This is the separation
+    /// type that reads across to the SHE/medical surveillance and return-to-work records rather
+    /// than replacing them — the boundary is unchanged.
+    /// </remarks>
+    [Description("Medical Retirement")]
+    MedicalRetirement = 11,
+
+    [Description("Other")]
+    Other = 99
+}
+
+/// <summary>
+/// Where a separation has reached (area 9b). The order is the FRD's own sequence, and it matters:
+/// FR-HR-091 requires a completed clearance form <b>before</b> the separation, and <i>then</i>
+/// entitlements are computed — so clearance precedes settlement, never the reverse. FR-HR-185 then
+/// puts Internal Audit between a prepared settlement and a paid one.
+/// </summary>
+/// <remarks>
+/// <c>Approved</c> means the FR-HR-092 signature is in — the MD's, or HR's own where the
+/// separation is procedural. Nothing that computes money may run before <c>ClearanceCompleted</c>,
+/// and nothing may pay before <c>SettlementApproved</c>.
+/// </remarks>
+public enum SeparationStatus
+{
+    /// <summary>Raised and still editable; no approval sought.</summary>
+    [Description("Draft")]
+    Draft = 1,
+
+    /// <summary>Submitted; awaiting the MD's signature, or HR's where procedural (FR-HR-092).</summary>
+    [Description("Pending Approval")]
+    PendingApproval = 2,
+
+    [Description("Approved")]
+    Approved = 3,
+
+    /// <summary>The FR-HR-183 clearance run is open; items are being signed off.</summary>
+    [Description("Clearance In Progress")]
+    ClearanceInProgress = 4,
+
+    /// <summary>Every required clearance item is signed off — the FR-HR-091 gate is now open.</summary>
+    [Description("Clearance Completed")]
+    ClearanceCompleted = 5,
+
+    /// <summary>The FR-HR-184 settlement statement is being prepared.</summary>
+    [Description("Settlement Pending")]
+    SettlementPending = 6,
+
+    /// <summary>Statement prepared; with Internal Audit for review (FR-HR-185).</summary>
+    [Description("Settlement Under Review")]
+    SettlementUnderReview = 7,
+
+    /// <summary>Internal Audit has reviewed it; payment may be released.</summary>
+    [Description("Settlement Approved")]
+    SettlementApproved = 8,
+
+    /// <summary>Paid, and applied to the employee's master record.</summary>
+    [Description("Completed")]
+    Completed = 9,
+
+    /// <summary>Withdrawn before completion — a resignation retracted, a retirement deferred.</summary>
+    [Description("Cancelled")]
+    Cancelled = 10,
+
+    /// <summary>Refused at approval.</summary>
+    [Description("Rejected")]
+    Rejected = 11
+}
+
+/// <summary>
+/// Internal Audit's verdict on a final settlement (FR-HR-185: <i>"require Internal Audit review of
+/// the final settlement before payment is released"</i>).
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Nobody holds <c>TDC_INTERNAL_AUDIT</c> on the live tenant</b> (measured 2026-08-20, zero
+/// members). The control is built as specified and will therefore hold every settlement at
+/// <see cref="NotReviewed"/> until somebody is granted the role — correct behaviour, and it will
+/// look like a stuck queue to whoever meets it first. Raised with TDC as an operational
+/// prerequisite, not a development gap.
+/// </remarks>
+public enum SettlementReviewOutcome
+{
+    /// <summary>Not yet seen by Internal Audit.</summary>
+    [Description("Not Reviewed")]
+    NotReviewed = 1,
+
+    /// <summary>Reviewed and passed. Payment may be released.</summary>
+    [Description("Approved")]
+    Approved = 2,
+
+    /// <summary>
+    /// Sent back to HR with findings. The statement becomes editable again and must be corrected
+    /// and re-finalised — a return is not a refusal of the separation, only of the figures.
+    /// </summary>
+    [Description("Returned")]
+    Returned = 3
+}
+
+/// <summary>
+/// The main reason a leaver gives at their exit interview.
+/// </summary>
+/// <remarks>
+/// <para>Separate from <c>TerminationReason</c> on purpose, and the distinction is the whole value
+/// of an exit interview: <c>TerminationReason</c> is what the <b>organisation</b> records — a
+/// resignation — while this is what the <b>employee</b> says was behind it. "Resignation, because
+/// the pay was uncompetitive" and "resignation, because of their manager" are the same termination
+/// reason and completely different facts, and only the second one tells anybody what to fix.</para>
+///
+/// <para>Kept to a short list on purpose. A long taxonomy nobody can hold in their head gets
+/// answered with "Other", and then the analytics say nothing.</para>
+/// </remarks>
+public enum ExitInterviewReason
+{
+    [Description("Pay And Benefits")]
+    PayAndBenefits = 1,
+
+    [Description("Career Progression")]
+    CareerProgression = 2,
+
+    [Description("Management Or Supervision")]
+    ManagementOrSupervision = 3,
+
+    [Description("Workload Or Stress")]
+    WorkloadOrStress = 4,
+
+    [Description("Work-Life Balance")]
+    WorkLifeBalance = 5,
+
+    [Description("Working Conditions")]
+    WorkingConditions = 6,
+
+    [Description("Relationship With Colleagues")]
+    RelationshipWithColleagues = 7,
+
+    [Description("Job Security")]
+    JobSecurity = 8,
+
+    [Description("Relocation")]
+    Relocation = 9,
+
+    [Description("Health Or Personal")]
+    HealthOrPersonal = 10,
+
+    /// <summary>Retirement, contract expiry, death — an exit nobody chose for a reason.</summary>
+    [Description("Not Applicable — End Of Service")]
+    EndOfService = 11,
+
+    [Description("Other")]
+    Other = 99
+}
+
+/// <summary>
+/// What a line of the final settlement is (FR-HR-184: <i>"unpaid salary, notice pay, leave
+/// encashment, benefits, deductions, recoveries, loans and pension-related payments"</i>).
+/// </summary>
+public enum SettlementLineCategory
+{
+    [Description("Unpaid Salary")]
+    UnpaidSalary = 1,
+
+    /// <summary>Notice not served and not waived — paid in lieu.</summary>
+    [Description("Notice Pay")]
+    NoticePay = 2,
+
+    /// <summary>Accrued leave paid out. Exit only (FR-HR-046), capped at 56 days (FR-HR-152).</summary>
+    [Description("Leave Encashment")]
+    LeaveEncashment = 3,
+
+    [Description("Gratuity Or End Of Service")]
+    GratuityOrEndOfService = 4,
+
+    [Description("Benefit Payment")]
+    BenefitPayment = 5,
+
+    [Description("Pension-Related Payment")]
+    PensionRelated = 6,
+
+    [Description("Other Earning")]
+    OtherEarning = 49,
+
+    [Description("Loan Repayment")]
+    LoanRepayment = 50,
+
+    [Description("Salary Advance Recovery")]
+    SalaryAdvanceRecovery = 51,
+
+    /// <summary>An outstanding travel advance, from the employee's own travel records.</summary>
+    [Description("Travel Advance Recovery")]
+    TravelAdvanceRecovery = 52,
+
+    /// <summary>Unreturned property or equipment, carried from a clearance line.</summary>
+    [Description("Property Recovery")]
+    PropertyRecovery = 53,
+
+    [Description("Tax Deduction")]
+    TaxDeduction = 54,
+
+    [Description("Other Deduction")]
+    OtherDeduction = 99
+}
+
+/// <summary>
+/// Where a settlement line's amount came from — and whether it is trustworthy.
+/// </summary>
+/// <remarks>
+/// ⚠ This enum exists because of a measurement, not for tidiness. On the live tenant
+/// 2026-08-20, <b>202 of 3,883 employees</b> have a salary on file and <c>LeaveBalances</c> holds
+/// <b>zero</b> rows — so a settlement that simply computed from salary would print 0.00 for almost
+/// everybody. Zero and "we could not work it out" are not the same statement, and somebody would
+/// sign the first one. <see cref="CannotCompute"/> keeps them apart, and blocks finalisation until
+/// a human supplies the figure.
+/// </remarks>
+public enum SettlementLineComputation
+{
+    /// <summary>Worked out by the system from data it holds. <c>Basis</c> says how.</summary>
+    [Description("Computed")]
+    Computed = 1,
+
+    /// <summary>Entered by a person. <c>SourceReference</c> says where they got it.</summary>
+    [Description("Manually Entered")]
+    ManuallyEntered = 2,
+
+    /// <summary>
+    /// The system knows this line is owed but cannot value it — no salary on record, no leave
+    /// balance, no payroll figure. Carries no amount, and holds the statement open.
+    /// </summary>
+    [Description("Cannot Compute")]
+    CannotCompute = 3
+}
+
+/// <summary>
+/// What a clearance item checks — FR-HR-183's list, verbatim: <i>"exit clearance across outstanding
+/// loans, salary advances, company property, office equipment, duty-post keys, documents and
+/// payroll recoveries"</i>.
+/// </summary>
+/// <remarks>
+/// The kind is what makes an item mean something rather than being a line of free text. Two things
+/// hang off it: whether the item can carry an outstanding <b>amount</b> (a loan can, a set of keys
+/// cannot), and which system will eventually be able to answer it automatically — loans, advances
+/// and recoveries live in payroll, property and equipment in HR Assets (area 16, unbuilt).
+/// </remarks>
+public enum ClearanceItemKind
+{
+    [Description("Outstanding Loan")]
+    OutstandingLoan = 1,
+
+    [Description("Salary Advance")]
+    SalaryAdvance = 2,
+
+    [Description("Company Property")]
+    CompanyProperty = 3,
+
+    [Description("Office Equipment")]
+    OfficeEquipment = 4,
+
+    [Description("Duty-Post Keys")]
+    DutyPostKeys = 5,
+
+    [Description("Documents And Records")]
+    DocumentsAndRecords = 6,
+
+    [Description("Payroll Recovery")]
+    PayrollRecovery = 7,
+
+    [Description("Other")]
+    Other = 99
+}
+
+/// <summary>Where a single clearance item has got to.</summary>
+public enum ClearanceItemStatus
+{
+    /// <summary>Nobody has answered it yet.</summary>
+    [Description("Pending")]
+    Pending = 1,
+
+    /// <summary>Answered and settled — nothing outstanding, or what was outstanding has been returned.</summary>
+    [Description("Cleared")]
+    Cleared = 2,
+
+    /// <summary>
+    /// Answered and NOT settled: something is still owed or unreturned. A blocking answer, and the
+    /// reason the FR-HR-091 gate exists.
+    /// </summary>
+    [Description("Blocked")]
+    Blocked = 3,
+
+    /// <summary>
+    /// Deliberately set aside — the item does not apply to this person, or what is outstanding is
+    /// being carried into the final settlement instead of recovered first. Requires a reason.
+    /// </summary>
+    [Description("Waived")]
+    Waived = 4,
+
+    /// <summary>Does not apply to this separation at all.</summary>
+    [Description("Not Applicable")]
+    NotApplicable = 5
+}
+
+/// <summary>
+/// What a document attached to a separation is (area 9b). The category is what makes the file
+/// findable years later, when the question is "show me the clearance form" rather than "show me
+/// the attachments".
+/// </summary>
+public enum SeparationDocumentCategory
+{
+    /// <summary>The employee's own letter. The origin of a resignation, and its date of record.</summary>
+    [Description("Resignation Letter")]
+    ResignationLetter = 1,
+
+    /// <summary>The organisation's reply accepting the resignation, or its notice of termination.</summary>
+    [Description("Acceptance Or Notice Letter")]
+    AcceptanceOrNoticeLetter = 2,
+
+    /// <summary>The signed clearance form FR-HR-091 requires before entitlements are computed.</summary>
+    [Description("Clearance Form")]
+    ClearanceForm = 3,
+
+    /// <summary>The FR-HR-184 final settlement statement, and the FR-HR-185 review of it.</summary>
+    [Description("Settlement Statement")]
+    SettlementStatement = 4,
+
+    [Description("Exit Interview Record")]
+    ExitInterviewRecord = 5,
+
+    /// <summary>Supports a medical retirement — the evidence that the employee is permanently unfit.</summary>
+    [Description("Medical Report")]
+    MedicalReport = 6,
+
+    /// <summary>Supports a separation by death, and the entitlement paid to the estate.</summary>
+    [Description("Death Certificate")]
+    DeathCertificate = 7,
+
+    /// <summary>A handover note, a certificate of service, correspondence.</summary>
     [Description("Other")]
     Other = 99
 }
@@ -2878,6 +3756,25 @@ public enum LearningPathStatus
     Active = 1,
 
     Inactive = 2,
+}
+
+/// <summary>
+/// The status scale used for <c>EmployeeLearningPathStep</c> rows in <c>TrainingStatusHistory</c>.
+///
+/// The step entity itself only stores a boolean, so this is what preserves the distinction that
+/// matters at audit time: whether a completion rested on evidence or on someone's authority. A
+/// learning path can award a certificate that outside parties verify, so "who said so, and on what
+/// basis" has to survive on the record rather than in the boolean.
+/// </summary>
+public enum LearningPathStepStatus
+{
+    NotCompleted = 0,
+
+    /// <summary>Backed by attendance or a completion record.</summary>
+    Completed = 1,
+
+    /// <summary>Recorded by HR without evidence, against a mandatory reason.</summary>
+    CompletedByOverride = 2,
 }
 
 public enum MentoringStatus
@@ -3150,6 +4047,118 @@ public enum AwardTargetType
     StaffLevel = 3,
 
     Employee = 4,
+}
+
+/// <summary>
+/// Where the candidates for an award come from.
+/// </summary>
+/// <remarks>
+/// <para>TDC's <i>Staff Awards Changes</i> note describes three distinct origins, and they are not
+/// interchangeable: <i>"employees or management will do the nomination"</i>, <i>"some of the
+/// nomination will be due to performance or target reached"</i>, and <i>"some too will have to be a
+/// direct selection by management"</i>.</para>
+///
+/// <para>This replaces the decorative <c>AutoGenerateNominees</c> flag, which was mapped through
+/// every DTO and read by nothing. Keeping both would have left two fields meaning the same thing
+/// and free to disagree.</para>
+/// </remarks>
+public enum AwardNominationSource
+{
+    /// <summary>Employees or management nominate. The document's main flow.</summary>
+    [Description("Open nomination")]
+    OpenNomination = 1,
+
+    /// <summary>The system derives the candidates from performance results or targets reached.</summary>
+    [Description("Performance or target triggered")]
+    PerformanceTriggered = 2,
+
+    /// <summary>There is no nomination stage at all — management names the recipient.</summary>
+    [Description("Direct management selection")]
+    ManagementDirect = 3
+}
+
+/// <summary>
+/// What a target on an award type is scoping: who may win it, or who may vote in it.
+/// </summary>
+/// <remarks>
+/// <para>TDC's note asks for both, and they are different sets: <i>"management will set the criteria
+/// and then it will qualify some employees"</i> is who may win, while <i>"a section of the employees
+/// or all of them can vote on the nominees"</i> is who may vote. A department might nominate from
+/// its own staff but let the whole company vote, or the reverse.</para>
+///
+/// <para>They share one table because they are the same shape — an organisation unit, a position, a
+/// staff level or a named person, included or excluded, optionally effective-dated — and because
+/// sharing it means the name resolver and the matching logic are written once. <c>Eligibility</c> is
+/// the default, so every target written before voting existed keeps meaning what it meant.</para>
+/// </remarks>
+public enum AwardTargetPurpose
+{
+    /// <summary>Scopes who may receive the award.</summary>
+    [Description("Eligible to win")]
+    Eligibility = 1,
+
+    /// <summary>Scopes who may vote in it. An award with none of these is voted on by everyone.</summary>
+    [Description("Eligible to vote")]
+    Electorate = 2
+}
+
+/// <summary>
+/// Where an award cycle is in its life, which is not the same question as whether its windows are open.
+/// </summary>
+/// <remarks>
+/// Deliberately excludes "NominationsOpen" and "VotingOpen". Those are answered by comparing the
+/// clock to <c>AwardCycle.NominationOpensOn</c> / <c>VotingOpensOn</c>, so they cannot drift out of
+/// step with the dates they describe. A status that says a window is open while the dates say it
+/// closed yesterday is the two-sources-of-one-fact defect this area keeps producing.
+/// </remarks>
+public enum AwardCycleStatus
+{
+    /// <summary>Being set up. Not visible to employees, and nothing may be nominated to it.</summary>
+    [Description("Draft")]
+    Draft = 1,
+
+    /// <summary>Live. Its windows govern what may happen and when.</summary>
+    [Description("Published")]
+    Published = 2,
+
+    /// <summary>The winner has been decided and the cycle is finished.</summary>
+    [Description("Completed")]
+    Completed = 3,
+
+    /// <summary>Abandoned before completion. Kept so its nominations still have a home.</summary>
+    [Description("Cancelled")]
+    Cancelled = 4
+}
+
+/// <summary>
+/// How the winner is chosen once there are candidates.
+/// </summary>
+/// <remarks>
+/// <para>Deliberately separate from <see cref="AwardNominationSource"/>, because the source and the
+/// decision vary independently in TDC's note. <i>"HR will setup the eligibility criteria, then
+/// employees or management will do the nomination, and then staff can vote"</i> pairs open
+/// nomination with a vote; <i>"some might not have to go through the employee vote since management
+/// will decide and award"</i> pairs the same open nomination with a management decision; and the
+/// committee section pairs it with scoring. Collapsing the two axes into one field would force a
+/// fixed menu of combinations and lose real ones.</para>
+///
+/// <para>One combination is invalid and is refused: a <see cref="AwardNominationSource.ManagementDirect"/>
+/// award cannot be decided by <see cref="StaffVote"/> or <see cref="CommitteeScore"/>, because there
+/// is no candidate list for anyone to vote on or score.</para>
+/// </remarks>
+public enum AwardWinnerDecision
+{
+    /// <summary>Eligible employees vote on the shortlist; most votes wins.</summary>
+    [Description("Staff vote")]
+    StaffVote = 1,
+
+    /// <summary>The award committee scores each nominee; the highest average score wins.</summary>
+    [Description("Committee score")]
+    CommitteeScore = 2,
+
+    /// <summary>Management decides outright, with no vote and no scoring.</summary>
+    [Description("Management decision")]
+    ManagementDecision = 3
 }
 
 public enum AwardStatus
@@ -5464,6 +6473,25 @@ public enum AssignmentStatus
     [Description("Returned")]
     Returned = 2,
 
+    /// <summary>
+    /// ⚠ <b>Nothing writes this, and nothing should.</b> Whether a custody is late is derived from
+    /// <c>ExpectedReturnDate</c> against today, and a derived fact stored in a status column is
+    /// stale the moment the day turns.
+    /// </summary>
+    /// <remarks>
+    /// <para>Measured in area 16 slice 11: the only references anywhere are reads that TOLERATE it.
+    /// It came from the port with no writer — the same shape as <see cref="Lost"/> and
+    /// <see cref="Damaged"/>, which slice 7 did give one because those record something that
+    /// happened rather than something a calendar implies.</para>
+    ///
+    /// <para><b>Writing it would break the feature that reports it.</b> Before slice 11,
+    /// <c>GetOverdueAssignmentsAsync</c> asked <c>Status == Active</c>, so a sweep that helpfully
+    /// flipped late custodies to <c>Overdue</c> would have emptied the overdue list itself — and
+    /// <c>ReturnAsync</c> and <c>ReportIncidentAsync</c> both refuse anything that is not
+    /// <c>Active</c>, so a late asset could then never be handed back at all. The return
+    /// watchlists now accept both statuses so that trap is defused, but the rule stands: this
+    /// member is tolerated on read and never set.</para>
+    /// </remarks>
     [Description("Overdue")]
     Overdue = 3,
 
@@ -5471,7 +6499,22 @@ public enum AssignmentStatus
     Lost = 4,
 
     [Description("Damaged")]
-    Damaged = 5
+    Damaged = 5,
+
+    /// <summary>
+    /// The holder passed the asset to another employee through an approved asset transfer, rather
+    /// than handing it back. RHEMA addition, area 16 slice 4 — see the note at the top of
+    /// <c>HREnums.Rhema.cs</c>.
+    /// </summary>
+    /// <remarks>
+    /// Closing an employee-to-employee transfer as <c>Returned</c> would have been a lie in the one
+    /// place somebody goes to find out what happened to an asset: nobody took it back, and the next
+    /// custody starts the same day. Every query in the module asks whether an assignment is
+    /// <c>Active</c>, so this behaves exactly as <c>Returned</c> does for "what does this employee
+    /// still hold" — it only changes what the record says about why the custody ended.
+    /// </remarks>
+    [Description("Transferred")]
+    Transferred = 6
 }
 
 public enum AssetMaintenanceType
@@ -6871,6 +7914,28 @@ public enum AppraisalNotificationType
     AutoLocked = 16,
     PeerEvaluationReminder = 17,
     ActionRequired = 18,
+
+    // ── Conversations, development plans and improvement plans ────────────────
+    // Added with the development/PIP/conversation slice. Stored as int, so new members are
+    // schema-safe; keep the existing numbering untouched.
+
+    /// <summary>A manager has put an appraisal conversation in the diary.</summary>
+    ConversationScheduled = 19,
+
+    /// <summary>A development plan has been activated and is now the employee's to work on.</summary>
+    DevelopmentPlanActivated = 20,
+
+    /// <summary>A manager has written feedback on a development plan.</summary>
+    DevelopmentFeedbackAdded = 21,
+
+    /// <summary>An improvement plan has been approved and is now in force.</summary>
+    PipOpened = 22,
+
+    /// <summary>A PIP review meeting has been scheduled.</summary>
+    PipMeetingScheduled = 23,
+
+    /// <summary>An improvement plan has been closed with an outcome.</summary>
+    PipOutcomeRecorded = 24,
 }
 
 /// <summary>Urgency level for in-app notifications.</summary>
@@ -8441,6 +9506,268 @@ public enum EncashmentRateBasis
 {
     DerivedFromEmoluments = 0,
     Manual = 1
+}
+
+#endregion
+
+#region Employee Profile Change Requests (area 25 slice 12 — decision D6)
+
+/// <summary>
+/// Where a personal-data change request stands.
+/// </summary>
+/// <remarks>
+/// There is no separate "Applied" state: approving a request APPLIES it in the same
+/// transaction, because a request approved but not applied is a promise the employee cannot
+/// see the result of. <see cref="EmployeeProfileChangeRequest.AppliedAt"/> records when that
+/// happened, and the items keep what actually landed.
+/// </remarks>
+public enum ProfileChangeRequestStatus
+{
+    /// <summary>Filed by the employee and waiting on HR.</summary>
+    Pending = 1,
+
+    /// <summary>HR agreed; the values were written onto the employee record.</summary>
+    Approved = 2,
+
+    /// <summary>HR refused, with a reason the employee reads back.</summary>
+    Rejected = 3,
+
+    /// <summary>The employee withdrew it before HR answered.</summary>
+    Cancelled = 4
+}
+
+/// <summary>
+/// The fields an employee may ask to have changed. Deliberately an ENUM, not a free string:
+/// the applier switches on it, so a field that is not named here cannot be written by this
+/// path at all.
+/// </summary>
+/// <remarks>
+/// <para>What is absent matters as much as what is present. Employment placement
+/// (<c>PositionId</c>, org unit, <c>ManagerId</c>), money (<c>Salary</c>, the payroll
+/// switches), identity assigned by the employer (<c>EmployeeNumber</c>, <c>BadgeNumber</c>)
+/// and lifecycle dates are **not** requestable — they are HR/payroll decisions, not personal
+/// data corrections, and an employee asking to change their own salary is not a workflow
+/// anybody wants.</para>
+/// <para>The low-risk contact fields (mobile, telephone, business number, extension) are
+/// absent too, for the opposite reason: the employee edits those directly, so routing them
+/// through an approval queue would only teach people that HR approval is noise.</para>
+/// </remarks>
+public enum EmployeeProfileField
+{
+    // ── Identity ──────────────────────────────────────────────────────────
+    FirstName = 1,
+    MiddleName = 2,
+    LastName = 3,
+    Title = 4,
+    DateOfBirth = 5,
+    Gender = 6,
+    MaritalStatus = 7,
+
+    /// <summary>Login-adjacent and tenant-unique — never a direct edit.</summary>
+    EmailAddress = 8,
+
+    // ── Address ───────────────────────────────────────────────────────────
+    Address = 20,
+    City = 21,
+    State = 22,
+    PostalCode = 23,
+    DigitalAddress = 24,
+    CountryId = 25,
+
+    // ── Statutory ─────────────────────────────────────────────────────────
+    SocialSecurityNumber = 40,
+    TINNumber = 41,
+    TaxNumber = 42,
+
+    // ── Bank account (targets the request's BankDetailId) ─────────────────
+    BankName = 60,
+    BankBranchName = 61,
+    BankAccountNumber = 62,
+    BankAccountName = 63,
+    BankAccountType = 64,
+    MobileMoneyNumber = 65
+}
+
+#endregion
+
+#region HR Letter Requests (area 25 slice 12b — decision D7/D10)
+
+/// <summary>
+/// The letters an employee may ask HR for. Each has a built-in template in
+/// <c>HrLettersEmailCatalog</c>, so a tenant that has never opened the template editor can
+/// still issue one.
+/// </summary>
+public enum HrLetterType
+{
+    /// <summary>"X has been employed by us since Y as Z" — the everyday request.</summary>
+    EmploymentConfirmation = 1,
+
+    /// <summary>An introduction addressed to a named third party.</summary>
+    IntroductionLetter = 2,
+
+    /// <summary>A certificate of service, usually wanted on or after leaving.</summary>
+    ServiceCertificate = 3,
+
+    /// <summary>
+    /// Employment confirmation that also states the salary — for a bank or a landlord.
+    /// ⚠ Only HR can issue it, and the figure comes from the employee record; the employee's
+    /// own profile deliberately never shows salary (slice 12a), so this letter is the one
+    /// sanctioned path by which they receive it, on purpose and for a stated reason.
+    /// </summary>
+    SalaryConfirmation = 4
+}
+
+/// <summary>Where a letter request stands.</summary>
+public enum HrLetterRequestStatus
+{
+    /// <summary>Asked for, waiting on HR.</summary>
+    Pending = 1,
+
+    /// <summary>HR issued it — either generated from the template or uploaded as a signed scan.</summary>
+    Issued = 2,
+
+    /// <summary>HR refused, with a reason the employee reads back.</summary>
+    Rejected = 3,
+
+    /// <summary>The employee withdrew it before HR answered.</summary>
+    Cancelled = 4
+}
+
+#endregion
+
+#region HR Audience Targeting (area 25 slice 12c)
+
+/// <summary>
+/// How a broadcast picks its recipients. Shared by announcements (slice 12c) and, when it is
+/// built, the policy library (slice 12d).
+/// </summary>
+/// <remarks>
+/// <para><b>Where an employee sits is <c>OrganizationUnit</c> + <c>OrganizationLevel</c>, and
+/// nothing else.</b> The org structure here is generic: a tenant names its own tiers, so what
+/// one client calls a department another calls a section, a division or a directorate — the
+/// LEVEL names the tier and the UNIT is the actual box on the chart. There is deliberately no
+/// <c>Department</c> target: <c>Employee.DepartmentId</c> is a parallel legacy column, and
+/// measured on live data it is both coarser and less complete than the unit tree (7,440 of
+/// 7,954 employees carry it against 7,930 for the unit; 7 departments against 48 units; and
+/// only 24 people have a department without a unit). Offering both would let a sender pick the
+/// axis that quietly reaches a different population than the one they meant.</para>
+///
+/// <para><c>OrganizationUnit</c> includes CHILD units: announcing something to "Operations" and
+/// having it miss every team inside Operations is never what the sender meant.</para>
+///
+/// <para>Note that <c>OrientationAudienceRule</c> models the same idea and has no resolver
+/// anywhere — its rules are stored and never expanded. If orientation's audience rules are ever
+/// made to work, they should come through the resolver this enum belongs to rather than growing
+/// a second one.</para>
+/// </remarks>
+public enum HrAudienceTargetType
+{
+    /// <summary>Everyone active in the tenant. Needs no target id.</summary>
+    AllEmployees = 1,
+
+    /// <summary>A unit and everything beneath it — the placement axis.</summary>
+    OrganizationUnit = 2,
+
+    /// <summary>A tier of the org chart, whatever this tenant calls it.</summary>
+    OrganizationLevel = 3,
+
+    /// <summary>A job, wherever it sits.</summary>
+    Position = 4,
+
+    /// <summary>A physical site — orthogonal to the org chart, which is why it is its own axis.</summary>
+    Location = 5,
+
+    /// <summary>One named person — mostly useful as an exclusion.</summary>
+    Employee = 6
+}
+
+#endregion
+
+#region HR Announcements (area 25 slice 12c — decision D7)
+
+public enum HrAnnouncementCategory
+{
+    General = 1,
+    Policy = 2,
+    Benefits = 3,
+    Safety = 4,
+    Event = 5,
+
+    /// <summary>Shown first and styled to interrupt. Use sparingly, or it stops working.</summary>
+    Urgent = 6
+}
+
+public enum HrAnnouncementStatus
+{
+    /// <summary>Being written. Visible to no employee.</summary>
+    Draft = 1,
+
+    /// <summary>Live for its audience, subject to its dates.</summary>
+    Published = 2,
+
+    /// <summary>Taken down. Kept, because what was announced and when is a record.</summary>
+    Archived = 3
+}
+
+#endregion
+
+#region HR Policy Library + Acknowledgements (area 25 slice 12d — decision D7)
+
+public enum HrPolicyCategory
+{
+    General = 1,
+    CodeOfConduct = 2,
+    HumanResources = 3,
+    HealthAndSafety = 4,
+    Finance = 5,
+    InformationTechnology = 6
+}
+
+/// <summary>
+/// Where a policy stands. A superseded version is <see cref="Archived"/> rather than deleted —
+/// the acknowledgements against it are evidence of what somebody agreed to, and they are
+/// meaningless without the version they agreed to.
+/// </summary>
+public enum HrPolicyStatus
+{
+    Draft = 1,
+    Published = 2,
+    Archived = 3
+}
+
+/// <summary>
+/// What an employee did when asked to acknowledge a policy.
+/// </summary>
+/// <remarks>
+/// There is deliberately no <c>Pending</c> member. Acknowledgement rows are created only when
+/// somebody actually acts, so "pending" is the ABSENCE of a row, not a state in it — see
+/// <c>HrPolicyAcknowledgement</c>'s remarks for why the roster is computed rather than
+/// pre-seeded.
+/// </remarks>
+public enum HrPolicyAcknowledgementOutcome
+{
+    /// <summary>They read it and agreed.</summary>
+    Signed = 1,
+
+    /// <summary>They read it and refused, with a reason. A real outcome, not a failure.</summary>
+    Declined = 2
+}
+
+/// <summary>
+/// Which instrument of authority a stored company image is.
+/// </summary>
+/// <remarks>
+/// ⚠ One table, two kinds, because they are governed identically: both are what makes a generated
+/// document look authentic, both must be versioned rather than overwritten, and both are replaced
+/// by the same restricted act. Two tables would duplicate that governance and let it drift.
+/// </remarks>
+public enum CompanySealAssetKind
+{
+    /// <summary>The company seal or stamp.</summary>
+    Seal = 1,
+
+    /// <summary>The authorised signatory's signature image.</summary>
+    Signature = 2
 }
 
 #endregion

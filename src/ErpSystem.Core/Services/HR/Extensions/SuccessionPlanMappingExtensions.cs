@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Services.HR;
@@ -78,6 +78,7 @@ public static class SuccessionPlanMappingExtensions
             PlanYear = entity.PlanYear,
             VersionNumber = entity.VersionNumber,
             IsActiveVersion = entity.IsActiveVersion,
+            PositionId = entity.PositionId,
             PositionTitle = entity.Position?.Title ?? string.Empty,
             CurrentIncumbentName = entity.CurrentIncumbent?.FullName,
             Status = entity.Status,
@@ -101,7 +102,9 @@ public static class SuccessionPlanMappingExtensions
             CurrentIncumbentId = dto.CurrentIncumbentId,
             PlanYear = dto.PlanYear,
             VersionNumber = 1,
-            IsActiveVersion = true,
+            // A draft holds no active-version slot; approval raises it. The service sets this
+            // explicitly too — see SuccessionPlanService.CreateAsync and section 3.9 of the plan.
+            IsActiveVersion = false,
             Status = SuccessionPlanStatus.Draft,
             Criticality = dto.Criticality,
             RiskLevel = dto.RiskLevel,
@@ -649,7 +652,8 @@ public static class SuccessionPlanMappingExtensions
             Type = dto.Type,
             Priority = dto.Priority,
             ResponsiblePersonId = dto.ResponsiblePersonId,
-            AssignedById = dto.AssignedById,
+            // AssignedById is stamped by the service from the token, not read off the DTO — the
+            // field is gone from CreateSuccessionActionDto (D-05, sixth instance).
             DueDate = dto.DueDate,
             Status = ActionStatus.NotStarted,
             DependsOnActionId = dto.DependsOnActionId,
@@ -663,7 +667,8 @@ public static class SuccessionPlanMappingExtensions
         entity.Type = dto.Type;
         entity.Priority = dto.Priority;
         entity.ResponsiblePersonId = dto.ResponsiblePersonId;
-        entity.AssignedById = dto.AssignedById;
+        // AssignedById is deliberately untouched: it records who raised the action, and an edit
+        // is not a re-assignment. Correcting the owner means ResponsiblePersonId above.
         entity.DueDate = dto.DueDate;
         entity.StartedDate = dto.StartedDate;
         entity.Status = dto.Status;
@@ -753,6 +758,9 @@ public static class SuccessionPlanMappingExtensions
             DocumentName = entity.DocumentName,
             DocumentType = entity.DocumentType,
             DocumentUrl = entity.DocumentUrl,
+            FileUploadRecordId = entity.FileUploadRecordId,
+            DocumentRecordId = entity.DocumentRecordId,
+            DocumentVersionId = entity.DocumentVersionId,
             Description = entity.Description,
             CandidateId = entity.CandidateId,
             CandidateEmployeeName = entity.Candidate?.Employee?.FullName,
@@ -768,7 +776,14 @@ public static class SuccessionPlanMappingExtensions
         };
     }
 
-    public static SuccessionDocument ToEntity(this CreateSuccessionDocumentDto dto, Guid tenantId, Guid userId)
+    /// <param name="uploadedByEmployeeId">
+    /// D-15: the authenticated employee. <c>UploadedById</c> is an <c>Employee</c> FK the screens
+    /// render as "Uploaded by", and it used to be copied from the request body while the token's
+    /// id went only to <c>CreatedBy</c> — so a document could be attributed to a colleague. It is
+    /// a parameter rather than a DTO field precisely so it cannot be asserted by a caller.
+    /// </param>
+    public static SuccessionDocument ToEntity(
+        this CreateSuccessionDocumentDto dto, Guid tenantId, Guid userId, Guid uploadedByEmployeeId)
     {
         return new SuccessionDocument
         {
@@ -779,9 +794,12 @@ public static class SuccessionPlanMappingExtensions
             DocumentName = dto.DocumentName,
             DocumentType = dto.DocumentType,
             DocumentUrl = dto.DocumentUrl,
+            FileUploadRecordId = dto.FileUploadRecordId,
+            DocumentRecordId = dto.DocumentRecordId,
+            DocumentVersionId = dto.DocumentVersionId,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,
-            UploadedById = dto.UploadedById,
+            UploadedById = uploadedByEmployeeId,
             FileSizeBytes = dto.FileSizeBytes,
             FileHash = dto.FileHash,
             IsConfidential = dto.IsConfidential,
@@ -1027,7 +1045,7 @@ public static class SuccessionPlanMappingExtensions
             Strengths = dto.Strengths,
             DevelopmentGaps = dto.DevelopmentGaps,
             EnrolledDate = dto.EnrolledDate,
-            NominatedById = dto.NominatedById,
+            // NominatedById is set by the service from the authenticated employee, not the body.
             NominationNotes = dto.NominationNotes,
             IsActive = true,
             CreatedBy = userId.ToString(),

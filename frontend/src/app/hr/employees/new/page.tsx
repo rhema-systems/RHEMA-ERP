@@ -24,6 +24,16 @@ export default function NewEmployeePage() {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
 
+  /*
+   * ⚠ Recording an employee who already exists is a DIFFERENT ACT from hiring one, not a variant
+   * of it. A hire is given a number by whichever rule governs their register, and the normal
+   * create refuses a supplied one so a hand-typed value cannot occupy a number the counter is
+   * about to issue. Someone already on the payroll arrives with a number that is printed on their
+   * ID card — it is not ours to reissue, so it goes down the import path, which keeps it and
+   * moves the register's counter past it.
+   */
+  const [importMode, setImportMode] = useState(false);
+
   const { data: positions, isLoading: positionsLoading } = useQuery({
     queryKey: ['hr', 'employee-positions', 'active'],
     queryFn: () => employeePositionService.getActive(),
@@ -47,14 +57,28 @@ export default function NewEmployeePage() {
   const handleSubmit = async (values: EmployeeFormValues) => {
     setSubmitting(true);
     try {
-      await employeeService.create(employeeFormToRequest(values));
+      const request = employeeFormToRequest(values);
+      if (importMode) {
+        await employeeService.importExisting(request);
+      } else {
+        await employeeService.create(request);
+      }
       await queryClient.invalidateQueries({ queryKey: ['hr', 'employees'] });
-      toast({ title: 'Success', description: 'Employee created.' });
+      // The import moves the register's counter, so anything showing where it stands is stale.
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'staff-number-counter'] });
+      toast({
+        title: 'Success',
+        description: importMode
+          ? 'Employee recorded with their existing staff number.'
+          : 'Employee created.',
+      });
       router.push('/hr/employees');
     } catch (error: any) {
       toast({
         title: 'Error',
-        description: error?.message || 'Failed to create employee.',
+        description:
+          error?.message ||
+          (importMode ? 'Failed to record the employee.' : 'Failed to create employee.'),
         variant: 'destructive',
       });
     } finally {
@@ -66,7 +90,7 @@ export default function NewEmployeePage() {
     <div className="space-y-6 p-6 max-w-6xl mx-auto">
       <PageHeader
         title="New Employee"
-        description="Create an employee record."
+        description="Create an employee record, or record one who already has a staff number."
         backHref="/hr/employees"
       />
 
@@ -83,8 +107,11 @@ export default function NewEmployeePage() {
           defaultValues={emptyEmployee}
           onSubmit={handleSubmit}
           submitting={submitting}
-          submitLabel="Create Employee"
+          submitLabel={importMode ? 'Record Employee' : 'Create Employee'}
           onCancel={() => router.push('/hr/employees')}
+          showNumberingRule
+          importMode={importMode}
+          onImportModeChange={setImportMode}
         />
       )}
     </div>

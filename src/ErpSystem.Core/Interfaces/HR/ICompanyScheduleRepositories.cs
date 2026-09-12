@@ -72,7 +72,7 @@ public interface IEventTaskRepository : IGenericRepository<EventTask>
 public interface IMeetingRoomRepository : IGenericRepository<MeetingRoom>
 {
     Task<MeetingRoom?> GetByRoomCodeAsync(string roomCode);
-    Task<IEnumerable<MeetingRoom>> GetByStationAsync(Guid stationId);
+    Task<IEnumerable<MeetingRoom>> GetByLocationAsync(Guid locationId);
     Task<IEnumerable<MeetingRoom>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null);
     Task<IEnumerable<MeetingRoom>> GetActiveRoomsAsync();
     Task<IEnumerable<MeetingRoom>> GetBookableRoomsAsync();
@@ -113,10 +113,10 @@ public interface IBusinessClosureRepository : IGenericRepository<BusinessClosure
 {
     Task<IEnumerable<BusinessClosure>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
     Task<IEnumerable<BusinessClosure>> GetByTypeAsync(ClosureType type);
-    Task<IEnumerable<BusinessClosure>> GetByStationAsync(Guid stationId);
+    Task<IEnumerable<BusinessClosure>> GetByLocationAsync(Guid locationId);
     Task<IEnumerable<BusinessClosure>> GetByDepartmentAsync(Guid departmentId);
     Task<IEnumerable<BusinessClosure>> GetUpcomingClosuresAsync(int daysAhead = 30);
-    Task<bool> IsClosureDateAsync(DateTime date, Guid? stationId = null, Guid? departmentId = null);
+    Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? departmentId = null);
 }
 
 #endregion Business Closure Repository

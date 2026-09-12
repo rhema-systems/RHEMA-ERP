@@ -35,7 +35,13 @@ public static class AwardsMappingExtensions
             HasLevels = entity.HasLevels,
             RequiresFormalReview = entity.RequiresFormalReview,
             MinRequiredReviewers = entity.MinRequiredReviewers,
-            AutoGenerateNominees = entity.AutoGenerateNominees,
+            NominationSource = entity.NominationSource,
+            WinnerDecision = entity.WinnerDecision,
+            AllowSelfNomination = entity.AllowSelfNomination,
+            DisqualifyOnDisciplinaryRecord = entity.DisqualifyOnDisciplinaryRecord,
+            DisqualifyingDisciplineMonths = entity.DisqualifyingDisciplineMonths,
+            MinPerformanceScore = entity.MinPerformanceScore,
+            MinGoalsAchieved = entity.MinGoalsAchieved,
             Notes = entity.Notes,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
@@ -60,6 +66,8 @@ public static class AwardsMappingExtensions
             MaxMonetaryAmount = entity.MaxMonetaryAmount,
             HasLevels = entity.HasLevels,
             RequiresFormalReview = entity.RequiresFormalReview,
+            NominationSource = entity.NominationSource,
+            WinnerDecision = entity.WinnerDecision,
             IsActive = entity.IsActive,
             AwardCount = awardCount
         };
@@ -91,7 +99,13 @@ public static class AwardsMappingExtensions
             HasLevels = dto.HasLevels,
             RequiresFormalReview = dto.RequiresFormalReview,
             MinRequiredReviewers = dto.MinRequiredReviewers,
-            AutoGenerateNominees = dto.AutoGenerateNominees,
+            NominationSource = dto.NominationSource,
+            WinnerDecision = dto.WinnerDecision,
+            AllowSelfNomination = dto.AllowSelfNomination,
+            DisqualifyOnDisciplinaryRecord = dto.DisqualifyOnDisciplinaryRecord,
+            DisqualifyingDisciplineMonths = dto.DisqualifyingDisciplineMonths,
+            MinPerformanceScore = dto.MinPerformanceScore,
+            MinGoalsAchieved = dto.MinGoalsAchieved,
             Notes = dto.Notes,
             IsActive = dto.IsActive,
             CreatedBy = userId.ToString()
@@ -121,7 +135,13 @@ public static class AwardsMappingExtensions
         entity.HasLevels = dto.HasLevels;
         entity.RequiresFormalReview = dto.RequiresFormalReview;
         entity.MinRequiredReviewers = dto.MinRequiredReviewers;
-        entity.AutoGenerateNominees = dto.AutoGenerateNominees;
+        entity.NominationSource = dto.NominationSource;
+        entity.WinnerDecision = dto.WinnerDecision;
+        entity.AllowSelfNomination = dto.AllowSelfNomination;
+        entity.DisqualifyOnDisciplinaryRecord = dto.DisqualifyOnDisciplinaryRecord;
+        entity.DisqualifyingDisciplineMonths = dto.DisqualifyingDisciplineMonths;
+        entity.MinPerformanceScore = dto.MinPerformanceScore;
+        entity.MinGoalsAchieved = dto.MinGoalsAchieved;
         entity.Notes = dto.Notes;
         entity.IsActive = dto.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -141,6 +161,12 @@ public static class AwardsMappingExtensions
     {
         return new EmployeeAwardDto
         {
+            AwardLevelId = entity.AwardLevelId,
+            AwardLevelName = entity.AwardLevel?.Name,
+            AwardNominationId = entity.AwardNominationId,
+            NominationNumber = entity.AwardNomination?.NominationNumber,
+            AwardCycleId = entity.AwardCycleId,
+            AwardCycleName = entity.AwardCycle?.Name,
             Id = entity.Id,
             TenantId = entity.TenantId,
             AwardNumber = entity.AwardNumber,
@@ -182,6 +208,8 @@ public static class AwardsMappingExtensions
     {
         return new EmployeeAwardSummaryDto
         {
+            AwardLevelId = entity.AwardLevelId,
+            AwardLevelName = entity.AwardLevel?.Name,
             Id = entity.Id,
             AwardNumber = entity.AwardNumber,
             EmployeeName = entity.Employee != null 
@@ -245,6 +273,7 @@ public static class AwardsMappingExtensions
             AwardNumber = awardNumber,
             EmployeeId = dto.EmployeeId,
             AwardTypeId = dto.AwardTypeId,
+            AwardLevelId = dto.AwardLevelId,
             AwardDate = dto.AwardDate,
             Citation = dto.Citation,
             MonetaryAmount = dto.MonetaryAmount,
@@ -286,9 +315,14 @@ public static class AwardsMappingExtensions
             AwardId = entity.AwardId,
             FileName = entity.FileName,
             FilePath = entity.FilePath,
+            FileSizeBytes = entity.FileSizeBytes,
             AttachmentType = entity.AttachmentType,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
+            UploadedById = entity.UploadedById,
+            UploadedByName = entity.UploadedBy == null
+                ? null
+                : $"{entity.UploadedBy.FirstName} {entity.UploadedBy.LastName}".Trim(),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -296,17 +330,41 @@ public static class AwardsMappingExtensions
         };
     }
 
-    public static AwardAttachment ToEntity(this CreateAwardAttachmentDto dto, Guid tenantId, Guid awardId, Guid userId)
+    /// <summary>
+    /// Builds the row from the metadata the caller sent AND the file the gate stored.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The file's own facts — name, path, size and the three gate ids — come from
+    /// <c>HrControlledDocument</c>, never from the DTO. That separation is the fix for D-39: a
+    /// caller can describe what a file IS, and cannot say where it lives.
+    /// </remarks>
+    public static AwardAttachment ToEntity(
+        this CreateAwardAttachmentDto dto,
+        Guid tenantId,
+        Guid awardId,
+        Guid uploadedById,
+        Guid userId,
+        string fileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AwardAttachment
         {
             TenantId = tenantId,
             AwardId = awardId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = fileName,
+            FilePath = filePath,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             AttachmentType = dto.AttachmentType,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
             CreatedBy = userId.ToString()
         };
     }
@@ -329,6 +387,10 @@ public static class AwardsMappingExtensions
             NominationNumber = entity.NominationNumber,
             AwardTypeId = entity.AwardTypeId,
             AwardTypeName = entity.AwardType?.Name ?? string.Empty,
+            AwardCycleId = entity.AwardCycleId,
+            AwardCycleName = entity.AwardCycle?.Name,
+            CommitteeId = entity.CommitteeId,
+            CommitteeName = entity.Committee?.Name,
             AwardLevelId = entity.AwardLevelId,
             AwardLevelName = entity.AwardLevel?.Name,
             NomineeId = entity.NomineeId,
@@ -391,6 +453,7 @@ public static class AwardsMappingExtensions
             TenantId = tenantId,
             NominationNumber = nominationNumber,
             AwardTypeId = dto.AwardTypeId,
+            AwardCycleId = dto.AwardCycleId,
             AwardLevelId = dto.AwardLevelId,
             NomineeId = dto.NomineeId,
             NominatedById = nominatedById,
@@ -490,10 +553,14 @@ public static class AwardsMappingExtensions
             AwardNominationId = entity.AwardNominationId,
             FileName = entity.FileName,
             FilePath = entity.FilePath,
+            FileSizeBytes = entity.FileSizeBytes,
             AttachmentType = entity.AttachmentType,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
             UploadedById = entity.UploadedById,
+            UploadedByName = entity.UploadedBy == null
+                ? null
+                : $"{entity.UploadedBy.FirstName} {entity.UploadedBy.LastName}".Trim(),
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -501,14 +568,30 @@ public static class AwardsMappingExtensions
         };
     }
 
-    public static AwardNominationAttachment ToEntity(this CreateAwardNominationAttachmentDto dto, Guid tenantId, Guid nominationId, Guid uploadedById, Guid userId)
+    /// <summary>The caller describes the file; the GATE says where it is. See D-39.</summary>
+    public static AwardNominationAttachment ToEntity(
+        this CreateAwardNominationAttachmentDto dto,
+        Guid tenantId,
+        Guid nominationId,
+        Guid uploadedById,
+        Guid userId,
+        string fileName,
+        string filePath,
+        long? fileSizeBytes,
+        Guid? fileUploadRecordId,
+        Guid? documentRecordId,
+        Guid? documentVersionId)
     {
         return new AwardNominationAttachment
         {
             TenantId = tenantId,
             AwardNominationId = nominationId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
+            FileName = fileName,
+            FilePath = filePath,
+            FileSizeBytes = fileSizeBytes,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
             AttachmentType = dto.AttachmentType,
             Description = dto.Description,
             UploadDate = DateTime.UtcNow,
@@ -604,6 +687,7 @@ public static class AwardsMappingExtensions
             Id = entity.Id,
             TenantId = entity.TenantId,
             AwardTypeId = entity.AwardTypeId,
+            Purpose = entity.Purpose,
             TargetType = entity.TargetType,
             TargetId = entity.TargetId,
             MinAge = entity.MinAge,
@@ -623,6 +707,7 @@ public static class AwardsMappingExtensions
         {
             TenantId = tenantId,
             AwardTypeId = dto.AwardTypeId,
+            Purpose = dto.Purpose,
             TargetType = dto.TargetType,
             TargetId = dto.TargetId,
             MinAge = dto.MinAge,
@@ -637,6 +722,7 @@ public static class AwardsMappingExtensions
 
     public static void UpdateEntity(this AwardTypeTarget entity, UpdateAwardTypeTargetDto dto, Guid userId)
     {
+        entity.Purpose = dto.Purpose;
         entity.TargetType = dto.TargetType;
         entity.TargetId = dto.TargetId;
         entity.MinAge = dto.MinAge;
@@ -836,9 +922,14 @@ public static class AwardsMappingExtensions
             CommitteeId = entity.CommitteeId,
             CommitteeName = entity.Committee?.Name!,
             EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee != null 
-                ? $"{entity.Employee.FirstName} {entity.Employee.LastName}" 
+            EmployeeName = entity.Employee != null
+                ? $"{entity.Employee.FirstName} {entity.Employee.LastName}"
                 : string.Empty,
+            // ⚠ The DTO has carried this field since the area was ported and the mapper never set
+            // it, so every committee membership list showed names beside a blank number column. The
+            // navigation is loaded already — the name next to it proves that — which is why nothing
+            // ever failed. Found by the slice-11 payload probe, not by a symptom.
+            EmployeeNumber = entity.Employee?.EmployeeNumber,
             Role = entity.Role,
             StartDate = entity.StartDate,
             EndDate = entity.EndDate,
@@ -896,8 +987,7 @@ public static class AwardsMappingExtensions
                 ? $"{entity.Reviewer.FirstName} {entity.Reviewer.LastName}" 
                 : string.Empty,
             ReviewDate = entity.ReviewDate,
-            Approved = entity.Approved,
-            Score = null,
+            Score = entity.Score,
             Comments = entity.Comments,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
@@ -914,7 +1004,7 @@ public static class AwardsMappingExtensions
             AwardNominationId = nominationId,
             ReviewerId = reviewerId,
             ReviewDate = DateTime.UtcNow,
-            Approved = dto.Approved,
+            Score = dto.Score,
             Comments = dto.Comments,
             CreatedBy = userId.ToString()
         };
@@ -922,7 +1012,7 @@ public static class AwardsMappingExtensions
 
     public static void UpdateEntity(this AwardNominationReview entity, UpdateCommitteeReviewDto dto, Guid userId)
     {
-        entity.Approved = dto.Approved;
+        entity.Score = dto.Score;
         entity.Comments = dto.Comments;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -1094,6 +1184,29 @@ public static class AwardsMappingExtensions
     {
         return entities.Select(e => e.ToSummaryDto()).ToList();
     }
+
+    #region LongServiceMilestone Mappings
+
+    public static LongServiceMilestoneDto ToDto(this LongServiceMilestone entity)
+    {
+        return new LongServiceMilestoneDto
+        {
+            Id = entity.Id,
+            TenantId = entity.TenantId,
+            AwardTypeId = entity.AwardTypeId,
+            AwardTypeName = entity.AwardType?.Name,
+            Years = entity.Years,
+            Name = entity.Name,
+            MonetaryAmount = entity.MonetaryAmount,
+            LeaveDaysBonus = entity.LeaveDaysBonus,
+            Benefits = entity.Benefits,
+            IsActive = entity.IsActive,
+            CreatedAt = entity.CreatedAt,
+            UpdatedAt = entity.UpdatedAt,
+        };
+    }
+
+    #endregion
 
     #endregion
 }

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Enums.Safety;
 
@@ -23,6 +24,17 @@ using ErpSystem.Core.Enums.Safety;
 //  P. SHE Performance Metrics / KPIs
 //  Q. Safety Committee & Meetings
 //  R. Return-to-Work Plans
+//  S. SHE Reminder Engine
+//  T. SHE Audit Management
+//  U. Stop-Work Authority
+//  V. Statutory Incident Submissions
+//  W. SHE Controlled Document Register
+//  X. Environmental Permit & Licence Register
+//  Y. Environmental Monitoring Schedules
+//  Z. Regulatory Updates Register
+//  AA. Sustainability Initiatives
+//  AB. Environmental Compliance Reviews & Clearance
+//  AC. Monthly Environmental Reports
 // ============================================================
 
 namespace ErpSystem.Core.Entities.HR.Safety;
@@ -339,6 +351,10 @@ public class SafetyIncident : TenantEntity
     [MaxLength(1000)]
     public string? ClosureNotes { get; set; }
 
+    /// <summary>What the organisation takes away from this incident (FR-ENV-027 / FR-SHE-104; slice 15).</summary>
+    [MaxLength(2000)]
+    public string? LessonsLearned { get; set; }
+
     // ── Navigation ──
     public virtual ICollection<SafetyIncidentInvolvedPerson> InvolvedPersons { get; set; } = new List<SafetyIncidentInvolvedPerson>();
     public virtual ICollection<SafetyIncidentWitness> Witnesses { get; set; } = new List<SafetyIncidentWitness>();
@@ -346,6 +362,7 @@ public class SafetyIncident : TenantEntity
     public virtual ICollection<SafetyIncidentFollowUp> FollowUps { get; set; } = new List<SafetyIncidentFollowUp>();
     public virtual ICollection<SafetyIncidentDocument> Documents { get; set; } = new List<SafetyIncidentDocument>();
     public virtual ICollection<SafetyIncidentInvestigationTeamMember> InvestigationTeam { get; set; } = new List<SafetyIncidentInvestigationTeamMember>();
+    public virtual ICollection<SheStatutoryIncidentSubmission> StatutorySubmissions { get; set; } = new List<SheStatutoryIncidentSubmission>();
 }
 
 public class SafetyIncidentInvolvedPerson : TenantEntity
@@ -682,6 +699,18 @@ public class SheHazard : TenantEntity
 
     [ForeignKey(nameof(LastReviewedById))]
     public virtual Employee? LastReviewedBy { get; set; }
+
+    /// <summary>
+    /// Who reported the hazard (2026-09-04). Stamped from the token for a self-service report;
+    /// the SHE desk may name the reporter when recording a hazard that reached it in person.
+    /// Nullable because every hazard created before this column has no reporter on record.
+    /// </summary>
+    public Guid? ReportedById { get; set; }
+
+    [ForeignKey(nameof(ReportedById))]
+    public virtual Employee? ReportedBy { get; set; }
+
+    public DateTime? ReportedDate { get; set; }
 
     public bool IsActive { get; set; } = true;
 
@@ -2015,6 +2044,10 @@ public class SheWasteDisposalRecord : TenantEntity
     [MaxLength(200)]
     public string? GenerationArea { get; set; }
 
+    /// <summary>On-site interim storage before disposal (FR-ENV-020, slice 17).</summary>
+    [MaxLength(200)]
+    public string? StorageLocation { get; set; }
+
     public DateTime DisposalDate { get; set; }
 
     public decimal Quantity { get; set; }
@@ -2109,6 +2142,14 @@ public class SheEnvironmentalIncident : TenantEntity
     [MaxLength(2000)]
     public string? CorrectiveActions { get; set; }
 
+    /// <summary>FR-ENV-027 (slice 17) — preventive actions distinct from the corrective ones.</summary>
+    [MaxLength(2000)]
+    public string? PreventiveActions { get; set; }
+
+    /// <summary>FR-ENV-027 (slice 17) — captured at close-out, mirrors SafetyIncident.LessonsLearned.</summary>
+    [MaxLength(2000)]
+    public string? LessonsLearned { get; set; }
+
     public DateTime? ClosedDate { get; set; }
 
     public Guid? ClosedById { get; set; }
@@ -2123,6 +2164,12 @@ public class SheEnvironmentalMonitoringRecord : TenantEntity
     public string RecordNumber { get; set; } = string.Empty;
 
     public SheEnvironmentalMonitoringType MonitoringType { get; set; }
+
+    /// <summary>Set when the record completes a scheduled activity (FR-ENV-023/024, slice 17).</summary>
+    public Guid? ScheduleId { get; set; }
+
+    [ForeignKey(nameof(ScheduleId))]
+    public virtual SheEnvironmentalMonitoringSchedule? Schedule { get; set; }
 
     public Guid? LocationId { get; set; }
 
@@ -2687,6 +2734,37 @@ public class ShePerformanceSnapshot : TenantEntity
 
     [MaxLength(500)]
     public string? ReportDocumentPath { get; set; }
+
+    // ── Computed KPIs (slice 14) ──
+    // Written only by SheKpiComputationService — never hand-entered. Null until the
+    // first computation runs (or when the inputs make the figure undefined, e.g.
+    // zero man-hours for the frequency rates).
+
+    /// <summary>TRIR — recordable incidents (accidents + occupational illness) × 200,000 / man-hours (OSHA base).</summary>
+    public decimal? TotalRecordableIncidentRate { get; set; }
+
+    /// <summary>Near misses × 1,000,000 / man-hours (same base as LTIFR).</summary>
+    public decimal? NearMissFrequencyRate { get; set; }
+
+    /// <summary>Attended employee sign-ins / registered employee sign-ins on conducted SHE programs, %.</summary>
+    public decimal? TrainingCompletionRate { get; set; }
+
+    /// <summary>Drills conducted in the period that met their objectives, %.</summary>
+    public decimal? FireDrillObjectivesMetRate { get; set; }
+
+    /// <summary>Waste mass diverted to recycling/composting over total disposed mass (kg/tonne records), %.</summary>
+    public decimal? WasteRecyclingRate { get; set; }
+
+    /// <summary>Average compliance score across scored workplace inspections in the period, %.</summary>
+    public decimal? AverageInspectionComplianceScore { get; set; }
+
+    /// <summary>When the computed figures were last refreshed from live data. Null = figures are hand-reported only.</summary>
+    public DateTime? KpisComputedAt { get; set; }
+
+    public Guid? KpisComputedById { get; set; }
+
+    [ForeignKey(nameof(KpisComputedById))]
+    public virtual Employee? KpisComputedBy { get; set; }
 }
 
 // ──────────────────────────────────────────────────────────
@@ -2983,4 +3061,997 @@ public class SheReturnToWorkReview : TenantEntity
     public virtual Employee ReviewedBy { get; set; } = null!;
 
     public DateTime? NextReviewDate { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  S. SHE REMINDER ENGINE  (slice 13; FRD §17)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One execution of the SHE reminder sweep for one tenant — scheduled (background
+/// service) or manual (the run-now endpoint). Carries the outcome counts the admin
+/// screen shows; the per-item detail hangs off <see cref="SheReminderDispatchLog"/>.
+/// </summary>
+public class SheReminderRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [Required, MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+    public int PermitsExpired { get; set; }
+    public int RiskAssessmentsExpired { get; set; }
+
+    /// <summary>Environmental permits the sweep flipped to Expired (slice 17, FR-ENV-019).</summary>
+    public int EnvironmentalPermitsExpired { get; set; }
+
+    public virtual ICollection<SheReminderDispatchLog> DispatchLogs { get; set; } = new List<SheReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a sweep. The unique (TenantId, DedupeKey)
+/// index is the engine's send-once guarantee: a key encodes the item, the reminder
+/// kind, its due date and the ladder threshold (or escalation tier) hit, so each
+/// rung fires exactly once — and a rescheduled due date re-arms the ladder because
+/// it produces new keys.
+/// </summary>
+public class SheReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual SheReminderRun Run { get; set; } = null!;
+
+    /// <summary>Machine kind, e.g. "PermitExpiringSoon", "RegulatoryReviewDue".</summary>
+    [Required, MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item type, e.g. "Permit to work".</summary>
+    [Required, MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept SHE record (no FK — the target table varies by kind).</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>What the notification shows: number/code plus a short name.</summary>
+    [Required, MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time (negative when overdue).</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 = due-soon ladder rung; 1–3 = overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required, MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
+}
+
+// ──────────────────────────────────────────────────────────
+//  T. SHE AUDIT MANAGEMENT  (slice 15, FRD §12 / FR-SHE-229)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// A management-system SHE audit: planning → execution → findings → CAPA →
+/// verification → closure. Distinct from workplace inspections (section D) and
+/// from Maintenance's unrelated SafetyAudit scaffolding.
+/// </summary>
+public class SheAudit : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string AuditNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    public SheAuditType Type { get; set; }
+
+    /// <summary>The standard or criteria audited against, e.g. "ISO 45001:2018", "Factories, Offices and Shops Act".</summary>
+    [MaxLength(200)]
+    public string? Standard { get; set; }
+
+    [MaxLength(1000)]
+    public string? Scope { get; set; }
+
+    [MaxLength(1000)]
+    public string? Objectives { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    /// <summary>Internal coordinator even for external audits — the accountable employee.</summary>
+    public Guid LeadAuditorId { get; set; }
+
+    [ForeignKey(nameof(LeadAuditorId))]
+    public virtual Employee LeadAuditor { get; set; } = null!;
+
+    [MaxLength(200)]
+    public string? ExternalAuditorName { get; set; }
+
+    [MaxLength(200)]
+    public string? ExternalAuditorOrganization { get; set; }
+
+    public DateTime PlannedStartDate { get; set; }
+    public DateTime? PlannedEndDate { get; set; }
+    public DateTime? ActualStartDate { get; set; }
+    public DateTime? ActualEndDate { get; set; }
+
+    public SheAuditStatus Status { get; set; }
+
+    // ── Report ──
+    [MaxLength(4000)]
+    public string? Summary { get; set; }
+
+    [MaxLength(500)]
+    public string? ReportDocumentPath { get; set; }
+
+    public DateTime? ReportIssuedDate { get; set; }
+
+    // ── Closure ──
+    public DateTime? ClosedDate { get; set; }
+
+    public Guid? ClosedById { get; set; }
+
+    [ForeignKey(nameof(ClosedById))]
+    public virtual Employee? ClosedBy { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClosureNotes { get; set; }
+
+    public virtual ICollection<SheAuditTeamMember> TeamMembers { get; set; } = new List<SheAuditTeamMember>();
+    public virtual ICollection<SheAuditFinding> Findings { get; set; } = new List<SheAuditFinding>();
+}
+
+public class SheAuditTeamMember : TenantEntity
+{
+    public Guid AuditId { get; set; }
+
+    [ForeignKey(nameof(AuditId))]
+    public virtual SheAudit Audit { get; set; } = null!;
+
+    public Guid EmployeeId { get; set; }
+
+    [ForeignKey(nameof(EmployeeId))]
+    public virtual Employee Employee { get; set; } = null!;
+
+    [Required, MaxLength(100)]
+    public string Role { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One audit finding. Corrective actions hang off the finding as template-linked
+/// rows (the slice-14 unified tracker's fifth source); the finding itself closes
+/// only after its actions complete and the resolution is verified.
+/// </summary>
+public class SheAuditFinding : TenantEntity
+{
+    public Guid AuditId { get; set; }
+
+    [ForeignKey(nameof(AuditId))]
+    public virtual SheAudit Audit { get; set; } = null!;
+
+    /// <summary>Server-assigned sequence within the audit; soft-deleted findings keep their number.</summary>
+    public int FindingNumber { get; set; }
+
+    public SheAuditFindingClassification Classification { get; set; }
+
+    /// <summary>Clause / section of the audited standard, e.g. "45001 §8.1.2".</summary>
+    [MaxLength(100)]
+    public string? ClauseReference { get; set; }
+
+    [Required, MaxLength(2000)]
+    public string Description { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Evidence { get; set; }
+
+    public SheAuditFindingStatus Status { get; set; }
+
+    public Guid? ResponsiblePersonId { get; set; }
+
+    [ForeignKey(nameof(ResponsiblePersonId))]
+    public virtual Employee? ResponsiblePerson { get; set; }
+
+    public DateTime? DueDate { get; set; }
+
+    [MaxLength(2000)]
+    public string? ResolutionNotes { get; set; }
+
+    public DateTime? ResolvedDate { get; set; }
+
+    // ── Effectiveness verification ──
+    public Guid? VerifiedById { get; set; }
+
+    [ForeignKey(nameof(VerifiedById))]
+    public virtual Employee? VerifiedBy { get; set; }
+
+    public DateTime? VerifiedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? VerificationNotes { get; set; }
+
+    public virtual ICollection<SheAuditFindingAction> Actions { get; set; } = new List<SheAuditFindingAction>();
+}
+
+public class SheAuditFindingAction : TenantEntity
+{
+    public Guid FindingId { get; set; }
+
+    [ForeignKey(nameof(FindingId))]
+    public virtual SheAuditFinding Finding { get; set; } = null!;
+
+    public Guid CorrectiveActionTemplateId { get; set; }
+
+    [ForeignKey(nameof(CorrectiveActionTemplateId))]
+    public virtual SheCorrectiveActionTemplate CorrectiveActionTemplate { get; set; } = null!;
+
+    public SheCorrectiveActionStatus Status { get; set; }
+    public DateTime? DueDate { get; set; }
+    public DateTime? CompletionDate { get; set; }
+
+    [MaxLength(500)]
+    public string? CompletionNotes { get; set; }
+
+    public Guid? AssignedToId { get; set; }
+
+    [ForeignKey(nameof(AssignedToId))]
+    public virtual Employee? AssignedTo { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  U. STOP-WORK AUTHORITY  (slice 15, FR-SHE-200)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// A stop-work order: any employee may halt work they believe is imminently
+/// dangerous (raise stays open like incident/hazard reporting); HR/SHE routes,
+/// resolves and finally clears the resumption. Raised → UnderReview → Resolved
+/// → Cleared, with Cancelled for false alarms.
+/// </summary>
+public class SheStopWorkOrder : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string OrderNumber { get; set; } = string.Empty;
+
+    public Guid RaisedById { get; set; }
+
+    [ForeignKey(nameof(RaisedById))]
+    public virtual Employee RaisedBy { get; set; } = null!;
+
+    public DateTime RaisedDate { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    [MaxLength(200)]
+    public string? SpecificArea { get; set; }
+
+    /// <summary>What work was stopped.</summary>
+    [Required, MaxLength(1000)]
+    public string WorkDescription { get; set; } = string.Empty;
+
+    /// <summary>Why — the imminent danger observed.</summary>
+    [Required, MaxLength(2000)]
+    public string ReasonDescription { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? ImmediateActionsTaken { get; set; }
+
+    // Optional bridges to the records the stop-work concerns.
+    public Guid? PermitToWorkId { get; set; }
+
+    [ForeignKey(nameof(PermitToWorkId))]
+    public virtual ShePermitToWork? PermitToWork { get; set; }
+
+    public Guid? HazardId { get; set; }
+
+    [ForeignKey(nameof(HazardId))]
+    public virtual SheHazard? Hazard { get; set; }
+
+    public Guid? IncidentId { get; set; }
+
+    [ForeignKey(nameof(IncidentId))]
+    public virtual SafetyIncident? Incident { get; set; }
+
+    public SheStopWorkStatus Status { get; set; }
+
+    /// <summary>The manager the order is routed to for resolution.</summary>
+    public Guid? RoutedToId { get; set; }
+
+    [ForeignKey(nameof(RoutedToId))]
+    public virtual Employee? RoutedTo { get; set; }
+
+    public DateTime? RoutedDate { get; set; }
+
+    // ── Resolution ──
+    [MaxLength(2000)]
+    public string? ResolutionDescription { get; set; }
+
+    public Guid? ResolvedById { get; set; }
+
+    [ForeignKey(nameof(ResolvedById))]
+    public virtual Employee? ResolvedBy { get; set; }
+
+    public DateTime? ResolvedDate { get; set; }
+
+    // ── Clearance (work resumes) ──
+    public Guid? ClearedById { get; set; }
+
+    [ForeignKey(nameof(ClearedById))]
+    public virtual Employee? ClearedBy { get; set; }
+
+    public DateTime? ClearedDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClearanceNotes { get; set; }
+
+    // ── Cancellation (false alarm) ──
+    public Guid? CancelledById { get; set; }
+
+    [ForeignKey(nameof(CancelledById))]
+    public virtual Employee? CancelledBy { get; set; }
+
+    public DateTime? CancelledDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  V. STATUTORY INCIDENT SUBMISSIONS  (slice 15, FR-SHE-103)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One submission of a reportable incident to a regulatory body (Labour
+/// Department, EPA, GNFS, …) — initial notification through final report. The
+/// first submission stamps the incident's denormalised authority-notification
+/// fields when they are still blank.
+/// </summary>
+public class SheStatutoryIncidentSubmission : TenantEntity
+{
+    public Guid IncidentId { get; set; }
+
+    [ForeignKey(nameof(IncidentId))]
+    public virtual SafetyIncident Incident { get; set; } = null!;
+
+    public Guid RegulatoryBodyId { get; set; }
+
+    [ForeignKey(nameof(RegulatoryBodyId))]
+    public virtual SheRegulatoryBody RegulatoryBody { get; set; } = null!;
+
+    public SheStatutorySubmissionType Type { get; set; }
+    public SheStatutorySubmissionMethod Method { get; set; }
+
+    public DateTime SubmissionDate { get; set; }
+
+    /// <summary>The authority's reference for this submission, once assigned.</summary>
+    [MaxLength(100)]
+    public string? ReferenceNumber { get; set; }
+
+    public Guid SubmittedById { get; set; }
+
+    [ForeignKey(nameof(SubmittedById))]
+    public virtual Employee SubmittedBy { get; set; } = null!;
+
+    /// <summary>The submitted artefact (report / form) on the document store.</summary>
+    [MaxLength(500)]
+    public string? DocumentPath { get; set; }
+
+    public bool AcknowledgementReceived { get; set; }
+    public DateTime? AcknowledgementDate { get; set; }
+
+    [MaxLength(100)]
+    public string? AcknowledgementReference { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  W. SHE CONTROLLED DOCUMENT REGISTER  (slice 16, FR-SHE-246/170)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One controlled SHE document (policy, procedure, emergency plan, …) in the
+/// area's register — FR-SHE-170 filing/retrieval and FR-SHE-246 version
+/// control. The register row carries the SHE classification and lifecycle;
+/// the file versions themselves live in the central DMS
+/// (<see cref="CentralDocumentRecord"/> / CentralDocumentVersion), each bound
+/// to a scanned controlled upload — SHE deliberately mints no parallel
+/// version store.
+/// </summary>
+public class SheControlledDocument : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string DocumentNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(250)]
+    public string Title { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public SheControlledDocumentCategory Category { get; set; }
+
+    public SheControlledDocumentStatus Status { get; set; } = SheControlledDocumentStatus.Draft;
+
+    /// <summary>Free-text search terms for FR-SHE-170 retrieval.</summary>
+    [MaxLength(500)]
+    public string? Keywords { get; set; }
+
+    /// <summary>The document's custodian — owns the content and its review cycle.</summary>
+    public Guid OwnerId { get; set; }
+
+    [ForeignKey(nameof(OwnerId))]
+    public virtual Employee Owner { get; set; } = null!;
+
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    // ── Version control (central DMS binding) ──
+    /// <summary>Null until the first version is uploaded and DMS-registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    [ForeignKey(nameof(DocumentRecordId))]
+    public virtual CentralDocumentRecord? DocumentRecord { get; set; }
+
+    /// <summary>Mirror of the DMS record's CurrentVersion for list reads.</summary>
+    [MaxLength(20)]
+    public string? CurrentVersionLabel { get; set; }
+
+    // ── Approval / effectivity (FR-SHE-246) ──
+    public DateTime? EffectiveDate { get; set; }
+
+    /// <summary>Drives NextReviewDate on activation when no explicit date is given.</summary>
+    public int? ReviewFrequencyMonths { get; set; }
+
+    public DateTime? NextReviewDate { get; set; }
+
+    public Guid? ApprovedById { get; set; }
+
+    [ForeignKey(nameof(ApprovedById))]
+    public virtual Employee? ApprovedBy { get; set; }
+
+    public DateTime? ApprovedDate { get; set; }
+
+    // ── Archival (obsolete documents stay on the register) ──
+    public Guid? ArchivedById { get; set; }
+
+    [ForeignKey(nameof(ArchivedById))]
+    public virtual Employee? ArchivedBy { get; set; }
+
+    public DateTime? ArchivedDate { get; set; }
+
+    [MaxLength(500)]
+    public string? ArchiveReason { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  X. ENVIRONMENTAL PERMIT & LICENCE REGISTER  (slice 17, FR-ENV-017–019)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One environmental permit, licence, EPA registration or certificate on the
+/// Part D Permit Register (FR-ENV-017). The reminder engine rides the statutory
+/// 180/90/60/30/14/7 ladder toward ExpiryDate (FR-ENV-018) and flips a live
+/// permit to Expired past it — expired rows escalate to the admin audience and
+/// show red on the dashboard (FR-ENV-019). The permit document itself rides
+/// the controlled-upload gate onto the central DMS, exactly like the slice-16
+/// register — no bare string paths.
+/// </summary>
+public class SheEnvironmentalPermit : TenantEntity
+{
+    /// <summary>The register's own sequence (EPR-YYYY-NNNN), distinct from the authority's number.</summary>
+    [Required, MaxLength(30)]
+    public string RegisterNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(300)]
+    public string PermitName { get; set; } = string.Empty;
+
+    public SheEnvironmentalPermitType PermitType { get; set; }
+
+    /// <summary>The issuing authority's own permit/licence number.</summary>
+    [MaxLength(100)]
+    public string? AuthorityReferenceNumber { get; set; }
+
+    public Guid? IssuingBodyId { get; set; }
+
+    [ForeignKey(nameof(IssuingBodyId))]
+    public virtual SheRegulatoryBody? IssuingBody { get; set; }
+
+    /// <summary>FR-ENV-017's responsible officer — owns the renewal.</summary>
+    public Guid ResponsibleOfficerId { get; set; }
+
+    [ForeignKey(nameof(ResponsibleOfficerId))]
+    public virtual Employee ResponsibleOfficer { get; set; } = null!;
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    /// <summary>Conditions attached to the permit that operations must honour.</summary>
+    [MaxLength(2000)]
+    public string? Conditions { get; set; }
+
+    public DateTime IssueDate { get; set; }
+
+    /// <summary>The renewal ladder's hook (FR-ENV-018).</summary>
+    public DateTime ExpiryDate { get; set; }
+
+    public int? RenewalPeriodMonths { get; set; }
+
+    public SheEnvironmentalPermitStatus Status { get; set; } = SheEnvironmentalPermitStatus.Active;
+
+    // ── Permit document (central DMS binding, slice-16 stance) ──
+    /// <summary>Null until the permit document is uploaded and DMS-registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    [ForeignKey(nameof(DocumentRecordId))]
+    public virtual CentralDocumentRecord? DocumentRecord { get; set; }
+
+    [MaxLength(20)]
+    public string? CurrentVersionLabel { get; set; }
+
+    // ── Renewal trail ──
+    public DateTime? LastRenewedDate { get; set; }
+
+    public Guid? LastRenewedById { get; set; }
+
+    [ForeignKey(nameof(LastRenewedById))]
+    public virtual Employee? LastRenewedBy { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  Y. ENVIRONMENTAL MONITORING SCHEDULES  (slice 17, FR-ENV-023–024)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// A recurring monitoring obligation (dust, waste storage, noise, air quality,
+/// annual performance review — FR-ENV-023). The reminder engine ladders toward
+/// NextDueDate (FR-ENV-024); recording completion links the monitoring record
+/// that satisfied the cycle and advances the schedule by its interval.
+/// </summary>
+public class SheEnvironmentalMonitoringSchedule : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string ScheduleNumber { get; set; } = string.Empty;
+
+    public SheEnvironmentalMonitoringType MonitoringType { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    [MaxLength(200)]
+    public string? MonitoringPoint { get; set; }
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    /// <summary>Days between cycles — completion advances NextDueDate by this much.</summary>
+    public int FrequencyDays { get; set; }
+
+    /// <summary>The reminder sweep's hook.</summary>
+    public DateTime NextDueDate { get; set; }
+
+    public DateTime? LastPerformedDate { get; set; }
+
+    public Guid? ResponsibleOfficerId { get; set; }
+
+    [ForeignKey(nameof(ResponsibleOfficerId))]
+    public virtual Employee? ResponsibleOfficer { get; set; }
+
+    public bool IsActive { get; set; } = true;
+
+    public virtual ICollection<SheEnvironmentalMonitoringRecord> Records { get; set; } = new List<SheEnvironmentalMonitoringRecord>();
+}
+
+// ──────────────────────────────────────────────────────────
+//  Z. REGULATORY UPDATES REGISTER  (slice 17, FR-ENV-030–032 / FR-SHE-182)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One recorded change in environmental/SHE legislation or standards — EPA,
+/// Ghana Standards Authority, ministries, international standards, new LIs
+/// (FR-ENV-030, FR-SHE-182). Carries the FR-ENV-031 assessment (summary,
+/// affected departments, deadline, risk, required actions, management
+/// notification) and the FR-ENV-032 register columns, and is tracked to
+/// compliance closure. May link to the obligations register when the update
+/// amends an obligation already under management.
+/// </summary>
+public class SheRegulatoryUpdate : TenantEntity
+{
+    /// <summary>The register's own sequence (REG-YYYY-NNNN).</summary>
+    [Required, MaxLength(30)]
+    public string UpdateNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(300)]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>The authority's own regulation/LI number (FR-ENV-032's "regulation number").</summary>
+    [MaxLength(100)]
+    public string? RegulationReference { get; set; }
+
+    public Guid? RegulatoryBodyId { get; set; }
+
+    [ForeignKey(nameof(RegulatoryBodyId))]
+    public virtual SheRegulatoryBody? RegulatoryBody { get; set; }
+
+    /// <summary>Free-text authority when the body is not on the reference register.</summary>
+    [MaxLength(200)]
+    public string? AuthorityName { get; set; }
+
+    public SheRegulatoryDomain Domain { get; set; }
+
+    [Required, MaxLength(2000)]
+    public string Summary { get; set; } = string.Empty;
+
+    public DateTime IssueDate { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+
+    [MaxLength(500)]
+    public string? AffectedDepartments { get; set; }
+
+    /// <summary>The reminder sweep ladders toward this while the update is not closed.</summary>
+    public DateTime? ComplianceDeadline { get; set; }
+
+    public SheRegulatoryUpdateRiskLevel RiskLevel { get; set; }
+
+    [MaxLength(2000)]
+    public string? RequiredActions { get; set; }
+
+    public SheRegulatoryUpdateStatus Status { get; set; } = SheRegulatoryUpdateStatus.Recorded;
+
+    public SheComplianceStatus ComplianceStatus { get; set; } = SheComplianceStatus.NotAssessed;
+
+    public DateTime? ReviewDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? OfficerComments { get; set; }
+
+    public Guid? LinkedObligationId { get; set; }
+
+    [ForeignKey(nameof(LinkedObligationId))]
+    public virtual SheRegulatoryObligation? LinkedObligation { get; set; }
+
+    // ── FR-ENV-031 management notification ──
+    public DateTime? ManagementNotifiedAt { get; set; }
+
+    public Guid? ManagementNotifiedById { get; set; }
+
+    [ForeignKey(nameof(ManagementNotifiedById))]
+    public virtual Employee? ManagementNotifiedBy { get; set; }
+
+    public Guid RecordedById { get; set; }
+
+    [ForeignKey(nameof(RecordedById))]
+    public virtual Employee RecordedBy { get; set; } = null!;
+
+    // ── Compliance closure ──
+    public DateTime? ClosedAt { get; set; }
+
+    public Guid? ClosedById { get; set; }
+
+    [ForeignKey(nameof(ClosedById))]
+    public virtual Employee? ClosedBy { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClosureNotes { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  AA. SUSTAINABILITY INITIATIVES  (slice 17, FR-ENV-028–029)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One tracked sustainability initiative (energy/water/paper savings, tree
+/// planting, recycling, carbon reduction, cost savings — FR-ENV-028). The
+/// aggregates feed the dashboard KPI strip and the monthly environmental
+/// report (FR-ENV-029). Spec priority D.
+/// </summary>
+public class SheSustainabilityInitiative : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string InitiativeNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(300)]
+    public string Title { get; set; } = string.Empty;
+
+    public SheSustainabilityCategory Category { get; set; }
+
+    [MaxLength(2000)]
+    public string? Description { get; set; }
+
+    public Guid? LocationId { get; set; }
+
+    [ForeignKey(nameof(LocationId))]
+    public virtual Location? Location { get; set; }
+
+    public Guid? OwnerId { get; set; }
+
+    [ForeignKey(nameof(OwnerId))]
+    public virtual Employee? Owner { get; set; }
+
+    public DateTime StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+
+    public SheSustainabilityStatus Status { get; set; } = SheSustainabilityStatus.Planned;
+
+    /// <summary>Target and achieved values in MeasurementUnit (kWh, m³, kg, trees, …).</summary>
+    public decimal? TargetValue { get; set; }
+    public decimal? ActualValue { get; set; }
+
+    [MaxLength(50)]
+    public string? MeasurementUnit { get; set; }
+
+    /// <summary>Estimated cost saving in GHS — summed for the monthly report.</summary>
+    public decimal? EstimatedCostSavings { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  AB. ENVIRONMENTAL COMPLIANCE REVIEWS & CLEARANCE  (slice 17, FR-ENV-001–016)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One activity/project submitted for environmental compliance review
+/// (FR-ENV-001): screening determination (FR-ENV-009), officer decision
+/// (FR-ENV-004), management approval routing (FR-ENV-005), EPA submission
+/// trail (FR-ENV-011) and clearance issue (FR-ENV-016). ProjectReference is
+/// the deliberate seam for the Project module: automatic triggering at
+/// project creation (FR-ENV-008/012/013) and the procurement/construction
+/// hard block (FR-ENV-010, decision DR-09 pending) wire in when a Project
+/// trigger source exists — the register and its gates stand alone until then.
+/// </summary>
+public class SheEnvironmentalReview : TenantEntity
+{
+    [Required, MaxLength(30)]
+    public string ReviewNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(300)]
+    public string ProjectName { get; set; } = string.Empty;
+
+    public SheEnvironmentalWorkClassification WorkClassification { get; set; }
+
+    /// <summary>Free-text pointer to the initiating record — the stubbed Project-module seam.</summary>
+    [MaxLength(200)]
+    public string? ProjectReference { get; set; }
+
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    public Guid? ResponsibleManagerId { get; set; }
+
+    [ForeignKey(nameof(ResponsibleManagerId))]
+    public virtual Employee? ResponsibleManager { get; set; }
+
+    public Guid SubmittedById { get; set; }
+
+    [ForeignKey(nameof(SubmittedById))]
+    public virtual Employee SubmittedBy { get; set; } = null!;
+
+    public DateTime SubmittedDate { get; set; }
+
+    /// <summary>FR-ENV-014's 90/60/30-day project-notification reminders ladder toward this.</summary>
+    public DateTime? PlannedStartDate { get; set; }
+
+    [Required, MaxLength(3000)]
+    public string Description { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? ApplicableLaws { get; set; }
+
+    public bool PermitRequired { get; set; }
+
+    [MaxLength(2000)]
+    public string? ComplianceChecklist { get; set; }
+
+    // ── Screening determination (FR-ENV-009) ──
+    public bool RequiresRegistration { get; set; }
+    public bool RequiresEnvironmentalPermit { get; set; }
+    public bool RequiresFullEia { get; set; }
+    public bool RequiresRiskAssessment { get; set; }
+    public bool RequiresEpaSubmission { get; set; }
+    public bool RequiresManagementApproval { get; set; }
+
+    [MaxLength(2000)]
+    public string? ScreeningNotes { get; set; }
+
+    public DateTime? ScreeningCompletedDate { get; set; }
+
+    public Guid? ScreenedById { get; set; }
+
+    [ForeignKey(nameof(ScreenedById))]
+    public virtual Employee? ScreenedBy { get; set; }
+
+    // ── Officer decision (FR-ENV-004) ──
+    public SheEnvironmentalReviewStatus Status { get; set; } = SheEnvironmentalReviewStatus.Submitted;
+
+    [MaxLength(2000)]
+    public string? OfficerComments { get; set; }
+
+    public DateTime? ApprovedDate { get; set; }
+
+    public Guid? ApprovedById { get; set; }
+
+    [ForeignKey(nameof(ApprovedById))]
+    public virtual Employee? ApprovedBy { get; set; }
+
+    // ── Management approval (FR-ENV-005) ──
+    public DateTime? ManagementApprovedDate { get; set; }
+
+    public Guid? ManagementApprovedById { get; set; }
+
+    [ForeignKey(nameof(ManagementApprovedById))]
+    public virtual Employee? ManagementApprovedBy { get; set; }
+
+    // ── EPA submission (FR-ENV-011) ──
+    public DateTime? EpaSubmissionDate { get; set; }
+
+    [MaxLength(100)]
+    public string? EpaSubmissionReference { get; set; }
+
+    // ── Clearance (FR-ENV-016) ──
+    public DateTime? ClearanceIssuedDate { get; set; }
+
+    public Guid? ClearanceIssuedById { get; set; }
+
+    [ForeignKey(nameof(ClearanceIssuedById))]
+    public virtual Employee? ClearanceIssuedBy { get; set; }
+
+    // ── Project commencement approval (FR-ENV-011's trail end) ──
+    public DateTime? CommencementApprovedDate { get; set; }
+
+    public Guid? CommencementApprovedById { get; set; }
+
+    [ForeignKey(nameof(CommencementApprovedById))]
+    public virtual Employee? CommencementApprovedBy { get; set; }
+
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+
+    public virtual ICollection<SheEnvironmentalReviewAction> Actions { get; set; } = new List<SheEnvironmentalReviewAction>();
+}
+
+/// <summary>
+/// The review's append-only audit trail (FR-ENV-006/011): every lifecycle
+/// action — submission, screening, corrections, approval, rejection,
+/// management approval, EPA submission, clearance, commencement — lands one
+/// immutable row.
+/// </summary>
+public class SheEnvironmentalReviewAction : TenantEntity
+{
+    public Guid ReviewId { get; set; }
+
+    [ForeignKey(nameof(ReviewId))]
+    public virtual SheEnvironmentalReview Review { get; set; } = null!;
+
+    [Required, MaxLength(60)]
+    public string Action { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Notes { get; set; }
+
+    public Guid ActorId { get; set; }
+
+    [ForeignKey(nameof(ActorId))]
+    public virtual Employee Actor { get; set; } = null!;
+
+    public DateTime ActionDate { get; set; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  AC. MONTHLY ENVIRONMENTAL REPORTS  (slice 17, FR-ENV-033–034)
+// ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// One generated monthly environmental report (FR-ENV-033). The sweep
+/// auto-generates the prior month's report when missing; an unsubmitted
+/// report can be regenerated (figures recomputed), a submitted one is
+/// permanent history (FR-ENV-034). All figures are computed at generation
+/// time from the live registers — never hand-entered.
+/// </summary>
+public class SheMonthlyEnvironmentalReport : TenantEntity
+{
+    /// <summary>Natural key: ENV-RPT-YYYY-MM.</summary>
+    [Required, MaxLength(30)]
+    public string ReportNumber { get; set; } = string.Empty;
+
+    public int Year { get; set; }
+    public int Month { get; set; }
+
+    public DateTime PeriodStart { get; set; }
+    public DateTime PeriodEnd { get; set; }
+
+    public DateTime GeneratedAt { get; set; }
+
+    /// <summary>Null when the reminder engine generated the report.</summary>
+    public Guid? GeneratedById { get; set; }
+
+    [ForeignKey(nameof(GeneratedById))]
+    public virtual Employee? GeneratedBy { get; set; }
+
+    // ── Compliance (obligations register) ──
+    public int ObligationsTotal { get; set; }
+    public int ObligationsCompliant { get; set; }
+    public decimal? CompliancePercentage { get; set; }
+
+    // ── Permit status + upcoming renewals ──
+    public int PermitsActive { get; set; }
+    public int PermitsExpiringIn90Days { get; set; }
+    public int PermitsExpired { get; set; }
+
+    // ── Reviews ──
+    public int ProjectsReviewed { get; set; }
+    public int ClearancesIssued { get; set; }
+
+    // ── Waste (mass-based, kilogram/tonne records only — mixed units are incommensurable) ──
+    public decimal WasteGeneratedKg { get; set; }
+    public decimal WasteRecycledKg { get; set; }
+    public decimal? WasteRecyclingRate { get; set; }
+
+    // ── Incidents & monitoring ──
+    public int EnvironmentalIncidents { get; set; }
+    public int EnvironmentalIncidentsClosed { get; set; }
+    public int MonitoringExceedances { get; set; }
+
+    // ── Audits & corrective actions ──
+    public int AuditFindingsRaised { get; set; }
+    public int CorrectiveActionsOpen { get; set; }
+
+    // ── Regulations & sustainability ──
+    public int NewRegulatoryUpdates { get; set; }
+    public int SustainabilityInitiativesActive { get; set; }
+    public int SustainabilityInitiativesCompleted { get; set; }
+    public decimal SustainabilityCostSavings { get; set; }
+
+    /// <summary>The officer's narrative — editable until submission.</summary>
+    [MaxLength(3000)]
+    public string? OfficerSummary { get; set; }
+
+    // ── Electronic submission to management (FR-ENV-034) ──
+    public DateTime? SubmittedToManagementAt { get; set; }
+
+    public Guid? SubmittedById { get; set; }
+
+    [ForeignKey(nameof(SubmittedById))]
+    public virtual Employee? SubmittedBy { get; set; }
 }

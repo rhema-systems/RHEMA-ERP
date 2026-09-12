@@ -709,6 +709,17 @@ public class ShePerformanceSnapshotDto : BaseDto
     public DateTime? ReviewedDate { get; set; }
     public string? ManagementComments { get; set; }
     public string? ReportDocumentPath { get; set; }
+
+    // Computed KPIs (slice 14) — written only by the KPI computation engine.
+    public decimal? TotalRecordableIncidentRate { get; set; }
+    public decimal? NearMissFrequencyRate { get; set; }
+    public decimal? TrainingCompletionRate { get; set; }
+    public decimal? FireDrillObjectivesMetRate { get; set; }
+    public decimal? WasteRecyclingRate { get; set; }
+    public decimal? AverageInspectionComplianceScore { get; set; }
+    public DateTime? KpisComputedAt { get; set; }
+    public Guid? KpisComputedById { get; set; }
+    public string? KpisComputedByName { get; set; }
 }
 
 public class ShePerformanceSnapshotSummaryDto
@@ -740,10 +751,112 @@ public class CreateShePerformanceSnapshotDto : CreateDtoBase
     public int? PeriodNumber { get; set; }
     public Guid? LocationId { get; set; }
 
+    // The reported figures. Every one is hand-entered by the SHE officer — nothing computes
+    // them yet (KPI computation is a later slice); the screens label them "reported".
+    [Range(0, int.MaxValue)] public int TotalAccidents { get; set; }
+    [Range(0, int.MaxValue)] public int TotalIncidents { get; set; }
+    [Range(0, int.MaxValue)] public int TotalNearMisses { get; set; }
+    [Range(0, int.MaxValue)] public int TotalDangerousOccurrences { get; set; }
+    [Range(0, int.MaxValue)] public int TotalFatalities { get; set; }
+    [Range(0, int.MaxValue)] public int TotalLostTimeInjuries { get; set; }
+
+    [Range(0, double.MaxValue)] public decimal? LostTimeInjuryFrequencyRate { get; set; }
+    [Range(0, long.MaxValue)] public long TotalManHoursWorked { get; set; }
+    [Range(0, int.MaxValue)] public int TotalLostDays { get; set; }
+
+    [Range(0, int.MaxValue)] public int InspectionsPlanned { get; set; }
+    [Range(0, int.MaxValue)] public int InspectionsConducted { get; set; }
+    [Range(0, int.MaxValue)] public int InspectionsOverdue { get; set; }
+
+    [Range(0, int.MaxValue)] public int CorrectiveActionsIssued { get; set; }
+    [Range(0, int.MaxValue)] public int CorrectiveActionsCompleted { get; set; }
+    [Range(0, int.MaxValue)] public int CorrectiveActionsOverdue { get; set; }
+    [Range(0, 100)] public decimal? CorrectiveActionClosureRate { get; set; }
+
+    [Range(0, int.MaxValue)] public int TrainingProgramsPlanned { get; set; }
+    [Range(0, int.MaxValue)] public int TrainingProgramsConducted { get; set; }
+    [Range(0, int.MaxValue)] public int TotalTrainingHours { get; set; }
+
+    [Range(0, int.MaxValue)] public int ContractorsOnSite { get; set; }
+    [Range(0, int.MaxValue)] public int ContractorInspectionsConducted { get; set; }
+    [Range(0, int.MaxValue)] public int ContractorNonComplianceNoticesIssued { get; set; }
+    [Range(0, 100)] public decimal? ContractorComplianceRate { get; set; }
+
+    [Range(0, int.MaxValue)] public int EnvironmentalIncidents { get; set; }
+    [Range(0, int.MaxValue)] public int EnvironmentalIncidentsReportedToEpa { get; set; }
+
+    [Range(0, int.MaxValue)] public int EmergencyDrillsPlanned { get; set; }
+    [Range(0, int.MaxValue)] public int EmergencyDrillsConducted { get; set; }
+
+    [Range(0, 100)] public decimal? PpeComplianceRate { get; set; }
+    [Range(0, 100)] public decimal? HousekeepingComplianceRating { get; set; }
+
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsTotal { get; set; }
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsCompliant { get; set; }
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsNonCompliant { get; set; }
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsExpiringSoon { get; set; }
+
     [Required]
     public Guid PreparedById { get; set; }
 
     public DateTime PreparedDate { get; set; } = DateTime.UtcNow;
+
+    [MaxLength(1000)]
+    public string? ManagementComments { get; set; }
+
+    [MaxLength(500)]
+    public string? ReportDocumentPath { get; set; }
+}
+
+/// <summary>
+/// Corrects the reported figures on a snapshot that has not yet been through management review.
+/// The identity fields (number, period, year, location, preparer) are fixed at creation — a
+/// snapshot for the wrong period is deleted and re-entered, not renamed.
+/// </summary>
+public class UpdateShePerformanceSnapshotDto : UpdateDtoBase
+{
+    [Range(0, int.MaxValue)] public int TotalAccidents { get; set; }
+    [Range(0, int.MaxValue)] public int TotalIncidents { get; set; }
+    [Range(0, int.MaxValue)] public int TotalNearMisses { get; set; }
+    [Range(0, int.MaxValue)] public int TotalDangerousOccurrences { get; set; }
+    [Range(0, int.MaxValue)] public int TotalFatalities { get; set; }
+    [Range(0, int.MaxValue)] public int TotalLostTimeInjuries { get; set; }
+
+    [Range(0, double.MaxValue)] public decimal? LostTimeInjuryFrequencyRate { get; set; }
+    [Range(0, long.MaxValue)] public long TotalManHoursWorked { get; set; }
+    [Range(0, int.MaxValue)] public int TotalLostDays { get; set; }
+
+    [Range(0, int.MaxValue)] public int InspectionsPlanned { get; set; }
+    [Range(0, int.MaxValue)] public int InspectionsConducted { get; set; }
+    [Range(0, int.MaxValue)] public int InspectionsOverdue { get; set; }
+
+    [Range(0, int.MaxValue)] public int CorrectiveActionsIssued { get; set; }
+    [Range(0, int.MaxValue)] public int CorrectiveActionsCompleted { get; set; }
+    [Range(0, int.MaxValue)] public int CorrectiveActionsOverdue { get; set; }
+    [Range(0, 100)] public decimal? CorrectiveActionClosureRate { get; set; }
+
+    [Range(0, int.MaxValue)] public int TrainingProgramsPlanned { get; set; }
+    [Range(0, int.MaxValue)] public int TrainingProgramsConducted { get; set; }
+    [Range(0, int.MaxValue)] public int TotalTrainingHours { get; set; }
+
+    [Range(0, int.MaxValue)] public int ContractorsOnSite { get; set; }
+    [Range(0, int.MaxValue)] public int ContractorInspectionsConducted { get; set; }
+    [Range(0, int.MaxValue)] public int ContractorNonComplianceNoticesIssued { get; set; }
+    [Range(0, 100)] public decimal? ContractorComplianceRate { get; set; }
+
+    [Range(0, int.MaxValue)] public int EnvironmentalIncidents { get; set; }
+    [Range(0, int.MaxValue)] public int EnvironmentalIncidentsReportedToEpa { get; set; }
+
+    [Range(0, int.MaxValue)] public int EmergencyDrillsPlanned { get; set; }
+    [Range(0, int.MaxValue)] public int EmergencyDrillsConducted { get; set; }
+
+    [Range(0, 100)] public decimal? PpeComplianceRate { get; set; }
+    [Range(0, 100)] public decimal? HousekeepingComplianceRating { get; set; }
+
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsTotal { get; set; }
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsCompliant { get; set; }
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsNonCompliant { get; set; }
+    [Range(0, int.MaxValue)] public int RegulatoryObligationsExpiringSoon { get; set; }
 
     [MaxLength(1000)]
     public string? ManagementComments { get; set; }
@@ -1212,8 +1325,6 @@ public class CreateSheReturnToWorkPhaseDto : CreateDtoBase
     [Required, MaxLength(100)]
     public string PhaseName { get; set; } = string.Empty;
 
-    public int PhaseNumber { get; set; }
-
     [Required]
     public DateTime StartDate { get; set; }
 
@@ -1239,8 +1350,6 @@ public class UpdateSheReturnToWorkPhaseDto : UpdateDtoBase
 {
     [Required, MaxLength(100)]
     public string PhaseName { get; set; } = string.Empty;
-
-    public int PhaseNumber { get; set; }
 
     [Required]
     public DateTime StartDate { get; set; }
@@ -1303,8 +1412,6 @@ public class CreateSheReturnToWorkReviewDto : CreateDtoBase
 
     [Required]
     public DateTime ReviewDate { get; set; }
-
-    public int ReviewNumber { get; set; }
 
     [MaxLength(500)]
     public string? EmployeeCondition { get; set; }

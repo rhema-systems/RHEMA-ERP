@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -37,8 +38,19 @@ public class AttendanceDashboardService : IAttendanceDashboardService
     //
     // EXPECTED (denominator) — every status except Weekend, PublicHoliday and OffDay. Those
     //   are not attendance failures so they leave the calculation entirely. Approved leave
-    //   IS in the denominator: it is a scheduled working day the person did not attend, and
-    //   DaysOnLeave is reported alongside so the reason stays visible.
+    //   IS in the denominator BY DEFAULT: it is a scheduled working day the person did not attend,
+    //   and DaysOnLeave is reported alongside so the reason stays visible. That default is now
+    //   CompanyHrPolicySettings.AttendanceRateIncludesApprovedLeave, because TDC has never
+    //   confirmed it and it changes every rate on the dashboard.
+    //
+    // ⚠ THE RATE IS COMPUTED IN THREE PLACES, not two: today's snapshot, the daily trend, and the
+    //   chronic-absentee ranking. The note here used to imply two. All three take the flag from a
+    //   SINGLE read in GetDashboardAsync — a headline rate that included leave while the risk list
+    //   beside it excluded leave would rank people by a rule the page does not state.
+
+    // ⚠ Read ONCE per dashboard and threaded into both rate calculations. Two reads could straddle
+    // a settings change and produce a headline rate the trend beside it contradicts.
+    private readonly ICompanyHrPolicyProvider _policyProvider;
 
     private readonly IStaffDailyAttendanceRepository _dailyRepository;
     private readonly IStaffAttendanceLogRepository _logRepository;
@@ -62,9 +74,11 @@ public class AttendanceDashboardService : IAttendanceDashboardService
         IStaffAttendanceDeviceRepository deviceRepository,
         IPayPeriodRepository payPeriodRepository,
         IEmployeeRepository employeeRepository,
+        ICompanyHrPolicyProvider policyProvider,
         ICurrentUserProvider currentUserProvider,
         ILogger<AttendanceDashboardService> logger)
     {
+        _policyProvider = policyProvider;
         _dailyRepository = dailyRepository;
         _logRepository = logRepository;
         _regularizationRepository = regularizationRepository;
@@ -108,13 +122,16 @@ public class AttendanceDashboardService : IAttendanceDashboardService
                 .CountAsync(e => e.TenantId == tenantId && e.IsActive, ct),
         };
 
-        await PopulateTodaySnapshotAsync(dto, tenantId, today, ct);
+        var policy = await _policyProvider.GetAsync(ct);
+        var leaveIsExpected = policy.AttendanceRateIncludesApprovedLeave;
+
+        await PopulateTodaySnapshotAsync(dto, tenantId, today, leaveIsExpected, ct);
         await PopulateCurrentPayPeriodAsync(dto, tenantId, today, ct);
         await PopulateQueuesAsync(dto, tenantId, ct);
         await PopulateAlertsAsync(dto, tenantId, ct);
         await PopulateDevicesAndLogsAsync(dto, tenantId, ct);
-        dto.DailyTrend = await BuildDailyTrendAsync(tenantId, today, trendDays, ct);
-        dto.ChronicAbsentees = await BuildChronicAbsenteesAsync(tenantId, today, riskListSize, ct);
+        dto.DailyTrend = await BuildDailyTrendAsync(tenantId, today, trendDays, leaveIsExpected, ct);
+        dto.ChronicAbsentees = await BuildChronicAbsenteesAsync(tenantId, today, riskListSize, leaveIsExpected, ct);
 
         dto.ComputedAt = DateTime.UtcNow;
         return dto;
@@ -124,7 +141,8 @@ public class AttendanceDashboardService : IAttendanceDashboardService
     /// Today's headline counts, taken in one grouped pass so the day's rows are scanned once.
     /// </summary>
     private async Task PopulateTodaySnapshotAsync(
-        AttendanceDashboardDto dto, Guid tenantId, DateOnly today, CancellationToken ct)
+        AttendanceDashboardDto dto, Guid tenantId, DateOnly today, bool leaveIsExpected,
+        CancellationToken ct)
     {
         var counts = await _dailyRepository.GetQueryable()
             .Where(r => r.TenantId == tenantId && r.AttendanceDate == today)
@@ -145,10 +163,14 @@ public class AttendanceDashboardService : IAttendanceDashboardService
                     r.Status == StaffAttendanceStatus.HalfDay ||
                     r.Status == StaffAttendanceStatus.RemoteWork ||
                     r.IsRemoteWork),
+                // Approved leave is in the denominator by default — a scheduled working day the
+                // person did not attend — and leaves it entirely when the tenant says otherwise,
+                // the way weekends, public holidays and off-days always do.
                 Expected = g.Count(r =>
                     r.Status != StaffAttendanceStatus.Weekend &&
                     r.Status != StaffAttendanceStatus.PublicHoliday &&
-                    r.Status != StaffAttendanceStatus.OffDay),
+                    r.Status != StaffAttendanceStatus.OffDay &&
+                    (leaveIsExpected || r.Status != StaffAttendanceStatus.OnLeave)),
             })
             .FirstOrDefaultAsync(ct);
 
@@ -246,7 +268,8 @@ public class AttendanceDashboardService : IAttendanceDashboardService
     /// records at all are filled in as zeroes so the series has no gaps to plot around.
     /// </summary>
     private async Task<List<DailyAttendanceTrendDto>> BuildDailyTrendAsync(
-        Guid tenantId, DateOnly today, int trendDays, CancellationToken ct)
+        Guid tenantId, DateOnly today, int trendDays, bool leaveIsExpected,
+        CancellationToken ct)
     {
         var from = today.AddDays(-(trendDays - 1));
 
@@ -268,10 +291,14 @@ public class AttendanceDashboardService : IAttendanceDashboardService
                     r.Status == StaffAttendanceStatus.HalfDay ||
                     r.Status == StaffAttendanceStatus.RemoteWork ||
                     r.IsRemoteWork),
+                // Approved leave is in the denominator by default — a scheduled working day the
+                // person did not attend — and leaves it entirely when the tenant says otherwise,
+                // the way weekends, public holidays and off-days always do.
                 Expected = g.Count(r =>
                     r.Status != StaffAttendanceStatus.Weekend &&
                     r.Status != StaffAttendanceStatus.PublicHoliday &&
-                    r.Status != StaffAttendanceStatus.OffDay),
+                    r.Status != StaffAttendanceStatus.OffDay &&
+                    (leaveIsExpected || r.Status != StaffAttendanceStatus.OnLeave)),
             })
             .ToListAsync(ct);
 
@@ -308,7 +335,7 @@ public class AttendanceDashboardService : IAttendanceDashboardService
     /// a "risk" list that includes people with a clean record is noise.
     /// </summary>
     private async Task<List<AttendanceRiskEmployeeDto>> BuildChronicAbsenteesAsync(
-        Guid tenantId, DateOnly today, int riskListSize, CancellationToken ct)
+        Guid tenantId, DateOnly today, int riskListSize, bool leaveIsExpected, CancellationToken ct)
     {
         var from = today.AddDays(-RiskWindowDays);
 
@@ -327,10 +354,14 @@ public class AttendanceDashboardService : IAttendanceDashboardService
                     r.Status == StaffAttendanceStatus.HalfDay ||
                     r.Status == StaffAttendanceStatus.RemoteWork ||
                     r.IsRemoteWork),
+                // Approved leave is in the denominator by default — a scheduled working day the
+                // person did not attend — and leaves it entirely when the tenant says otherwise,
+                // the way weekends, public holidays and off-days always do.
                 Expected = g.Count(r =>
                     r.Status != StaffAttendanceStatus.Weekend &&
                     r.Status != StaffAttendanceStatus.PublicHoliday &&
-                    r.Status != StaffAttendanceStatus.OffDay),
+                    r.Status != StaffAttendanceStatus.OffDay &&
+                    (leaveIsExpected || r.Status != StaffAttendanceStatus.OnLeave)),
             })
             .Where(x => x.AbsentDays > 0)
             .OrderByDescending(x => x.AbsentDays)

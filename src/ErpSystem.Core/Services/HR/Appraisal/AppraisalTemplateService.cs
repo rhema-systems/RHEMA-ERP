@@ -20,8 +20,17 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     private readonly IGenericRepository<AppraisalGradeDefinition> _gradeDefinitionRepository;
     private readonly IGenericRepository<AppraisalCompetency> _competencyRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IWorkflowIntegrationService _workflowIntegrationService;
+    private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalTemplateService> _logger;
+
+    /// <summary>
+    /// Entity type registered with the workflow engine. Must match the catalog entry in
+    /// <c>WorkflowEntityTypeCatalogService</c> and the aliases on
+    /// <c>AppraisalTemplateWorkflowStatusAdapter</c>.
+    /// </summary>
+    private const string EntityType = "AppraisalTemplate";
 
     public AppraisalTemplateService(
         IGenericRepository<AppraisalTemplate> templateRepository,
@@ -31,6 +40,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         IGenericRepository<AppraisalGradeDefinition> gradeDefinitionRepository,
         IGenericRepository<AppraisalCompetency> competencyRepository,
         ICurrentUserProvider currentUserProvider,
+        IWorkflowIntegrationService workflowIntegrationService,
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalTemplateService> logger)
     {
@@ -41,6 +52,8 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         _gradeDefinitionRepository = gradeDefinitionRepository;
         _competencyRepository = competencyRepository;
         _currentUserProvider = currentUserProvider;
+        _workflowIntegrationService = workflowIntegrationService;
+        _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _unitOfWork = unitOfWork;
         _logger = logger;
     }
@@ -286,8 +299,17 @@ public class AppraisalTemplateService : IAppraisalTemplateService
     }
 
     // ── Approval workflow ──────────────────────────────────────────────────
+    // Submit / approve / reject / recall all run through the generic workflow engine, so the
+    // routing (who signs a template off, and in how many steps) is configuration rather than
+    // code. This service never sets ApprovalStatus itself — the engine reports an outcome and
+    // AppraisalTemplateWorkflowStatusAdapter maps it onto the entity.
+    //
+    // Two ids are in play and they are not interchangeable: the engine resolves approvers by
+    // ApplicationUser, while the template's own SubmittedById / ApprovedById columns follow
+    // the pre-existing convention of holding an Employee id. Each is written from its own
+    // source rather than from whichever one happened to be at hand.
 
-    public async Task<AppraisalTemplateDto> SubmitForApprovalAsync(Guid id, Guid submittedById, CancellationToken cancellationToken = default)
+    public async Task<AppraisalTemplateDto> SubmitForApprovalAsync(Guid id, Guid submittedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
 
@@ -299,56 +321,105 @@ public class AppraisalTemplateService : IAppraisalTemplateService
         // Ensure the template is structurally valid before it goes to HR.
         await ValidateTemplateWeightsAsync(id, cancellationToken);
 
-        entity.ApprovalStatus = TemplateApprovalStatus.PendingApproval;
-        entity.SubmittedById = submittedById;
+        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the template approval workflow.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+
+        entity.SubmittedById = submittedByEmployeeId == Guid.Empty ? null : submittedByEmployeeId;
         entity.SubmittedDate = DateTime.UtcNow;
-        entity.RejectionReason = null;
-        entity.ApprovedById = null;
-        entity.ApprovalDate = null;
 
         await _templateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal template {Id} submitted for approval by {User}", id, submittedById);
+        _logger.LogInformation("Appraisal template {Id} submitted for approval by employee {Employee}", id, submittedByEmployeeId);
         return await GetByIdAsync(id, cancellationToken);
     }
 
-    public async Task<AppraisalTemplateDto> ApproveAsync(Guid id, Guid approvedById, CancellationToken cancellationToken = default)
+    public async Task<AppraisalTemplateDto> ApproveAsync(Guid id, Guid approvedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
+        var userId = RequireUserId();
 
-        if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
-            throw new InvalidOperationException("Only templates pending approval can be approved.");
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        entity.ApprovalStatus = TemplateApprovalStatus.Approved;
-        entity.ApprovedById = approvedById;
-        entity.ApprovalDate = DateTime.UtcNow;
-        entity.RejectionReason = null;
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+
+        // Only stamp the approver once the engine says the whole chain has passed; an
+        // intermediate step leaves the template Pending and unattributed.
+        if (workflowResult.Outcome == WorkflowOutcome.Approved)
+            entity.ApprovedById = approvedByEmployeeId == Guid.Empty ? null : approvedByEmployeeId;
 
         await _templateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal template {Id} approved by {User}", id, approvedById);
+        _logger.LogInformation("Appraisal template {Id} approval step processed by employee {Employee}", id, approvedByEmployeeId);
         return await GetByIdAsync(id, cancellationToken);
     }
 
-    public async Task<AppraisalTemplateDto> RejectAsync(Guid id, Guid rejectedById, string? reason, CancellationToken cancellationToken = default)
+    public async Task<AppraisalTemplateDto> RejectAsync(Guid id, Guid rejectedByEmployeeId, string? reason, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
+        var userId = RequireUserId();
 
-        if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
-            throw new InvalidOperationException("Only templates pending approval can be rejected.");
+        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        entity.ApprovalStatus = TemplateApprovalStatus.Rejected;
-        entity.RejectionReason = reason;
-        entity.ApprovedById = rejectedById;
-        entity.ApprovalDate = DateTime.UtcNow;
+        var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
+        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType)
+            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
 
         await _templateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal template {Id} rejected by {User}", id, rejectedById);
+        _logger.LogInformation("Appraisal template {Id} rejected by employee {Employee}", id, rejectedByEmployeeId);
         return await GetByIdAsync(id, cancellationToken);
+    }
+
+    /// <summary>
+    /// Pulls a submitted template back to Draft so its author can keep editing it. Allowed
+    /// only while it is still awaiting a decision — once HR has ruled, the way back is a new
+    /// submission, not a recall.
+    /// </summary>
+    public async Task<AppraisalTemplateDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id);
+        var userId = RequireUserId();
+
+        if (entity.ApprovalStatus != TemplateApprovalStatus.PendingApproval)
+            throw new InvalidOperationException("Only a template still awaiting approval can be recalled.");
+
+        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, id, userId);
+        if (!workflowResult.ExecutionResult.Success)
+            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the template.");
+
+        _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
+
+        await _templateRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Appraisal template {Id} recalled to draft", id);
+        return await GetByIdAsync(id, cancellationToken);
+    }
+
+    private Guid RequireUserId()
+    {
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("User not authenticated.");
+        return userId;
     }
 
     public async Task<AppraisalTemplateDto> CloneAsync(Guid sourceTemplateId, CopyAppraisalTemplateDto dto, CancellationToken cancellationToken = default)

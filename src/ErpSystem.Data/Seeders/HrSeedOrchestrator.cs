@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -117,6 +118,18 @@ public class HrSeedOrchestrator
             ct => _context.Set<Country>().AnyAsync(x => x.TenantId == tenantId, ct),
             ct => new CountrySeeder(_context, Log<CountrySeeder>()).SeedAsync(tenantId)),
 
+        // Depends on Countries above, to resolve Ghana. Shared reference data rather than HR's, but
+        // it seeds here because this is the only orchestrator that runs — see
+        // docs/GEOGRAPHY-REFERENCE-DESIGN.md. The probe asks for the scheme THIS seed creates, not
+        // for "any scheme exists": a tenant that had added a scheme of its own would otherwise
+        // silently never receive Ghana's, which is the trap the job-architecture step below records.
+        new SeedStep(
+            "Ghana administrative geography (Region → District → Town → Community)",
+            ct => _context.Set<GeoScheme>()
+                          .AnyAsync(s => s.TenantId == tenantId
+                                      && s.Code == GhanaGeographySeeder.SchemeCode && !s.IsDeleted, ct),
+            ct => new GhanaGeographySeeder(_context, Log<GhanaGeographySeeder>()).SeedAsync(tenantId, ct)),
+
         new SeedStep(
             "Identification types",
             ct => _context.Set<IdentificationType>().AnyAsync(x => x.TenantId == tenantId, ct),
@@ -131,6 +144,20 @@ public class HrSeedOrchestrator
             "Skills",
             ct => _context.Set<Skill>().AnyAsync(x => x.TenantId == tenantId, ct),
             ct => new SkillDataSeeder(_context, Log<SkillDataSeeder>()).SeedForDefaultTenantAsync(ct)),
+
+        // The job-family / sub-family / career-level vocabulary a job description is classified
+        // against (area 17, decision D-5). Deliberately after Skills and before the organogram:
+        // it depends on neither, and belongs with the other reference lookups.
+        new SeedStep(
+            "Job architecture (families, sub-families, career levels)",
+            // The probe asks for a row THIS SEED creates, not for a non-empty table. Measured
+            // 2026-08-19: an "any job family exists?" probe skipped the step entirely, because the
+            // area-17 harness had already created twenty families of its own — so a tenant where
+            // anyone had ever added one job family would silently never receive the starter
+            // vocabulary. A starter-vocabulary seed and a create-the-baseline seed need different
+            // questions: "is the table empty" is only the right signal for the latter.
+            ct => _context.Set<JobFamily>().AnyAsync(x => x.TenantId == tenantId && x.Code == "EXE", ct),
+            ct => new JobArchitectureSeeder(_context, Log<JobArchitectureSeeder>()).SeedAsync(tenantId, ct)),
 
         // TDC organisation: levels, staff bands, the 8 salary grades, units and positions.
         new SeedStep(
@@ -171,8 +198,14 @@ public class HrSeedOrchestrator
             "Still carry generic sample data from the standalone HR solution. The TDC HR questionnaire " +
             "supplies real values (leave, allowances, pensions, orientation checklist, separation and " +
             "loan types) — these should be rewritten against it before being seeded."),
-        ("RecruitmentEmailTemplateSeeder",
-            "Templates are not TDC-branded yet; enable once the wording is agreed."),
+        ("EmailTemplateCatalogSeeder",
+            "Templates are not TDC-branded yet; enable once the wording is agreed. Seeds editable "
+            + "EmailTemplate rows from EVERY registered IEmailEventCatalog — recruitment's "
+            + "transactional emails, the FR-HR-032 confirmation letter, and AST-5's asset "
+            + "responsibility-and-terms form. Until it runs, all of them render from their built-in "
+            + "catalog defaults and none is listed in the email-template designer. It replaces the "
+            + "per-module RecruitmentEmailTemplateSeeder and ProbationEmailTemplateSeeder, which were "
+            + "identical but for the catalog they read."),
     };
 
     private ILogger<T> Log<T>() => _loggerFactory.CreateLogger<T>();

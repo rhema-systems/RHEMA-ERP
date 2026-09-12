@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities.HR.SuccessionPlanning;
+﻿using ErpSystem.Core.Entities.HR.SuccessionPlanning;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
@@ -35,6 +35,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
             .Include(p => p.Candidates).ThenInclude(c => c.Employee)
             .Include(p => p.Actions).ThenInclude(a => a.ResponsiblePerson)
             .Include(p => p.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.PositionId == positionId && p.IsActiveVersion && !p.IsDeleted);
     }
 
@@ -48,12 +49,21 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
             .ToListAsync();
     }
 
+    // ⚠ "Current" is NOT IsActiveVersion. That flag means "this is the position's live approved
+    // version", and since a draft deliberately holds no active-version slot, filtering on it hid
+    // every draft and under-review plan from this query. Measured 2026-08-18: 21 drafts existed and
+    // /status/Draft returned zero, while /no-successors — the view whose whole purpose is finding
+    // plans with nobody on them — excluded the brand-new empty drafts that most need finding.
+    //
+    // The right predicate for "a plan that still matters" is: not superseded. Superseding sets
+    // Status = Archived, so that is what these queries exclude.
     public async Task<IEnumerable<SuccessionPlan>> GetByStatusAsync(SuccessionPlanStatus status)
     {
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.Status == status && p.IsActiveVersion && !p.IsDeleted)
+            // The caller named the status; a second status filter on top of it is nonsense.
+            .Where(p => p.Status == status && !p.IsDeleted)
             .OrderBy(p => p.Position.Title)
             .ToListAsync();
     }
@@ -63,7 +73,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.PlanYear == planYear && p.IsActiveVersion && !p.IsDeleted)
+            .Where(p => p.PlanYear == planYear && p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted)
             .OrderBy(p => p.Position.Title)
             .ToListAsync();
     }
@@ -73,7 +83,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.PlanYear == planYear && p.Status == status && p.IsActiveVersion && !p.IsDeleted)
+            .Where(p => p.PlanYear == planYear && p.Status == status && !p.IsDeleted)
             .OrderBy(p => p.Position.Title)
             .ToListAsync();
     }
@@ -83,7 +93,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.Criticality == criticality && p.IsActiveVersion && !p.IsDeleted)
+            .Where(p => p.Criticality == criticality && p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted)
             .OrderBy(p => p.Position.Title)
             .ToListAsync();
     }
@@ -93,7 +103,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.RiskLevel >= riskLevel && p.IsActiveVersion && !p.IsDeleted)
+            .Where(p => p.RiskLevel >= riskLevel && p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted)
             .OrderByDescending(p => p.RiskLevel)
             .ThenBy(p => p.Position.Title)
             .ToListAsync();
@@ -105,7 +115,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.IsActiveVersion && !p.IsDeleted
+            .Where(p => p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted
                      && p.NextReviewDate != null
                      && p.NextReviewDate <= cutoff)
             .OrderBy(p => p.NextReviewDate)
@@ -117,7 +127,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.IsActiveVersion && !p.IsDeleted && !p.HasReadyNowSuccessor)
+            .Where(p => p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted && !p.HasReadyNowSuccessor)
             .OrderByDescending(p => p.Criticality)
             .ToListAsync();
     }
@@ -127,7 +137,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.IsActiveVersion && !p.IsDeleted && p.NumberOfIdentifiedSuccessors == 0)
+            .Where(p => p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted && p.NumberOfIdentifiedSuccessors == 0)
             .OrderByDescending(p => p.Criticality)
             .ToListAsync();
     }
@@ -137,7 +147,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.CurrentIncumbentId == incumbentEmployeeId && p.IsActiveVersion && !p.IsDeleted)
+            .Where(p => p.CurrentIncumbentId == incumbentEmployeeId && p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted)
             .OrderBy(p => p.Position.Title)
             .ToListAsync();
     }
@@ -161,6 +171,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
             .Include(p => p.Actions).ThenInclude(a => a.AssignedBy)
             .Include(p => p.History).ThenInclude(h => h.SnapshotCreatedBy)
             .Include(p => p.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
     }
 
@@ -179,7 +190,7 @@ public class SuccessionPlanRepository : GenericRepository<SuccessionPlan>, ISucc
         return await _dbSet
             .Include(p => p.Position)
             .Include(p => p.CurrentIncumbent)
-            .Where(p => p.IsActiveVersion && !p.IsDeleted
+            .Where(p => p.Status != SuccessionPlanStatus.Archived && !p.IsDeleted
                      && p.AnticipatedVacancyDate != null
                      && p.AnticipatedVacancyDate <= cutoff)
             .OrderBy(p => p.AnticipatedVacancyDate)
@@ -215,6 +226,26 @@ public class SuccessionCompetencyRequirementRepository : GenericRepository<Succe
             .Where(r => r.CompetencyId == competencyId && !r.IsDeleted)
             .ToListAsync();
     }
+
+    public async Task<SuccessionCompetencyRequirement?> GetByIdWithCompetencyAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(r => r.Competency)
+            .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted);
+    }
+
+    // IgnoreQueryFilters drops the tenant filter along with the soft-delete one, so the tenant is
+    // re-applied by hand here. Reviving a row from another tenant would be worse than the 500 the
+    // unique index throws.
+    public async Task<SuccessionCompetencyRequirement?> GetIncludingDeletedAsync(Guid planId, Guid competencyId, Guid tenantId)
+    {
+        return await _dbSet
+            .IgnoreQueryFilters()
+            .Include(r => r.Competency)
+            .FirstOrDefaultAsync(r => r.SuccessionPlanId == planId
+                                   && r.CompetencyId == competencyId
+                                   && r.TenantId == tenantId);
+    }
 }
 
 #endregion
@@ -236,12 +267,17 @@ public class SuccessionCandidateRepository : GenericRepository<SuccessionCandida
             .Include(c => c.TalentPoolMember).ThenInclude(m => m!.TalentPool)
             .Where(c => c.SuccessionPlanId == planId && !c.IsDeleted)
             .OrderBy(c => c.Rank)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
     public async Task<IEnumerable<SuccessionCandidate>> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _dbSet
+            // ⚠ Employee was missing while every SIBLING query included it, so this one alone
+            // returned rows with employeeName: "". The uneven-Include shape, found by the content
+            // audit rather than by any status check.
+            .Include(c => c.Employee)
             .Include(c => c.SuccessionPlan).ThenInclude(p => p.Position)
             .Where(c => c.EmployeeId == employeeId && !c.IsDeleted)
             .OrderByDescending(c => c.SuccessionPlan.PlanYear)
@@ -299,6 +335,7 @@ public class SuccessionCandidateRepository : GenericRepository<SuccessionCandida
             .Include(c => c.DevelopmentActivities).ThenInclude(a => a.Milestones)
             .Include(c => c.DevelopmentActivities).ThenInclude(a => a.Supervisor)
             .Include(c => c.Feedback).ThenInclude(f => f.Reviewer)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(c => c.Id == id && !c.IsDeleted);
     }
 
@@ -352,6 +389,7 @@ public class SuccessionCandidateGapRepository : GenericRepository<SuccessionCand
             .Include(g => g.Competency)
             .Where(g => g.CompetencyId == competencyId && !g.IsDeleted)
             .OrderByDescending(g => g.RequiredLevel - g.CurrentLevel)
+            .AsSplitQuery()
             .ToListAsync();
     }
 }
@@ -396,6 +434,7 @@ public class SuccessionDevelopmentActivityRepository : GenericRepository<Success
             .Include(a => a.TalentPoolMember).ThenInclude(m => m!.Employee)
             .Where(a => a.Status == status && !a.IsDeleted)
             .OrderBy(a => a.PlannedStartDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -423,6 +462,7 @@ public class SuccessionDevelopmentActivityRepository : GenericRepository<Success
             .Include(a => a.Supervisor)
             .Include(a => a.Milestones)
             .Include(a => a.AddressedGaps).ThenInclude(g => g.Competency)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
     }
 }
@@ -455,6 +495,7 @@ public class SuccessionDevelopmentMilestoneRepository : GenericRepository<Succes
             .Include(m => m.Activity).ThenInclude(a => a.TalentPoolMember).ThenInclude(t => t!.Employee)
             .Where(m => !m.IsDeleted && !m.IsCompleted && m.TargetDate < today)
             .OrderBy(m => m.TargetDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 }
@@ -471,16 +512,34 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
 {
     public SuccessionActionRepository(ApplicationDbContext context) : base(context) { }
 
+    // ⚠ The DependsOnAction include is not decoration. This read feeds the plan's actions panel,
+    // which edits the row, and `DependsOnActionDescription` is the only readable form of the
+    // dependency — without it the panel shows a blank where the prerequisite should be.
     public async Task<IEnumerable<SuccessionAction>> GetByPlanIdAsync(Guid planId)
     {
         return await _dbSet
+            .Include(a => a.SuccessionPlan)
             .Include(a => a.ResponsiblePerson)
             .Include(a => a.AssignedBy)
             .Include(a => a.Candidate).ThenInclude(c => c!.Employee)
+            .Include(a => a.DependsOnAction)
             .Where(a => a.SuccessionPlanId == planId && !a.IsDeleted)
             .OrderBy(a => a.Priority)
             .ThenBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
+    }
+
+    public async Task<SuccessionAction?> GetByIdWithDetailsAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(a => a.SuccessionPlan)
+            .Include(a => a.ResponsiblePerson)
+            .Include(a => a.AssignedBy)
+            .Include(a => a.Candidate).ThenInclude(c => c!.Employee)
+            .Include(a => a.DependsOnAction)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted);
     }
 
     public async Task<IEnumerable<SuccessionAction>> GetByCandidateIdAsync(Guid candidateId)
@@ -501,6 +560,7 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
             .Include(a => a.SuccessionPlan).ThenInclude(p => p.Position)
             .Where(a => a.Status == status && !a.IsDeleted)
             .OrderBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -511,6 +571,7 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
             .Include(a => a.SuccessionPlan).ThenInclude(p => p.Position)
             .Where(a => a.Priority == priority && !a.IsDeleted)
             .OrderBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -537,6 +598,7 @@ public class SuccessionActionRepository : GenericRepository<SuccessionAction>, I
             .Where(a => a.ResponsiblePersonId == employeeId && !a.IsDeleted)
             .OrderBy(a => a.Priority)
             .ThenBy(a => a.DueDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 }
@@ -583,6 +645,13 @@ public class SuccessionPlanHistoryRepository : GenericRepository<SuccessionPlanH
 public class SuccessionDocumentRepository : GenericRepository<SuccessionDocument>, ISuccessionDocumentRepository
 {
     public SuccessionDocumentRepository(ApplicationDbContext context) : base(context) { }
+
+    public async Task<SuccessionDocument?> GetByIdWithUploaderAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(d => d.UploadedBy)
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted);
+    }
 
     public async Task<IEnumerable<SuccessionDocument>> GetByPlanIdAsync(Guid planId)
     {
@@ -684,6 +753,7 @@ public class TalentPoolRepository : GenericRepository<TalentPool>, ITalentPoolRe
             .Include(p => p.TargetPosition)
             .Include(p => p.Members.Where(m => m.IsActive && !m.IsDeleted))
                 .ThenInclude(m => m.Employee)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
     }
 }
@@ -745,13 +815,16 @@ public class TalentPoolMemberRepository : GenericRepository<TalentPoolMember>, I
     {
         return await _dbSet
             .Include(m => m.Employee)
-            .Include(m => m.TalentPool)
+            // ThenInclude the pool's type: the member DTO carries TalentPoolTypeName, which is
+            // two hops away and came back blank while the pool's own name resolved.
+            .Include(m => m.TalentPool).ThenInclude(p => p.PoolType)
             .Include(m => m.NominatedBy)
             .Include(m => m.ReviewRatings).ThenInclude(r => r.Session)
             .Include(m => m.ReviewRatings).ThenInclude(r => r.RatedBy)
             .Include(m => m.DevelopmentActivities).ThenInclude(a => a.Milestones)
             .Include(m => m.DevelopmentActivities).ThenInclude(a => a.Supervisor)
             .Include(m => m.Documents).ThenInclude(d => d.UploadedBy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted);
     }
 
@@ -806,6 +879,7 @@ public class TalentReviewSessionRepository : GenericRepository<TalentReviewSessi
             .Include(s => s.FinalizedBy)
             .Where(s => s.IsFinalized && !s.IsDeleted)
             .OrderByDescending(s => s.SessionDate)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -830,6 +904,7 @@ public class TalentReviewSessionRepository : GenericRepository<TalentReviewSessi
             .Include(s => s.Ratings).ThenInclude(r => r.RatedBy)
             .Include(s => s.Ratings).ThenInclude(r => r.CalibrationConfirmedBy)
             .Include(s => s.Ratings).ThenInclude(r => r.TalentPoolMember).ThenInclude(m => m!.TalentPool)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted);
     }
 }
@@ -855,6 +930,7 @@ public class TalentReviewRatingRepository : GenericRepository<TalentReviewRating
             .Where(r => r.SessionId == sessionId && !r.IsDeleted)
             .OrderBy(r => r.Employee.LastName)
             .ThenBy(r => r.Employee.FirstName)
+            .AsSplitQuery()
             .ToListAsync();
     }
 
@@ -880,12 +956,20 @@ public class TalentReviewRatingRepository : GenericRepository<TalentReviewRating
 
     public async Task<TalentReviewRating?> GetLatestConfirmedRatingForEmployeeAsync(Guid employeeId)
     {
+        // ⚠ The tie-break is load-bearing. Ordering by SessionDate alone leaves two sessions held on
+        // the same day resolved arbitrarily by the database, and this value is not cosmetic: it
+        // becomes the employee's cached rating on their talent pool member and the "previous
+        // placement" a later session shows as their trend. An arbitrary winner means the trend can
+        // change between two reads with no data having changed. Measured 2026-08-18, when the same
+        // harness run twice produced different answers.
         return await _dbSet
             .Include(r => r.Session)
             .Where(r => r.EmployeeId == employeeId
                      && r.CalibrationConfirmed
                      && !r.IsDeleted)
             .OrderByDescending(r => r.Session.SessionDate)
+            .ThenByDescending(r => r.CalibrationConfirmedDate)
+            .ThenByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
     }
 
@@ -926,10 +1010,15 @@ public class TalentReviewRatingRepository : GenericRepository<TalentReviewRating
     {
         return await _dbSet
             .Include(r => r.Employee)
+            // ⚠ Session was missing. The rating DTO carries SessionName and ReviewYear from it, so
+            // the single-rating detail read came back with sessionName: "" — every other navigation
+            // resolved and that one did not.
+            .Include(r => r.Session)
             .Include(r => r.RatedBy)
             .Include(r => r.CalibrationConfirmedBy)
             .Include(r => r.TalentPoolMember).ThenInclude(m => m!.TalentPool)
             .Include(r => r.PreviousRatingSession)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(r => r.SessionId == sessionId
                                     && r.EmployeeId == employeeId
                                     && !r.IsDeleted);

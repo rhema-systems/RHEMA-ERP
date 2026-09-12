@@ -233,7 +233,17 @@ namespace ErpSystem.Api.Controllers
         /// <summary>
         /// Create a notification
         /// </summary>
+        /// <remarks>
+        /// Admin-gated (HR area-25 slice 11). This action takes an arbitrary RecipientId,
+        /// title, message and actionUrl — under the controller's plain [Authorize] ANY user
+        /// could plant an official-looking notification (an "Approval Required" with a chosen
+        /// link, say) in ANY other user's feed, measured live. Backend modules create
+        /// notifications through INotificationService directly, and no frontend flow calls
+        /// this route (the only client wrapper, notificationService.sendNotification, has no
+        /// callers) — so the gate matches send-push's and breaks nothing.
+        /// </remarks>
         [HttpPost]
+        [Authorize(Roles = "SuperAdmin,TenantAdmin")]
         public async Task<ActionResult<NotificationDto>> CreateNotification(CreateNotificationDto createNotificationDto)
         {
             try

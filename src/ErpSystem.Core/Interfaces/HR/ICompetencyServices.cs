@@ -113,6 +113,13 @@ public interface IEmployeeCompetencyService
     /// Returns a full competency gap summary for an employee measured against
     /// the requirements of their current assigned position.
     /// </summary>
+    /// <summary>
+    /// Where the organisation is short against the competencies its positions require — the
+    /// training-needs view, aggregated across everyone in a position that requires each competency.
+    /// </summary>
+    Task<IEnumerable<OrganisationCompetencyGapDto>> GetOrganisationGapsAsync(
+        CancellationToken cancellationToken = default);
+
     Task<EmployeePositionCompetencyGapSummaryDto> GetGapsForEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);
 
     /// <summary>

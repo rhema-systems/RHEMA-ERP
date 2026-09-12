@@ -45,6 +45,18 @@ class LeaveTypeService {
     return apiService.post<LeaveType>(this.baseUrl, data);
   }
 
+  /**
+   * Retire a leave type.
+   *
+   * ⚠ **The only way out.** This controller has no delete at all — `DELETE hr/leave-types/{id}`
+   * answers 405 — which is correct, because a type is referenced by every request ever made against
+   * it. Until this method existed a leave type could be created and never retired, so a type added
+   * in error stayed in the picker for good (ledger: LeaveTypes, BUILD).
+   */
+  deactivate(id: string) {
+    return apiService.patch<void>(`${this.baseUrl}/${id}/deactivate`, {});
+  }
+
   update(id: string, data: UpdateLeaveTypeRequest): Promise<LeaveType> {
     return apiService.put<LeaveType>(`${this.baseUrl}/${id}`, data);
   }

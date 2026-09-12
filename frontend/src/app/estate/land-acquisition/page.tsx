@@ -34,6 +34,7 @@ import {
   Send,
   ShieldCheck,
   Stamp,
+  Trash2,
   Upload,
   WalletCards,
 } from 'lucide-react';
@@ -138,6 +139,15 @@ type PendingAcquisitionDocument = {
 
 type WorkspaceValues = Record<string, string | boolean>;
 
+type OtherAcquisitionServiceCost = {
+  id: string;
+  serviceName: string;
+  payeeName: string;
+  amount: string;
+  dueDate: string;
+  notes: string;
+};
+
 type BeaconComparisonRow = {
   label: string;
   cadastralNorthing?: number;
@@ -176,6 +186,91 @@ const riskClasses = {
     'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-300',
   High: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300',
 };
+
+const CADASTRAL_EXTERNAL_SURVEYOR_FIELDS = new Set([
+  'surveyorBusinessPartnerId',
+  'surveyorFeeAmount',
+  'surveyorFeeDueDate',
+  'accountsPayableInvoiceNumber',
+  'accountsPayableInvoiceStatus',
+  'accountsPayablePaymentNumber',
+  'accountsPayablePaymentStatus',
+  'receiptNumber',
+  'paymentReference',
+  'paymentDate',
+  'amountPaid',
+  'paymentMethod',
+  'isPaid',
+  'paymentNotes',
+]);
+
+const PAYABLE_BUSINESS_PARTNER_TYPES = new Set([
+  'supplier',
+  'contractor',
+  'vendor',
+  'both',
+  'consultant',
+]);
+
+const createServiceCostId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `service-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const emptyOtherAcquisitionService = (): OtherAcquisitionServiceCost => ({
+  id: createServiceCostId(),
+  serviceName: '',
+  payeeName: '',
+  amount: '',
+  dueDate: '',
+  notes: '',
+});
+
+const parseOtherAcquisitionServices = (
+  raw: string | boolean | undefined
+): OtherAcquisitionServiceCost[] => {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as Partial<OtherAcquisitionServiceCost>[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => ({
+      id: item.id || createServiceCostId(),
+      serviceName: item.serviceName || '',
+      payeeName: item.payeeName || '',
+      amount: item.amount ? `${item.amount}` : '',
+      dueDate: item.dueDate || '',
+      notes: item.notes || '',
+    }));
+  } catch {
+    return [];
+  }
+};
+
+const serializeOtherAcquisitionServices = (
+  services: OtherAcquisitionServiceCost[]
+) => JSON.stringify(services);
+
+const sumOtherAcquisitionServices = (
+  services: OtherAcquisitionServiceCost[]
+) =>
+  services.reduce((total, service) => {
+    const amount = Number(service.amount);
+    return total + (Number.isFinite(amount) && amount > 0 ? amount : 0);
+  }, 0);
+
+function isActiveApprovedBusinessPartner(partner: BusinessPartnerDto) {
+  const status = partner.status?.toLowerCase();
+  const isActive = status === 'active' || status === 'approved';
+  const approvalStatus = partner.approvalStatus?.toLowerCase();
+  const isApproved = !approvalStatus || approvalStatus === 'approved';
+  return isActive && isApproved && !partner.isBlacklisted;
+}
+
+function isPayableBusinessPartner(partner: BusinessPartnerDto) {
+  return PAYABLE_BUSINESS_PARTNER_TYPES.has(
+    `${partner.partnerType || ''}`.toLowerCase()
+  );
+}
 
 const field = (
   key: string,
@@ -307,6 +402,13 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       undefined,
       2
     ),
+    field('surveyorSource', 'Surveyor Source', 'select', [
+      'Internal',
+      'External',
+    ]),
+    field('surveyorBusinessPartnerId', 'External Surveyor / Vendor'),
+    field('surveyorFeeAmount', 'External Surveyor Fee'),
+    field('surveyorFeeDueDate', 'Surveyor Fee Due Date', 'date'),
     field('surveyorName', 'Surveyor Name'),
     field('licensedSurveyor', 'Surveyor Licence Number'),
     field('surveyDate', 'Survey Date', 'date'),
@@ -330,6 +432,45 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('mainPortion', 'Main Portion', 'check'),
     field('coordinateReference', 'Coordinate Reference'),
     field('surveyNotes', 'Survey Notes', 'textarea', undefined, 2),
+    field(
+      'accountsPayableInvoiceNumber',
+      'AP Invoice',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayableInvoiceStatus',
+      'Invoice Status',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayablePaymentNumber',
+      'AP Payment',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field(
+      'accountsPayablePaymentStatus',
+      'Payment Status',
+      'text',
+      undefined,
+      1,
+      true
+    ),
+    field('receiptNumber', 'Receipt Number', 'text', undefined, 1, true),
+    field('paymentReference', 'Payment Reference', 'text', undefined, 1, true),
+    field('paymentDate', 'Payment Date', 'date', undefined, 1, true),
+    field('amountPaid', 'Amount Paid', 'text', undefined, 1, true),
+    field('paymentMethod', 'Payment Method', 'text', undefined, 1, true),
+    field('isPaid', 'Paid', 'check', undefined, 1, true),
+    field('paymentNotes', 'Payment Notes', 'textarea', undefined, 2, true),
   ],
   'cadastral-verification': [],
   'ownership-classification': [
@@ -371,7 +512,6 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
       'Other',
     ]),
     field('identificationNumber', 'Identification Number'),
-    field('interestHeld', 'Interest Held'),
     field('classificationRisk', 'Classification Risk', 'select', [
       'Low',
       'Medium',
@@ -687,6 +827,9 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
   ],
   registration: [
     field('registryOffice', 'Registry Office'),
+    field('publicationDate', 'Publication Date', 'date'),
+    field('landTitleReference', 'Land Title Reference'),
+    field('landTitleCapturedDate', 'Land Title Captured Date', 'date'),
     field('registrationNumber', 'Registration Number'),
     field('volume', 'Volume'),
     field('folio', 'Folio'),
@@ -696,32 +839,36 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('registrationNotes', 'Registration Notes', 'textarea', undefined, 2),
   ],
   'asset-creation': [
-    field('assetCode', 'Asset Code', 'text', undefined, 1, true),
-    field('assetNumber', 'Asset Number', 'text', undefined, 1, true),
-    field('parcelIdentifier', 'Parcel Identifier'),
-    field('registrationNumber', 'Registration Number'),
-    field('ownerName', 'Owner Name'),
-    field('assetLocation', 'Asset Location'),
-    field('assetCategory', 'Asset Category', 'select', [
+    field('assetCode', 'Land Code', 'text', undefined, 1, true),
+    field('assetNumber', 'Land Number', 'text', undefined, 1, true),
+    field('parcelIdentifier', 'Parcel Identifier', 'text', undefined, 1, true),
+    field('registrationNumber', 'Registration Number', 'text', undefined, 1, true),
+    field('assetCategory', 'Land Category', 'select', [
       'Land',
       'Land Improvement',
       'Investment Property',
-    ]),
-    field('size', 'Size'),
-    field('sizeUnit', 'Size Unit', 'select', ['Acres', 'Hectares', 'sqm']),
-    field('assetStatus', 'Asset Status', 'select', [
+    ], 1, true),
+    field('size', 'Size', 'text', undefined, 1, true),
+    field('sizeUnit', 'Size Unit', 'select', ['Acres', 'Hectares', 'sqm'], 1, true),
+    field('assetStatus', 'Land Status', 'select', [
       'Draft',
       'Active',
       'Under Dispute',
       'Locked',
-    ]),
-    field('purpose', 'Purpose'),
-    field('zoningClassification', 'Zoning Classification'),
-    field('ownershipVerification', 'Ownership Verification'),
-    field('capitalizationValue', 'Capitalization Value'),
-    field('glAccount', 'GL Account'),
-    field('custodian', 'Custodian'),
-    field('assetNotes', 'Asset Notes', 'textarea', undefined, 2),
+    ], 1, true),
+    field('purpose', 'Purpose', 'text', undefined, 1, true),
+    field('zoningClassification', 'Zoning Classification', 'text', undefined, 1, true),
+    field('ownershipVerification', 'Ownership Verification', 'text', undefined, 1, true),
+    field('ownerConsiderationCost', 'Owner / Vendor Consideration', 'text', undefined, 1, true),
+    field('externalSurveyorCost', 'External Surveyor Cost', 'text', undefined, 1, true),
+    field('stampDutyCost', 'Stamp Duty Cost', 'text', undefined, 1, true),
+    field('otherAcquisitionCost', 'Other Acquisition Cost', 'text', undefined, 1, true),
+    field('totalCapitalizedCost', 'Total Land Cost', 'text', undefined, 1, true),
+    field('capitalizationValue', 'Capitalization Value', 'text', undefined, 1, true),
+    field('capitalizationBreakdown', 'Capitalization Breakdown', 'textarea', undefined, 2, true),
+    field('glAccount', 'Fixed Asset GL Account', 'text', undefined, 1, true),
+    field('custodian', 'Custodian', 'text', undefined, 1, true),
+    field('assetNotes', 'Land Notes', 'textarea', undefined, 2, true),
   ],
 };
 
@@ -801,6 +948,10 @@ const WORKSPACE_SECTIONS: Partial<
         'areaUnit',
         'surveyPlanNumber',
         'mapSheetNumber',
+        'surveyorSource',
+        'surveyorBusinessPartnerId',
+        'surveyorFeeAmount',
+        'surveyorFeeDueDate',
         'surveyorName',
         'licensedSurveyor',
         'surveyDate',
@@ -850,12 +1001,30 @@ const WORKSPACE_SECTIONS: Partial<
         'surveyNotes',
       ],
     },
+    {
+      title: 'External surveyor payment',
+      description:
+        'Track the Accounts Payable request and receipt when an external surveyor is used.',
+      keys: [
+        'accountsPayableInvoiceNumber',
+        'accountsPayableInvoiceStatus',
+        'accountsPayablePaymentNumber',
+        'accountsPayablePaymentStatus',
+        'receiptNumber',
+        'paymentReference',
+        'paymentDate',
+        'amountPaid',
+        'paymentMethod',
+        'isPaid',
+        'paymentNotes',
+      ],
+    },
   ],
   'ownership-classification': [
     {
       title: 'Owner and tenure',
       description:
-        'Classify ownership and record the owner, interest, tenure, dates, and risk.',
+        'Classify ownership and record the owner, tenure, dates, and risk.',
       keys: [
         'ownershipType',
         'isCurrentOwner',
@@ -866,7 +1035,6 @@ const WORKSPACE_SECTIONS: Partial<
         'tenureType',
         'ownershipStartDate',
         'ownershipEndDate',
-        'interestHeld',
         'classificationRisk',
         'dateGapReason',
       ],
@@ -1166,9 +1334,12 @@ const WORKSPACE_SECTIONS: Partial<
     {
       title: 'Lands Commission registration',
       description:
-        'Record registry office, registration number, volume, folio, date, and notes.',
+        'Record publication, title reference, registration number, volume, folio, date, and notes.',
       keys: [
         'registryOffice',
+        'publicationDate',
+        'landTitleReference',
+        'landTitleCapturedDate',
         'registrationNumber',
         'volume',
         'folio',
@@ -1181,16 +1352,14 @@ const WORKSPACE_SECTIONS: Partial<
   ],
   'asset-creation': [
     {
-      title: 'Land asset details',
+      title: 'Land details',
       description:
-        'Create the land asset and prepare it for land bank or project handoff.',
+        'Create the land record and prepare it for land bank or project handoff.',
       keys: [
         'assetCode',
         'assetNumber',
         'parcelIdentifier',
         'registrationNumber',
-        'ownerName',
-        'assetLocation',
         'assetCategory',
         'size',
         'sizeUnit',
@@ -1198,15 +1367,28 @@ const WORKSPACE_SECTIONS: Partial<
       ],
     },
     {
+      title: 'Cost capitalization',
+      description:
+        'Review the costs accumulated in Land Under Acquisition before registering the land in Fixed Assets and Land Bank.',
+      keys: [
+        'ownerConsiderationCost',
+        'externalSurveyorCost',
+        'stampDutyCost',
+        'otherAcquisitionCost',
+        'totalCapitalizedCost',
+        'capitalizationValue',
+        'capitalizationBreakdown',
+        'glAccount',
+      ],
+    },
+    {
       title: 'Finance and custody',
       description:
-        'Capture purpose, zoning, ownership verification, capitalization, GL account, custodian, and notes.',
+        'Capture purpose, zoning, ownership verification, custodian, and notes.',
       keys: [
         'purpose',
         'zoningClassification',
         'ownershipVerification',
-        'capitalizationValue',
-        'glAccount',
         'custodian',
         'assetNotes',
       ],
@@ -1249,6 +1431,7 @@ function defaultsFor(
 
   if (kind === 'cadastral-survey') {
     values.mainPortion = true;
+    values.surveyorSource = 'Internal';
   }
 
   if (item) {
@@ -1266,6 +1449,48 @@ function missingWorkspaceInputs(
   kind: AcquisitionWorkspaceKind,
   values: WorkspaceValues
 ) {
+  if (kind === 'cadastral-survey') {
+    const externalSurveyor = values.surveyorSource === 'External';
+    const missing = WORKSPACE_FIELDS[kind].filter((config) => {
+      const value = values[config.key];
+      return typeof value === 'boolean' ? false : !`${value ?? ''}`.trim();
+    }).filter((config) => {
+      if (config.readOnly) {
+        return false;
+      }
+
+      if (CADASTRAL_EXTERNAL_SURVEYOR_FIELDS.has(config.key)) {
+        return externalSurveyor;
+      }
+
+      return true;
+    });
+
+    if (!externalSurveyor) return missing;
+
+    const invoiceId = `${values.accountsPayableInvoiceId ?? ''}`.trim();
+    const paymentId = `${values.accountsPayablePaymentId ?? ''}`.trim();
+    const paid =
+      values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true';
+
+    if (!invoiceId)
+      return [
+        ...missing,
+        field('accountsPayableRequest', 'Surveyor AP Request'),
+      ];
+    if (!paymentId)
+      return [
+        ...missing,
+        field('accountsPayablePayment', 'Surveyor AP Payment'),
+      ];
+    return paid
+      ? missing
+      : [
+          ...missing,
+          field('accountsPayablePaymentProcessing', 'Finance Processing'),
+        ];
+  }
+
   if (kind === 'vendor-payment' || kind === 'stamp-duty-payment') {
     const invoiceId = `${values.accountsPayableInvoiceId ?? ''}`.trim();
     const paymentId = `${values.accountsPayablePaymentId ?? ''}`.trim();
@@ -1281,6 +1506,10 @@ function missingWorkspaceInputs(
   }
 
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
+    if (config.readOnly) {
+      return false;
+    }
+
     const value = values[config.key];
     return typeof value === 'boolean' ? false : !`${value ?? ''}`.trim();
   });
@@ -1363,6 +1592,8 @@ const WITNESS_TWO_OATH_FIELD_KEYS = new Set([
 ]);
 
 function requiredMarker(config: WorkspaceField) {
+  if (config.readOnly) return null;
+
   return WITNESS_OATH_FIELD_KEYS.has(config.key) ? null : (
     <span className="text-destructive">*</span>
   );
@@ -1400,6 +1631,51 @@ function workspaceDate(value: string | boolean | undefined): Date | null {
   if (typeof value !== 'string' || !value.trim()) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function workspaceDecimal(value: string | boolean | undefined): number | null {
+  if (typeof value === 'boolean' || value == null) return null;
+  const normalized = `${value}`.replace(/,/g, '').trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatWorkspaceMoney(
+  value: string | boolean | undefined,
+  currency = 'GHS'
+) {
+  const amount = workspaceDecimal(value);
+  if (amount == null) return '-';
+  return new Intl.NumberFormat('en-GH', {
+    style: 'currency',
+    currency,
+  }).format(amount);
+}
+
+function formatWorkspaceDate(value: string | boolean | undefined) {
+  const date = workspaceDate(value);
+  if (!date) return '-';
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
+function displayWorkspaceValue(value: string | boolean | undefined) {
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  const text = `${value ?? ''}`.trim();
+  return text || '-';
+}
+
+function isEditableElement(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest(
+      'input, textarea, select, [contenteditable="true"], [role="textbox"], [cmdk-input]'
+    )
+  );
 }
 
 function hasOwnershipDateGap(values: WorkspaceValues) {
@@ -1465,6 +1741,9 @@ function inputLabels(kind: AcquisitionWorkspaceKind, keys: string[]) {
     WORKSPACE_FIELDS[kind].map((config) => [config.key, config.label])
   );
   labels.set('vendorId', 'Linked Vendor / Owner');
+  labels.set('surveyorBusinessPartnerId', 'External Surveyor / Vendor');
+  labels.set('accountsPayableRequest', 'Accounts Payable Request');
+  labels.set('accountsPayablePayment', 'Accounts Payable Payment');
   labels.set('stageDocuments', 'Stage Documents');
   labels.set('witnessOath', 'Witness Oath');
   labels.set('accountsPayablePaymentProcessing', 'Finance Processing');
@@ -2508,11 +2787,11 @@ function AcquisitionDetail({
   const hasPublishedLandAsset =
     isAssetCreationStage && item.status === 'Approved';
   const captureStageActionLabel = hasCreatedLandAsset
-    ? 'Complete Asset Creation'
+    ? 'Complete Land Creation'
     : stage.primaryAction;
   const assetWorkspaceNotSavedReason =
     isAssetCreationStage && !hasCreatedLandAsset
-      ? 'Open the Asset Creation workspace, review the auto-filled asset details, then Save Workspace. Saving creates the Estate asset before Land Bank handoff.'
+      ? 'Open the Land Creation workspace, review the auto-filled land details, then Save Workspace. Saving creates the Estate land record before Land Bank handoff.'
       : undefined;
   const forwardActionReason = item.stageInputsComplete
     ? undefined
@@ -2522,7 +2801,7 @@ function AcquisitionDetail({
     item.stageOrder > stage.order
       ? completedWorkflowActionLabel(stage.primaryAction)
       : hasCreatedLandAsset
-        ? 'Asset created'
+        ? 'Land created'
         : stage.primaryAction;
   const showCaptureStageSubmit =
     item.stageOrder === stage.order &&
@@ -2659,14 +2938,14 @@ function AcquisitionDetail({
 
   const publishToLandBank = async () => {
     if (!hasCreatedLandAsset) {
-      toast.error('Create and save the Estate asset before Land Bank handoff.');
+      toast.error('Create and save the Estate land record before Land Bank handoff.');
       return;
     }
 
     if (!item.stageInputsComplete) {
       toast.error(
         forwardActionReason ||
-          'Complete all required asset fields before Land Bank handoff.'
+          'Complete all required land fields before Land Bank handoff.'
       );
       return;
     }
@@ -2677,12 +2956,12 @@ function AcquisitionDetail({
       if (!result.success) {
         throw new Error(result.message || 'Land Bank handoff failed.');
       }
-      toast.success('Published to Land Bank', {
+      toast.success('Transferred to Land Bank', {
         description: result.asset?.assetCode || item.projectReference,
       });
       await onReload();
     } catch (error: any) {
-      toast.error('Unable to publish asset to Land Bank.', {
+      toast.error('Unable to transfer land to Land Bank.', {
         description: error?.message || undefined,
       });
     } finally {
@@ -2850,7 +3129,7 @@ function AcquisitionDetail({
                   ) : (
                     <Building2 className="mr-2 h-4 w-4" />
                   )}
-                  Publish to Land Bank
+                  Transfer to Land Bank
                 </Button>
               )}
               <WorkflowApprovalActions
@@ -3215,6 +3494,156 @@ function CoordinateComparisonPanel({
   );
 }
 
+function EvidenceField({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border bg-background p-3">
+      <p className="text-xs font-medium uppercase text-muted-foreground">
+        {label}
+      </p>
+      <div className="mt-1 break-words text-sm font-medium text-foreground">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function AccountsPayableEvidenceDialog({
+  open,
+  onOpenChange,
+  values,
+  subject,
+  view,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  values: WorkspaceValues;
+  subject: string;
+  view: 'invoice' | 'receipt';
+}) {
+  const amountDue = workspaceDecimal(values.amountDue);
+  const amountPaid = workspaceDecimal(values.amountPaid) ?? 0;
+  const balance =
+    amountDue == null ? null : Math.max(0, amountDue - amountPaid);
+  const title =
+    view === 'invoice'
+      ? 'Accounts Payable Invoice'
+      : 'Payment Receipt';
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="max-h-[90vh] max-w-3xl overflow-y-auto"
+        onKeyDownCapture={(event) => {
+          if (isEditableElement(event.target)) event.stopPropagation();
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{subject}</Badge>
+            <Badge
+              variant={
+                values.isPaid === true ||
+                `${values.isPaid}`.toLowerCase() === 'true'
+                  ? 'secondary'
+                  : 'outline'
+              }
+            >
+              {values.isPaid === true ||
+              `${values.isPaid}`.toLowerCase() === 'true'
+                ? 'Paid'
+                : 'Pending payment'}
+            </Badge>
+          </div>
+
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">Invoice</h3>
+            <div className="grid gap-3 md:grid-cols-2">
+              <EvidenceField
+                label="Invoice number"
+                value={displayWorkspaceValue(
+                  values.accountsPayableInvoiceNumber
+                )}
+              />
+              <EvidenceField
+                label="Invoice status"
+                value={displayWorkspaceValue(
+                  values.accountsPayableInvoiceStatus
+                )}
+              />
+              <EvidenceField
+                label="Amount due"
+                value={formatWorkspaceMoney(values.amountDue)}
+              />
+              <EvidenceField
+                label="Balance"
+                value={
+                  balance == null
+                    ? '-'
+                    : formatWorkspaceMoney(`${balance}`)
+                }
+              />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">Receipt / payment</h3>
+            <div className="grid gap-3 md:grid-cols-2">
+              <EvidenceField
+                label="Payment number"
+                value={displayWorkspaceValue(
+                  values.accountsPayablePaymentNumber
+                )}
+              />
+              <EvidenceField
+                label="Payment status"
+                value={displayWorkspaceValue(
+                  values.accountsPayablePaymentStatus
+                )}
+              />
+              <EvidenceField
+                label="Receipt number"
+                value={displayWorkspaceValue(values.receiptNumber)}
+              />
+              <EvidenceField
+                label="Payment reference"
+                value={displayWorkspaceValue(values.paymentReference)}
+              />
+              <EvidenceField
+                label="Payment date"
+                value={formatWorkspaceDate(values.paymentDate)}
+              />
+              <EvidenceField
+                label="Amount paid"
+                value={formatWorkspaceMoney(values.amountPaid)}
+              />
+              <EvidenceField
+                label="Payment method"
+                value={displayWorkspaceValue(values.paymentMethod)}
+              />
+            </div>
+          </section>
+
+          {`${values.paymentNotes ?? ''}`.trim() && (
+            <section className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              {displayWorkspaceValue(values.paymentNotes)}
+            </section>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PastOwnersPanel({
   owners,
   disabled,
@@ -3496,6 +3925,9 @@ function WorkspaceDialog({
     url: string;
     name: string;
   } | null>(null);
+  const [payableEvidenceView, setPayableEvidenceView] = React.useState<
+    'invoice' | 'receipt' | null
+  >(null);
   const [cadastralComparisonValues, setCadastralComparisonValues] =
     React.useState<WorkspaceValues>({});
   const [classificationComparisonValues, setClassificationComparisonValues] =
@@ -3512,25 +3944,46 @@ function WorkspaceDialog({
   const accountsPayablePaid =
     Boolean(accountsPayableInvoiceId) &&
     (values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true');
+  const otherAcquisitionServices = React.useMemo(
+    () => parseOtherAcquisitionServices(values.otherAcquisitionServicesJson),
+    [values.otherAcquisitionServicesJson]
+  );
+  const otherAcquisitionServicesTotal = React.useMemo(
+    () => sumOtherAcquisitionServices(otherAcquisitionServices),
+    [otherAcquisitionServices]
+  );
+  const otherAccountsPayableInvoiceId =
+    `${values.otherAccountsPayableInvoiceId || ''}`.trim();
+  const otherAccountsPayablePaymentId =
+    `${values.otherAccountsPayablePaymentId || ''}`.trim();
+  const otherAccountsPayablePaid =
+    Boolean(otherAccountsPayableInvoiceId) &&
+    (values.otherCostsPaid === true ||
+      `${values.otherCostsPaid}`.toLowerCase() === 'true');
   const isAccountsPayableWorkspace =
+    (stage.workspaceKind === 'cadastral-survey' &&
+      values.surveyorSource === 'External') ||
     stage.workspaceKind === 'vendor-payment' ||
     stage.workspaceKind === 'stamp-duty-payment';
   const isAgreementWorkspace =
     stage.workspaceKind === 'agreement-negotiation' ||
     stage.workspaceKind === 'agreement-approval';
   const accountsPayableSubject =
-    stage.workspaceKind === 'vendor-payment'
+    stage.workspaceKind === 'cadastral-survey'
+      ? 'external surveyor fee'
+      : stage.workspaceKind === 'vendor-payment'
       ? 'vendor payment'
       : 'stamp duty payment';
   const isPublishedAssetWorkspace =
     stage.workspaceKind === 'asset-creation' && item.status === 'Approved';
   const workspaceCanEdit = canEdit && !isPublishedAssetWorkspace;
   const workspaceLockedMessage = isPublishedAssetWorkspace
-    ? 'This asset has already been published to Estate Land Bank, so the workspace is read-only.'
+    ? 'This land has already been transferred to Estate Land Bank, so the workspace is read-only.'
     : assignmentMessage;
 
   React.useEffect(() => {
     setGeneratedAgreement(null);
+    setPayableEvidenceView(null);
   }, [item.id, open, stage.id]);
 
   React.useEffect(() => {
@@ -3571,6 +4024,12 @@ function WorkspaceDialog({
     if (!item.id || !workspaceCanEdit) return;
     try {
       setSyncingPayable(true);
+      await estateAcquisitionService.saveWorkspace({
+        acquisitionId: item.id,
+        procedureId: stage.id,
+        workspaceKind: stage.workspaceKind,
+        values,
+      });
       const workspace =
         await estateAcquisitionService.ensureAccountsPayableRequest(item.id);
       onChange(workspace.values);
@@ -3579,6 +4038,59 @@ function WorkspaceDialog({
     } catch (error: any) {
       toast.error(
         error?.message || 'Unable to create the Accounts Payable request.'
+      );
+    } finally {
+      setSyncingPayable(false);
+    }
+  };
+
+  const updateOtherAcquisitionServices = (
+    services: OtherAcquisitionServiceCost[]
+  ) => {
+    onChange((current) => ({
+      ...current,
+      otherAcquisitionServicesJson: serializeOtherAcquisitionServices(services),
+      otherAcquisitionCost: `${sumOtherAcquisitionServices(services) || ''}`,
+    }));
+  };
+
+  const createOtherAcquisitionCostsPayableRequest = async () => {
+    if (!item.id || !workspaceCanEdit) return;
+    const payableServices = otherAcquisitionServices.filter(
+      (service) =>
+        service.serviceName.trim() &&
+        Number.isFinite(Number(service.amount)) &&
+        Number(service.amount) > 0
+    );
+    if (payableServices.length === 0) {
+      toast.error('Add at least one other acquisition service with an amount.');
+      return;
+    }
+
+    try {
+      setSyncingPayable(true);
+      await estateAcquisitionService.saveWorkspace({
+        acquisitionId: item.id,
+        procedureId: stage.id,
+        workspaceKind: stage.workspaceKind,
+        values: {
+          ...values,
+          otherAcquisitionServicesJson:
+            serializeOtherAcquisitionServices(payableServices),
+          otherAcquisitionCost: `${sumOtherAcquisitionServices(payableServices)}`,
+        },
+      });
+      const workspace =
+        await estateAcquisitionService.ensureOtherAcquisitionCostsPayableRequest(
+          item.id
+        );
+      onChange(workspace.values);
+      await onReload();
+      toast.success('Other acquisition costs AP request created.');
+    } catch (error: any) {
+      toast.error(
+        error?.message ||
+          'Unable to create the other acquisition costs AP request.'
       );
     } finally {
       setSyncingPayable(false);
@@ -3720,10 +4232,32 @@ function WorkspaceDialog({
     router.push(`/finance/ap/payments/create?${params.toString()}`);
   };
 
+  const openOtherAcquisitionCostsAccountsPayable = () => {
+    if (otherAccountsPayablePaymentId) {
+      router.push(`/finance/ap/payments/${otherAccountsPayablePaymentId}`);
+      return;
+    }
+
+    if (!otherAccountsPayableInvoiceId) return;
+    const params = new URLSearchParams({
+      invoiceId: otherAccountsPayableInvoiceId,
+      amount: `${values.otherAmountDue || otherAcquisitionServicesTotal || ''}`,
+      referenceNumber: item.projectReference,
+      description: `other acquisition costs for ${item.projectReference}`,
+      source: 'land-acquisition',
+      locked: 'true',
+    });
+    router.push(`/finance/ap/payments/create?${params.toString()}`);
+  };
+
   React.useEffect(() => {
     if (
       !open ||
-      !['parcel-identification', 'ownership-classification'].includes(
+      ![
+        'parcel-identification',
+        'cadastral-survey',
+        'ownership-classification',
+      ].includes(
         stage.workspaceKind
       )
     ) {
@@ -3738,19 +4272,12 @@ function WorkspaceDialog({
         const partners =
           await businessPartnerService.getAllPartnersForDropdown();
         if (cancelled) return;
+        const activeApproved = partners.filter(isActiveApprovedBusinessPartner);
+        const payablePartners = activeApproved.filter(isPayableBusinessPartner);
         setVendors(
-          partners
-            .filter((partner) => {
-              const status = partner.status?.toLowerCase();
-              const isActive = status === 'active' || status === 'approved';
-              const isApproved =
-                !partner.approvalStatus ||
-                partner.approvalStatus.toLowerCase() === 'approved';
-              return isActive && isApproved && !partner.isBlacklisted;
-            })
-            .sort((left, right) =>
-              left.partnerName.localeCompare(right.partnerName)
-            )
+          (payablePartners.length ? payablePartners : activeApproved).sort(
+            (left, right) => left.partnerName.localeCompare(right.partnerName)
+          )
         );
       } catch (error) {
         if (!cancelled) {
@@ -3987,7 +4514,12 @@ function WorkspaceDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-5xl overflow-hidden p-0">
+      <DialogContent
+        className="max-h-[90vh] max-w-5xl overflow-hidden p-0"
+        onKeyDownCapture={(event) => {
+          if (isEditableElement(event.target)) event.stopPropagation();
+        }}
+      >
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle className="flex items-center gap-2">
             <FolderOpen className="h-5 w-5" />
@@ -4077,12 +4609,36 @@ function WorkspaceDialog({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {accountsPayableInvoiceId
                         ? `Invoice ${values.accountsPayableInvoiceNumber || accountsPayableInvoiceId} is the payment source for this acquisition.`
-                        : stage.workspaceKind === 'vendor-payment'
+                        : stage.workspaceKind === 'cadastral-survey'
+                          ? 'Create the payable from the external surveyor and fee amount before routing for survey verification.'
+                          : stage.workspaceKind === 'vendor-payment'
                           ? 'Create the payable from the approved agreement amount before processing vendor payment.'
                           : 'Create the payable from the approved stamp duty assessment before processing payment.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {accountsPayableInvoiceId && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setPayableEvidenceView('invoice')}
+                      >
+                        <Eye className="mr-2 h-4 w-4" />
+                        View Invoice
+                      </Button>
+                    )}
+                    {accountsPayablePaymentId && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setPayableEvidenceView('receipt')}
+                      >
+                        <Receipt className="mr-2 h-4 w-4" />
+                        View Receipt
+                      </Button>
+                    )}
                     {accountsPayableInvoiceId ? (
                       <Button
                         type="button"
@@ -4248,6 +4804,246 @@ function WorkspaceDialog({
                     ) : null}
                   </div>
                 ) : null}
+              </section>
+            )}
+            {stage.workspaceKind === 'stamp-duty-payment' && (
+              <section className="rounded-lg border bg-card p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Other acquisition services
+                      </h3>
+                      <Badge
+                        variant={
+                          otherAccountsPayablePaid ? 'secondary' : 'outline'
+                        }
+                      >
+                        {otherAccountsPayablePaid
+                          ? 'Paid'
+                          : otherAccountsPayableInvoiceId
+                            ? `${values.otherAccountsPayablePaymentStatus || 'Pending payment'}`
+                            : 'Not linked'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Add legal, search, consent, facilitation, documentation,
+                      or other service costs that must be capitalized into Land
+                      Creation.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {otherAccountsPayableInvoiceId ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={openOtherAcquisitionCostsAccountsPayable}
+                        disabled={syncingPayable}
+                      >
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        {otherAccountsPayablePaymentId
+                          ? 'View Other Cost Payment'
+                          : 'Process Other Costs in AP'}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() =>
+                          void createOtherAcquisitionCostsPayableRequest()
+                        }
+                        disabled={
+                          syncingPayable ||
+                          !workspaceCanEdit ||
+                          otherAcquisitionServicesTotal <= 0
+                        }
+                        title={
+                          !workspaceCanEdit
+                            ? workspaceLockedMessage
+                            : otherAcquisitionServicesTotal <= 0
+                              ? 'Add at least one service cost first.'
+                              : undefined
+                        }
+                      >
+                        {syncingPayable ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Plus className="mr-2 h-4 w-4" />
+                        )}
+                        Create Other Cost AP
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        updateOtherAcquisitionServices([
+                          ...otherAcquisitionServices,
+                          emptyOtherAcquisitionService(),
+                        ])
+                      }
+                      disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                      title={
+                        otherAccountsPayableInvoiceId
+                          ? 'Other cost AP request already exists.'
+                          : !workspaceCanEdit
+                            ? workspaceLockedMessage
+                            : undefined
+                      }
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Service
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {otherAcquisitionServices.length === 0 && (
+                    <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                      No other acquisition services added yet.
+                    </p>
+                  )}
+                  {otherAcquisitionServices.map((service, index) => (
+                    <div
+                      key={service.id}
+                      className="grid gap-3 rounded-md border p-3 md:grid-cols-[1.3fr_1fr_140px_150px_auto]"
+                    >
+                      <div className="space-y-2">
+                        <Label>Service / Cost</Label>
+                        <Input
+                          value={service.serviceName}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          placeholder="e.g. Title search, consent processing"
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, serviceName: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Payee / Provider</Label>
+                        <Input
+                          value={service.payeeName}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          placeholder="Optional"
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, payeeName: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Amount</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={service.amount}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, amount: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Due Date</Label>
+                        <Input
+                          type="date"
+                          value={service.dueDate}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, dueDate: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          onClick={() =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.filter(
+                                (_, row) => row !== index
+                              )
+                            )
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="space-y-2 md:col-span-5">
+                        <Label>Notes</Label>
+                        <Textarea
+                          value={service.notes}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          rows={2}
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, notes: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-3 rounded-md bg-muted/40 p-3 text-sm md:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Service total</p>
+                    <p className="font-semibold">
+                      GHS {otherAcquisitionServicesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">AP invoice</p>
+                    <p className="font-medium">
+                      {values.otherAccountsPayableInvoiceNumber ||
+                        otherAccountsPayableInvoiceId ||
+                        'Not created'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">AP payment</p>
+                    <p className="font-medium">
+                      {values.otherAccountsPayablePaymentNumber ||
+                        values.otherAccountsPayablePaymentStatus ||
+                        'Pending'}
+                    </p>
+                  </div>
+                </div>
+                {values.otherPaymentNotes && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {values.otherPaymentNotes}
+                  </p>
+                )}
               </section>
             )}
             <section className="rounded-lg border bg-card p-4">
@@ -4595,6 +5391,13 @@ function WorkspaceDialog({
                           values
                         ) &&
                         !(
+                          stage.workspaceKind === 'cadastral-survey' &&
+                          CADASTRAL_EXTERNAL_SURVEYOR_FIELDS.has(
+                            config.key
+                          ) &&
+                          values.surveyorSource !== 'External'
+                        ) &&
+                        !(
                           stage.workspaceKind === 'ownership-classification' &&
                           config.key === 'dateGapReason' &&
                           !hasOwnershipDateGap(values)
@@ -4650,6 +5453,59 @@ function WorkspaceDialog({
                               <p className="text-xs text-muted-foreground">
                                 No active approved vendors are available in the
                                 business partner register.
+                              </p>
+                            )}
+                        </div>
+                      ) : config.key === 'surveyorBusinessPartnerId' &&
+                        stage.workspaceKind === 'cadastral-survey' ? (
+                        <div key={config.key} className="space-y-2">
+                          <Label>
+                            External Surveyor / Vendor{' '}
+                            <span className="text-destructive">*</span>
+                          </Label>
+                          <Select
+                            value={`${values.surveyorBusinessPartnerId || ''}`}
+                            disabled={vendorsLoading || !workspaceCanEdit}
+                            onValueChange={(surveyorBusinessPartnerId) => {
+                              const vendor = vendors.find(
+                                (candidate) =>
+                                  candidate.id === surveyorBusinessPartnerId
+                              );
+                              onChange((current) => ({
+                                ...current,
+                                surveyorBusinessPartnerId,
+                                surveyorName: vendor?.partnerName || '',
+                              }));
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue
+                                placeholder={
+                                  vendorsLoading
+                                    ? 'Loading vendors...'
+                                    : 'Select external surveyor'
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {vendors.map((vendor) => (
+                                <SelectItem key={vendor.id} value={vendor.id}>
+                                  {vendor.partnerName} ({vendor.partnerCode})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {vendorsError && (
+                            <p className="text-xs text-destructive">
+                              {vendorsError}
+                            </p>
+                          )}
+                          {!vendorsLoading &&
+                            !vendorsError &&
+                            vendors.length === 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                No active approved supplier or contractor
+                                Business Partners are available.
                               </p>
                             )}
                         </div>
@@ -4866,6 +5722,23 @@ function WorkspaceDialog({
                               }));
                               return;
                             }
+                            if (
+                              stage.workspaceKind === 'cadastral-survey' &&
+                              config.key === 'surveyorSource'
+                            ) {
+                              onChange((current) => ({
+                                ...current,
+                                surveyorSource: value,
+                                ...(value === 'Internal'
+                                  ? {
+                                      surveyorBusinessPartnerId: '',
+                                      surveyorFeeAmount: '',
+                                      surveyorFeeDueDate: '',
+                                    }
+                                  : {}),
+                              }));
+                              return;
+                            }
                             setValue(config.key, value);
                           }}
                         />
@@ -4893,6 +5766,16 @@ function WorkspaceDialog({
             ) : null}
           </DialogContent>
         </Dialog>
+
+        {payableEvidenceView && (
+          <AccountsPayableEvidenceDialog
+            open={Boolean(payableEvidenceView)}
+            onOpenChange={(open) => !open && setPayableEvidenceView(null)}
+            values={values}
+            subject={accountsPayableSubject}
+            view={payableEvidenceView}
+          />
+        )}
 
         <DialogFooter className="border-t px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>

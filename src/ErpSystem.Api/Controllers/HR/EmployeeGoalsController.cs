@@ -1,35 +1,125 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Exceptions;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public class EmployeeGoalsController : ControllerBase
 {
     private readonly IEmployeeGoalService _employeeGoalService;
     private readonly IGoalWorkflowCommandService _workflowService;
+    private readonly ICurrentUserService _currentUserService;
+    private readonly ApplicationDbContext _db;
     private readonly ILogger<EmployeeGoalsController> _logger;
 
     public EmployeeGoalsController(
         IEmployeeGoalService employeeGoalService,
         IGoalWorkflowCommandService workflowService,
+        ICurrentUserService currentUserService,
+        ApplicationDbContext db,
         ILogger<EmployeeGoalsController> logger)
     {
         _employeeGoalService = employeeGoalService;
         _workflowService     = workflowService;
+        _currentUserService  = currentUserService;
+        _db                  = db;
         _logger              = logger;
+    }
+
+    // ── W3 entitlement ────────────────────────────────────────────────────
+    //
+    // The service is tenant-scoped only: it validates goal rules but never asks who is calling,
+    // so before these guards any authenticated user could read, rewrite or delete anyone's
+    // goals by id. A goal belongs to its employee; the employee's line manager shares it; the
+    // performance permission stands in for the desk. Submit/approve/reject/lock stay ungated —
+    // IGoalWorkflowCommandService resolves the caller from the token and enforces the
+    // direct-manager rule itself (the bespoke goal workflow, kept off the engine by design).
+
+    private async Task<bool> HoldsPolicyAsync(string policy)
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, policy)).Succeeded;
+    }
+
+    /// <summary>The goal's employee, that employee's line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessGoalAsync(Guid goalId, string policy)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<EmployeeGoal>()
+            .AsNoTracking()
+            .Where(g => g.Id == goalId && g.TenantId == tenantId)
+            .AnyAsync(g => g.EmployeeId == me || g.Employee.ManagerId == me, HttpContext.RequestAborted);
+    }
+
+    /// <summary>As <see cref="CanAccessGoalAsync"/> minus the employee — unlocking undoes the
+    /// manager's lock, so it is the manager's (or the desk's) alone.</summary>
+    private async Task<bool> CanManageGoalAsync(Guid goalId, string policy)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<EmployeeGoal>()
+            .AsNoTracking()
+            .Where(g => g.Id == goalId && g.TenantId == tenantId)
+            .AnyAsync(g => g.Employee.ManagerId == me, HttpContext.RequestAborted);
+    }
+
+    /// <summary>The employee themselves, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessEmployeeRecordsAsync(Guid employeeId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+        {
+            if (me == employeeId) return true;
+            if (_currentUserService.TenantId is Guid tenantId &&
+                await _db.Set<Core.Entities.HR.Employee>()
+                    .AsNoTracking()
+                    .AnyAsync(e => e.Id == employeeId && e.TenantId == tenantId && e.ManagerId == me, HttpContext.RequestAborted))
+                return true;
+        }
+
+        return await HoldsPolicyAsync(policy);
+    }
+
+    /// <summary>The appraisal's subject, their line manager, or a policy holder.</summary>
+    private async Task<bool> CanAccessAppraisalAsync(Guid appraisalId, string policy)
+    {
+        if (await HoldsPolicyAsync(policy)) return true;
+        if (_currentUserService.EmployeeId is not Guid me || me == Guid.Empty) return false;
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+
+        return await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .AnyAsync(a => a.EmployeeId == me || a.Employee.ManagerId == me, HttpContext.RequestAborted);
+    }
+
+    /// <summary>The named employee is the caller, or the caller holds the policy.</summary>
+    private async Task<bool> SelfOrPolicyAsync(Guid employeeId, string policy)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == employeeId) return true;
+        return await HoldsPolicyAsync(policy);
     }
 
     /// <summary>Get employee goals with pagination</summary>
     [HttpGet("paged")]
     [ProducesResponseType(typeof(PagedResult<EmployeeGoalDto>), StatusCodes.Status200OK)]
+    [Authorize(Policy = HrPermissions.PerformanceReadPolicy)]
     public async Task<IActionResult> GetPaged([FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 20, [FromQuery] Guid? employeeId = null, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
         try
@@ -50,6 +140,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(Guid id, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessGoalAsync(id, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.GetByIdAsync(id, cancellationToken);
@@ -71,6 +163,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<EmployeeGoalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByEmployee(Guid employeeId, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessEmployeeRecordsAsync(employeeId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.GetByEmployeeIdAsync(employeeId, cycleId, cancellationToken);
@@ -88,6 +182,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<EmployeeGoalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetByAppraisal(Guid appraisalId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessAppraisalAsync(appraisalId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.GetByAppraisalIdAsync(appraisalId, cancellationToken);
@@ -105,6 +201,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<EmployeeGoalDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetPendingApproval(Guid managerId, [FromQuery] Guid? cycleId = null, CancellationToken cancellationToken = default)
     {
+        if (!await SelfOrPolicyAsync(managerId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.GetPendingApprovalAsync(managerId, cycleId, cancellationToken);
@@ -122,6 +220,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(typeof(EmployeeGoalSummaryDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetGoalSummary(Guid employeeId, Guid cycleId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessEmployeeRecordsAsync(employeeId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.GetGoalSummaryAsync(employeeId, cycleId, cancellationToken);
@@ -143,6 +243,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<TeamGoalSummaryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetTeamGoalSummary(Guid managerId, Guid cycleId, CancellationToken cancellationToken = default)
     {
+        if (!await SelfOrPolicyAsync(managerId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.GetTeamGoalSummaryAsync(managerId, cycleId, cancellationToken);
@@ -161,6 +263,10 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Create([FromBody] CreateEmployeeGoalDto createDto, CancellationToken cancellationToken = default)
     {
+        // A goal is raised for its employee by that employee, their manager, or the desk — the
+        // payload names the employee, so without this anyone could plant goals on a colleague.
+        if (!await CanAccessEmployeeRecordsAsync(createDto.EmployeeId, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.CreateAsync(createDto, cancellationToken);
@@ -169,6 +275,10 @@ public class EmployeeGoalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "creating");
         }
         catch (Exception ex)
         {
@@ -183,6 +293,12 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateEmployeeGoalDto updateDto, CancellationToken cancellationToken = default)
     {
+        // The service updates the body's id, so without this a PUT to one goal's URL could edit another.
+        if (id != updateDto.Id)
+            return BadRequest(new { message = "Route id does not match body id." });
+
+        if (!await CanAccessGoalAsync(id, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.UpdateAsync(updateDto, cancellationToken);
@@ -191,6 +307,10 @@ public class EmployeeGoalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating");
         }
         catch (Exception ex)
         {
@@ -205,6 +325,10 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
+        // The employee prunes their own drafts and the manager their team's — the service's
+        // status rules decide what may go; the Admin arm covers the desk.
+        if (!await CanAccessGoalAsync(id, HrPermissions.PerformanceAdminPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.DeleteAsync(id, cancellationToken);
@@ -214,6 +338,10 @@ public class EmployeeGoalsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (Exception ex)
         {
@@ -361,6 +489,10 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Unlock(Guid goalId, CancellationToken cancellationToken = default)
     {
+        // Locking runs through the goal workflow, which holds it to the direct manager; unlock
+        // bypassed that entirely, so anyone could undo a manager's lock — including its subject.
+        if (!await CanManageGoalAsync(goalId, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.UnlockGoalAsync(goalId, cancellationToken);
@@ -398,6 +530,34 @@ public class EmployeeGoalsController : ControllerBase
         };
     }
 
+    /// <summary>
+    /// Maps a business-rule rejection from the service onto 422 with the rule's own message.
+    ///
+    /// The service raises <see cref="InvalidOperationException"/> for rules the caller can act
+    /// on — the goal is locked, the cycle's goal cap is reached, the goal is not in a status
+    /// that accepts progress. Nothing caught these, so they fell into the generic handler and
+    /// came back as a 500 carrying a bare string; because the body was a string rather than
+    /// <c>{ message }</c>, the client could not read a message out of it either, and the user
+    /// got an unexplained failure on rules they hit routinely.
+    ///
+    /// 422 rather than 409 to match <see cref="WorkflowError"/> above, which already returns 422
+    /// for a locked goal — the same goal in the same state should not answer differently
+    /// depending on which endpoint was asked.
+    ///
+    /// Logged at warning, not error: the request was refused correctly and nobody needs paging.
+    ///
+    /// Caveat: the service's tenant guard raises the same exception type, so a token with no
+    /// tenant claim would also land here as a 422 rather than a fault. Left as-is because that
+    /// guard is unreachable for any authenticated caller (every token carries tenant_id) and
+    /// giving it a distinct type means touching the ~10 HR services that copy the same guard.
+    /// Worth doing if that refactor happens for another reason.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Employee goal rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
     // ── Progress entries ──────────────────────────────────────────────────
 
     /// <summary>Add a progress entry to a goal</summary>
@@ -406,14 +566,26 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> AddProgressEntry(Guid goalId, [FromBody] CreateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
+        // The recorder is the caller. The payload used to name them, so a progress entry could be
+        // attributed to a colleague who never made it.
+        if (_currentUserService.EmployeeId is not Guid recordedById || recordedById == Guid.Empty)
+            return Unauthorized("User employee context not found");
+
+        // Progress on a goal is recorded by its parties, not by any colleague with the id.
+        if (!await CanAccessGoalAsync(goalId, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
-            var result = await _employeeGoalService.AddProgressEntryAsync(goalId, dto, cancellationToken);
+            var result = await _employeeGoalService.AddProgressEntryAsync(goalId, dto, recordedById, cancellationToken);
             return StatusCode(201, result);
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "adding a progress entry to");
         }
         catch (Exception ex)
         {
@@ -427,6 +599,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<GoalProgressEntryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProgressEntries(Guid goalId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessGoalAsync(goalId, HrPermissions.PerformanceReadPolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.GetProgressEntriesAsync(goalId, cancellationToken);
@@ -449,6 +623,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> UpdateProgressEntry(Guid goalId, Guid entryId, [FromBody] UpdateGoalProgressEntryDto dto, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessGoalAsync(goalId, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.UpdateProgressEntryAsync(goalId, dto, cancellationToken);
@@ -471,6 +647,8 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteProgressEntry(Guid goalId, Guid entryId, CancellationToken cancellationToken = default)
     {
+        if (!await CanAccessGoalAsync(goalId, HrPermissions.PerformanceWritePolicy)) return Forbid();
+
         try
         {
             var result = await _employeeGoalService.DeleteProgressEntryAsync(goalId, entryId, cancellationToken);

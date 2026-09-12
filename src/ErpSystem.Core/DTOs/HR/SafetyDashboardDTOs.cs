@@ -33,4 +33,14 @@ public class SheDashboardDto
     public int EquipmentExpiringCertification { get; set; }
     public int EquipmentOutOfService { get; set; }
     public int PpeBelowReorder { get; set; }
+
+    // Environment (slice 17 — Part D core)
+    /// <summary>FR-ENV-019 — rendered red on the dashboard.</summary>
+    public int ExpiredEnvironmentalPermits { get; set; }
+    public int EnvironmentalPermitsExpiringSoon { get; set; }
+    public int OpenEnvironmentalIncidents { get; set; }
+    public int MonitoringSchedulesDue { get; set; }
+    public int RegulatoryUpdatesOpen { get; set; }
+    /// <summary>FR-ENV-029 — the sustainability KPI presence on the main dashboard.</summary>
+    public int SustainabilityInitiativesActive { get; set; }
 }

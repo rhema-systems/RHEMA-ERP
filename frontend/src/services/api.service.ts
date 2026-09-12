@@ -68,6 +68,8 @@ export interface UserInfo {
   authenticationProvider?: 'Local' | 'LDAP';
   mustChangePassword?: boolean;
   temporaryPasswordExpiresAtUtc?: string;
+  /** The user↔employee link; null/absent = not linked. The /me portal gate reads this. */
+  employeeId?: string | null;
 }
 
 export interface UserTenantInfo {

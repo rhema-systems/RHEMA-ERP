@@ -1,14 +1,17 @@
+﻿using ErpSystem.Api.Filters;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 [ApiController]
 [Route("api/training-budgets")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
+[TrainingBusinessRulesAttribute]
 public class TrainingBudgetsController : ControllerBase
 {
     private readonly ITrainingBudgetService _service;
@@ -25,34 +28,42 @@ public class TrainingBudgetsController : ControllerBase
     // =========================================================================
 
     [HttpGet]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetSummaryDto>>> GetAll(CancellationToken ct)
         => Ok(await _service.GetAllAsync(ct));
 
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingBudgetDto>> GetById(Guid id, CancellationToken ct)
         => Ok(await _service.GetByIdAsync(id, ct));
 
     [HttpGet("code/{budgetCode}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<TrainingBudgetDto?>> GetByBudgetCode(string budgetCode, CancellationToken ct)
         => Ok(await _service.GetByBudgetCodeAsync(budgetCode, ct));
 
     [HttpGet("year/{year:int}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetSummaryDto>>> GetByYear(int year, CancellationToken ct)
         => Ok(await _service.GetByYearAsync(year, ct));
 
     [HttpGet("year/{year:int}/quarter/{quarter:int}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetSummaryDto>>> GetByYearAndQuarter(int year, int quarter, CancellationToken ct)
         => Ok(await _service.GetByYearAndQuarterAsync(year, quarter, ct));
 
     [HttpGet("approved")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetSummaryDto>>> GetApproved(CancellationToken ct)
         => Ok(await _service.GetApprovedAsync(ct));
 
     [HttpGet("over-budget")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetSummaryDto>>> GetOverBudget(CancellationToken ct)
         => Ok(await _service.GetOverBudgetAsync(ct));
 
     [HttpGet("org-unit/{orgUnitId:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetSummaryDto>>> GetByOrganizationUnitId(Guid orgUnitId, CancellationToken ct)
         => Ok(await _service.GetByOrganizationUnitIdAsync(orgUnitId, ct));
 
@@ -61,6 +72,7 @@ public class TrainingBudgetsController : ControllerBase
     // =========================================================================
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingBudgetDto>> Create([FromBody] CreateTrainingBudgetDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -76,6 +88,7 @@ public class TrainingBudgetsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingBudgetDto>> Update(Guid id, [FromBody] UpdateTrainingBudgetDto dto, CancellationToken ct)
     {
         if (id != dto.Id) return BadRequest("ID mismatch.");
@@ -88,6 +101,7 @@ public class TrainingBudgetsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _service.DeleteAsync(id, ct);
@@ -99,6 +113,7 @@ public class TrainingBudgetsController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/approve")]
+    [Authorize(Policy = HrPermissions.TrainingAdminPolicy)]
     public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveTrainingBudgetDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -116,6 +131,7 @@ public class TrainingBudgetsController : ControllerBase
     // =========================================================================
 
     [HttpPost("{id:guid}/transactions")]
+    [Authorize(Policy = HrPermissions.TrainingWritePolicy)]
     public async Task<ActionResult<TrainingBudgetTransactionDto>> RecordTransaction(Guid id, [FromBody] CreateTrainingBudgetTransactionDto dto, CancellationToken ct)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
@@ -131,10 +147,12 @@ public class TrainingBudgetsController : ControllerBase
     }
 
     [HttpGet("{id:guid}/transactions")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetTransactionDto>>> GetTransactions(Guid id, CancellationToken ct)
         => Ok(await _service.GetTransactionsAsync(id, ct));
 
     [HttpGet("{id:guid}/transactions/date-range")]
+    [Authorize(Policy = HrPermissions.TrainingReadPolicy)]
     public async Task<ActionResult<IEnumerable<TrainingBudgetTransactionDto>>> GetTransactionsByDateRange(
         Guid id,
         [FromQuery] DateTime from,

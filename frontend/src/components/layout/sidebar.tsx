@@ -1,17 +1,27 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  AlarmClock,
   Building2,
+  Sparkles,
+  DoorOpen,
+  Flag,
+  Plus,
+  FireExtinguisher,
+  Siren,
   LayoutDashboard,
   Users,
+  Trophy,
   ShoppingCart,
   Package,
   CreditCard,
   UserCheck,
+  BadgeAlert,
   Briefcase,
+  BookText,
   Megaphone,
   Settings,
   ChevronDown,
@@ -22,10 +32,15 @@ import {
   FileText,
   FileInput,
   Scale,
+  Signpost,
   Banknote,
   Globe,
   GraduationCap,
+  TrendingDown,
   IdCard,
+  Stamp,
+  ShieldAlert,
+  Route,
   Tags,
   CalendarDays,
   Globe2,
@@ -39,18 +54,34 @@ import {
   Home,
   Code,
   HelpCircle,
+  LayoutList,
   Workflow,
   Wrench,
   Calendar,
+  CalendarRange,
+  Check,
   ClipboardCheck,
   ClipboardPlus,
+  ListChecks,
+  OctagonX,
+  FileSearch,
+  FolderArchive,
+  Medal,
+  SlidersHorizontal,
   AlertTriangle,
   Clock,
   CheckSquare,
   Activity,
   FolderTree,
   FileCheck,
+  History,
   Gavel,
+  Network,
+  ShieldQuestion,
+  TriangleAlert,
+  Users2,
+  UserRoundCheck,
+  Grid3x3,
   Award,
   Star,
   Target,
@@ -58,6 +89,7 @@ import {
   TrendingUp,
   AlertCircle,
   ClipboardList,
+  ClipboardPen,
   Tag,
   MapPin,
   Truck,
@@ -72,14 +104,24 @@ import {
   Phone,
   Swords,
   BookTemplate,
+  BadgeCheck,
+  Hash,
+  ListOrdered,
   Landmark,
+  HardHat,
+  Bandage,
+  PersonStanding,
   GitBranch,
   Search,
   ArrowRightLeft,
+  Boxes,
+  Undo2,
   Repeat2,
   KeyRound,
   PackageCheck,
   CalendarCheck,
+  MessagesSquare,
+  NotebookPen,
   ScrollText,
   Timer,
   BellRing,
@@ -90,6 +132,24 @@ import {
   ShieldPlus,
   ScanLine,
   WalletCards,
+  Layers,
+  FileStack,
+  FileBarChart,
+  Sprout,
+  Library,
+  Gauge,
+  Lightbulb,
+  Handshake,
+  FastForward,
+  HandCoins,
+  UserPlus,
+  Stethoscope,
+  HeartPulse,
+  Hospital,
+  FileHeart,
+  Leaf,
+  Recycle,
+  Plane,
   Layers3,
 } from 'lucide-react';
 
@@ -274,6 +334,13 @@ export const navigationItems: NavItem[] = [
     title: 'Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
+  },
+  {
+    // The two-way switcher's desk side — /me has its own chrome ("Back to ERP"
+    // lives there). The /me layout handles unlinked users with a friendly page.
+    title: 'My Self-Service',
+    href: '/me',
+    icon: Sparkles,
   },
   {
     title: 'Finance',
@@ -894,182 +961,690 @@ export const navigationItems: NavItem[] = [
     title: 'Human Resources',
     href: '/hr',
     icon: UserCheck,
-    roles: [...ADMINISTRATION_ROLES, 'HR User', 'HR Officer', 'HR Manager'],
-    permissions: ['hr.access', 'hr.read', 'employees.read'],
-    accessMode: 'any',
+    // Mirrors the /hr layout's AuthGuard. hr.access is granted to every general internal
+    // role by the seeder — the gate exists to exclude external (candidate/business-partner)
+    // accounts, not to hide HR from staff. SuperAdmin/TenantAdmin auto-pass.
+    permissions: ['hr.access'],
     children: [
-      { title: 'Employees', href: '/hr/employees', icon: Users },
+      // The flat list had 34 rows and the flyout could not show them all, so HR is
+      // grouped one level down (the same shape Estate and Procurement already use). A group's
+      // href is only its natural landing page — the row itself is a hover target, and it lights
+      // up when any screen beneath it is active (isActiveDeep).
       {
-        title: 'Payroll',
-        href: '/hr/payroll',
-        icon: CreditCard,
+        title: 'Employees',
+        href: '/hr/employees',
+        icon: Users,
         children: [
-          { title: 'Run Desk', href: '/hr/payroll#runs', icon: CalendarClock },
+          // The register's detail/profile/sub-record reads are HR.Employee.Read on the
+          // API now (they carry salary, identifiers and bank data), so the desk entry follows. The
+          // shared employee picker rides the open paged read and does not need this.
+          { title: 'Employees', href: '/hr/employees', icon: Users, permissions: ['HR.Employee.Read'] },
+          // Approving one of these WRITES onto the employee record, which is
+          // why it sits with the register and carries the same permission.
           {
-            title: 'Employee Profiles',
-            href: '/hr/payroll/employee-profiles',
-            icon: Users,
+            title: 'Change Requests',
+            href: '/hr/employees/change-requests',
+            icon: UserCheck,
+            permissions: ['HR.Employee.Read'],
           },
+          // Issuing a letter is making a statement about an employee record,
+          // so it carries the same permission and sits with the register.
           {
-            title: 'Bonus Exceptions',
-            href: '/hr/payroll/bonus-exceptions',
-            icon: Award,
+            title: 'Letter Requests',
+            href: '/hr/employees/letter-requests',
+            icon: Mail,
+            permissions: ['HR.Employee.Read'],
           },
+          // The identification-expiry sweep. Read-gated, not write-gated: seeing what is
+          // about to lapse is the point, and the run button is the only part the API gates on Write.
           {
-            title: 'Salary Advance',
-            href: '/hr/payroll/salary-advance',
-            icon: DollarSign,
+            title: 'ID Expiry',
+            href: '/hr/employees/identification-expiry',
+            icon: BadgeAlert,
+            permissions: ['HR.Employee.Read'],
           },
+          // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md). Write-gated, the same
+          // tier as the create form: loading and amending employee records is what Write means,
+          // and the HR role holds Write but not Admin — Admin hid this from every HR desk user.
           {
-            title: 'Loan Transaction',
-            href: '/hr/payroll/loan-transaction',
-            icon: CreditCard,
+            title: 'Import',
+            href: '/hr/employees/import',
+            icon: Upload,
+            permissions: ['HR.Employee.Write'],
           },
+          // Read-only view of the org's own records. Lives here rather than under Administration
+          // because it is looked at daily, not configured — and the administration tree is gated to
+          // admin roles, which would hide it from the HR officers the API gate lets in.
+          { title: 'Organogram', href: '/hr/organogram', icon: Network },
+          // Operational, not configuration — written and published continuously,
+          // so it sits at the top of HR rather than in administration settings. HR.Company, because
+          // an announcement is a communication from the organisation, not an act on a record.
           {
-            title: 'Loan Transaction Amendment',
-            href: '/hr/payroll/loan-transaction-amendment',
-            icon: RotateCcw,
+            title: 'Announcements',
+            href: '/hr/announcements',
+            icon: Megaphone,
+            permissions: ['HR.Company.Read'],
           },
+          // The policy library and its acknowledgements. Same HR.Company
+          // family: a policy is issued by the organisation, not performed on a record.
           {
-            title: 'Loan Repayment',
-            href: '/hr/payroll/loan-repayment',
-            icon: FileCheck,
-          },
-          { title: 'Tax Relief', href: '/hr/payroll/tax-relief', icon: Tag },
-          {
-            title: 'Allowances & Ded Exception',
-            href: '/hr/payroll/allowances-deductions-exception',
-            icon: CheckSquare,
-          },
-          {
-            title: 'Promotion Arrears',
-            href: '/hr/payroll/promotion-arrears',
-            icon: TrendingUp,
-          },
-          {
-            title: 'Overtime Summary',
-            href: '/hr/payroll/overtime-summary',
-            icon: Clock,
-          },
-          {
-            title: 'Opening Balance',
-            href: '/hr/payroll/opening-balance',
-            icon: Database,
-          },
-          {
-            title: 'Contributions',
-            href: '/hr/payroll/contributions',
-            icon: CreditCard,
+            title: 'Policy Library',
+            href: '/hr/policies',
+            icon: BookText,
+            permissions: ['HR.Company.Read'],
           },
         ],
       },
       {
-        title: 'Leave Management',
+        title: 'Pay & Benefits',
+        href: '/hr/payroll',
+        icon: HandCoins,
+        children: [
+          {
+            // Menu gate only. PayrollController is the payroll developer's file and
+            // still bare [Authorize] (cross-module #11), so this hides the desk from staff who
+            // could otherwise open every screen; it does not protect the API. Compensation Read
+            // is the nearest HR family until payroll seeds its own.
+            title: 'Payroll',
+            href: '/hr/payroll',
+            icon: CreditCard,
+            permissions: ['HR.Compensation.Read'],
+            children: [
+              { title: 'Run Desk', href: '/hr/payroll#runs', icon: CalendarClock },
+              {
+                title: 'Employee Profiles',
+                href: '/hr/payroll/employee-profiles',
+                icon: Users,
+              },
+              {
+                title: 'Bonus Exceptions',
+                href: '/hr/payroll/bonus-exceptions',
+                icon: Award,
+              },
+              {
+                title: 'Salary Advance',
+                href: '/hr/payroll/salary-advance',
+                icon: DollarSign,
+              },
+              {
+                title: 'Loan Transaction',
+                href: '/hr/payroll/loan-transaction',
+                icon: CreditCard,
+              },
+              {
+                title: 'Loan Transaction Amendment',
+                href: '/hr/payroll/loan-transaction-amendment',
+                icon: RotateCcw,
+              },
+              {
+                title: 'Loan Repayment',
+                href: '/hr/payroll/loan-repayment',
+                icon: FileCheck,
+              },
+              { title: 'Tax Relief', href: '/hr/payroll/tax-relief', icon: Tag },
+              {
+                title: 'Allowances & Ded Exception',
+                href: '/hr/payroll/allowances-deductions-exception',
+                icon: CheckSquare,
+              },
+              {
+                title: 'Promotion Arrears',
+                href: '/hr/payroll/promotion-arrears',
+                icon: TrendingUp,
+              },
+              {
+                title: 'Overtime Summary',
+                href: '/hr/payroll/overtime-summary',
+                icon: Clock,
+              },
+              {
+                title: 'Opening Balance',
+                href: '/hr/payroll/opening-balance',
+                icon: Database,
+              },
+              {
+                title: 'Contributions',
+                href: '/hr/payroll/contributions',
+                icon: CreditCard,
+              },
+            ],
+          },
+          {
+            title: 'Emoluments',
+            href: '/hr/emoluments',
+            icon: Coins,
+            // Org-wide pay data — the compensation read tier. An employee's own pay
+            // makeup is an ownership check on the API and arrives as a self-service screen.
+            permissions: ['HR.Compensation.Read'],
+          },
+          {
+            title: 'Benefits',
+            href: '/hr/benefits',
+            icon: ShieldPlus,
+            // The enrollment desk — same tier. Own benefits/beneficiaries are self-service.
+            permissions: ['HR.Compensation.Read'],
+          },
+          {
+            // The enforcement side of a sponsored training nomination. It sits outside Performance
+            // because the obligation is a training commitment, not an appraisal outcome — Training
+            // links here too once that area is built.
+            //
+            // The screen is the desk register (getAll + on-behalf/waive/settle actions),
+            // so it rides on the desk read. The employee's own bonds surface through My Training /
+            // the API's /mine read; a self-service accept screen is still owed.
+            title: 'Service Bonds',
+            href: '/hr/service-bonds',
+            icon: HandCoins,
+            permissions: ['HR.Training.Read'],
+          },
+          {
+            // FR-HR-135 names the chain: Department Head → HR → Managing Director. An approved
+            // budget is not only a plan — it sets the establishment, which then gates whether a
+            // vacancy may be opened at all (FR-HR-136).
+            // TDC's name for it is the Manpower Recruitment Budget — the plan of
+            // posts to recruit against, not a payroll budget.
+            title: 'Manpower Recruitment Budgets',
+            href: '/hr/manpower-budgets',
+            icon: Banknote,
+            permissions: ['HR.ManpowerBudget.Read'],
+          },
+        ],
+      },
+      {
+        title: 'Time & Leave',
         href: '/hr/leave',
         icon: CalendarDays,
         children: [
-          { title: 'Requests', href: '/hr/leave/requests', icon: CalendarDays },
           {
-            title: 'Approvals',
-            href: '/hr/leave/approvals',
-            icon: CheckSquare,
-          },
-          { title: 'Plans', href: '/hr/leave/plans', icon: CalendarClock },
-          { title: 'Balances', href: '/hr/leave/balances', icon: Database },
-          {
-            title: 'Adjustments',
-            href: '/hr/leave/adjustments',
-            icon: RotateCcw,
-          },
-          {
-            title: 'Encashments',
-            href: '/hr/leave/encashments',
-            icon: DollarSign,
-          },
-          {
-            title: 'Compliance',
-            href: '/hr/leave/compliance',
-            icon: FileCheck,
+            // The org-wide surfaces authorize on HR.Leave.* (SuperAdmin/TenantAdmin
+            // auto-pass). Requests stays open — it is per-employee and the API's self-or-permission
+            // check lets anyone work their own history — and Approvals is the workflow assignee's
+            // queue, deliberately not an HR permission. Year-End is the admin tier: it rewrites
+            // every balance in the tenant, so plain HR staff do not see it.
+            title: 'Leave Management',
+            href: '/hr/leave',
+            icon: CalendarDays,
+            children: [
+              { title: 'Requests', href: '/hr/leave/requests', icon: CalendarDays },
+              { title: 'Approvals', href: '/hr/leave/approvals', icon: CheckSquare },
+              { title: 'Plans', href: '/hr/leave/plans', icon: CalendarClock, permissions: ['HR.Leave.Read'] },
+              { title: 'Balances', href: '/hr/leave/balances', icon: Database, permissions: ['HR.Leave.Read'] },
+              { title: 'Adjustments', href: '/hr/leave/adjustments', icon: RotateCcw, permissions: ['HR.Leave.Read'] },
+              { title: 'Encashments', href: '/hr/leave/encashments', icon: DollarSign, permissions: ['HR.Leave.Read'] },
+              { title: 'Compliance', href: '/hr/leave/compliance', icon: FileCheck, permissions: ['HR.Leave.Read'] },
+              { title: 'Year-End', href: '/hr/leave/year-end', icon: CalendarClock, permissions: ['HR.Leave.Admin'] },
+            ],
           },
           {
-            title: 'Year-End',
-            href: '/hr/leave/year-end',
-            icon: CalendarClock,
+            // Every child here is a desk surface (org-wide search, monitoring, exports,
+            // biometrics), so the whole section rides on the attendance read tier. Employee
+            // self-service (punch, own records, own regularizations) lives in the portal
+            // and authorizes by ownership, not by this permission.
+            title: 'Attendance & Time',
+            href: '/hr/attendance',
+            icon: Clock,
+            permissions: ['HR.Attendance.Read'],
+            children: [
+              {
+                title: 'Daily Attendance',
+                href: '/hr/attendance/daily',
+                icon: CalendarCheck,
+              },
+              {
+                title: 'Attendance Records',
+                href: '/hr/attendance/records',
+                icon: ClipboardList,
+              },
+              {
+                title: 'Punch Logs',
+                href: '/hr/attendance/logs',
+                icon: ScrollText,
+              },
+              {
+                title: 'Regularizations',
+                href: '/hr/attendance/regularizations',
+                icon: FileCheck,
+              },
+              {
+                title: 'Overtime Requests',
+                href: '/hr/attendance/overtime',
+                icon: Timer,
+              },
+              {
+                title: 'Remote Work',
+                href: '/hr/attendance/remote-work',
+                icon: Home,
+              },
+              {
+                title: 'Monthly Summaries',
+                href: '/hr/attendance/summaries',
+                icon: Database,
+              },
+              { title: 'Alerts', href: '/hr/attendance/alerts', icon: BellRing },
+              {
+                title: 'Bulk Imports',
+                href: '/hr/attendance/imports',
+                icon: Upload,
+              },
+              {
+                title: 'Payroll Exports',
+                href: '/hr/attendance/payroll-exports',
+                icon: DollarSign,
+              },
+              {
+                title: 'Biometrics',
+                href: '/hr/attendance/biometrics',
+                icon: Fingerprint,
+              },
+            ],
+          },
+          {
+            // The company schedule. Built 2026-08-28 — the backend had 90 endpoints and no screen had
+            // ever called one of them. Events and bookings are day-to-day work and live here; rooms,
+            // closures, milestones and fiscal years are set up once and live under Administration.
+            title: 'Company Schedule',
+            href: '/hr/company-schedule',
+            icon: CalendarDays,
+            children: [
+              {
+                title: 'Events',
+                href: '/hr/company-schedule/events',
+                icon: CalendarDays,
+                permissions: ['HR.Company.Read'],
+              },
+              {
+                title: 'Room Bookings',
+                href: '/hr/company-schedule/bookings',
+                icon: CalendarCheck,
+                permissions: ['HR.Company.Read'],
+              },
+            ],
+          },
+          {
+            // One request covers the whole trip — approval, itinerary, bookings, the advance
+            // and the expenses claimed against it. Approval runs on the generic workflow engine, so a
+            // screen reads the live step from the workflow record rather than from `status`.
+            title: 'Staff Travel',
+            href: '/hr/travel',
+            icon: Plane,
+            children: [
+              { title: 'Register', href: '/hr/travel', icon: Plane, permissions: ['HR.Travel.Read'] },
+              // My Travel re-homed to the portal (/me/travel).
+              // Claims get their own entry because the finance desk works a queue ACROSS trips —
+              // "approved and unpaid" — which no single travel request can show.
+              { title: 'Group Travel', href: '/hr/travel/groups', icon: Users2, permissions: ['HR.Travel.Read'] },
+              { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt, permissions: ['HR.Travel.Read'] },
+              // The visa register had a client and no screen, so eleven fields on its DTOs
+              // were unreachable. Reference data rather than day-to-day work, so it sits last.
+              { title: 'Visa Requirements', href: '/hr/travel/visa-requirements', icon: Globe2, permissions: ['HR.Travel.Read'] },
+              { title: 'Dashboard', href: '/hr/travel/dashboard', icon: LayoutDashboard, permissions: ['HR.Travel.Read'] },
+            ],
           },
         ],
       },
       {
-        title: 'Emoluments',
-        href: '/hr/emoluments',
-        icon: Coins,
-      },
-      {
-        title: 'Benefits',
-        href: '/hr/benefits',
-        icon: ShieldPlus,
-      },
-      {
-        title: 'Attendance & Time',
-        href: '/hr/attendance',
-        icon: Clock,
+        title: 'Talent & Performance',
+        href: '/hr/performance',
+        icon: Target,
         children: [
           {
-            title: 'Daily Attendance',
-            href: '/hr/attendance/daily',
-            icon: CalendarCheck,
+            // Cycles, the goal cascade, and the appraisal run itself. Ordered by who acts: the
+            // employee's own work first, then the manager's, then HR's — then what happens around
+            // the sign-off (calibration before it, appeals after it, outcomes off the back of it),
+            // with the deadline override last as the exception path.
+            title: 'Performance',
+            href: '/hr/performance',
+            icon: Target,
+            // The desk registers ride on HR.Performance.Read and the deadline override
+            // on Write; everything an employee, peer or manager does as themselves stays open — the
+            // API holds those to the token actor, not to a permission.
+            children: [
+              // The my-shaped screens (My Appraisals, Peer Reviews, Check-ins,
+              // Journal, my/team development plans, my goals) moved to the self-service portal —
+              // desk users reach them via "My Self-Service". What stays here is the desk's work.
+              { title: 'Analytics', href: '/hr/performance/analytics', icon: BarChart3, permissions: ['HR.Performance.Read'] },
+              { title: 'Appraisal Cycles', href: '/hr/performance/cycles', icon: CalendarRange, permissions: ['HR.Performance.Read'] },
+              { title: 'Team Appraisals', href: '/hr/performance/team-appraisals', icon: UserCheck },
+              { title: 'Interim Reviews', href: '/hr/performance/interim-reviews', icon: CalendarCheck },
+              { title: 'Conversations', href: '/hr/performance/conversations', icon: MessagesSquare },
+              {
+                title: 'Development Plans',
+                href: '/hr/performance/development-plans',
+                icon: GraduationCap,
+                permissions: ['HR.Performance.Read'],
+              },
+              { title: 'Improvement Plans', href: '/hr/performance/pip', icon: ClipboardPen },
+              { title: 'HR Review', href: '/hr/performance/hr-review', icon: ClipboardList, permissions: ['HR.Performance.Read'] },
+              { title: 'Calibration', href: '/hr/performance/calibration', icon: Scale, permissions: ['HR.Performance.Read'] },
+              { title: 'Appeals', href: '/hr/performance/appeals', icon: Gavel, permissions: ['HR.Performance.Read'] },
+              { title: 'Recommendations', href: '/hr/performance/recommendations', icon: Lightbulb, permissions: ['HR.Performance.Read'] },
+              { title: 'Proposals', href: '/hr/performance/proposals', icon: Handshake, permissions: ['HR.Performance.Read'] },
+              { title: 'Company Goals', href: '/hr/performance/company-goals', icon: Building2, permissions: ['HR.Performance.Read'] },
+              { title: 'Unit Goals', href: '/hr/performance/unit-goals', icon: Layers },
+              { title: 'Employee Goals', href: '/hr/performance/employee-goals', icon: Target },
+              { title: 'Team Goals', href: '/hr/performance/team-goals', icon: Users },
+              { title: 'Goals At Risk', href: '/hr/performance/at-risk', icon: AlertTriangle, permissions: ['HR.Performance.Read'] },
+              // Appraisal notifications were a self surface on the desk; they were folded
+              // them into the portal's unified feed (/me/notifications).
+              {
+                title: 'Deadline Enforcement',
+                href: '/hr/performance/deadline-enforcement',
+                icon: FastForward,
+                permissions: ['HR.Performance.Write'],
+              },
+            ],
           },
           {
-            title: 'Attendance Records',
-            href: '/hr/attendance/records',
-            icon: ClipboardList,
+            // Ordered along the training lifecycle: a schedule is planned, people are nominated onto it
+            // (or queued on its waitlist), those nominations are approved, and the run is closed off
+            // with a completion. Self-service sits at the top because most people only ever need that.
+            // The catalog, plans and budgets are setup and live under Administration → HR → Training.
+            //
+            // Desk registers gate on HR.Training.Read (leave-slice shape — the parent stays
+            // open so the self-service children remain reachable). Schedules is the published calendar,
+            // Requests is the desk register + on-behalf create, and Nomination Approvals is the approver
+            // queue — workflow-validated per request.
+            //
+            // The my-* screens (My Training, My Learning Paths, my mentoring pairs)
+            // re-homed to the portal (/me/training, /me/learning, /me/mentoring); Mentoring and the new
+            // Enrollments entry are the desk registers that remained.
+            title: 'Training',
+            href: '/hr/training',
+            icon: GraduationCap,
+            //
+            // Training Activities is the per-employee grouped view TDC
+            // asked for; Mentoring moved out to its own section below — TDC's feedback was that it did
+            // not belong inside the Training menu.
+            children: [
+              { title: 'Enrollments', href: '/hr/training/enrollments', icon: Route, permissions: ['HR.Training.Read'] },
+              { title: 'Training Activities', href: '/hr/training/activities', icon: Activity, permissions: ['HR.Training.Read'] },
+              { title: 'Analytics', href: '/hr/training/analytics', icon: TrendingUp, permissions: ['HR.Training.Read'] },
+              { title: 'Schedules', href: '/hr/training/schedules', icon: CalendarClock },
+              { title: 'Requests', href: '/hr/training/requests', icon: ClipboardList, permissions: ['HR.Training.Read'] },
+              { title: 'Nomination Approvals', href: '/hr/training/approvals', icon: UserCheck },
+              { title: 'Completions', href: '/hr/training/completions', icon: Award, permissions: ['HR.Training.Read'] },
+              { title: 'Certificates', href: '/hr/training/certificates', icon: Stamp, permissions: ['HR.Training.Read'] },
+              { title: 'Employee Certificates', href: '/hr/training/employee-certificates', icon: IdCard, permissions: ['HR.Training.Read'] },
+              { title: 'Compliance', href: '/hr/training/compliance', icon: ShieldAlert, permissions: ['HR.Training.Read'] },
+            ],
           },
           {
-            title: 'Punch Logs',
-            href: '/hr/attendance/logs',
-            icon: ScrollText,
+            // Mentoring was a child of Training; TDC's demo feedback
+            // wanted it as its own section. The routes are unchanged (the desk register is still under
+            // /hr/training/mentoring, the schemes under Administration) — what moved is where the
+            // navigation puts them. A mentee's own pairs stay in the portal (/me/mentoring).
+            title: 'Mentoring',
+            href: '/hr/training/mentoring',
+            icon: Handshake,
+            children: [
+              { title: 'Mentoring Pairs', href: '/hr/training/mentoring', icon: Handshake, permissions: ['HR.Training.Read'] },
+              { title: 'Programmes', href: '/administration/hr/training/mentoring', icon: Settings, permissions: ['HR.Training.Read'] },
+            ],
           },
           {
-            title: 'Regularizations',
-            href: '/hr/attendance/regularizations',
-            icon: FileCheck,
+            // The gap view is the operational screen: what positions require against what
+            // people have been assessed at. "Below requirement" and "not assessed" stay separate all
+            // the way to the tiles — an unknown is not a training need.
+            title: 'Competencies',
+            href: '/hr/competencies',
+            icon: GraduationCap,
+            children: [
+              { title: 'Organisation Gaps', href: '/hr/competencies', icon: TrendingDown, permissions: ['HR.Competency.Read'] },
+              { title: 'Assess Competencies', href: '/hr/competencies/assess', icon: ClipboardCheck, permissions: ['HR.Competency.Write'] },
+              // "My Competencies" moved to My Self-Service → Career & Jobs (/me/competencies) on
+              // A self-only screen has no place on the desk menu.
+            ],
           },
           {
-            title: 'Overtime Requests',
-            href: '/hr/attendance/overtime',
-            icon: Timer,
+            // FR-HR-134: a position is measured against its APPROVED job description, and only
+            // one stands at a time — approving a new version retires the one before it. Coverage is its
+            // own entry because the useful question is not how many descriptions exist but how many
+            // positions still have none.
+            title: 'Job Descriptions',
+            href: '/hr/job-descriptions',
+            icon: FileText,
+            children: [
+              { title: 'Register', href: '/hr/job-descriptions', icon: FileText, permissions: ['HR.JobArchitecture.Read'] },
+              { title: 'Coverage Gaps', href: '/hr/job-descriptions/gaps', icon: ClipboardList, permissions: ['HR.JobArchitecture.Read'] },
+            ],
           },
           {
-            title: 'Remote Work',
-            href: '/hr/attendance/remote-work',
-            icon: Home,
+            // The plan is per POSITION, not per person, and it is versioned: approving a new
+            // plan archives the one the post had before and points it at the successor. Only an
+            // approved plan is the position's active version — a draft deliberately holds no slot.
+            title: 'Succession Planning',
+            href: '/hr/succession',
+            icon: Network,
+            children: [
+              { title: 'Plans', href: '/hr/succession', icon: Network, permissions: ['HR.Succession.Read'] },
+              // Pools are NOT tied to a post, which is what separates them from a plan — so they get
+              // their own entry rather than living inside one. Note that Performance writes into the
+              // "Appraisal Nominations" pool on its own, without anyone opening this screen.
+              { title: 'Talent Pools', href: '/hr/succession/pools', icon: Users2, permissions: ['HR.Succession.Read'] },
+              // Calibration sessions and the nine box. Separate from plans and pools because a session
+              // is an EVENT with a close, not a register: finalizing freezes it for good.
+              { title: 'Talent Reviews', href: '/hr/succession/reviews', icon: Grid3x3, permissions: ['HR.Succession.Read'] },
+              // The criteria search had an endpoint and a client method but no screen.
+              // Also hosted inside a plan's Candidates tab.
+              { title: 'Find Candidates', href: '/hr/succession/candidate-search', icon: Search, permissions: ['HR.Succession.Read'] },
+              { title: 'Dashboard', href: '/hr/succession/dashboard', icon: LayoutDashboard, permissions: ['HR.Succession.Read'] },
+            ],
+            // No "my succession" entry, and there must never be one: readiness, retention risk and
+            // nine-box placement are assessments made ABOUT a candidate, not records belonging to them.
+            // Succession inverts the self-service rule the rest of HR follows.
           },
           {
-            title: 'Monthly Summaries',
-            href: '/hr/attendance/summaries',
-            icon: Database,
-          },
-          { title: 'Alerts', href: '/hr/attendance/alerts', icon: BellRing },
-          {
-            title: 'Bulk Imports',
-            href: '/hr/attendance/imports',
-            icon: Upload,
-          },
-          {
-            title: 'Payroll Exports',
-            href: '/hr/attendance/payroll-exports',
-            icon: DollarSign,
-          },
-          {
-            title: 'Biometrics',
-            href: '/hr/attendance/biometrics',
-            icon: Fingerprint,
+            // ONE exit register for every route out — resignation, retirement, contract
+            // expiry, redundancy, dismissal, death. Before it, the only way to leave was a disciplinary
+            // case, so the other routes had enum members and nothing that could reach them. The
+            // disciplinary route writes here too: Discipline keeps the decision, the exit lives here.
+            // NOTE the title: '/procurement/awards' already exists and also uses the Award
+            // icon, so a bare "Awards" here would give the sidebar two entries a user cannot tell
+            // apart. Medal is deliberately a different glyph for the same reason.
+            title: 'Awards & Recognition',
+            href: '/hr/awards',
+            icon: Medal,
+            children: [
+              { title: 'Register', href: '/hr/awards', icon: Medal, permissions: ['HR.Awards.Read'] },
+              // The self surface (My Awards, Nominate, Vote, Score) moved to the
+              // portal under /me/awards — reachable via "My Self-Service". Only the desk stays here.
+              { title: 'Who Qualifies', href: '/hr/awards/eligibility', icon: Users, permissions: ['HR.Awards.Read'] },
+              { title: 'Results', href: '/hr/awards/results', icon: Trophy, permissions: ['HR.Awards.Read'] },
+              { title: 'Long Service', href: '/hr/awards/long-service', icon: Medal, permissions: ['HR.Awards.Read'] },
+            ],
           },
         ],
       },
       {
+        title: 'Workforce Lifecycle',
+        href: '/hr/recruitment',
+        icon: Route,
+        children: [
+          {
+            // Ordered the way a hire happens rather than alphabetically: a gap in the establishment
+            // becomes a requisition, an approved requisition becomes a vacancy, publishing the vacancy
+            // raises the adverts, and the adverts bring in candidates and applications.
+            //
+            // The pipeline board and the screening workspace are not listed: both belong to a single
+            // vacancy and are reached from it, so a top-level link would have nowhere to go.
+            // Desk registers gate on HR.Recruitment.Read (the leave-slice shape — the
+            // parent stays open so the self-service children remain reachable). Requisitions stays
+            // open as the manager's entry point (raising one is self-service; the register tab needs
+            // the desk read), and My Panel is the panelist's own surface, validated per record.
+            title: 'Recruitment',
+            href: '/hr/recruitment',
+            icon: UserPlus,
+            children: [
+              { title: 'Establishment', href: '/hr/recruitment/establishment', icon: Building2, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Requisitions', href: '/hr/recruitment/requisitions', icon: ClipboardList, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Vacancies', href: '/hr/recruitment/vacancies', icon: Briefcase, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Adverts', href: '/hr/recruitment/adverts', icon: Megaphone, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Candidates', href: '/hr/recruitment/candidates', icon: Users, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Talent Pool', href: '/hr/recruitment/talent-pool', icon: Star, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Applications', href: '/hr/recruitment/applications', icon: FileText, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Interviews', href: '/hr/recruitment/interviews', icon: CalendarClock, permissions: ['HR.Recruitment.Read'] },
+              // The only recruitment screen a non-HR employee can use: a panelist's own sessions. The
+              // interview schedule above answers 403 for them, so without this they have no way in.
+              { title: 'Offers', href: '/hr/recruitment/offers', icon: HandCoins, permissions: ['HR.Recruitment.Read'] },
+              { title: 'Hires', href: '/hr/recruitment/hires', icon: UserCheck, permissions: ['HR.Recruitment.Read'] },
+              {
+                title: 'Pre-Employment Checks',
+                href: '/hr/recruitment/pre-employment-checks',
+                icon: ShieldCheck,
+                permissions: ['HR.Recruitment.Read'],
+              },
+            ],
+          },
+          {
+            // Ordered along the induction lifecycle rather than alphabetically: the dashboard says what
+            // needs chasing, sessions are the scheduled runs, enrollments are who is on them, and My
+            // Orientation is the participant's own view. Onboarding sits below because it is a different
+            // artifact — a new hire's task checklist rather than a programme — and the queues answer the
+            // cross-plan question ("what is overdue anywhere?") no single plan can.
+            //
+            // The catalogue, categories and onboarding templates are setup and live under
+            // Administration → HR → Orientation & Onboarding.
+            title: 'Orientation & Onboarding',
+            href: '/hr/orientation',
+            icon: GraduationCap,
+            children: [
+              { title: 'Dashboard', href: '/hr/orientation/dashboard', icon: LayoutDashboard, permissions: ['HR.Orientation.Read'] },
+              { title: 'Sessions', href: '/hr/orientation/sessions', icon: CalendarClock, permissions: ['HR.Orientation.Read'] },
+              { title: 'Enrollments', href: '/hr/orientation/enrollments', icon: Users, permissions: ['HR.Orientation.Read'] },
+              // My Orientation re-homed to the portal (/me/orientation).
+              { title: 'Onboarding Plans', href: '/hr/orientation/onboarding', icon: ListChecks, permissions: ['HR.Orientation.Read'] },
+              { title: 'Task Queues', href: '/hr/orientation/onboarding/queues', icon: ClipboardCheck, permissions: ['HR.Orientation.Read'] },
+            ],
+          },
+          {
+            // The probation is per EMPLOYMENT TERM, not per person: a rehire gets a new one,
+            // and an employee may accumulate several over a career. Length comes from the staff
+            // category (FR-HR-031, senior 6 / junior 3), not from whoever fills in the form.
+            title: 'Probation & Confirmation',
+            href: '/hr/probation',
+            icon: UserCheck,
+            children: [
+              { title: 'Register', href: '/hr/probation', icon: UserCheck, permissions: ['HR.Probation.Read'] },
+              // The reviewer queue is deliberately its own entry: probation reviews are conducted by
+              // LINE MANAGERS, who hold no HR permission at all, so this is the one screen in the area
+              // most of its users will ever open. (The employee's own reviews and
+              // the oath affirmation re-homed to the portal — /me/probation and /me/oath.)
+              { title: 'Reviews to Conduct', href: '/hr/probation/reviews', icon: ClipboardCheck },
+              // FR-HR-030. Not probation, but the same FRD section (onboarding), and it is the only
+              // other place an oath would sensibly live.
+              { title: 'Oaths of Secrecy', href: '/hr/probation/oaths', icon: ScrollText, permissions: ['HR.Probation.Read'] },
+            ],
+          },
+          {
+            // One record covers promotion, transfer, demotion, secondment, acting appointment,
+            // lateral move and redesignation — they share an approval route, a checklist and a set of
+            // documents, and differ only in their subtype detail.
+            title: 'Staff Movements',
+            href: '/hr/movements',
+            icon: ArrowRightLeft,
+            children: [
+              { title: 'Register', href: '/hr/movements', icon: ArrowRightLeft, permissions: ['HR.Movements.Read'] },
+              // Standalone: most acting appointments never come from a movement at all.
+              { title: 'Acting Appointments', href: '/hr/movements/acting', icon: UserCheck, permissions: ['HR.Movements.Read'] },
+              // Answering a demotion notice removes it from the pending queue, so a filed
+              // appeal was visible on no list at all. Both queues live here.
+              { title: 'Demotion Appeals', href: '/hr/movements/appeals', icon: Gavel, permissions: ['HR.Movements.Read'] },
+              // My Movements re-homed to the portal (/me/movements).
+            ],
+          },
+          {
+            title: 'Separations & Exit',
+            href: '/hr/separations',
+            icon: DoorOpen,
+            children: [
+              { title: 'Register', href: '/hr/separations', icon: DoorOpen, permissions: ['HR.Separation.Read'] },
+              { title: 'Raise a separation', href: '/hr/separations/new', icon: Plus, permissions: ['HR.Separation.Write'] },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Conduct & Relations',
+        href: '/hr/discipline',
+        icon: Gavel,
+        children: [
+          {
+            // The case is the unit of work: one record carries the allegation, the
+            // investigation, the hearing, the decision, whichever sanction follows, and the appeal.
+            title: 'Discipline',
+            href: '/hr/discipline',
+            icon: Gavel,
+            children: [
+              { title: 'Cases', href: '/hr/discipline', icon: Gavel, permissions: ['HR.Discipline.Read'] },
+              // Sub-entity queues: which investigations have run past FR-HR-178's four weeks, and which
+              // hearings are scheduled or have happened without their notes recorded.
+              { title: 'Investigations & Hearings', href: '/hr/discipline/queues', icon: Search, permissions: ['HR.Discipline.Read'] },
+              // Open by design: the officer who confirms a sanction is a head of department or the MD,
+              // and the register above answers 403 for them — this is where their work appears. The
+              // engine decides its contents, per case and per step.
+              { title: 'Awaiting My Confirmation', href: '/hr/discipline/approvals', icon: Check },
+              // "My Record" moved to the portal (/me/discipline).
+            ],
+          },
+          {
+            // FR-HR-181. Separate from Discipline on purpose: a disciplinary case is
+            // raised ABOUT an employee and a grievance BY one, which gives them opposite permissions —
+            // HR cannot file, escalate or withdraw a grievance at all.
+            // The employee surface (mine, filing, the detail) moved to the portal
+            // under /me/grievances.
+            // Renamed and re-homed to /hr/employee-relations. The register has held
+            // mediations, welfare matters and union consultations from the start, so "Grievances" had
+            // become the wrong name for it — and its rows now open the DESK's case file rather than
+            // the employee's portal detail, which they had been doing by accident.
+            title: 'Employee relations',
+            href: '/hr/employee-relations',
+            icon: MessagesSquare,
+            children: [
+              { title: 'Case register', href: '/hr/employee-relations', icon: ClipboardList, permissions: ['HR.Discipline.Read'] },
+              { title: 'Anonymous concerns', href: '/hr/employee-relations/concerns', icon: ShieldQuestion, permissions: ['HR.Discipline.Read'] },
+              { title: 'Who answers each rung', href: '/hr/employee-relations/responders', icon: Network, permissions: ['HR.Discipline.Read'] },
+              { title: 'Analytics', href: '/hr/employee-relations/analytics', icon: BarChart3, permissions: ['HR.Discipline.Read'] },
+            ],
+          },
+        ],
+      },
+      {
+        // Company property in a named employee's hands: the register, the requisition that
+        // asks for one, and the responsibility document they sign for it.
+        //
+        // The parent now points at the HR register hub, which answers 403 without HR — so
+        // "My Assets" keeps its own entry below it, as staff movements and travel do, because it
+        // is the one screen in this group every employee can reach.
+        title: 'Company Assets',
+        href: '/hr/assets',
+        icon: Package,
+        children: [
+          { title: 'Register', href: '/hr/assets/register', icon: Boxes, permissions: ['HR.Assets.Read'] },
+          { title: 'Assignments', href: '/hr/assets/assignments', icon: Package, permissions: ['HR.Assets.Read'] },
+          { title: 'Requisitions', href: '/hr/assets/requisitions', icon: ClipboardList, permissions: ['HR.Assets.Read'] },
+          { title: 'Transfers', href: '/hr/assets/transfers', icon: ArrowRightLeft, permissions: ['HR.Assets.Read'] },
+          { title: 'Surcharges', href: '/hr/assets/surcharges', icon: Receipt, permissions: ['HR.Assets.Read'] },
+          // The payroll desk's view of both money surfaces. Its own entry because it is somebody
+          // else's worklist entirely: HR declares here, payroll deducts elsewhere.
+          { title: 'Payroll Deductions', href: '/hr/assets/payroll', icon: Coins, permissions: ['HR.Assets.Read'] },
+          // The three watchlist groups get their own entries rather than living behind the
+          // register: each is somebody's worklist, and a list you have to go looking for is a list
+          // nobody works.
+          { title: 'Maintenance', href: '/hr/assets/maintenance', icon: Wrench, permissions: ['HR.Assets.Read'] },
+          { title: 'Insurance', href: '/hr/assets/insurance', icon: ShieldCheck, permissions: ['HR.Assets.Read'] },
+          { title: 'Returns', href: '/hr/assets/returns', icon: Undo2, permissions: ['HR.Assets.Read'] },
+          { title: 'Register Report', href: '/hr/assets/report', icon: FileText, permissions: ['HR.Assets.Read'] },
+          { title: 'Reminders', href: '/hr/assets/reminders', icon: BellRing, permissions: ['HR.Assets.Read'] },
+          // "My Assets" moved to the portal (/me/assets), via "My Self-Service".
+        ],
+      },
+      {
+        // Management registers (clients, engagements, invoicing) — attendance read
+        // tier. A consultant's own timesheet surface is self-service.
         title: 'Consulting',
         href: '/hr/consulting',
         icon: Briefcase,
+        permissions: ['HR.Attendance.Read'],
         children: [
           { title: 'Clients', href: '/hr/consulting/clients', icon: Building2 },
           {
@@ -1085,8 +1660,131 @@ export const navigationItems: NavItem[] = [
           { title: 'Invoices', href: '/hr/consulting/invoices', icon: Receipt },
         ],
       },
-      // Performance is re-added with its area — linking to routes that do not exist yet
-      // only produces 404s.
+      {
+        // Medical & Health. Everything here is gated on the HR.Medical.* permission
+        // policies rather than a role, so an HR user without medical permissions sees 403s.
+        // The reference registers ship first; health records, claims and the clinical
+        // surface follow. Note occupational health and return-to-work live under
+        // Safety (SHE owns them) but ride the same medical policies.
+        title: 'Medical & Health',
+        href: '/hr/medical',
+        icon: HeartPulse,
+        children: [
+          { title: 'Dashboard', href: '/hr/medical/dashboard', icon: LayoutDashboard, permissions: ['HR.Medical.Read'] },
+          { title: 'Medical Claims', href: '/hr/medical/claims', icon: Receipt, permissions: ['HR.Medical.Read'] },
+          // "My Medical Claims" moved to the portal (/me/medical/claims).
+          { title: 'NHIS Claims', href: '/hr/medical/nhis', icon: Landmark, permissions: ['HR.Medical.Read'] },
+          { title: 'Clinical', href: '/hr/medical/clinical', icon: ClipboardCheck, permissions: ['HR.Medical.Read'] },
+          { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart, permissions: ['HR.Medical.Read'] },
+          { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital, permissions: ['HR.Medical.Read'] },
+          { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope, permissions: ['HR.Medical.Read'] },
+          { title: 'Insurance Providers', href: '/hr/medical/insurance', icon: ShieldPlus, permissions: ['HR.Medical.Read'] },
+          { title: 'Benefit Schemes', href: '/hr/medical/schemes', icon: Layers, permissions: ['HR.Medical.Read'] },
+        ],
+      },
+    ],
+  },
+  {
+    // Safety (SHE) is its own top-level module in the sidebar (moved out of Human Resources on
+    // 31 registers made the HR flyout unusable). The routes still live under
+    // /hr/safety (so the /hr layout's hr.access applies too), but since 2026-09-03 the
+    // menu and the /hr/safety layout gate on the SHE module's OWN permission, she.access — held by
+    // Safety Officer, SHE Manager, HR (read-only in SHE) and the administrators, not by every
+    // employee. Staff report incidents, hazards and stop-work from My Self-Service → My Safety.
+    // Every register below carries its own HR.She.* / HR.Medical.* permission.
+    // Reference data lives under Administration → HR → Safety.
+    title: 'Safety (SHE)',
+    href: '/hr/safety',
+    icon: HardHat,
+    permissions: ['she.access'],
+    children: [
+      { title: 'Dashboard', href: '/hr/safety/dashboard', icon: LayoutDashboard, permissions: ['HR.She.Read'] },
+      // 31 registers grouped one level down, like Human Resources. A group's href is
+      // only its natural landing page; the row lights up when any screen beneath it is active.
+      {
+        title: 'Incidents & Hazards',
+        href: '/hr/safety/incidents',
+        icon: AlertTriangle,
+        children: [
+          // The open employee actions (report incident/hazard/environmental,
+          // raise stop-work) and My PPE moved to the self-service portal under /me/safety —
+          // reachable via "My Self-Service". Only the desk registers stay here.
+          { title: 'Incidents', href: '/hr/safety/incidents', icon: AlertTriangle, permissions: ['HR.She.Read'] },
+          { title: 'Hazards', href: '/hr/safety/hazards', icon: ShieldAlert, permissions: ['HR.She.Read'] },
+          { title: 'Risk Assessments', href: '/hr/safety/risk-assessments', icon: ClipboardList, permissions: ['HR.She.Read'] },
+          { title: 'Stop-Work Orders', href: '/hr/safety/stop-work', icon: OctagonX, permissions: ['HR.She.Read'] },
+          // The unified CA tracker (one queue over all five action stores) and the
+          // computed-KPI layer (snapshot compute + the analytics screen).
+          { title: 'Corrective Actions', href: '/hr/safety/corrective-actions', icon: ListChecks, permissions: ['HR.She.Read'] },
+        ],
+      },
+      {
+        title: 'Inspections & Audits',
+        href: '/hr/safety/inspections',
+        icon: ClipboardCheck,
+        children: [
+          { title: 'Inspections', href: '/hr/safety/inspections', icon: ClipboardCheck, permissions: ['HR.She.Read'] },
+          // Audits + the stop-work register (raise lives in the open block above).
+          { title: 'SHE Audits', href: '/hr/safety/audits', icon: FileSearch, permissions: ['HR.She.Read'] },
+          { title: 'Permits to Work', href: '/hr/safety/permits', icon: FileCheck, permissions: ['HR.She.Read'] },
+          { title: 'Regulatory Compliance', href: '/hr/safety/regulatory', icon: Scale, permissions: ['HR.She.Read'] },
+        ],
+      },
+      {
+        title: 'PPE & Equipment',
+        href: '/hr/safety/ppe',
+        icon: Package,
+        children: [
+          { title: 'PPE Stock', href: '/hr/safety/ppe', icon: Package, permissions: ['HR.She.Read'] },
+          { title: 'PPE Issuance', href: '/hr/safety/ppe/issuances', icon: Users, permissions: ['HR.She.Read'] },
+          { title: 'Safety Equipment', href: '/hr/safety/equipment', icon: FireExtinguisher, permissions: ['HR.She.Read'] },
+          { title: 'Safety Signage', href: '/hr/safety/signs', icon: Signpost, permissions: ['HR.She.Read'] },
+          { title: 'Emergency Plans', href: '/hr/safety/emergency', icon: Siren, permissions: ['HR.She.Read'] },
+        ],
+      },
+      {
+        title: 'People & Health',
+        href: '/hr/safety/training',
+        icon: Users,
+        children: [
+          // The SHE training record — deliberately separate from corporate Training.
+          { title: 'Safety Training', href: '/hr/safety/training', icon: GraduationCap, permissions: ['HR.She.Read'] },
+          { title: 'Contractors', href: '/hr/safety/contractors', icon: Handshake, permissions: ['HR.She.Read'] },
+          { title: 'Safety Committees', href: '/hr/safety/committees', icon: Users, permissions: ['HR.She.Read'] },
+          // Occ-health + RTW ride the HR.Medical.* policies, not the SHE HR-role gate.
+          { title: 'Occupational Health', href: '/hr/safety/occupational-health', icon: Stethoscope, permissions: ['HR.Medical.Read'] },
+          { title: 'Return to Work', href: '/hr/safety/return-to-work', icon: HeartPulse, permissions: ['HR.Medical.Read'] },
+        ],
+      },
+      {
+        title: 'Environment',
+        href: '/hr/safety/environmental',
+        icon: Leaf,
+        children: [
+          { title: 'Environmental', href: '/hr/safety/environmental', icon: Leaf, permissions: ['HR.She.Read'] },
+          { title: 'Waste Management', href: '/hr/safety/waste', icon: Recycle, permissions: ['HR.She.Read'] },
+          // Part D environmental core (FR-ENV): the permit/licence register with the
+          // statutory renewal ladder, monitoring schedules, the regulatory-updates register,
+          // sustainability, compliance reviews/clearance and the monthly environmental report.
+          { title: 'Environmental Permits', href: '/hr/safety/environmental/permits', icon: FileCheck, permissions: ['HR.She.Read'] },
+          { title: 'Monitoring Schedules', href: '/hr/safety/environmental/monitoring-schedules', icon: CalendarClock, permissions: ['HR.She.Read'] },
+          { title: 'Regulatory Updates', href: '/hr/safety/environmental/regulatory-updates', icon: Scale, permissions: ['HR.She.Read'] },
+          { title: 'Sustainability', href: '/hr/safety/environmental/sustainability', icon: Sprout, permissions: ['HR.She.Read'] },
+          { title: 'Environmental Reviews', href: '/hr/safety/environmental/reviews', icon: ClipboardCheck, permissions: ['HR.She.Read'] },
+          { title: 'Monthly Env. Reports', href: '/hr/safety/environmental/monthly-reports', icon: FileBarChart, permissions: ['HR.She.Read'] },
+        ],
+      },
+      {
+        title: 'Performance & Records',
+        href: '/hr/safety/performance',
+        icon: Gauge,
+        children: [
+          { title: 'Performance Snapshots', href: '/hr/safety/performance', icon: Gauge, permissions: ['HR.She.Read'] },
+          { title: 'SHE Analytics', href: '/hr/safety/performance/analytics', icon: BarChart3, permissions: ['HR.She.Read'] },
+          // The controlled document register (versions ride the central DMS).
+          { title: 'Document Register', href: '/hr/safety/documents', icon: FolderArchive, permissions: ['HR.She.Read'] },
+        ],
+      },
     ],
   },
   {
@@ -2786,7 +3484,17 @@ export const navigationItems: NavItem[] = [
     icon: Settings,
     navigationSurface: 'settings',
     roles: ADMINISTRATION_ROLES,
-    permissions: ['Finance.Admin'],
+    // admin.hr: an HR practitioner holding the seeded admin.hr grant must see the parent
+    // node, or the HR child below would be filtered out with it.
+    // Reference.Geography.* is listed too: a reference-data curator from another module holds no
+    // admin.hr, and without this the parent node would hide the child they do have.
+    permissions: [
+      'Finance.Admin',
+      'admin.hr',
+      'admin.she',
+      'Reference.Geography.Write',
+      'Reference.Geography.Admin',
+    ],
     accessMode: 'any',
     children: [
       {
@@ -2961,31 +3669,105 @@ export const navigationItems: NavItem[] = [
         ],
       },
       {
+        // SHE configuration is the safety function's own settings tree, beside
+        // HR and gated on its own admin.she (SHE Manager + administrators — not officers, not
+        // HR), the platform's one-admin-gate-per-module convention. Matches the administration
+        // layout's /administration/safety route branch; the API's configuration writes are
+        // HR.She.Admin to agree with it.
+        title: 'Safety (SHE)',
+        href: '/administration/safety',
+        icon: HardHat,
+        roles: ADMINISTRATION_ROLES,
+        permissions: ['admin.she'],
+        accessMode: 'any',
+        children: [
+          {
+            title: 'Incident Types',
+            href: '/administration/safety/incident-types',
+            icon: AlertTriangle,
+          },
+          {
+            title: 'Injury Types',
+            href: '/administration/safety/injury-types',
+            icon: Bandage,
+          },
+          {
+            title: 'Body Parts',
+            href: '/administration/safety/body-parts',
+            icon: PersonStanding,
+          },
+          {
+            title: 'CA Templates',
+            href: '/administration/safety/corrective-action-templates',
+            icon: ClipboardList,
+          },
+          {
+            title: 'Regulatory Bodies',
+            href: '/administration/safety/regulatory-bodies',
+            icon: Landmark,
+          },
+          {
+            title: 'PPE Types',
+            href: '/administration/safety/ppe-types',
+            icon: HardHat,
+          },
+          {
+            title: 'PPE Requirements',
+            href: '/administration/safety/ppe-requirements',
+            icon: ClipboardCheck,
+          },
+          {
+            title: 'Reminder Engine',
+            href: '/administration/safety/reminders',
+            icon: AlarmClock,
+          },
+        ],
+      },
+      {
+        // Shared cross-module reference data. Deliberately NOT under Administration → HR: the
+        // geography tree is consumed by Estate, Sales, Procurement and Inventory too, and an
+        // administrator of any of those should not need an HR grant to curate a list of districts.
+        title: 'Reference Data',
+        href: '/administration/reference/geography',
+        icon: Globe2,
+        roles: ADMINISTRATION_ROLES,
+        // Either tier admits — administrators hold both, the HR role holds Write. Matches the
+        // /administration/reference route gate in the administration layout.
+        permissions: ['Reference.Geography.Write', 'Reference.Geography.Admin'],
+        accessMode: 'any',
+        children: [
+          {
+            title: 'Geography',
+            href: '/administration/reference/geography',
+            icon: Globe2,
+          },
+        ],
+      },
+      {
         title: 'HR',
         href: '/administration/hr',
         icon: UserCheck,
+        // Admins by role, HR practitioners by the seeded admin.hr grant — HR maintains its
+        // own reference data (leave types, org structures). Matches the administration
+        // layout's /administration/hr route gate.
         roles: ADMINISTRATION_ROLES,
+        permissions: ['admin.hr'],
+        accessMode: 'any',
         children: [
           {
             title: 'Organization',
             href: '/administration/hr/organization',
             icon: Building2,
             children: [
-              {
-                title: 'Structures',
-                href: '/administration/hr/organization/structures',
-                icon: Building2,
-              },
-              {
-                title: 'Levels',
-                href: '/administration/hr/organization/levels',
-                icon: ListTree,
-              },
-              {
-                title: 'Units',
-                href: '/administration/hr/organization/units',
-                icon: FolderTree,
-              },
+              { title: 'Structures', href: '/administration/hr/organization/structures', icon: Building2 },
+              { title: 'Levels', href: '/administration/hr/organization/levels', icon: ListTree },
+              { title: 'Units', href: '/administration/hr/organization/units', icon: FolderTree },
+              // Teams are the working groups, as distinct from the units people are
+              // formally posted into — the entities existed since the port with no way to write them.
+              { title: 'Teams', href: '/administration/hr/organization/teams', icon: Users2 },
+              // Read-only, and gated on the HR/admin roles server-side — the log names the
+              // employees who have led each unit.
+              { title: 'Unit Change Log', href: '/administration/hr/organization/unit-history', icon: History },
             ],
           },
           {
@@ -3010,47 +3792,41 @@ export const navigationItems: NavItem[] = [
               },
             ],
           },
-          {
-            title: 'Job Positions',
-            href: '/administration/hr/positions',
-            icon: Users,
-          },
-          {
-            title: 'Staff Levels',
-            href: '/administration/hr/staff-levels',
-            icon: ListTree,
-          },
+          { title: 'Job Positions', href: '/administration/hr/positions', icon: Users },
+          // Master data behind the job description's bargaining-unit clause, which
+          // until now could never be filled in: there was no register and no picker.
+          { title: 'Unions', href: '/administration/hr/unions', icon: Users2 },
+          // Eleven endpoints that nothing had ever called; the panel picker in
+          // recruitment was the only reader, and it could only search a register no screen
+          // could add to.
+          { title: 'External Associates', href: '/administration/hr/external-associates', icon: UserRoundCheck },
+          { title: 'Staff Levels', href: '/administration/hr/staff-levels', icon: ListTree },
           { title: 'Skills', href: '/administration/hr/skills', icon: Wrench },
-          {
-            title: 'Qualifications',
-            href: '/administration/hr/qualifications',
-            icon: GraduationCap,
-          },
-          {
-            title: 'Identification Types',
-            href: '/administration/hr/identification-types',
-            icon: IdCard,
-          },
-          {
-            title: 'Reason Codes',
-            href: '/administration/hr/reason-codes',
-            icon: Tags,
-          },
-          {
-            title: 'Countries',
-            href: '/administration/hr/countries',
-            icon: Globe,
-          },
-          {
-            title: 'Departments',
-            href: '/administration/hr/departments',
-            icon: Building,
-          },
-          {
-            title: 'Leave Types',
-            href: '/administration/hr/leave-types',
-            icon: CalendarDays,
-          },
+          // A competency is what the organisation expects someone to be able to do;
+          // a skill is the finer-grained thing an indicator points at, which is why both exist.
+          { title: 'Competencies', href: '/administration/hr/competencies', icon: Layers },
+          // The exception path: most positions should be established by an approved
+          // manpower budget, and this is the one place that chain can be bypassed.
+          { title: 'Establishment', href: '/administration/hr/establishment', icon: ShieldCheck },
+          { title: 'Qualifications', href: '/administration/hr/qualifications', icon: GraduationCap },
+          // The RANK a qualification sits on — QualificationType is a category and cannot
+          // answer "is a Master's above a Diploma", which is what shortlisting and succession ask.
+          { title: 'Qualification Levels', href: '/administration/hr/qualification-levels', icon: ListOrdered },
+          // Who certified a skill, as a catalogue rather than free text on every row.
+          { title: 'Certifying Bodies', href: '/administration/hr/certifying-bodies', icon: BadgeCheck },
+          { title: 'Identification Types', href: '/administration/hr/identification-types', icon: IdCard },
+          // The vocabulary an employee's document file and a position's requirements both speak.
+          { title: 'Document Types', href: '/administration/hr/document-types', icon: FileText },
+          { title: 'Reason Codes', href: '/administration/hr/reason-codes', icon: Tags },
+          { title: 'Countries', href: '/administration/hr/countries', icon: Globe },
+          // Ten write endpoints with no screen anywhere until 2026-08-31: a bank could not be
+          // added, renamed, retired or removed from the product at all.
+          { title: 'Banks', href: '/administration/hr/banks', icon: Landmark },
+          { title: 'Departments', href: '/administration/hr/departments', icon: Building },
+          // The categories the company-asset register is built on — nothing can be
+          // added to that register until at least one exists, so it is setup, not casework.
+          { title: 'Asset Types', href: '/administration/hr/asset-types', icon: Boxes },
+          { title: 'Leave Types', href: '/administration/hr/leave-types', icon: CalendarDays },
           {
             title: 'Compensation & Benefits',
             href: '/administration/hr/compensation',
@@ -3120,11 +3896,173 @@ export const navigationItems: NavItem[] = [
               },
             ],
           },
+          {
+            title: 'Performance',
+            href: '/administration/hr/performance',
+            icon: Target,
+            children: [
+              { title: 'Appraisal Settings', href: '/administration/hr/performance/settings', icon: SlidersHorizontal },
+              { title: 'Appraisal Templates', href: '/administration/hr/performance/templates', icon: ClipboardCheck },
+              { title: 'Appraisal Criteria', href: '/administration/hr/performance/criteria', icon: ListChecks },
+              { title: 'Grade Definitions', href: '/administration/hr/performance/grade-definitions', icon: Medal },
+              { title: 'Strategic Goals', href: '/administration/hr/performance/strategic-goals', icon: Target },
+              { title: 'Goal Library', href: '/administration/hr/performance/goal-library', icon: Library },
+              { title: 'KPI Definitions', href: '/administration/hr/performance/kpi-definitions', icon: Gauge },
+              { title: 'Goal Risk Thresholds', href: '/administration/hr/performance/goal-risk-settings', icon: AlertTriangle },
+            ],
+          },
+          {
+            title: 'Recruitment',
+            href: '/administration/hr/recruitment',
+            icon: Workflow,
+            children: [
+              { title: 'Pipelines', href: '/administration/hr/recruitment/pipelines', icon: Workflow },
+              { title: 'Question Bank', href: '/administration/hr/recruitment/question-bank', icon: HelpCircle },
+              { title: 'Interview Presets', href: '/administration/hr/recruitment/question-presets', icon: LayoutList },
+              {
+                title: 'Check Templates',
+                href: '/administration/hr/recruitment/check-templates',
+                icon: ClipboardCheck,
+              },
+            ],
+          },
+          {
+            title: 'Training & Learning',
+            href: '/administration/hr/training',
+            icon: GraduationCap,
+            children: [
+              { title: 'Categories', href: '/administration/hr/training/categories', icon: Tag },
+              { title: 'Program Groups', href: '/administration/hr/training/program-groups', icon: Layers },
+              { title: 'Vendors', href: '/administration/hr/training/vendors', icon: Building2 },
+              { title: 'Trainers', href: '/administration/hr/training/trainers', icon: GraduationCap },
+              { title: 'Programs', href: '/administration/hr/training/programs', icon: BookOpen },
+              { title: 'Needs Assessments', href: '/administration/hr/training/needs-assessments', icon: ClipboardPen },
+              { title: 'Training Plans', href: '/administration/hr/training/plans', icon: CalendarRange },
+              { title: 'Training Budgets', href: '/administration/hr/training/budgets', icon: Coins },
+              { title: 'Compliance Requirements', href: '/administration/hr/training/compliance', icon: ShieldAlert },
+              { title: 'Learning Paths', href: '/administration/hr/training/learning-paths', icon: Route },
+              { title: 'Mentoring Programmes', href: '/administration/hr/training/mentoring', icon: Handshake },
+            ],
+          },
+          {
+            // Set up once, then referenced by the operational screens under /hr/company-schedule.
+            // Closures sit here rather than with events because the question they answer — "is this
+            // a working day?" — is the same one holiday calendars answer, and that is setup.
+            title: 'Company Schedule',
+            href: '/administration/hr/company-schedule',
+            icon: CalendarDays,
+            children: [
+              { title: 'Meeting Rooms', href: '/administration/hr/company-schedule/rooms', icon: DoorOpen },
+              { title: 'Business Closures', href: '/administration/hr/company-schedule/closures', icon: CalendarClock },
+              { title: 'Milestones', href: '/administration/hr/company-schedule/milestones', icon: Flag },
+              { title: 'Fiscal Years', href: '/administration/hr/company-schedule/fiscal-years', icon: CalendarRange },
+            ],
+          },
+          {
+            title: 'Orientation & Onboarding',
+            href: '/administration/hr/orientation',
+            icon: GraduationCap,
+            children: [
+              { title: 'Programmes', href: '/administration/hr/orientation/programs', icon: BookOpen },
+              { title: 'Categories', href: '/administration/hr/orientation/categories', icon: Tags },
+              {
+                title: 'Onboarding Templates',
+                href: '/administration/hr/orientation/onboarding-templates',
+                icon: FileStack,
+              },
+            ],
+          },
+          {
+            // The movement reminder sweep: run-now, run history and the dispatch log. Operational
+            // movement screens live under HR; this is the engine's admin surface.
+            title: 'Movements',
+            href: '/administration/hr/movements/reminders',
+            icon: ArrowRightLeft,
+          },
+          {
+            // The discipline reminder sweep: run-now, the preview, run history and the dispatch log.
+            // Operational case and grievance screens live under HR; this is the engine's admin
+            // surface — and muting a reminder means deactivating a notification topic, which is
+            // administration's to do rather than the notified party's.
+            title: 'Discipline',
+            href: '/administration/hr/discipline/reminders',
+            icon: Gavel,
+          },
+          {
+            // A route sweep found this one. Movements, discipline and safety each had
+            // their reminder sweep in this nav and probation's did not, so a screen that behaves
+            // exactly like its three neighbours had no way in — and `confirming-authorities`,
+            // which only the reminders page links to, was unreachable behind it.
+            title: 'Probation',
+            href: '/administration/hr/probation/reminders',
+            icon: UserPlus,
+            children: [
+              { title: 'Reminders', href: '/administration/hr/probation/reminders', icon: AlarmClock },
+              {
+                title: 'Confirming Authorities',
+                href: '/administration/hr/probation/confirming-authorities',
+                icon: UserRoundCheck,
+              },
+            ],
+          },
+          {
+            // Both children were orphans. ⚠ The policy register lists and approves but cannot
+            // create or edit: its "Draft a policy" button and its per-row link both pointed at
+            // pages that were never built, so they are gone until they are. The API behind them
+            // is complete.
+            title: 'Travel',
+            href: '/administration/hr/travel/policies',
+            icon: Plane,
+            children: [
+              { title: 'Travel Policies', href: '/administration/hr/travel/policies', icon: ShieldCheck },
+              { title: 'Destination Alerts', href: '/administration/hr/travel/alerts', icon: TriangleAlert },
+              { title: 'Reminders', href: '/administration/hr/travel/reminders', icon: AlarmClock },
+            ],
+          },
+          {
+            title: 'Separation',
+            href: '/administration/hr/separation/clearance-form',
+            icon: DoorOpen,
+            children: [
+              // The clearance form an exiting employee is walked through, by department.
+              { title: 'Clearance Form', href: '/administration/hr/separation/clearance-form', icon: DoorOpen },
+              // ⚠ The retirement and contract-expiry sweeps RAISE separations. They run nightly on
+              // their own; this is the manual run, and the only screen either endpoint has ever had.
+              { title: 'Reminders & Sweeps', href: '/administration/hr/separation/reminders', icon: AlarmClock },
+            ],
+          },
           // Employee Categories has no backing controller at all, so it stays dropped.
           {
             title: 'Payroll',
             href: '/administration/hr/payroll',
             icon: CreditCard,
+          },
+          {
+            // Tenant-wide HR configuration. The company profile is the letterhead every offer and
+            // confirmation letter is written on; policy settings follows in the next slice.
+            title: 'HR Settings',
+            href: '/administration/hr/settings',
+            icon: Settings,
+            children: [
+              {
+                title: 'Company Profile',
+                href: '/administration/hr/settings/company-profile',
+                icon: Building2,
+              },
+              {
+                title: 'Policy Settings',
+                href: '/administration/hr/settings/policy',
+                icon: SlidersHorizontal,
+              },
+              {
+                // Per-register numbering rules AND the counter behind them — the counter
+                // only knows about numbers it issued, so a loaded register leaves it at zero while
+                // thousands are in use, and nothing said so until this screen existed.
+                title: 'Staff Numbering',
+                href: '/administration/hr/settings/staff-numbering',
+                icon: Hash,
+              },
+            ],
           },
         ],
       },
@@ -3808,6 +4746,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
     const viewportWidth = window.innerWidth;
     const menuWidth = 240; // Approximate menu width
     const padding = 20; // Padding from viewport edges
+    // The top bar is sticky, h-16 and z-50 — the same layer as the flyout, painted later — so a
+    // panel that starts near the top of the window has its first rows hidden behind it.
+    const topPadding = 64 + 8;
 
     let x = rect.right + 8;
     let y = rect.top;
@@ -3818,27 +4759,27 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
     }
 
     // Adjust vertical position if menu would go off-screen
-    const maxMenuHeight = viewportHeight - 2 * padding;
+    const maxMenuHeight = viewportHeight - topPadding - padding;
     const actualMenuHeight = Math.min(estimatedHeight, maxMenuHeight);
 
     if (y + actualMenuHeight > viewportHeight - padding) {
       const availableSpaceBelow = viewportHeight - y - padding;
-      const availableSpaceAbove = rect.top - padding;
+      const availableSpaceAbove = rect.top - topPadding;
 
       if (
         availableSpaceAbove > availableSpaceBelow &&
         availableSpaceAbove >= 150
       ) {
         // Position above if there's more space and at least 150px available
-        y = Math.max(padding, rect.bottom - actualMenuHeight);
+        y = Math.max(topPadding, rect.bottom - actualMenuHeight);
       } else {
         // Position to fit in viewport with padding
-        y = Math.max(padding, viewportHeight - actualMenuHeight - padding);
+        y = Math.max(topPadding, viewportHeight - actualMenuHeight - padding);
       }
     }
 
     // Ensure minimum top position
-    y = Math.max(padding, y);
+    y = Math.max(topPadding, y);
 
     return { x, y };
   };
@@ -3852,7 +4793,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       (item) => item.title === itemTitle
     );
     const childCount = menuItem?.children?.length || 0;
-    const estimatedHeight = Math.min(600, childCount * 40 + 16); // 40px per item + padding
+    const estimatedHeight = childCount * 40 + 16; // 40px per item + padding
 
     const position = calculateMenuPosition(rect, itemTitle, estimatedHeight);
     setMenuPositions({
@@ -3892,7 +4833,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       (child) => child.title === childTitle
     );
     const grandChildCount = childItem?.children?.length || 0;
-    const estimatedHeight = Math.min(600, grandChildCount * 40 + 16); // 40px per item + padding
+    const estimatedHeight = grandChildCount * 40 + 16; // 40px per item + padding
 
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
     setMenuPositions((prev) => ({
@@ -3947,7 +4888,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       (grandChild) => grandChild.title === grandChildTitle
     );
     const greatGrandChildCount = grandChildItem?.children?.length || 0;
-    const estimatedHeight = Math.min(600, greatGrandChildCount * 40 + 16); // 40px per item + padding
+    const estimatedHeight = greatGrandChildCount * 40 + 16; // 40px per item + padding
 
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
     setMenuPositions((prev) => ({
@@ -3997,7 +4938,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       left: Math.min(fromX, targetMenu.x) - 12,
       top: targetMenu.y - 32,
       width: Math.abs(targetMenu.x - fromX) + 24,
-      height: Math.max(targetMenu.height + 64, 180),
+      // Clamp to what the panel can actually show; an uncapped estimate would grow the bridge
+      // past the bottom of the screen and swallow clicks beside the panel.
+      height: Math.max(Math.min(targetMenu.height, window.innerHeight - targetMenu.y - 20) + 64, 180),
       pointerEvents: 'auto' as const,
       backgroundColor: 'transparent',
     };
@@ -4049,6 +4992,29 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       return pathname === href;
     }
     return pathname.startsWith(href);
+  };
+
+  // A row that owns children is active when any screen beneath it is — its own href is only a
+  // landing page and need not be a prefix of every child's route.
+  const isActiveDeep = (item: NavItem): boolean =>
+    isActive(item.href) || (item.children?.some(isActiveDeep) ?? false);
+
+  // Siblings can nest by address at any level — Safety (SHE) under /hr/safety, Fleet under
+  // /maintenance/fleet, PPE Issuance under /hr/safety/ppe, every environmental screen under
+  // /hr/safety/environmental — so within one list only the sibling with the longest matching
+  // href is highlighted; otherwise its shorter-addressed neighbour lights up as well. A row
+  // that is active only through a child (a group) ranks below any direct match.
+  const activeSibling = (siblings: NavItem[]): NavItem | null => {
+    let best: NavItem | null = null;
+    let bestScore = -1;
+    for (const item of siblings) {
+      const score = isActive(item.href) ? item.href.length : isActiveDeep(item) ? 0 : -1;
+      if (score > bestScore) {
+        best = item;
+        bestScore = score;
+      }
+    }
+    return best;
   };
 
   const filterNavItems = (items: NavItem[]): NavItem[] => {
@@ -4105,10 +5071,10 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
 
         {/* Navigation */}
         <nav className="flex-1 space-y-0 overflow-y-auto p-2">
-          {filterNavItems(sidebarNavigationItems).map((item) => {
+          {filterNavItems(sidebarNavigationItems).map((item, _index, siblings) => {
             const Icon = item.icon;
             const hasChildren = item.children && item.children.length > 0;
-            const itemIsActive = isActive(item.href);
+            const itemIsActive = item === activeSibling(siblings);
 
             return (
               <div key={item.title} className="relative">
@@ -4177,6 +5143,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
           style={{
             left: menuPositions[hoveredItem].x,
             top: menuPositions[hoveredItem].y,
+            // The panel is clamped to the viewport from its own top, not from the top of the screen —
+            // otherwise a long menu positioned part-way down runs off the bottom and the tail is unreachable.
+            maxHeight: `calc(100vh - ${menuPositions[hoveredItem].y + 20}px)`,
             scrollbarWidth: 'thin',
             scrollbarColor: 'rgb(148 163 184) transparent',
           }}
@@ -4185,9 +5154,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         >
           {filterNavItems(sidebarNavigationItems)
             .find((item) => item.title === hoveredItem)
-            ?.children?.map((child) => {
+            ?.children?.map((child, _index, siblings) => {
               const ChildIcon = child.icon;
-              const childIsActive = isActive(child.href);
+              const childIsActive = child === activeSibling(siblings);
               const childHasChildren =
                 child.children && child.children.length > 0;
 
@@ -4262,6 +5231,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
             style={{
               left: menuPositions[`${hoveredItem}-${hoveredChild}`].x,
               top: menuPositions[`${hoveredItem}-${hoveredChild}`].y,
+              // The panel is clamped to the viewport from its own top, not from the top of the screen —
+              // otherwise a long menu positioned part-way down runs off the bottom and the tail is unreachable.
+              maxHeight: `calc(100vh - ${menuPositions[`${hoveredItem}-${hoveredChild}`].y + 20}px)`,
               scrollbarWidth: 'thin',
               scrollbarColor: 'rgb(148 163 184) transparent',
             }}
@@ -4271,9 +5243,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
             {filterNavItems(sidebarNavigationItems)
               .find((item) => item.title === hoveredItem)
               ?.children?.find((child) => child.title === hoveredChild)
-              ?.children?.map((grandchild) => {
+              ?.children?.map((grandchild, _index, siblings) => {
                 const GrandChildIcon = grandchild.icon;
-                const grandchildIsActive = isActive(grandchild.href);
+                const grandchildIsActive = grandchild === activeSibling(siblings);
                 const grandchildHasChildren =
                   grandchild.children && grandchild.children.length > 0;
 
@@ -4367,6 +5339,11 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
               top: menuPositions[
                 `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
               ].y,
+              // The panel is clamped to the viewport from its own top, not from the top of the screen —
+              // otherwise a long menu positioned part-way down runs off the bottom and the tail is unreachable.
+              maxHeight: `calc(100vh - ${menuPositions[
+                `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
+              ].y + 20}px)`,
               scrollbarWidth: 'thin',
               scrollbarColor: 'rgb(148 163 184) transparent',
             }}
@@ -4379,9 +5356,9 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
               ?.children?.find(
                 (grandchild) => grandchild.title === hoveredGrandChild
               )
-              ?.children?.map((greatGrandchild) => {
+              ?.children?.map((greatGrandchild, _index, siblings) => {
                 const GreatGrandChildIcon = greatGrandchild.icon;
-                const greatGrandchildIsActive = isActive(greatGrandchild.href);
+                const greatGrandchildIsActive = greatGrandchild === activeSibling(siblings);
 
                 return (
                   <Link

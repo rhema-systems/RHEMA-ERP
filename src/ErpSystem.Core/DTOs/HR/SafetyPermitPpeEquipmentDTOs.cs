@@ -689,7 +689,8 @@ public class SafetyEquipmentSummaryDto
 
 public class CreateSafetyEquipmentDto : CreateDtoBase
 {
-    [Required, MaxLength(30)]
+    /// <summary>Ignored — the equipment number is assigned server-side (SEQ-YYYY-NNNN).</summary>
+    [MaxLength(30)]
     public string EquipmentNumber { get; set; } = string.Empty;
 
     [Required, MaxLength(200)]

@@ -47,21 +47,6 @@ public class SheWasteDisposalRecordRepository : GenericRepository<SheWasteDispos
         await WithNavigations().Where(r => r.WasteContractorId == contractorId && !r.IsDeleted)
             .OrderByDescending(r => r.DisposalDate).ToListAsync();
 
-    public async Task<string> GetNextRecordNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"WD-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(r => r.RecordNumber.StartsWith(prefix))
-            .OrderByDescending(r => r.RecordNumber)
-            .Select(r => r.RecordNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 #endregion
@@ -106,21 +91,6 @@ public class SheEnvironmentalIncidentRepository : GenericRepository<SheEnvironme
         await WithListNavigations().Where(e => e.Status != SheEnvironmentalIncidentStatus.Closed && !e.IsDeleted)
             .OrderByDescending(e => e.IncidentDate).ToListAsync();
 
-    public async Task<string> GetNextIncidentNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"ENV-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(e => e.IncidentNumber.StartsWith(prefix))
-            .OrderByDescending(e => e.IncidentNumber)
-            .Select(e => e.IncidentNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 public class SheEnvironmentalMonitoringRecordRepository : GenericRepository<SheEnvironmentalMonitoringRecord>, ISheEnvironmentalMonitoringRecordRepository
@@ -149,21 +119,6 @@ public class SheEnvironmentalMonitoringRecordRepository : GenericRepository<SheE
         await WithNavigations().Where(r => (r.ExceedsLimit || r.ExceedsActionLevel) && !r.IsDeleted)
             .OrderByDescending(r => r.MeasurementDate).ToListAsync();
 
-    public async Task<string> GetNextRecordNumberAsync()
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"EM-{year}-";
-        var last = await _dbSet.IgnoreQueryFilters()
-            .Where(r => r.RecordNumber.StartsWith(prefix))
-            .OrderByDescending(r => r.RecordNumber)
-            .Select(r => r.RecordNumber)
-            .FirstOrDefaultAsync();
-
-        var next = 1;
-        if (!string.IsNullOrEmpty(last) && int.TryParse(last[prefix.Length..], out var n))
-            next = n + 1;
-        return $"{prefix}{next:D4}";
-    }
 }
 
 #endregion
@@ -213,28 +168,35 @@ public class SheFirstAidStationRepository : GenericRepository<SheFirstAidStation
 {
     public SheFirstAidStationRepository(ApplicationDbContext context) : base(context) { }
 
+    private IQueryable<SheFirstAidStation> WithNavigations() =>
+        _dbSet.Include(s => s.Location).Include(s => s.ResponsibleAider);
+
     public async Task<SheFirstAidStation?> GetByCodeAsync(string stationCode) =>
-        await _dbSet.Include(s => s.Location).Include(s => s.ResponsibleAider)
+        await WithNavigations()
             .FirstOrDefaultAsync(s => s.StationCode == stationCode && !s.IsDeleted);
 
+    public async Task<IEnumerable<SheFirstAidStation>> GetAllListAsync() =>
+        await WithNavigations()
+            .Where(s => !s.IsDeleted).OrderBy(s => s.Name).ToListAsync();
+
     public async Task<IEnumerable<SheFirstAidStation>> GetByLocationAsync(Guid locationId) =>
-        await _dbSet.Include(s => s.ResponsibleAider)
+        await WithNavigations()
             .Where(s => s.LocationId == locationId && !s.IsDeleted).OrderBy(s => s.Name).ToListAsync();
 
     public async Task<IEnumerable<SheFirstAidStation>> GetActiveAsync() =>
-        await _dbSet.Include(s => s.Location)
+        await WithNavigations()
             .Where(s => s.IsActive && !s.IsDeleted).OrderBy(s => s.Name).ToListAsync();
 
     public async Task<IEnumerable<SheFirstAidStation>> GetDueForInspectionAsync(int daysAhead = 30)
     {
         var cutoff = DateTime.UtcNow.AddDays(daysAhead);
-        return await _dbSet.Include(s => s.Location)
+        return await WithNavigations()
             .Where(s => s.IsActive && !s.IsDeleted && s.NextInspectionDate != null && s.NextInspectionDate <= cutoff)
             .OrderBy(s => s.NextInspectionDate).ToListAsync();
     }
 
     public async Task<IEnumerable<SheFirstAidStation>> GetUnderStockedAsync() =>
-        await _dbSet.Include(s => s.Location)
+        await WithNavigations()
             .Where(s => s.IsActive && !s.IsFullyStocked && !s.IsDeleted).OrderBy(s => s.Name).ToListAsync();
 }
 
@@ -245,6 +207,10 @@ public class SheWellnessProgramRepository : GenericRepository<SheWellnessProgram
     public async Task<SheWellnessProgram?> GetByCodeAsync(string programCode) =>
         await _dbSet.Include(p => p.Coordinator)
             .FirstOrDefaultAsync(p => p.ProgramCode == programCode && !p.IsDeleted);
+
+    public async Task<IEnumerable<SheWellnessProgram>> GetAllListAsync() =>
+        await _dbSet.Include(p => p.Coordinator)
+            .Where(p => !p.IsDeleted).OrderByDescending(p => p.StartDate).ToListAsync();
 
     public async Task<IEnumerable<SheWellnessProgram>> GetByStatusAsync(SheWellnessProgramStatus status) =>
         await _dbSet.Include(p => p.Coordinator)

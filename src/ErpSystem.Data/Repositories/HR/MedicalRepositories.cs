@@ -176,6 +176,22 @@ public class PhysicianRepository : GenericRepository<Physician>, IPhysicianRepos
 
 #region Facility Service Repository
 
+/// <summary>
+/// The services a facility offers.
+/// </summary>
+/// <remarks>
+/// ⚠ Every read here used to <c>.Include(s => s.Facility)</c>, and <c>FacilityService.FacilityId</c>
+/// is <b>required</b> — so the include was an INNER JOIN, and the global <c>!IsDeleted</c> filter on
+/// the principal took the service rows out of the answer whenever the facility was soft-deleted.
+/// Measured in areas 19-23 slice 9: a facility with one service was deleted, its service list
+/// answered <b>0</b>, and the row was still readable by id the whole time. Not gone — unreachable
+/// from the only list that leads to it. Same shape as slice 5's org-unit change log.
+/// <para>The includes are gone; <c>HealthcareFacilityService</c> resolves the facility name itself,
+/// which it had to do anyway because three of the five endpoints returned it blank.</para>
+/// <para>⚠ <c>Physician</c> does NOT have this problem: its <c>FacilityId</c> is nullable, so the
+/// same include there is a LEFT JOIN and its rows survive. The difference is the requiredness of the
+/// navigation, not the include.</para>
+/// </remarks>
 public class FacilityServiceRepository : GenericRepository<FacilityService>, IFacilityServiceRepository
 {
     public FacilityServiceRepository(ApplicationDbContext context) : base(context) { }
@@ -183,7 +199,6 @@ public class FacilityServiceRepository : GenericRepository<FacilityService>, IFa
     public async Task<IEnumerable<FacilityService>> GetByFacilityIdAsync(Guid facilityId)
     {
         return await _dbSet
-            .Include(s => s.Facility)
             .Where(s => s.FacilityId == facilityId && !s.IsDeleted)
             .OrderBy(s => s.Name)
             .ToListAsync();
@@ -192,7 +207,6 @@ public class FacilityServiceRepository : GenericRepository<FacilityService>, IFa
     public async Task<IEnumerable<FacilityService>> GetByServiceTypeAsync(MedicalServiceType serviceType)
     {
         return await _dbSet
-            .Include(s => s.Facility)
             .Where(s => s.ServiceType == serviceType && !s.IsDeleted)
             .OrderBy(s => s.Name)
             .ToListAsync();
@@ -201,7 +215,6 @@ public class FacilityServiceRepository : GenericRepository<FacilityService>, IFa
     public async Task<IEnumerable<FacilityService>> GetActiveServicesAsync(Guid facilityId)
     {
         return await _dbSet
-            .Include(s => s.Facility)
             .Where(s => s.FacilityId == facilityId && s.IsActive && !s.IsDeleted)
             .OrderBy(s => s.Name)
             .ToListAsync();
@@ -210,7 +223,6 @@ public class FacilityServiceRepository : GenericRepository<FacilityService>, IFa
     public async Task<IEnumerable<FacilityService>> GetEmergencyServicesAsync(Guid facilityId)
     {
         return await _dbSet
-            .Include(s => s.Facility)
             .Where(s => s.FacilityId == facilityId && s.IsEmergencyService && !s.IsDeleted)
             .OrderBy(s => s.Name)
             .ToListAsync();
@@ -219,7 +231,6 @@ public class FacilityServiceRepository : GenericRepository<FacilityService>, IFa
     public async Task<IEnumerable<FacilityService>> GetRequiringPreAuthorizationAsync(Guid facilityId)
     {
         return await _dbSet
-            .Include(s => s.Facility)
             .Where(s => s.FacilityId == facilityId && s.RequiresPreAuthorization && !s.IsDeleted)
             .OrderBy(s => s.Name)
             .ToListAsync();

@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -12,7 +13,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// </summary>
 [ApiController]
 [Route("api/hr/qualifications")]
-[Authorize]
+[Authorize(Policy = "InternalOnly")]
 public sealed class QualificationController : ControllerBase
 {
     private readonly IQualificationCatalogueService _service;
@@ -45,6 +46,7 @@ public sealed class QualificationController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(QualificationCatalogueDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<QualificationCatalogueDto>> Create([FromBody] CreateQualificationCatalogueDto dto)
@@ -61,6 +63,7 @@ public sealed class QualificationController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
     [ProducesResponseType(typeof(QualificationCatalogueDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -77,6 +80,7 @@ public sealed class QualificationController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id)

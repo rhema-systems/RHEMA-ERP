@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -18,6 +19,7 @@ import {
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { leaveService } from '@/services/hr/leave.service';
+import { employeeRelieverService } from '@/services/hr/employee-reliever.service';
 import { DateField, FieldRow, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
 
 export const leaveRequestSchema = z
@@ -81,6 +83,53 @@ export function LeaveRequestForm({
     resolver: zodResolver(leaveRequestSchema) as any,
     defaultValues,
   });
+
+  // ── the reliever roster, as a DEFAULT source ────────────────────────────────
+  // Decision 3 of the areas 19-23 plan, and the promise `LeaveRequest.RelieverEmployeeId` and
+  // `SecondRelieverEmployeeId` have carried in their entity comments since the port — *"pre-defined
+  // relievers populate both slots by priority"* — which nothing kept, because until slice 7 nothing
+  // read `EmployeeReliever` at all.
+  //
+  // ⚠ Three things this must NOT do, each of which would turn a convenience into a defect:
+  //   · never on an edit. A saved request's relievers are what was agreed; re-seeding them would
+  //     silently rewrite the record from master data that has moved on since.
+  //   · never over a value already in the field, including one the user has just cleared on purpose.
+  //   · never more than once per subject. `seededFor` holds the employee the roster was applied for,
+  //     so switching employee re-seeds and re-rendering does not.
+  const [rosterApplied, setRosterApplied] = useState<string[] | null>(null);
+  const seededFor = useRef<string | null>(null);
+  const subjectId = form.watch('employeeId');
+
+  const { data: roster } = useQuery({
+    queryKey: ['hr', 'employee-relievers', 'employee', subjectId],
+    queryFn: () => employeeRelieverService.getForEmployee(subjectId, true),
+    // Only for the person the request is for, and only while composing a new one. An HR actor
+    // raising a request on someone else's behalf reads that person's roster; the endpoint is gated
+    // self-or-HR, so a 403 here would mean the caller had no business seeing it anyway.
+    enabled: !isEdit && !!subjectId,
+  });
+
+  useEffect(() => {
+    if (isEdit || !subjectId || !roster) return;
+    if (seededFor.current === subjectId) return;
+    seededFor.current = subjectId;
+
+    // Already ordered by priority server-side; the filter drops anyone who cannot legitimately
+    // cover — themselves, or a row switched off.
+    const usable = roster.filter((r) => r.isActive && r.relieverEmployeeId !== subjectId);
+    if (usable.length === 0) return;
+
+    const applied: string[] = [];
+    if (!form.getValues('relieverEmployeeId') && usable[0]) {
+      form.setValue('relieverEmployeeId', usable[0].relieverEmployeeId, { shouldValidate: true });
+      applied.push(`${usable[0].relieverName} (priority ${usable[0].priority})`);
+    }
+    if (!form.getValues('secondRelieverEmployeeId') && usable[1]) {
+      form.setValue('secondRelieverEmployeeId', usable[1].relieverEmployeeId, { shouldValidate: true });
+      applied.push(`${usable[1].relieverName} (priority ${usable[1].priority})`);
+    }
+    setRosterApplied(applied.length ? applied : null);
+  }, [isEdit, subjectId, roster, form]);
 
   const employeeId = form.watch('employeeId');
   const leaveTypeId = form.watch('leaveTypeId');
@@ -183,6 +232,15 @@ export function LeaveRequestForm({
           )}
 
           <TextareaField form={form} name="reason" label="Reason" rows={3} />
+
+          {rosterApplied && (
+            // Filling a field without saying so is how a form starts lying to the person using it.
+            <p className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+              Filled from this employee&apos;s reliever roster: {rosterApplied.join(', ')}. Change
+              either one freely — the roster is only a starting point, and what you save here is
+              what counts for this request.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

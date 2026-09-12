@@ -46,7 +46,7 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -77,7 +77,7 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
     public async Task<StaffDisciplineActionStepDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _actionStepRepository.GetWithDocumentsAsync(id);
+        var entity = await _actionStepRepository.GetWithDocumentsAsync(tenantId, id);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -86,29 +86,29 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
     public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _actionStepRepository.GetByCaseIdAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _actionStepRepository.GetByCaseIdAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetPendingStepsAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _actionStepRepository.GetPendingStepsAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _actionStepRepository.GetPendingStepsAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetOverdueStepsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _actionStepRepository.GetOverdueStepsAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _actionStepRepository.GetOverdueStepsAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineActionStepDto>> GetByActionedByAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _actionStepRepository.GetByActionedByAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _actionStepRepository.GetByActionedByAsync(tenantId, employeeId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineActionStepDto>> InitialiseFromOffenseProceduresAsync(Guid caseId, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -116,12 +116,11 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
         tenantId = RequireCurrentTenant(tenantId);
         var disciplinaryCase = await GetOwnedCaseAsync(caseId);
 
-        var existingSteps = await _actionStepRepository.GetByCaseIdAsync(caseId);
-        if (existingSteps.Any(s => s.TenantId == tenantId))
+        var existingSteps = await _actionStepRepository.GetByCaseIdAsync(tenantId, caseId);
+        if (existingSteps.Any())
             throw new InvalidOperationException("Action steps have already been initialised for this case.");
 
-        var procedures = (await _procedureRepository.GetByOffenseIdAsync(disciplinaryCase.StaffOffenseId))
-            .Where(p => p.TenantId == tenantId)
+        var procedures = (await _procedureRepository.GetByOffenseIdAsync(tenantId, disciplinaryCase.StaffOffenseId))
             .ToList();
 
         if (!procedures.Any())
@@ -179,6 +178,13 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
         entity.Status        = DisciplinaryActionStepStatus.Completed;
         entity.CompletedDate = DateTime.UtcNow;
         entity.Notes         = notes;
+        // The step's own actor, not merely the audit stamp. UpdatedBy is a string audit column;
+        // ActionedById is the Employee FK the DTO exposes and the case screen renders as "By".
+        // Setting only the former left that column permanently blank for every step closed through
+        // the supported route, while the plain update — which takes ActionedById from the request
+        // body — was the only path that filled it at all. Same defect class as the legal-review
+        // referrer (ledger D-05).
+        entity.ActionedById  = userId;
         entity.UpdatedAt     = DateTime.UtcNow;
         entity.UpdatedBy     = userId.ToString();
 
@@ -197,6 +203,11 @@ public class StaffDisciplineActionStepService : IStaffDisciplineActionStepServic
 
         entity.Status    = DisciplinaryActionStepStatus.Skipped;
         entity.Notes     = reason;
+        // Who skipped it matters more than who completed it: a skip is a departure from the
+        // offence's own procedure, and is exactly what a case turns on when it is challenged.
+        // CompletedDate is deliberately NOT set — a skipped step was not completed, and this
+        // entity has no separate skipped-on column to say otherwise.
+        entity.ActionedById = userId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
 
@@ -241,7 +252,7 @@ public class StaffDisciplineWitnessService : IStaffDisciplineWitnessService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -270,25 +281,30 @@ public class StaffDisciplineWitnessService : IStaffDisciplineWitnessService
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    // Returns the FULL record, not a summary. A per-case read feeds a panel that has to EDIT
+    // what it shows, so a projection that drops fields makes them unreachable — the witness
+    // summary has no ContactInfo and the note summary carries a 100-character excerpt instead
+    // of the note. The cross-case reads below stay on summaries: those feed lists, not forms.
+    // Legal reviews already worked this way; these four had not caught up.
+    public async Task<IEnumerable<StaffDisciplineWitnessDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _witnessRepository.GetByCaseIdAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _witnessRepository.GetByCaseIdAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetByEmployeeWitnessAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _witnessRepository.GetByEmployeeWitnessAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _witnessRepository.GetByEmployeeWitnessAsync(tenantId, employeeId);
+        return entities.ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<StaffDisciplineWitnessSummaryDto>> GetWithoutStatementAsync(Guid caseId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StaffDisciplineWitnessDto>> GetWithoutStatementAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _witnessRepository.GetWithoutStatementAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _witnessRepository.GetWithoutStatementAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<StaffDisciplineWitnessDto> AddAsync(CreateStaffDisciplineWitnessDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -371,7 +387,7 @@ public class StaffDisciplineDocumentService : IStaffDisciplineDocumentService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -400,39 +416,39 @@ public class StaffDisciplineDocumentService : IStaffDisciplineDocumentService
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StaffDisciplineDocumentDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _documentRepository.GetByCaseIdAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _documentRepository.GetByCaseIdAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByScopeAsync(Guid caseId, DisciplinaryDocumentScope scope, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _documentRepository.GetByScopeAsync(caseId, scope);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _documentRepository.GetByScopeAsync(tenantId, caseId, scope);
+        return entities.ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByActionStepIdAsync(Guid actionStepId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StaffDisciplineDocumentDto>> GetByActionStepIdAsync(Guid actionStepId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _documentRepository.GetByActionStepIdAsync(actionStepId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _documentRepository.GetByActionStepIdAsync(tenantId, actionStepId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
-    public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByAppealIdAsync(Guid appealId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StaffDisciplineDocumentDto>> GetByAppealIdAsync(Guid appealId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _documentRepository.GetByAppealIdAsync(appealId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _documentRepository.GetByAppealIdAsync(tenantId, appealId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineDocumentSummaryDto>> GetByCategoryAsync(Guid caseId, DisciplinaryDocumentCategory category, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _documentRepository.GetByCategoryAsync(caseId, category);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _documentRepository.GetByCategoryAsync(tenantId, caseId, category);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<StaffDisciplineDocumentDto> AddAsync(CreateStaffDisciplineDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -601,7 +617,7 @@ public class StaffDisciplineNoteService : IStaffDisciplineNoteService
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -630,18 +646,18 @@ public class StaffDisciplineNoteService : IStaffDisciplineNoteService
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<StaffDisciplineNoteSummaryDto>> GetByCaseIdAsync(Guid caseId, bool includeConfidential = true, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StaffDisciplineNoteDto>> GetByCaseIdAsync(Guid caseId, bool includeConfidential = true, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _noteRepository.GetByCaseIdAsync(caseId, includeConfidential);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _noteRepository.GetByCaseIdAsync(tenantId, caseId, includeConfidential);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineNoteSummaryDto>> GetByAuthorAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _noteRepository.GetByAuthorAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _noteRepository.GetByAuthorAsync(tenantId, employeeId);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<StaffDisciplineNoteDto> AddAsync(CreateStaffDisciplineNoteDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -689,17 +705,20 @@ public class StaffDisciplineNoteService : IStaffDisciplineNoteService
 public class StaffDisciplineNotificationService : IStaffDisciplineNotificationService
 {
     private readonly IStaffDisciplineNotificationRepository _notificationRepository;
+    private readonly IStaffDisciplinaryActionRepository _caseRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<StaffDisciplineNotificationService> _logger;
 
     public StaffDisciplineNotificationService(
         IStaffDisciplineNotificationRepository notificationRepository,
+        IStaffDisciplinaryActionRepository caseRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<StaffDisciplineNotificationService> logger)
     {
         _notificationRepository = notificationRepository;
+        _caseRepository = caseRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -712,7 +731,7 @@ public class StaffDisciplineNotificationService : IStaffDisciplineNotificationSe
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -741,25 +760,25 @@ public class StaffDisciplineNotificationService : IStaffDisciplineNotificationSe
         return entity.ToDto();
     }
 
-    public async Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StaffDisciplineNotificationDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _notificationRepository.GetByCaseIdAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _notificationRepository.GetByCaseIdAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
-    public async Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetUnacknowledgedAsync(Guid caseId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<StaffDisciplineNotificationDto>> GetUnacknowledgedAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _notificationRepository.GetUnacknowledgedAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _notificationRepository.GetUnacknowledgedAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineNotificationSummaryDto>> GetPendingFollowupAsync(int daysOld = 3, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _notificationRepository.GetPendingFollowupAsync(daysOld);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        var entities = await _notificationRepository.GetPendingFollowupAsync(tenantId, daysOld);
+        return entities.ToSummaryDtoList();
     }
 
     public async Task<StaffDisciplineNotificationDto> SendAsync(CreateStaffDisciplineNotificationDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
@@ -775,14 +794,30 @@ public class StaffDisciplineNotificationService : IStaffDisciplineNotificationSe
         return entity.ToDto();
     }
 
-    public async Task<bool> AcknowledgeAsync(AcknowledgeNotificationDto dto, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// Acknowledgement is the employee's own act and is refused from anyone else, HR included: it is
+    /// the record that the subject received a show-cause or hearing notice, and the response clocks
+    /// are measured from it. The date is server-stamped for the same reason — a client-supplied
+    /// acknowledgement date would let the clock be set to whatever suits.
+    ///
+    /// The notification carries no recipient of its own; the recipient is the subject of the case it
+    /// belongs to, which is why the case is loaded here.
+    /// </remarks>
+    public async Task<bool> AcknowledgeAsync(AcknowledgeNotificationDto dto, Guid acknowledgedByEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedNotificationAsync(dto.NotificationId);
+
+        var disciplinaryCase = await _caseRepository.GetByIdAsync(entity.DisciplinaryActionId);
+        if (disciplinaryCase == null || disciplinaryCase.TenantId != GetTenantId())
+            throw new ArgumentException($"Disciplinary case for notification '{dto.NotificationId}' not found.");
+
+        if (disciplinaryCase.EmployeeId != acknowledgedByEmployeeId)
+            throw new UnauthorizedAccessException("Only the employee a notification was issued to can acknowledge it.");
 
         if (entity.AcknowledgedDate.HasValue)
             throw new InvalidOperationException("This notification has already been acknowledged.");
 
-        entity.AcknowledgedDate = dto.AcknowledgedDate;
+        entity.AcknowledgedDate = DateTime.UtcNow;
         entity.UpdatedAt        = DateTime.UtcNow;
 
         await _notificationRepository.UpdateAsync(entity);
@@ -845,7 +880,7 @@ public class StaffDisciplineLegalReviewService : IStaffDisciplineLegalReviewServ
     {
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
-            throw new InvalidOperationException("No tenant is associated with the current user.");
+            throw new UnauthorizedAccessException("No tenant is associated with the current user.");
         return tenantId;
     }
 
@@ -877,36 +912,39 @@ public class StaffDisciplineLegalReviewService : IStaffDisciplineLegalReviewServ
     public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetByCaseIdAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _legalReviewRepository.GetByCaseIdAsync(caseId);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _legalReviewRepository.GetByCaseIdAsync(tenantId, caseId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetOpenReviewsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _legalReviewRepository.GetOpenReviewsAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _legalReviewRepository.GetOpenReviewsAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetByRiskLevelAsync(DisciplineLegalRiskLevel minimumRisk, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _legalReviewRepository.GetByRiskLevelAsync(minimumRisk);
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _legalReviewRepository.GetByRiskLevelAsync(tenantId, minimumRisk);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
     public async Task<IEnumerable<StaffDisciplineLegalReviewDto>> GetRequiringExternalCounselAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = await _legalReviewRepository.GetRequiringExternalCounselAsync();
-        return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto()).ToList();
+        var entities = await _legalReviewRepository.GetRequiringExternalCounselAsync(tenantId);
+        return entities.Select(e => e.ToDto()).ToList();
     }
 
+    /// <remarks>
+    /// Summed in the database rather than by loading every review and adding them up here — the
+    /// repository owns the tenant predicate, so a money total can no longer be assembled from rows
+    /// the caller was never entitled to see.
+    /// </remarks>
     public async Task<decimal> GetTotalLegalCostsForCaseAsync(Guid caseId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var reviews = await _legalReviewRepository.GetByCaseIdAsync(caseId);
-        return reviews.Where(e => e.TenantId == tenantId).Sum(e => e.LegalCostsIncurred ?? 0m);
+        return await _legalReviewRepository.GetTotalLegalCostsForCaseAsync(GetTenantId(), caseId);
     }
 
     public async Task<StaffDisciplineLegalReviewDto> ReferAsync(CreateStaffDisciplineLegalReviewDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)

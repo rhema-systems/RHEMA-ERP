@@ -95,8 +95,10 @@ public interface IShePerformanceSnapshotRepository : IGenericRepository<ShePerfo
     Task<IEnumerable<ShePerformanceSnapshot>> GetByYearAsync(int year);
     Task<IEnumerable<ShePerformanceSnapshot>> GetByLocationAsync(Guid locationId);
 
-    /// <summary>Returns the most recently prepared snapshot.</summary>
-    Task<ShePerformanceSnapshot?> GetLatestAsync();
+    /// <summary>Returns the tenant's most recently prepared snapshot. The tenant filter must sit
+    /// inside the query: ordering across all tenants and discarding a foreign winner afterwards
+    /// would wrongly report "no snapshot" for a tenant that has them.</summary>
+    Task<ShePerformanceSnapshot?> GetLatestAsync(Guid tenantId);
 }
 
 // ============================================================================

@@ -23,6 +23,13 @@ public sealed record EstateGroundRentIncomeAccountOptionDto(
     string AccountName,
     string CurrencyCode);
 
+public sealed class AssessEstateGroundRentDto
+{
+    public Guid EstateManagedAssetId { get; set; }
+    public decimal RatePerAcre { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+}
+
 public sealed record EstateGroundRentAccountDto(
     Guid Id,
     Guid EstateManagedAssetId,

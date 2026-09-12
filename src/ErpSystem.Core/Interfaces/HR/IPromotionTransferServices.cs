@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.Common;
+﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -98,14 +98,39 @@ public interface IStaffMovementService
 
     // ── Workflow ──────────────────────────────────────────────────────────────
 
-    /// <summary>Submits a Draft movement into the approval workflow.</summary>
-    Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Submits a Draft movement into the approval workflow. Inoperable until a StaffMovement
+    /// workflow definition is published for the tenant.
+    /// </summary>
+    Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByEmployeeId, CancellationToken cancellationToken = default);
 
-    /// <summary>Records the final authorisation once all approval levels are cleared.</summary>
-    Task<bool> AuthorizeAsync(AuthorizeStaffMovementDto dto, Guid authorizedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// How the destination position stands against its establishment, or null when there is nothing
+    /// to report. Advisory only — see the note on the implementation.
+    /// </summary>
+    Task<string?> GetEstablishmentAdvisoryAsync(Guid movementId, CancellationToken cancellationToken = default);
 
-    /// <summary>Records the employee's acceptance or rejection of the proposed movement.</summary>
-    Task<bool> RecordEmployeeResponseAsync(RespondToStaffMovementDto dto, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Returns the movements the caller can currently approve. Token-derived: an approver is normally
+    /// a line manager, not HR, and the register is HR-only, so without this they have no queue.
+    /// </summary>
+    Task<IEnumerable<StaffMovementSummaryDto>> GetAwaitingMyApprovalAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records the caller's approval of the current workflow step. Refused unless the engine has
+    /// them assigned to it — authority comes from the published definition, not from a role.
+    /// </summary>
+    Task<bool> ApproveAsync(Guid movementId, Guid approvingEmployeeId, string? comments = null, CancellationToken cancellationToken = default);
+
+    /// <summary>Withdraws a submitted movement from approval and returns it to the requester as a Draft.</summary>
+    Task<bool> RecallAsync(Guid movementId, Guid recallingEmployeeId, string? reason = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records the employee's acceptance or rejection of the proposed movement.
+    /// <paramref name="respondingEmployeeId"/> is the token employee and must be the movement's subject —
+    /// acceptance is the employee's own testimony, so nobody, HR included, may record it on their behalf.
+    /// </summary>
+    Task<bool> RecordEmployeeResponseAsync(RespondToStaffMovementDto dto, Guid respondingEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Marks the handover stage as complete.</summary>
     Task<bool> CompleteHandoverAsync(CompleteHandoverDto dto, Guid completedByUserId, CancellationToken cancellationToken = default);
@@ -122,7 +147,13 @@ public interface IStaffMovementService
     /// <summary>Marks an approved movement as Implemented (physically actioned in the system).</summary>
     Task<bool> ImplementAsync(Guid movementId, Guid implementedByUserId, CancellationToken cancellationToken = default);
 
-    // ── Approval Level Operations ─────────────────────────────────────────────
+    // ── Approval Level Operations (legacy, read-only) ─────────────────────────
+    //
+    // The bespoke approval chain has been retired in favour of the generic workflow engine, which
+    // does everything it did — ordered steps, named approvers, delegation — and adds conditional
+    // routing and a queue the approver can actually find their work in. Two parallel paths to
+    // Approved is the dangerous shape, so the WRITES are gone; the reads stay so any chain a
+    // previous build recorded is still visible on the movement.
 
     /// <summary>Returns all approval levels for a movement, ordered by level number.</summary>
     Task<IEnumerable<StaffMovementApprovalLevelDto>> GetApprovalLevelsAsync(Guid movementId, CancellationToken cancellationToken = default);
@@ -130,16 +161,8 @@ public interface IStaffMovementService
     /// <summary>Returns the current pending approval level for a movement, or null if all are actioned.</summary>
     Task<StaffMovementApprovalLevelDto?> GetCurrentPendingApprovalLevelAsync(Guid movementId, CancellationToken cancellationToken = default);
 
-    /// <summary>Adds an approval level to the movement's approval chain.</summary>
-    Task<StaffMovementApprovalLevelDto> AddApprovalLevelAsync(CreateStaffMovementApprovalLevelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
-
-    /// <summary>Records an approve or reject decision at a specific level.</summary>
-    Task<bool> ActionApprovalLevelAsync(ActionApprovalLevelDto dto, Guid actionedByUserId, CancellationToken cancellationToken = default);
-
-    /// <summary>Delegates an approval level to another person.</summary>
-    Task<bool> DelegateApprovalLevelAsync(DelegateApprovalLevelDto dto, CancellationToken cancellationToken = default);
-
     /// <summary>Returns true when all approval levels for the movement are approved.</summary>
+    /// <remarks>Legacy rows only — see the note on the read above.</remarks>
     Task<bool> AllLevelsApprovedAsync(Guid movementId, CancellationToken cancellationToken = default);
 
     // ── Status History Operations ─────────────────────────────────────────────
@@ -181,8 +204,12 @@ public interface IStaffMovementService
     /// <summary>Adds a checklist item to a movement.</summary>
     Task<StaffMovementChecklistItemDto> AddChecklistItemAsync(CreateStaffMovementChecklistItemDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Marks a checklist item as complete.</summary>
-    Task<bool> CompleteChecklistItemAsync(CompleteChecklistItemDto dto, Guid completedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Marks a checklist item as complete. An item with a named responsible person may only be
+    /// completed by that person, unless <paramref name="actorIsHr"/> — HR closes out items whose
+    /// owner has left, moved on, or never had an account.
+    /// </summary>
+    Task<bool> CompleteChecklistItemAsync(CompleteChecklistItemDto dto, Guid completedByUserId, bool actorIsHr, CancellationToken cancellationToken = default);
 
     /// <summary>Returns true when all required checklist items for the movement are complete.</summary>
     Task<bool> AllRequiredItemsCompletedAsync(Guid movementId, CancellationToken cancellationToken = default);
@@ -259,11 +286,22 @@ public interface IStaffDemotionService
     Task<IEnumerable<StaffDemotionDto>> GetPerformanceRelatedDemotionsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffDemotionDto>> GetWithPendingAppealsAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Demotions the employee has answered — HR's worklist of appeals actually filed, which the
+    /// pending list cannot show because answering removes a demotion from it (ledger D-37).
+    /// </summary>
+    Task<IEnumerable<StaffDemotionDto>> GetWithFiledAppealsAsync(CancellationToken cancellationToken = default);
+
     Task<StaffDemotionDto> CreateAsync(CreateStaffDemotionDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffDemotionDto> UpdateAsync(UpdateStaffDemotionDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
-    /// <summary>Records the employee's response to a demotion notice (appeal / acceptance).</summary>
-    Task<bool> RecordEmployeeResponseAsync(Guid demotionId, string response, DateTime responseDate, Guid respondedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records the employee's response to a demotion notice (appeal / acceptance).
+    /// <paramref name="respondingEmployeeId"/> is the token employee and must be the demoted employee:
+    /// an appeal is testimony, so it is never recorded on someone's behalf. The response date is
+    /// stamped server-side for the same reason.
+    /// </summary>
+    Task<bool> RecordEmployeeResponseAsync(Guid demotionId, string response, Guid respondingEmployeeId, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }
@@ -311,6 +349,8 @@ public interface IStaffActingAppointmentService
     Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<PagedResult<StaffActingAppointmentSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    /// <summary>Full rows for one employee — the portal self-read (allowance + covering-for included).</summary>
+    Task<IEnumerable<StaffActingAppointmentDto>> GetDetailedByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByStatusAsync(StaffActingStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetActiveAppointmentsAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffActingAppointmentSummaryDto>> GetByActingPositionAsync(Guid positionId, CancellationToken cancellationToken = default);
@@ -320,6 +360,9 @@ public interface IStaffActingAppointmentService
     // ── CRUD & Workflow ───────────────────────────────────────────────────────
     Task<StaffActingAppointmentDto> CreateAsync(CreateStaffActingAppointmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffActingAppointmentDto> UpdateAsync(UpdateStaffActingAppointmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>Ends an acting appointment before its end date. The only route to TerminatedEarly.</summary>
+    Task<StaffActingAppointmentDto> TerminateEarlyAsync(TerminateStaffActingAppointmentEarlyDto dto, Guid terminatedByUserId, CancellationToken cancellationToken = default);
 
     /// <summary>Marks the acting appointment as complete.</summary>
     Task<bool> CompleteAsync(CompleteStaffActingAppointmentDto dto, Guid completedByUserId, CancellationToken cancellationToken = default);
@@ -371,6 +414,29 @@ public interface IEmployeeCareerPathService
     Task<EmployeeCareerPathDto> UpdateAsync(UpdateEmployeeCareerPathDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+}
+
+#endregion
+
+// ============================================================================
+// STAFF MOVEMENT REMINDER ENGINE
+// ============================================================================
+
+#region Staff Movement Reminder Service
+
+/// <summary>
+/// The movement sweep. The hourly background host and the HR-gated run-now endpoint both call
+/// <see cref="RunSweepForTenantAsync"/>, so there is exactly one implementation of what a reminder
+/// run does — and running it by hand is always safe, because dispatch is deduped.
+/// </summary>
+public interface IStaffMovementReminderService
+{
+    Task<StaffMovementReminderRunResultDto> RunSweepForTenantAsync(
+        Guid tenantId, string trigger, Guid? triggeredByUserId, CancellationToken cancellationToken = default);
+
+    Task<IEnumerable<StaffMovementReminderRunDto>> GetRecentRunsAsync(int count = 20, CancellationToken cancellationToken = default);
+
+    Task<IEnumerable<StaffMovementReminderLogEntryDto>> GetRecentLogAsync(int days = 14, CancellationToken cancellationToken = default);
 }
 
 #endregion

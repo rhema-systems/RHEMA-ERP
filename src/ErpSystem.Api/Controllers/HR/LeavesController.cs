@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Models;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR
@@ -17,7 +18,7 @@ namespace ErpSystem.Api.Controllers.HR
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize]
+    [Authorize(Policy = "InternalOnly")]
     public class LeavesController : ControllerBase
     {
         private readonly ILeaveService _leaveService;
@@ -27,6 +28,7 @@ namespace ErpSystem.Api.Controllers.HR
         private readonly ICentralDocumentRepositoryFileService _centralDocuments;
         private readonly ApplicationDbContext _db;
         private readonly ICurrentUserService _currentUserService;
+        private readonly IAuthorizationService _authorization;
         private readonly ILogger<LeavesController> _logger;
 
         public LeavesController(
@@ -37,6 +39,7 @@ namespace ErpSystem.Api.Controllers.HR
             ICentralDocumentRepositoryFileService centralDocuments,
             ApplicationDbContext db,
             ICurrentUserService currentUserService,
+            IAuthorizationService authorization,
             ILogger<LeavesController> logger)
         {
             _leaveService = leaveService;
@@ -46,7 +49,42 @@ namespace ErpSystem.Api.Controllers.HR
             _centralDocuments = centralDocuments;
             _db = db;
             _currentUserService = currentUserService;
+            _authorization = authorization;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// The caller satisfies the given leave policy — evaluated through the policy pipeline,
+        /// so database grants and the HR role-fallback both count.
+        /// </summary>
+        private async Task<bool> HoldsLeavePolicyAsync(string policy)
+            => (await _authorization.AuthorizeAsync(User, policy)).Succeeded;
+
+        /// <summary>
+        /// Self-or-permission (W3 slice 5): the caller is the employee the record is about, or
+        /// holds the given leave policy. Deliberately NOT self-or-manager — a line manager's
+        /// part in leave is approval, which reaches them through the workflow engine's own
+        /// assignee check, not through read access to the report's file.
+        /// </summary>
+        private async Task<bool> CanActForEmployeeAsync(Guid employeeId, string policy)
+        {
+            if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == employeeId)
+                return true;
+            return await HoldsLeavePolicyAsync(policy);
+        }
+
+        /// <summary>Self-or-permission resolved through the leave request's owner.</summary>
+        private async Task<bool> CanActOnRequestAsync(Guid leaveRequestId, string policy)
+        {
+            if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty &&
+                _currentUserService.TenantId is Guid tenantId)
+            {
+                var mine = await _db.Set<Core.Entities.HR.StaffLeave.LeaveRequest>()
+                    .AsNoTracking()
+                    .AnyAsync(r => r.Id == leaveRequestId && r.TenantId == tenantId && r.EmployeeId == me);
+                if (mine) return true;
+            }
+            return await HoldsLeavePolicyAsync(policy);
         }
 
         /// <summary>
@@ -61,6 +99,10 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
         public async Task<ActionResult<LeaveRequestDto>> CreateLeaveRequest([FromBody] CreateLeaveRequestDto dto)
         {
+            // W3: an employee files their OWN leave; filing for someone else is the HR desk.
+            if (!await CanActForEmployeeAsync(dto.EmployeeId, HrPermissions.LeaveWritePolicy))
+                return Forbid();
+
             try
             {
                 var application = await _leaveService.CreateLeaveRequestAsync(dto);
@@ -90,6 +132,10 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<LeaveRequestDto>> UpdateDraft(Guid id, [FromBody] CreateLeaveRequestDto dto)
         {
+            // W3: the draft's owner, or the HR desk.
+            if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
+                return Forbid();
+
             try
             {
                 var result = await _leaveService.UpdateDraftAsync(id, dto);
@@ -122,6 +168,10 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<LeaveRequestDto>> GetLeaveApplicationById(Guid id)
         {
+            // W3: the request's owner, or holders of the leave read tier.
+            if (!await CanActOnRequestAsync(id, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
             try
             {
                 var application = await _leaveService.GetLeaveRequestByIdAsync(id);
@@ -157,6 +207,10 @@ namespace ErpSystem.Api.Controllers.HR
                 return NotFound(new { message = $"Leave application '{requestNumber}' not found." });
             }
 
+            // W3: ownership is only knowable after the lookup — the number is not a capability.
+            if (!await CanActForEmployeeAsync(application.EmployeeId, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
             return Ok(application);
         }
 
@@ -177,6 +231,10 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 20)
         {
+            // W3: own history, or the leave read tier.
+            if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
             if (year == 0)
             {
                 year = DateTime.Today.Year;
@@ -200,6 +258,10 @@ namespace ErpSystem.Api.Controllers.HR
             Guid employeeId,
             [FromQuery] int year = 0)
         {
+            // W3: own balances, or the leave read tier.
+            if (!await CanActForEmployeeAsync(employeeId, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
             if (year == 0) year = DateTime.Today.Year;
             var balances = await _leaveService.GetEmployeeLeaveBalancesAsync(employeeId, year);
             return Ok(balances);
@@ -209,6 +271,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Get leave balances across all employees with optional filters
         /// </summary>
         [HttpGet("balances")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
         [ProducesResponseType(typeof(IEnumerable<LeaveBalanceDto>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<LeaveBalanceDto>>> GetAllLeaveBalances(
             [FromQuery] int year = 0,
@@ -225,6 +288,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// employee's taken / scheduled / outstanding days for the year.
         /// </summary>
         [HttpGet("mandatory-compliance")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
         [ProducesResponseType(typeof(IEnumerable<MandatoryLeaveComplianceDto>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<MandatoryLeaveComplianceDto>>> GetMandatoryCompliance(
             [FromQuery] int year = 0)
@@ -238,6 +302,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Get full audit-trail detail for a single leave balance
         /// </summary>
         [HttpGet("balances/{id}")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
         [ProducesResponseType(typeof(LeaveBalanceDetailDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<LeaveBalanceDetailDto>> GetLeaveBalanceDetail(Guid id)
@@ -252,6 +317,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Get all adjustments for a leave balance
         /// </summary>
         [HttpGet("balances/{balanceId}/adjustments")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
         [ProducesResponseType(typeof(IEnumerable<LeaveAdjustmentDto>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<LeaveAdjustmentDto>>> GetAdjustments(Guid balanceId)
         {
@@ -263,6 +329,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Add a manual adjustment to a leave balance
         /// </summary>
         [HttpPost("balances/{balanceId}/adjustments")]
+        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveAdjustmentDto), StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -288,6 +355,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Delete a leave adjustment by ID (also recalculates the cached AdjustmentDays on the balance)
         /// </summary>
         [HttpDelete("adjustments/{id}")]
+        [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> DeleteAdjustment(Guid id)
@@ -307,6 +375,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Get all leave adjustments across all employees with optional filters
         /// </summary>
         [HttpGet("adjustments")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
         [ProducesResponseType(typeof(IEnumerable<LeaveAdjustmentDto>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<LeaveAdjustmentDto>>> GetAllAdjustments(
             [FromQuery] int year = 0,
@@ -323,6 +392,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Get a single leave adjustment by ID
         /// </summary>
         [HttpGet("adjustments/{id}")]
+        [Authorize(Policy = HrPermissions.LeaveReadPolicy)]
         [ProducesResponseType(typeof(LeaveAdjustmentDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<ActionResult<LeaveAdjustmentDto>> GetAdjustmentById(Guid id)
@@ -337,6 +407,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Create a standalone leave adjustment (balance looked-up or auto-created; no balance ID required)
         /// </summary>
         [HttpPost("adjustments")]
+        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveAdjustmentDto), StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -366,6 +437,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// Update the days and reason of an existing leave adjustment
         /// </summary>
         [HttpPut("adjustments/{id}")]
+        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveAdjustmentDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -406,6 +478,10 @@ namespace ErpSystem.Api.Controllers.HR
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 20)
         {
+            // W3: a manager reads their OWN queue; reading someone else's is the leave read tier.
+            if (!await CanActForEmployeeAsync(managerId, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
             var result = await _leaveService.GetPendingApprovalsAsync(managerId, pageNumber, pageSize);
 
             return Ok(result);
@@ -425,6 +501,10 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> SubmitForApproval(Guid id)
         {
+            // W3: the request's owner submits; the HR desk may submit on their behalf.
+            if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
+                return Forbid();
+
             try
             {
                 await _leaveService.SubmitForApprovalAsync(id);
@@ -458,6 +538,9 @@ namespace ErpSystem.Api.Controllers.HR
         /// <response code="200">Leave approved successfully</response>
         /// <response code="400">Invalid request or business rule violation</response>
         /// <response code="404">Leave application not found</response>
+        // W3: deliberately NOT permission-gated — the approver is whoever the workflow engine
+        // assigned, usually a line manager with no HR permission at all, and the service refuses
+        // anyone else per request (LeaveService.ApproveLeaveAsync -> CanUserApproveAsync).
         [HttpPut("{id}/approve")]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -497,6 +580,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// <response code="200">Leave rejected successfully</response>
         /// <response code="400">Invalid request or business rule violation</response>
         /// <response code="404">Leave application not found</response>
+        // W3: same as approve — the workflow assignee's act, validated per request.
         [HttpPut("{id}/reject")]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -542,6 +626,10 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> CancelLeave(Guid id, [FromBody] string cancellationReason)
         {
+            // W3: the request's owner, or the HR desk.
+            if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
+                return Forbid();
+
             try
             {
                 await _leaveService.CancelLeaveRequestAsync(id, cancellationReason);
@@ -572,6 +660,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// <response code="400">Invalid request or business rule violation</response>
         /// <response code="404">Leave application not found</response>
         [HttpPut("{id}/close")]
+        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -601,6 +690,7 @@ namespace ErpSystem.Api.Controllers.HR
         /// If LeaveTypeId is provided only that type is recalculated; otherwise all leave types for the employee are recalculated.
         /// </summary>
         [HttpPost("balances/recalculate")]
+        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> RecalculateBalance([FromBody] RecalculateLeaveBalanceRequest request)
@@ -630,6 +720,10 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(typeof(IEnumerable<LeaveRequestAttachmentDto>), StatusCodes.Status200OK)]
         public async Task<ActionResult<IEnumerable<LeaveRequestAttachmentDto>>> GetAttachments(Guid id)
         {
+            // W3: same audience as the request itself.
+            if (!await CanActOnRequestAsync(id, HrPermissions.LeaveReadPolicy))
+                return Forbid();
+
             try
             {
                 var attachments = await _leaveService.GetAttachmentsAsync(id);
@@ -647,6 +741,10 @@ namespace ErpSystem.Api.Controllers.HR
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> UploadAttachment(Guid id, IFormFile file, CancellationToken ct = default)
         {
+            // W3: evidence goes onto your own request; the HR desk attaches for anyone.
+            if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
+                return Forbid();
+
             if (file == null || file.Length == 0)
                 return BadRequest(new { message = "No file provided" });
 
@@ -745,10 +843,9 @@ namespace ErpSystem.Api.Controllers.HR
 
             var isOwner = _currentUserService.EmployeeId is Guid employeeId &&
                           attachment.LeaveRequest.EmployeeId == employeeId;
-            var isHr = _currentUserService.IsInRole("HR") ||
-                       _currentUserService.IsInRole("Admin") ||
-                       _currentUserService.IsInRole("SuperAdmin");
-            if (!isOwner && !isHr)
+            // W3: the "or HR" side now goes through the leave read tier, so database grants and
+            // the role fallback both count — the raw role list this replaced missed TenantAdmin.
+            if (!isOwner && !await HoldsLeavePolicyAsync(HrPermissions.LeaveReadPolicy))
                 return Forbid();
 
             return await HrDocumentDownload.ServeAsync(
@@ -769,6 +866,11 @@ namespace ErpSystem.Api.Controllers.HR
                 var attachment = await _leaveService.GetAttachmentByIdAsync(attachmentId);
                 if (attachment == null)
                     return NotFound(new { message = "Attachment not found" });
+
+                // W3: the request's owner removes their own evidence; otherwise the leave write
+                // tier. Previously any authenticated user could delete any leave attachment.
+                if (!await CanActOnRequestAsync(attachment.LeaveRequestId, HrPermissions.LeaveWritePolicy))
+                    return Forbid();
 
                 // Controlled uploads and their DMS records are removed through the shared
                 // boundary, which soft-deletes and schedules the physical delete. Only
