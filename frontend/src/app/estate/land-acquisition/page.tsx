@@ -34,6 +34,7 @@ import {
   Send,
   ShieldCheck,
   Stamp,
+  Trash2,
   Upload,
   WalletCards,
 } from 'lucide-react';
@@ -138,6 +139,15 @@ type PendingAcquisitionDocument = {
 
 type WorkspaceValues = Record<string, string | boolean>;
 
+type OtherAcquisitionServiceCost = {
+  id: string;
+  serviceName: string;
+  payeeName: string;
+  amount: string;
+  dueDate: string;
+  notes: string;
+};
+
 type BeaconComparisonRow = {
   label: string;
   cadastralNorthing?: number;
@@ -201,6 +211,52 @@ const PAYABLE_BUSINESS_PARTNER_TYPES = new Set([
   'both',
   'consultant',
 ]);
+
+const createServiceCostId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `service-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const emptyOtherAcquisitionService = (): OtherAcquisitionServiceCost => ({
+  id: createServiceCostId(),
+  serviceName: '',
+  payeeName: '',
+  amount: '',
+  dueDate: '',
+  notes: '',
+});
+
+const parseOtherAcquisitionServices = (
+  raw: string | boolean | undefined
+): OtherAcquisitionServiceCost[] => {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as Partial<OtherAcquisitionServiceCost>[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((item) => ({
+      id: item.id || createServiceCostId(),
+      serviceName: item.serviceName || '',
+      payeeName: item.payeeName || '',
+      amount: item.amount ? `${item.amount}` : '',
+      dueDate: item.dueDate || '',
+      notes: item.notes || '',
+    }));
+  } catch {
+    return [];
+  }
+};
+
+const serializeOtherAcquisitionServices = (
+  services: OtherAcquisitionServiceCost[]
+) => JSON.stringify(services);
+
+const sumOtherAcquisitionServices = (
+  services: OtherAcquisitionServiceCost[]
+) =>
+  services.reduce((total, service) => {
+    const amount = Number(service.amount);
+    return total + (Number.isFinite(amount) && amount > 0 ? amount : 0);
+  }, 0);
 
 function isActiveApprovedBusinessPartner(partner: BusinessPartnerDto) {
   const status = partner.status?.toLowerCase();
@@ -783,38 +839,36 @@ const WORKSPACE_FIELDS: Record<AcquisitionWorkspaceKind, WorkspaceField[]> = {
     field('registrationNotes', 'Registration Notes', 'textarea', undefined, 2),
   ],
   'asset-creation': [
-    field('assetCode', 'Asset Code', 'text', undefined, 1, true),
-    field('assetNumber', 'Asset Number', 'text', undefined, 1, true),
-    field('parcelIdentifier', 'Parcel Identifier'),
-    field('registrationNumber', 'Registration Number'),
-    field('ownerName', 'Owner Name'),
-    field('assetLocation', 'Asset Location'),
-    field('assetCategory', 'Asset Category', 'select', [
+    field('assetCode', 'Land Code', 'text', undefined, 1, true),
+    field('assetNumber', 'Land Number', 'text', undefined, 1, true),
+    field('parcelIdentifier', 'Parcel Identifier', 'text', undefined, 1, true),
+    field('registrationNumber', 'Registration Number', 'text', undefined, 1, true),
+    field('assetCategory', 'Land Category', 'select', [
       'Land',
       'Land Improvement',
       'Investment Property',
-    ]),
-    field('size', 'Size'),
-    field('sizeUnit', 'Size Unit', 'select', ['Acres', 'Hectares', 'sqm']),
-    field('assetStatus', 'Asset Status', 'select', [
+    ], 1, true),
+    field('size', 'Size', 'text', undefined, 1, true),
+    field('sizeUnit', 'Size Unit', 'select', ['Acres', 'Hectares', 'sqm'], 1, true),
+    field('assetStatus', 'Land Status', 'select', [
       'Draft',
       'Active',
       'Under Dispute',
       'Locked',
-    ]),
-    field('purpose', 'Purpose'),
-    field('zoningClassification', 'Zoning Classification'),
-    field('ownershipVerification', 'Ownership Verification'),
+    ], 1, true),
+    field('purpose', 'Purpose', 'text', undefined, 1, true),
+    field('zoningClassification', 'Zoning Classification', 'text', undefined, 1, true),
+    field('ownershipVerification', 'Ownership Verification', 'text', undefined, 1, true),
     field('ownerConsiderationCost', 'Owner / Vendor Consideration', 'text', undefined, 1, true),
     field('externalSurveyorCost', 'External Surveyor Cost', 'text', undefined, 1, true),
     field('stampDutyCost', 'Stamp Duty Cost', 'text', undefined, 1, true),
-    field('otherAcquisitionCost', 'Other Acquisition Cost'),
-    field('totalCapitalizedCost', 'Total Land Asset Cost', 'text', undefined, 1, true),
+    field('otherAcquisitionCost', 'Other Acquisition Cost', 'text', undefined, 1, true),
+    field('totalCapitalizedCost', 'Total Land Cost', 'text', undefined, 1, true),
     field('capitalizationValue', 'Capitalization Value', 'text', undefined, 1, true),
     field('capitalizationBreakdown', 'Capitalization Breakdown', 'textarea', undefined, 2, true),
-    field('glAccount', 'Fixed Asset GL Account'),
-    field('custodian', 'Custodian'),
-    field('assetNotes', 'Asset Notes', 'textarea', undefined, 2),
+    field('glAccount', 'Fixed Asset GL Account', 'text', undefined, 1, true),
+    field('custodian', 'Custodian', 'text', undefined, 1, true),
+    field('assetNotes', 'Land Notes', 'textarea', undefined, 2, true),
   ],
 };
 
@@ -1298,16 +1352,14 @@ const WORKSPACE_SECTIONS: Partial<
   ],
   'asset-creation': [
     {
-      title: 'Land asset details',
+      title: 'Land details',
       description:
-        'Create the land asset and prepare it for land bank or project handoff.',
+        'Create the land record and prepare it for land bank or project handoff.',
       keys: [
         'assetCode',
         'assetNumber',
         'parcelIdentifier',
         'registrationNumber',
-        'ownerName',
-        'assetLocation',
         'assetCategory',
         'size',
         'sizeUnit',
@@ -1454,6 +1506,10 @@ function missingWorkspaceInputs(
   }
 
   const missing = WORKSPACE_FIELDS[kind].filter((config) => {
+    if (config.readOnly) {
+      return false;
+    }
+
     const value = values[config.key];
     return typeof value === 'boolean' ? false : !`${value ?? ''}`.trim();
   });
@@ -1536,6 +1592,8 @@ const WITNESS_TWO_OATH_FIELD_KEYS = new Set([
 ]);
 
 function requiredMarker(config: WorkspaceField) {
+  if (config.readOnly) return null;
+
   return WITNESS_OATH_FIELD_KEYS.has(config.key) ? null : (
     <span className="text-destructive">*</span>
   );
@@ -2729,11 +2787,11 @@ function AcquisitionDetail({
   const hasPublishedLandAsset =
     isAssetCreationStage && item.status === 'Approved';
   const captureStageActionLabel = hasCreatedLandAsset
-    ? 'Complete Asset Creation'
+    ? 'Complete Land Creation'
     : stage.primaryAction;
   const assetWorkspaceNotSavedReason =
     isAssetCreationStage && !hasCreatedLandAsset
-      ? 'Open the Asset Creation workspace, review the auto-filled asset details, then Save Workspace. Saving creates the Estate asset before Land Bank handoff.'
+      ? 'Open the Land Creation workspace, review the auto-filled land details, then Save Workspace. Saving creates the Estate land record before Land Bank handoff.'
       : undefined;
   const forwardActionReason = item.stageInputsComplete
     ? undefined
@@ -2743,7 +2801,7 @@ function AcquisitionDetail({
     item.stageOrder > stage.order
       ? completedWorkflowActionLabel(stage.primaryAction)
       : hasCreatedLandAsset
-        ? 'Asset created'
+        ? 'Land created'
         : stage.primaryAction;
   const showCaptureStageSubmit =
     item.stageOrder === stage.order &&
@@ -2880,14 +2938,14 @@ function AcquisitionDetail({
 
   const publishToLandBank = async () => {
     if (!hasCreatedLandAsset) {
-      toast.error('Create and save the Estate asset before Land Bank handoff.');
+      toast.error('Create and save the Estate land record before Land Bank handoff.');
       return;
     }
 
     if (!item.stageInputsComplete) {
       toast.error(
         forwardActionReason ||
-          'Complete all required asset fields before Land Bank handoff.'
+          'Complete all required land fields before Land Bank handoff.'
       );
       return;
     }
@@ -2903,7 +2961,7 @@ function AcquisitionDetail({
       });
       await onReload();
     } catch (error: any) {
-      toast.error('Unable to transfer asset to Land Bank.', {
+      toast.error('Unable to transfer land to Land Bank.', {
         description: error?.message || undefined,
       });
     } finally {
@@ -3886,6 +3944,22 @@ function WorkspaceDialog({
   const accountsPayablePaid =
     Boolean(accountsPayableInvoiceId) &&
     (values.isPaid === true || `${values.isPaid}`.toLowerCase() === 'true');
+  const otherAcquisitionServices = React.useMemo(
+    () => parseOtherAcquisitionServices(values.otherAcquisitionServicesJson),
+    [values.otherAcquisitionServicesJson]
+  );
+  const otherAcquisitionServicesTotal = React.useMemo(
+    () => sumOtherAcquisitionServices(otherAcquisitionServices),
+    [otherAcquisitionServices]
+  );
+  const otherAccountsPayableInvoiceId =
+    `${values.otherAccountsPayableInvoiceId || ''}`.trim();
+  const otherAccountsPayablePaymentId =
+    `${values.otherAccountsPayablePaymentId || ''}`.trim();
+  const otherAccountsPayablePaid =
+    Boolean(otherAccountsPayableInvoiceId) &&
+    (values.otherCostsPaid === true ||
+      `${values.otherCostsPaid}`.toLowerCase() === 'true');
   const isAccountsPayableWorkspace =
     (stage.workspaceKind === 'cadastral-survey' &&
       values.surveyorSource === 'External') ||
@@ -3904,7 +3978,7 @@ function WorkspaceDialog({
     stage.workspaceKind === 'asset-creation' && item.status === 'Approved';
   const workspaceCanEdit = canEdit && !isPublishedAssetWorkspace;
   const workspaceLockedMessage = isPublishedAssetWorkspace
-    ? 'This asset has already been transferred to Estate Land Bank, so the workspace is read-only.'
+    ? 'This land has already been transferred to Estate Land Bank, so the workspace is read-only.'
     : assignmentMessage;
 
   React.useEffect(() => {
@@ -3964,6 +4038,59 @@ function WorkspaceDialog({
     } catch (error: any) {
       toast.error(
         error?.message || 'Unable to create the Accounts Payable request.'
+      );
+    } finally {
+      setSyncingPayable(false);
+    }
+  };
+
+  const updateOtherAcquisitionServices = (
+    services: OtherAcquisitionServiceCost[]
+  ) => {
+    onChange((current) => ({
+      ...current,
+      otherAcquisitionServicesJson: serializeOtherAcquisitionServices(services),
+      otherAcquisitionCost: `${sumOtherAcquisitionServices(services) || ''}`,
+    }));
+  };
+
+  const createOtherAcquisitionCostsPayableRequest = async () => {
+    if (!item.id || !workspaceCanEdit) return;
+    const payableServices = otherAcquisitionServices.filter(
+      (service) =>
+        service.serviceName.trim() &&
+        Number.isFinite(Number(service.amount)) &&
+        Number(service.amount) > 0
+    );
+    if (payableServices.length === 0) {
+      toast.error('Add at least one other acquisition service with an amount.');
+      return;
+    }
+
+    try {
+      setSyncingPayable(true);
+      await estateAcquisitionService.saveWorkspace({
+        acquisitionId: item.id,
+        procedureId: stage.id,
+        workspaceKind: stage.workspaceKind,
+        values: {
+          ...values,
+          otherAcquisitionServicesJson:
+            serializeOtherAcquisitionServices(payableServices),
+          otherAcquisitionCost: `${sumOtherAcquisitionServices(payableServices)}`,
+        },
+      });
+      const workspace =
+        await estateAcquisitionService.ensureOtherAcquisitionCostsPayableRequest(
+          item.id
+        );
+      onChange(workspace.values);
+      await onReload();
+      toast.success('Other acquisition costs AP request created.');
+    } catch (error: any) {
+      toast.error(
+        error?.message ||
+          'Unable to create the other acquisition costs AP request.'
       );
     } finally {
       setSyncingPayable(false);
@@ -4099,6 +4226,24 @@ function WorkspaceDialog({
       amount: `${values.amountDue || ''}`,
       referenceNumber: item.projectReference,
       description: `${accountsPayableSubject} for ${item.projectReference}`,
+      source: 'land-acquisition',
+      locked: 'true',
+    });
+    router.push(`/finance/ap/payments/create?${params.toString()}`);
+  };
+
+  const openOtherAcquisitionCostsAccountsPayable = () => {
+    if (otherAccountsPayablePaymentId) {
+      router.push(`/finance/ap/payments/${otherAccountsPayablePaymentId}`);
+      return;
+    }
+
+    if (!otherAccountsPayableInvoiceId) return;
+    const params = new URLSearchParams({
+      invoiceId: otherAccountsPayableInvoiceId,
+      amount: `${values.otherAmountDue || otherAcquisitionServicesTotal || ''}`,
+      referenceNumber: item.projectReference,
+      description: `other acquisition costs for ${item.projectReference}`,
       source: 'land-acquisition',
       locked: 'true',
     });
@@ -4659,6 +4804,246 @@ function WorkspaceDialog({
                     ) : null}
                   </div>
                 ) : null}
+              </section>
+            )}
+            {stage.workspaceKind === 'stamp-duty-payment' && (
+              <section className="rounded-lg border bg-card p-4">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Other acquisition services
+                      </h3>
+                      <Badge
+                        variant={
+                          otherAccountsPayablePaid ? 'secondary' : 'outline'
+                        }
+                      >
+                        {otherAccountsPayablePaid
+                          ? 'Paid'
+                          : otherAccountsPayableInvoiceId
+                            ? `${values.otherAccountsPayablePaymentStatus || 'Pending payment'}`
+                            : 'Not linked'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Add legal, search, consent, facilitation, documentation,
+                      or other service costs that must be capitalized into Land
+                      Creation.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {otherAccountsPayableInvoiceId ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={openOtherAcquisitionCostsAccountsPayable}
+                        disabled={syncingPayable}
+                      >
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        {otherAccountsPayablePaymentId
+                          ? 'View Other Cost Payment'
+                          : 'Process Other Costs in AP'}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() =>
+                          void createOtherAcquisitionCostsPayableRequest()
+                        }
+                        disabled={
+                          syncingPayable ||
+                          !workspaceCanEdit ||
+                          otherAcquisitionServicesTotal <= 0
+                        }
+                        title={
+                          !workspaceCanEdit
+                            ? workspaceLockedMessage
+                            : otherAcquisitionServicesTotal <= 0
+                              ? 'Add at least one service cost first.'
+                              : undefined
+                        }
+                      >
+                        {syncingPayable ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Plus className="mr-2 h-4 w-4" />
+                        )}
+                        Create Other Cost AP
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        updateOtherAcquisitionServices([
+                          ...otherAcquisitionServices,
+                          emptyOtherAcquisitionService(),
+                        ])
+                      }
+                      disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                      title={
+                        otherAccountsPayableInvoiceId
+                          ? 'Other cost AP request already exists.'
+                          : !workspaceCanEdit
+                            ? workspaceLockedMessage
+                            : undefined
+                      }
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Service
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3">
+                  {otherAcquisitionServices.length === 0 && (
+                    <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                      No other acquisition services added yet.
+                    </p>
+                  )}
+                  {otherAcquisitionServices.map((service, index) => (
+                    <div
+                      key={service.id}
+                      className="grid gap-3 rounded-md border p-3 md:grid-cols-[1.3fr_1fr_140px_150px_auto]"
+                    >
+                      <div className="space-y-2">
+                        <Label>Service / Cost</Label>
+                        <Input
+                          value={service.serviceName}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          placeholder="e.g. Title search, consent processing"
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, serviceName: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Payee / Provider</Label>
+                        <Input
+                          value={service.payeeName}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          placeholder="Optional"
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, payeeName: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Amount</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={service.amount}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, amount: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Due Date</Label>
+                        <Input
+                          type="date"
+                          value={service.dueDate}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, dueDate: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          onClick={() =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.filter(
+                                (_, row) => row !== index
+                              )
+                            )
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="space-y-2 md:col-span-5">
+                        <Label>Notes</Label>
+                        <Textarea
+                          value={service.notes}
+                          disabled={!workspaceCanEdit || Boolean(otherAccountsPayableInvoiceId)}
+                          rows={2}
+                          onChange={(event) =>
+                            updateOtherAcquisitionServices(
+                              otherAcquisitionServices.map((item, row) =>
+                                row === index
+                                  ? { ...item, notes: event.target.value }
+                                  : item
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 grid gap-3 rounded-md bg-muted/40 p-3 text-sm md:grid-cols-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Service total</p>
+                    <p className="font-semibold">
+                      GHS {otherAcquisitionServicesTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">AP invoice</p>
+                    <p className="font-medium">
+                      {values.otherAccountsPayableInvoiceNumber ||
+                        otherAccountsPayableInvoiceId ||
+                        'Not created'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">AP payment</p>
+                    <p className="font-medium">
+                      {values.otherAccountsPayablePaymentNumber ||
+                        values.otherAccountsPayablePaymentStatus ||
+                        'Pending'}
+                    </p>
+                  </div>
+                </div>
+                {values.otherPaymentNotes && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {values.otherPaymentNotes}
+                  </p>
+                )}
               </section>
             )}
             <section className="rounded-lg border bg-card p-4">

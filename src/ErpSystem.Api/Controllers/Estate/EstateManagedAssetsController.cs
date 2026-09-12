@@ -229,6 +229,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 ProjectTitle = item.EstateManagedAsset.ProjectTitle,
                 AreaSquareFeet = item.AreaSquareFeet,
                 ValuationAmount = item.AllocatedCost,
+                TargetSalePrice = item.TargetSalePrice,
                 Currency = item.ExternalListingCurrency,
                 IsAvailableForLease = item.ExternalListingType == "Rent" || item.ExternalListingType == "SaleAndRent",
                 IsAvailableForSale = item.ExternalListingType == "Sale" || item.ExternalListingType == "SaleAndRent",

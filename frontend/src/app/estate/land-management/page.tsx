@@ -653,7 +653,7 @@ export default function EstateLandManagementPage() {
                     title={
                       acquisitionReadyForLandBank(selected.acquisition)
                         ? undefined
-                        : 'Complete the acquisition workflow through Asset Creation before publishing this land to Estate Land Bank.'
+                        : 'Complete the acquisition workflow through Land Creation before publishing this land to Estate Land Bank.'
                     }
                   >
                     {markingReadyKey ===
@@ -921,7 +921,7 @@ export default function EstateLandManagementPage() {
                         title={
                           acquisitionReadyForLandBank(selected.acquisition)
                             ? undefined
-                            : 'Complete the acquisition workflow through Asset Creation before publishing this land to Estate Land Bank.'
+                            : 'Complete the acquisition workflow through Land Creation before publishing this land to Estate Land Bank.'
                         }
                       >
                         {markingReadyKey ===

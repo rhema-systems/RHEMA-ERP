@@ -241,9 +241,33 @@ export default function EstatePropertyListingsPage() {
       selected.assetType === EstateManagedAssetType.Land &&
       !(selected.groundRentPayable != null && selected.groundRentPayable > 0)
   );
+  const minimumSalePrice =
+    selected?.listingScope === 'demarcation' &&
+    selected.targetSalePrice != null &&
+    selected.targetSalePrice > 0
+      ? selected.targetSalePrice
+      : null;
 
   const saveListing = async () => {
     if (!selected) return;
+    const salePriceValue =
+      includesSale && form.externalSalePrice
+        ? Number(form.externalSalePrice)
+        : null;
+    if (
+      minimumSalePrice != null &&
+      salePriceValue != null &&
+      salePriceValue < minimumSalePrice
+    ) {
+      toast.error(
+        `Sale price cannot be below the minimum sale price of ${formatMoney(
+          minimumSalePrice,
+          form.externalListingCurrency || selected.currency
+        )}.`
+      );
+      return;
+    }
+
     setIsSaving(true);
     try {
       const payload = {
@@ -633,7 +657,7 @@ export default function EstatePropertyListingsPage() {
                         <Label>Sale price</Label>
                         <Input
                           type="number"
-                          min="0"
+                          min={minimumSalePrice ?? 0}
                           value={form.externalSalePrice}
                           onChange={(event) =>
                             setForm((current) => ({
@@ -641,8 +665,26 @@ export default function EstatePropertyListingsPage() {
                               externalSalePrice: event.target.value,
                             }))
                           }
-                          placeholder="Enter sale price"
+                          placeholder={
+                            minimumSalePrice != null
+                              ? `Minimum ${formatMoney(
+                                  minimumSalePrice,
+                                  form.externalListingCurrency ||
+                                    selected.currency
+                                )}`
+                              : 'Enter sale price'
+                          }
                         />
+                        {minimumSalePrice != null ? (
+                          <p className="text-xs text-muted-foreground">
+                            Minimum sale price:{' '}
+                            {formatMoney(
+                              minimumSalePrice,
+                              form.externalListingCurrency || selected.currency
+                            )}
+                            . You can publish higher, but not lower.
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                     {includesRent ? (

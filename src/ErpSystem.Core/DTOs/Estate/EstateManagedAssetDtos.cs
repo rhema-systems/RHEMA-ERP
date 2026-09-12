@@ -59,6 +59,11 @@ public class EstateManagedAssetDto
     public string? PropertyFileReference { get; set; }
     public decimal? AreaSquareMeters { get; set; }
     public decimal? ValuationAmount { get; set; }
+    public decimal? OwnerConsiderationCost { get; set; }
+    public decimal? ExternalSurveyorCost { get; set; }
+    public decimal? StampDutyCost { get; set; }
+    public decimal? OtherAcquisitionCost { get; set; }
+    public decimal? TotalCapitalizedCost { get; set; }
     public string Currency { get; set; } = "GHS";
     public bool IsAvailableForLease { get; set; }
     public bool IsAvailableForSale { get; set; }
@@ -195,6 +200,11 @@ public class CreateManualExistingLandDto
     public string BoundaryCoordinates { get; set; } = string.Empty;
     public bool BoundaryVerified { get; set; }
     public decimal ValuationAmount { get; set; }
+    public decimal? OwnerConsiderationCost { get; set; }
+    public decimal? ExternalSurveyorCost { get; set; }
+    public decimal? StampDutyCost { get; set; }
+    public decimal? OtherAcquisitionCost { get; set; }
+    public decimal? TotalCapitalizedCost { get; set; }
     public string Currency { get; set; } = "GHS";
     public string Notes { get; set; } = string.Empty;
     public bool IsReadyForProjectManagement { get; set; }

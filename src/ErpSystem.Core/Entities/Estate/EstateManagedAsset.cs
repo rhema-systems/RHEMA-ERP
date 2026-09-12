@@ -113,6 +113,11 @@ public class EstateManagedAsset : TenantEntity
 
     public decimal? AreaSquareMeters { get; set; }
     public decimal? ValuationAmount { get; set; }
+    public decimal? OwnerConsiderationCost { get; set; }
+    public decimal? ExternalSurveyorCost { get; set; }
+    public decimal? StampDutyCost { get; set; }
+    public decimal? OtherAcquisitionCost { get; set; }
+    public decimal? TotalCapitalizedCost { get; set; }
 
     [MaxLength(10)]
     public string Currency { get; set; } = "GHS";

@@ -55,7 +55,7 @@ public class LandAcquisitionsController : ControllerBase
         [13] = ["financeApprovalReference", "approvedDutyAmount", "approverName", "approvalNotes"],
         [14] = ["accountsPayablePayment"],
         [15] = ["registryOffice", "publicationDate", "landTitleReference", "landTitleCapturedDate", "registrationNumber", "volume", "folio", "registrationDate", "isRegistered", "documentName", "registrationNotes"],
-        [16] = ["assetCode", "assetNumber", "parcelIdentifier", "registrationNumber", "ownerName", "assetLocation", "assetCategory", "size", "sizeUnit", "assetStatus", "purpose", "zoningClassification", "ownershipVerification", "ownerConsiderationCost", "stampDutyCost", "totalCapitalizedCost", "capitalizationValue", "glAccount", "custodian", "assetNotes"]
+        [16] = ["assetCode", "assetNumber", "parcelIdentifier", "registrationNumber", "assetCategory", "size", "sizeUnit", "assetStatus", "purpose", "zoningClassification", "ownershipVerification", "ownerConsiderationCost", "stampDutyCost", "totalCapitalizedCost", "capitalizationValue", "glAccount", "custodian", "assetNotes"]
     };
     private static readonly ISet<int> ApprovalStageOrders = new HashSet<int>
     {
@@ -114,6 +114,7 @@ public class LandAcquisitionsController : ControllerBase
             await SyncSurveyorPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
             await SyncVendorPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
             await SyncStampDutyPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
+            await SyncOtherAcquisitionCostsFromAccountsPayableAsync(acquisition, cancellationToken);
             await SyncStageFromCurrentWorkflowStepAsync(acquisition, cancellationToken);
         }
 
@@ -298,6 +299,7 @@ public class LandAcquisitionsController : ControllerBase
         await SyncSurveyorPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
         await SyncVendorPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
         await SyncStampDutyPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
+        await SyncOtherAcquisitionCostsFromAccountsPayableAsync(acquisition, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
 
         var snapshots = ReadWorkspaceSnapshots(acquisition);
@@ -966,7 +968,7 @@ public class LandAcquisitionsController : ControllerBase
         var assetCreationStage = StageDefinitions[^1];
         if (acquisition.StageOrder < assetCreationStage.Order)
         {
-            return BadRequest("Complete the acquisition workflow through asset creation before publishing it to the Estate Land Bank.");
+            return BadRequest("Complete the acquisition workflow through land creation before publishing it to the Estate Land Bank.");
         }
 
         // Land Bank publishing stays behind the same workflow authority as the active acquisition stage.
@@ -993,7 +995,7 @@ public class LandAcquisitionsController : ControllerBase
         {
             return BadRequest(new
             {
-                message = "Complete every required asset creation input before publishing this acquisition to the Estate Land Bank.",
+                message = "Complete every required land creation input before publishing this acquisition to the Estate Land Bank.",
                 missingInputs
             });
         }
@@ -1065,7 +1067,7 @@ public class LandAcquisitionsController : ControllerBase
                     IsCurrentOwner = item.IsCurrentOwner
                 })
                 .ToList(),
-            // Reaching asset creation proves the Survey Verification workflow stage was approved.
+            // Reaching land creation proves the Survey Verification workflow stage was approved.
             // The removed verification checkboxes must not remain a hidden prerequisite for Land Bank use.
             // CadastralMatch: true after Survey Verification is approved.
             CadastralMatch = acquisition.StageOrder > (int)AcquisitionProcedure.SurveyVerification,
@@ -1320,9 +1322,16 @@ public class LandAcquisitionsController : ControllerBase
 
             case AcquisitionProcedure.LandAssetCreation:
                 var asset = acquisition.LandAssets.FirstOrDefault() ?? Child(new LandAsset(), acquisition);
+                var snapshots = ReadWorkspaceSnapshots(acquisition);
+                snapshots.TryGetValue((int)AcquisitionProcedure.LandsCommissionRegistration, out var registrationSnapshot);
+                snapshots.TryGetValue((int)AcquisitionProcedure.OwnershipVerification, out var ownershipVerification);
+                var latestRegistration = acquisition.Registrations
+                    .Where(item => !item.IsDeleted)
+                    .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                    .FirstOrDefault();
                 var capitalization = BuildCapitalizationSummary(
                     acquisition,
-                    ReadWorkspaceSnapshots(acquisition),
+                    snapshots,
                     values,
                     asset);
                 values["ownerConsiderationCost"] = capitalization.OwnerConsiderationCost;
@@ -1333,23 +1342,57 @@ public class LandAcquisitionsController : ControllerBase
                 values["capitalizationValue"] = capitalization.TotalCapitalizedCost;
                 values["capitalizationBreakdown"] = capitalization.Breakdown;
                 values["ownerName"] = AcquiringOwnerName;
-                asset.AssetCode = Text(values, "assetCode") ?? Text(values, "assetNumber") ?? asset.AssetCode;
-                asset.AssetNumber = Text(values, "assetNumber") ?? asset.AssetNumber;
-                asset.ParcelIdentifier = Text(values, "parcelIdentifier") ?? asset.ParcelIdentifier;
-                asset.RegistrationNumber = Text(values, "registrationNumber") ?? asset.RegistrationNumber;
+                asset.AssetCode = Text(values, "assetCode") ?? Text(values, "assetNumber") ?? asset.AssetCode ?? GenerateLandAssetCode(acquisition.ProjectReference);
+                asset.AssetNumber = Text(values, "assetNumber") ?? asset.AssetNumber ?? GenerateLandAssetNumber(acquisition.ProjectReference);
+                asset.ParcelIdentifier = Text(values, "parcelIdentifier") ?? asset.ParcelIdentifier ?? acquisition.ProjectReference;
+                asset.RegistrationNumber =
+                    Text(values, "registrationNumber") ??
+                    asset.RegistrationNumber ??
+                    latestRegistration?.RegistrationNumber ??
+                    SnapshotText(registrationSnapshot, "registrationNumber");
                 asset.OwnerName = AcquiringOwnerName;
-                asset.Location = Text(values, "assetLocation") ?? Text(values, "location") ?? asset.Location;
-                asset.AssetCategory = Text(values, "assetCategory") ?? Text(values, "assetType") ?? asset.AssetCategory;
-                asset.Size = Decimal(values, "size") ?? asset.Size;
-                asset.SizeUnit = Text(values, "sizeUnit") ?? asset.SizeUnit;
-                asset.Status = Text(values, "assetStatus") ?? asset.Status;
-                asset.Purpose = Text(values, "purpose") ?? asset.Purpose;
-                asset.ZoningClassification = Text(values, "zoningClassification") ?? asset.ZoningClassification;
-                asset.OwnershipVerification = Text(values, "ownershipVerification") ?? asset.OwnershipVerification;
+                asset.Location = Text(values, "assetLocation") ?? Text(values, "location") ?? asset.Location ?? acquisition.Location;
+                asset.AssetCategory = Text(values, "assetCategory") ?? Text(values, "assetType") ?? asset.AssetCategory ?? "Land";
+                asset.Size = Decimal(values, "size") ?? asset.Size ?? acquisition.EstimatedSize;
+                asset.SizeUnit = Text(values, "sizeUnit") ?? asset.SizeUnit ?? "Acres";
+                asset.Status = Text(values, "assetStatus") ?? asset.Status ?? "Active";
+                asset.Purpose =
+                    Text(values, "purpose") ??
+                    asset.Purpose ??
+                    (string.IsNullOrWhiteSpace(acquisition.IntendedUse) ? "Land bank asset pending project handoff" : $"{acquisition.IntendedUse} land bank asset pending project handoff");
+                asset.ZoningClassification =
+                    Text(values, "zoningClassification") ??
+                    asset.ZoningClassification ??
+                    acquisition.PhysicalAssessment?.ZoningClassification ??
+                    SnapshotText(ownershipVerification, "zoningClassification") ??
+                    "Not classified";
+                asset.OwnershipVerification =
+                    Text(values, "ownershipVerification") ??
+                    asset.OwnershipVerification ??
+                    SnapshotText(ownershipVerification, "dueDiligenceStatus") ??
+                    "Ownership verified through legal due diligence and Lands Commission registration";
                 asset.CapitalizationValue = capitalization.TotalCapitalizedCost;
                 asset.GlAccount = NormalizeLandAssetGlAccount(Text(values, "glAccount") ?? asset.GlAccount);
-                asset.Custodian = Text(values, "custodian") ?? asset.Custodian;
-                asset.Notes = Text(values, "assetNotes") ?? asset.Notes;
+                asset.Custodian = Text(values, "custodian") ?? asset.Custodian ?? _currentUserService.UserName ?? "Fixed Asset Officer";
+                asset.Notes =
+                    Text(values, "assetNotes") ??
+                    asset.Notes ??
+                    "Created from completed estate land acquisition workflow. Capitalized cost includes owner consideration, surveyor costs, stamp duty, and other acquisition costs supported by the workflow.";
+                values["assetCode"] = asset.AssetCode;
+                values["assetNumber"] = asset.AssetNumber;
+                values["parcelIdentifier"] = asset.ParcelIdentifier;
+                values["registrationNumber"] = asset.RegistrationNumber;
+                values["assetLocation"] = asset.Location;
+                values["assetCategory"] = asset.AssetCategory;
+                values["size"] = asset.Size;
+                values["sizeUnit"] = asset.SizeUnit;
+                values["assetStatus"] = asset.Status;
+                values["purpose"] = asset.Purpose;
+                values["zoningClassification"] = asset.ZoningClassification;
+                values["ownershipVerification"] = asset.OwnershipVerification;
+                values["glAccount"] = asset.GlAccount;
+                values["custodian"] = asset.Custodian;
+                values["assetNotes"] = asset.Notes;
                 ApplyOwnershipTransferAtAssetCreation(acquisition, asset);
                 break;
         }
@@ -1386,7 +1429,7 @@ public class LandAcquisitionsController : ControllerBase
         acquiringOwner.OwnershipEndDate = null;
         acquiringOwner.OwnershipPercentage = 100m;
         acquiringOwner.IsCurrentOwner = true;
-        acquiringOwner.Notes = "Ownership transferred to TDC when the land asset was created.";
+        acquiringOwner.Notes = "Ownership transferred to TDC when the land was created.";
         acquiringOwner.UpdatedAt = transferDate;
         acquiringOwner.UpdatedBy = _currentUserService.UserName;
         acquiringOwner.LastModifiedById = GetUserId();
@@ -1548,6 +1591,65 @@ public class LandAcquisitionsController : ControllerBase
         {
             fixedAsset.AcquisitionCost = defaultBookValue.AcquisitionCost;
             fixedAsset.NetBookValue = defaultBookValue.NetBookValue;
+        }
+    }
+
+    [HttpPost("{id:guid}/other-acquisition-costs/accounts-payable-request")]
+    public async Task<ActionResult<LandAcquisitionWorkspaceDataResponse>> EnsureOtherAcquisitionCostsAccountsPayableRequest(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var acquisition = await BaseQuery(GetTenantId())
+            .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (acquisition == null)
+        {
+            return NotFound("Land acquisition was not found.");
+        }
+
+        if (acquisition.StageOrder != (int)AcquisitionProcedure.StampDutyPayment)
+        {
+            return BadRequest("Other acquisition cost payment is available during Stamp Duty Payment.");
+        }
+
+        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            await EnsureOtherAcquisitionCostsPayableAsync(acquisition, GetUserId(), cancellationToken);
+            await SyncOtherAcquisitionCostsFromAccountsPayableAsync(acquisition, cancellationToken);
+            acquisition.LastModifiedById = GetUserId();
+            acquisition.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+
+            var snapshots = ReadWorkspaceSnapshots(acquisition);
+            snapshots.TryGetValue(acquisition.StageOrder, out var values);
+            var responseValues = values?.ToDictionary(
+                pair => pair.Key,
+                pair => (object?)pair.Value,
+                StringComparer.OrdinalIgnoreCase)
+                ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            var documentRequirementsByStage = await GetWorkflowDocumentRequirementsByStageAsync(acquisition, cancellationToken);
+            var missingInputs = GetMissingStageInputs(acquisition, acquisition.StageOrder, documentRequirementsByStage);
+            var documentRequirements = documentRequirementsByStage.TryGetValue(acquisition.StageOrder, out var configuredRequirements)
+                ? configuredRequirements
+                : Array.Empty<WorkflowDocumentRequirementDto>();
+
+            return Ok(new LandAcquisitionWorkspaceDataResponse
+            {
+                AcquisitionId = acquisition.Id,
+                ProcedureId = acquisition.StageOrder,
+                Values = responseValues,
+                StageInputsComplete = missingInputs.Count == 0,
+                MissingInputs = missingInputs,
+                DocumentRequirements = documentRequirements
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
     }
 
@@ -2055,13 +2157,14 @@ public class LandAcquisitionsController : ControllerBase
             responseValues,
             "purpose",
             asset?.Purpose ??
-            (string.IsNullOrWhiteSpace(acquisition.IntendedUse) ? null : $"{acquisition.IntendedUse} land bank asset pending project handoff"));
+            (string.IsNullOrWhiteSpace(acquisition.IntendedUse) ? "Land bank asset pending project handoff" : $"{acquisition.IntendedUse} land bank asset pending project handoff"));
         SetMissingResponseValue(
             responseValues,
             "zoningClassification",
             asset?.ZoningClassification ??
             acquisition.PhysicalAssessment?.ZoningClassification ??
-            SnapshotText(ownershipVerification, "zoningClassification"));
+            SnapshotText(ownershipVerification, "zoningClassification") ??
+            "Not classified");
         SetMissingResponseValue(
             responseValues,
             "ownershipVerification",
@@ -2131,8 +2234,14 @@ public class LandAcquisitionsController : ControllerBase
             SnapshotDecimal(stampDutyAssessmentSnapshot, "dutyAmount") ??
             0m;
 
+        var otherServiceCosts = ReadOtherAcquisitionServiceCosts(stampDutyPaymentSnapshot);
+        var otherServicesTotal = otherServiceCosts.Sum(item => item.Amount);
         var otherAcquisitionCost =
             ObjectDecimal(assetCreationValues, "otherAcquisitionCost") ??
+            SnapshotDecimal(stampDutyPaymentSnapshot, "otherAmountPaid") ??
+            SnapshotDecimal(stampDutyPaymentSnapshot, "otherAcquisitionCost") ??
+            SnapshotDecimal(stampDutyPaymentSnapshot, "otherAmountDue") ??
+            (otherServicesTotal > 0m ? otherServicesTotal : (decimal?)null) ??
             SnapshotDecimal(snapshots.TryGetValue((int)AcquisitionProcedure.LandAssetCreation, out var assetCreationSnapshot)
                 ? assetCreationSnapshot
                 : null, "otherAcquisitionCost") ??
@@ -2150,7 +2259,7 @@ public class LandAcquisitionsController : ControllerBase
             $"External surveyor cost: GHS {externalSurveyorCost:N2}",
             $"Stamp duty: GHS {stampDuty:N2}",
             $"Other acquisition costs: GHS {otherAcquisitionCost:N2}",
-            $"Total land asset cost: GHS {total:N2}"
+            $"Total land cost: GHS {total:N2}"
         };
 
         return new LandCapitalizationSummary(
@@ -2172,6 +2281,64 @@ public class LandAcquisitionsController : ControllerBase
 
     private static string FormatDecimal(decimal value)
         => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static IReadOnlyList<OtherAcquisitionServiceCostInput> ReadOtherAcquisitionServiceCosts(
+        IReadOnlyDictionary<string, JsonElement>? values)
+    {
+        var json = SnapshotText(values, "otherAcquisitionServicesJson");
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            var rows = JsonSerializer.Deserialize<List<OtherAcquisitionServiceCostInput>>(json, WorkflowStepJsonOptions) ?? [];
+            return rows
+                .Select(row => row with
+                {
+                    ServiceName = row.ServiceName?.Trim() ?? string.Empty,
+                    PayeeName = row.PayeeName?.Trim(),
+                    Notes = row.Notes?.Trim()
+                })
+                .Where(row => !string.IsNullOrWhiteSpace(row.ServiceName) && row.Amount > 0m)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static string BuildOtherAcquisitionServiceDescription(OtherAcquisitionServiceCostInput service)
+    {
+        var parts = new[]
+        {
+            service.ServiceName,
+            string.IsNullOrWhiteSpace(service.PayeeName) ? null : $"Payee: {service.PayeeName}",
+            string.IsNullOrWhiteSpace(service.Notes) ? null : service.Notes
+        }.Where(item => !string.IsNullOrWhiteSpace(item));
+        return string.Join(" - ", parts);
+    }
+
+    private static Dictionary<string, object?> SnapshotToObjectDictionary(
+        IReadOnlyDictionary<string, JsonElement>? values)
+        => values?.ToDictionary(
+            pair => pair.Key,
+            pair => (object?)pair.Value.Clone(),
+            StringComparer.OrdinalIgnoreCase)
+            ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record OtherAcquisitionServiceCostInput
+    {
+        public string Id { get; init; } = string.Empty;
+        public string ServiceName { get; init; } = string.Empty;
+        public string? PayeeName { get; init; }
+        [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+        public decimal Amount { get; init; }
+        public string? DueDate { get; init; }
+        public string? Notes { get; init; }
+    }
 
     private static string NormalizeLandAssetGlAccount(string? value)
         => string.IsNullOrWhiteSpace(value) ||
@@ -2514,13 +2681,6 @@ public class LandAcquisitionsController : ControllerBase
 
     private static bool IsExternalSurveyor(IReadOnlyDictionary<string, JsonElement>? values)
         => string.Equals(SnapshotText(values, "surveyorSource"), "External", StringComparison.OrdinalIgnoreCase);
-
-    private static Dictionary<string, object?> SnapshotToObjectDictionary(
-        IReadOnlyDictionary<string, JsonElement> values)
-        => values.ToDictionary(
-            pair => pair.Key,
-            pair => (object?)pair.Value.Clone(),
-            StringComparer.OrdinalIgnoreCase);
 
     private static string BuildSurveyorPaymentSourceReference(Guid acquisitionId)
         => $"LAND-SURVEYOR-FEE:{acquisitionId:N}";
@@ -3003,6 +3163,223 @@ public class LandAcquisitionsController : ControllerBase
         await EnsureAcquisitionPayableSubmittedForApprovalAsync(invoice, cancellationToken);
         await SyncStampDutyPaymentFromAccountsPayableAsync(acquisition, cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsureOtherAcquisitionCostsPayableAsync(
+        LandAcquisition acquisition,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = ReadWorkspaceSnapshots(acquisition);
+        snapshots.TryGetValue((int)AcquisitionProcedure.StampDutyPayment, out var paymentSnapshot);
+        var services = ReadOtherAcquisitionServiceCosts(paymentSnapshot);
+        if (services.Count == 0)
+        {
+            throw new InvalidOperationException("Add at least one other acquisition service cost before creating the Accounts Payable request.");
+        }
+
+        var totalAmount = services.Sum(item => item.Amount);
+        if (totalAmount <= 0m)
+        {
+            throw new InvalidOperationException("Other acquisition service costs must have a total amount greater than zero.");
+        }
+
+        var supplierCode = "LAND-ACQ-OTHER-COSTS";
+        var supplierName = "Land Acquisition Other Service Providers";
+        var supplier = await _context.Set<Supplier>()
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == acquisition.TenantId &&
+                !item.IsDeleted &&
+                (item.SupplierCode == supplierCode || item.Name == supplierName),
+                cancellationToken);
+        if (supplier == null)
+        {
+            supplier = new Supplier
+            {
+                Id = Guid.NewGuid(),
+                TenantId = acquisition.TenantId,
+                SupplierCode = supplierCode,
+                Name = supplierName,
+                Description = "Generic supplier for estate land acquisition service costs captured before land creation.",
+                SupplierType = "Vendor",
+                Country = "Ghana",
+                PaymentTerms = "Due on receipt",
+                LeadTimeDays = 0,
+                IsWithholdingTaxApplicable = false,
+                TaxTreatment = TaxTreatment.OutOfScope,
+                IsActive = true,
+                Status = "Active",
+                CreatedById = userId == Guid.Empty ? null : userId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUserService.UserName ?? "Land Acquisition"
+            };
+            _context.Set<Supplier>().Add(supplier);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        var sourceReference = $"LAND-OTHER-COSTS:{acquisition.Id:N}";
+        var invoice = await _context.Set<VendorInvoice>()
+            .Include(item => item.LineItems)
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == acquisition.TenantId &&
+                !item.IsDeleted &&
+                item.Reference == sourceReference,
+                cancellationToken);
+        var debitAccountId = invoice?.JournalEntryId.HasValue == true
+            ? (Guid?)null
+            : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
+
+        if (invoice == null)
+        {
+            var earliestDueDate = services
+                .Select(item => ParseDate(item.DueDate))
+                .Where(date => date.HasValue)
+                .Select(date => date!.Value)
+                .DefaultIfEmpty(DateTime.UtcNow)
+                .Min();
+            var createdInvoice = await _vendorInvoiceService.CreateAsync(new VendorInvoiceCreateDto
+            {
+                SupplierInvoiceNumber = $"OTHER-{acquisition.ProjectReference}",
+                SupplierId = supplier.Id,
+                InvoiceDate = DateTime.UtcNow,
+                ReceivedDate = DateTime.UtcNow,
+                DueDate = earliestDueDate,
+                CurrencyCode = "GHS",
+                ExchangeRate = 1m,
+                PaymentTermsDays = 0,
+                MatchingType = InvoiceMatchingType.None,
+                ExpenseAccountId = debitAccountId,
+                Reference = sourceReference,
+                Notes = $"Other capitalizable land acquisition service costs for {acquisition.ProjectReference}.",
+                LineItems = services.Select(service => new VendorInvoiceLineItemCreateDto
+                {
+                    LineItemType = "Service",
+                    Description = BuildOtherAcquisitionServiceDescription(service),
+                    Quantity = 1m,
+                    UnitPrice = service.Amount,
+                    GLAccountId = debitAccountId,
+                    TaxTreatment = TaxTreatment.OutOfScope,
+                    Unit = "Service"
+                }).ToList()
+            }, cancellationToken);
+
+            invoice = await _context.Set<VendorInvoice>()
+                .Include(item => item.LineItems)
+                .FirstAsync(item =>
+                    item.TenantId == acquisition.TenantId &&
+                    item.Id == createdInvoice.Id &&
+                    !item.IsDeleted,
+                    cancellationToken);
+        }
+        else if (!invoice.JournalEntryId.HasValue)
+        {
+            foreach (var line in invoice.LineItems.Where(line => !line.IsDeleted && !line.GLAccountId.HasValue))
+            {
+                line.GLAccountId = debitAccountId;
+                line.UpdatedAt = DateTime.UtcNow;
+                line.UpdatedBy = _currentUserService.UserName ?? "Land Acquisition";
+            }
+        }
+
+        var values = SnapshotToObjectDictionary(paymentSnapshot);
+        values["otherAccountsPayableSupplierId"] = invoice.SupplierId;
+        values["otherAccountsPayableInvoiceId"] = invoice.Id;
+        values["otherAccountsPayableInvoiceNumber"] = invoice.InvoiceNumber;
+        values["otherAccountsPayableInvoiceStatus"] = invoice.Status.ToString();
+        values["otherAccountsPayablePaymentId"] = null;
+        values["otherAccountsPayablePaymentNumber"] = null;
+        values["otherAccountsPayablePaymentStatus"] = "Pending";
+        values["otherAmountDue"] = invoice.TotalAmount;
+        values["otherAmountPaid"] = invoice.PaidAmount;
+        values["otherCostsPaid"] = false;
+        values["otherAcquisitionCost"] = totalAmount;
+        values["otherPaymentNotes"] = $"Complete other acquisition cost payment in Accounts Payable for invoice {invoice.InvoiceNumber}.";
+        SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, values);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await EnsureAcquisitionPayableSubmittedForApprovalAsync(invoice, cancellationToken);
+    }
+
+    private async Task SyncOtherAcquisitionCostsFromAccountsPayableAsync(
+        LandAcquisition acquisition,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = ReadWorkspaceSnapshots(acquisition);
+        if (!snapshots.TryGetValue((int)AcquisitionProcedure.StampDutyPayment, out var paymentSnapshot))
+        {
+            return;
+        }
+
+        var invoiceId = SnapshotGuid(paymentSnapshot, "otherAccountsPayableInvoiceId");
+        if (!invoiceId.HasValue)
+        {
+            return;
+        }
+
+        var invoice = await _context.Set<VendorInvoice>()
+            .Include(item => item.PaymentAllocations)
+                .ThenInclude(allocation => allocation.VendorPayment)
+            .FirstOrDefaultAsync(item =>
+                item.TenantId == acquisition.TenantId &&
+                item.Id == invoiceId.Value &&
+                !item.IsDeleted,
+                cancellationToken);
+        if (invoice == null)
+        {
+            var missingValues = SnapshotToObjectDictionary(paymentSnapshot);
+            missingValues["otherPaymentNotes"] = "The linked other acquisition costs AP invoice could not be found.";
+            SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, missingValues);
+            return;
+        }
+
+        var activeAllocations = invoice.PaymentAllocations
+            .Where(allocation =>
+                !allocation.IsDeleted &&
+                allocation.VendorPayment != null &&
+                !allocation.VendorPayment.IsDeleted &&
+                IsActiveAccountsPayablePayment(allocation.VendorPayment.Status))
+            .ToList();
+        var completedAllocations = activeAllocations
+            .Where(allocation => IsCompletedAccountsPayablePayment(allocation.VendorPayment!.Status))
+            .ToList();
+        var activeAllocation = completedAllocations.FirstOrDefault() ??
+            activeAllocations
+                .OrderByDescending(allocation => allocation.UpdatedAt ?? allocation.CreatedAt)
+                .FirstOrDefault();
+        var vendorPayment = activeAllocation?.VendorPayment;
+        var completedPayment = completedAllocations.FirstOrDefault()?.VendorPayment;
+        var paidAmount = completedAllocations.Sum(allocation => allocation.AllocatedAmount);
+        if (paidAmount <= 0m)
+        {
+            paidAmount = invoice.PaidAmount;
+        }
+
+        var payableAmount = SnapshotDecimal(paymentSnapshot, "otherAmountDue") ?? invoice.TotalAmount;
+        var balanceAmount = Math.Max(0m, payableAmount - paidAmount);
+        var isPaid = completedPayment != null && balanceAmount <= 0.01m;
+        var paymentNotes = vendorPayment == null
+            ? $"Accounts Payable invoice {invoice.InvoiceNumber} is {invoice.Status}; payment has not been recorded."
+            : isPaid
+                ? vendorPayment.Notes ?? $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}."
+                : $"Accounts Payable payment {vendorPayment.PaymentNumber} is {vendorPayment.Status}; paid {invoice.CurrencyCode} {paidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}, balance {invoice.CurrencyCode} {balanceAmount:N2}.";
+
+        var values = SnapshotToObjectDictionary(paymentSnapshot);
+        values["otherAccountsPayableSupplierId"] = invoice.SupplierId;
+        values["otherAccountsPayableInvoiceId"] = invoice.Id;
+        values["otherAccountsPayableInvoiceNumber"] = invoice.InvoiceNumber;
+        values["otherAccountsPayableInvoiceStatus"] = invoice.Status.ToString();
+        values["otherAccountsPayablePaymentId"] = vendorPayment?.Id;
+        values["otherAccountsPayablePaymentNumber"] = vendorPayment?.PaymentNumber;
+        values["otherAccountsPayablePaymentStatus"] = vendorPayment?.Status.ToString() ?? "Pending";
+        values["otherAmountDue"] = invoice.TotalAmount;
+        values["otherAmountPaid"] = paidAmount;
+        values["otherCostsPaid"] = isPaid;
+        values["otherAcquisitionCost"] = isPaid ? paidAmount : invoice.TotalAmount;
+        values["otherPaymentReference"] = vendorPayment?.TransactionReference ?? vendorPayment?.PaymentNumber;
+        values["otherPaymentDate"] = vendorPayment?.PaymentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        values["otherPaymentMethod"] = vendorPayment?.PaymentMethod.ToString();
+        values["otherPaymentNotes"] = paymentNotes;
+        SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, values);
     }
 
     private async Task EnsureAcquisitionPayableSubmittedForApprovalAsync(
@@ -3820,6 +4197,15 @@ public class LandAcquisitionsController : ControllerBase
         string key)
         => DateTime.TryParse(
             SnapshotText(values, key),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal,
+            out var date)
+            ? date
+            : null;
+
+    private static DateTime? ParseDate(string? value)
+        => DateTime.TryParse(
+            value,
             CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal,
             out var date)
@@ -5355,6 +5741,6 @@ public class LandAcquisitionsController : ControllerBase
         new(13, 13, "Stamp Duty Approval", "Stamp Duty Approval", "Approve the stamp duty assessment before payment is processed.", "stamp-duty-approval", "/LandParcel/StampDutyApproval", "GET", "Finance Manager", "Approve Stamp Duty Assessment", "Reject Stamp Duty Assessment"),
         new(14, 14, "Stamp Duty Payment", "Stamp Duty Payment", "Track the linked Accounts Payable request and continue after its payment is processed.", "stamp-duty-payment", "/LandParcel/StampDutyPaymentPage", "GET", "Accounts Payable", "Confirm Accounts Payable Payment", "Return Payment"),
         new(15, 15, "Registration", "Registration", "Capture publication, title reference, registration number, volume, folio, instrument date, and archive details.", "registration", "/LandParcel/RegistrationStage", "GET", "Land Registry Officer", "Submit Registration", "Return Registration"),
-        new(16, 16, "Asset Creation", "Asset Creation", "Create the estate asset, confirm the total capitalized land cost, GL transfer target, and custodian.", "asset-creation", "/LandParcel/AssetCreation", "GET", "Fixed Asset Officer", "Create Estate Asset", "Return Asset Creation"),
+        new(16, 16, "Land Creation", "Land Creation", "Create the estate land record, confirm the total capitalized land cost, GL transfer target, and custodian.", "asset-creation", "/LandParcel/AssetCreation", "GET", "Fixed Asset Officer", "Create Estate Land", "Return Land Creation"),
     };
 }

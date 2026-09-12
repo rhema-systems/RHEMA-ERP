@@ -84,6 +84,12 @@ export interface EstateManagedAsset {
   propertyFileReference?: string;
   areaSquareMeters?: number;
   valuationAmount?: number;
+  targetSalePrice?: number | null;
+  ownerConsiderationCost?: number | null;
+  externalSurveyorCost?: number | null;
+  stampDutyCost?: number | null;
+  otherAcquisitionCost?: number | null;
+  totalCapitalizedCost?: number | null;
   currency: string;
   isAvailableForLease: boolean;
   isAvailableForSale: boolean;
@@ -153,6 +159,11 @@ export interface CreateManualExistingLand {
   boundaryCoordinates: string;
   boundaryVerified: boolean;
   valuationAmount: number;
+  ownerConsiderationCost?: number | null;
+  externalSurveyorCost?: number | null;
+  stampDutyCost?: number | null;
+  otherAcquisitionCost?: number | null;
+  totalCapitalizedCost?: number | null;
   currency: string;
   notes: string;
   isReadyForProjectManagement: boolean;

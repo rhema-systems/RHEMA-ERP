@@ -70,6 +70,14 @@ type PendingDemarcation = SaveEstateLandDemarcation & {
   costAllocationMethod: string;
 };
 
+type CostingDemarcation = {
+  id: string;
+  parentDemarcationId?: string | null;
+  areaSquareFeet: number | null;
+  allocatedCost?: number | null;
+  costAllocationMethod?: string | null;
+};
+
 type ConfirmationState = {
   open: boolean;
   title: string;
@@ -265,7 +273,7 @@ function getAssetAreaInAcres(asset?: EstateManagedAsset | null) {
 
 function estimateByAreaCost(
   asset: EstateManagedAsset | null,
-  demarcations: EstateLandDemarcation[],
+  demarcations: CostingDemarcation[],
   parentDemarcationId: string | null | undefined,
   areaSquareFeet: number | null
 ) {
@@ -274,31 +282,101 @@ function estimateByAreaCost(
   }
 
   const acres = areaSquareFeet / 43560;
-  if (parentDemarcationId) {
-    const parent = demarcations.find((item) => item.id === parentDemarcationId);
-    if (!parent?.allocatedCost || !parent.areaSquareFeet) {
-      return { allocatedCost: null, costPerAcre: null };
-    }
-
-    const parentAcres = parent.areaSquareFeet / 43560;
-    if (parentAcres <= 0) return { allocatedCost: null, costPerAcre: null };
-    const costPerAcre = roundMoney(parent.allocatedCost / parentAcres);
-    return {
-      allocatedCost: roundMoney(costPerAcre * acres),
-      costPerAcre,
-    };
-  }
-
-  const totalAcres = getAssetAreaInAcres(asset);
-  if (!asset.valuationAmount || totalAcres <= 0) {
+  const parent = parentDemarcationId
+    ? demarcations.find((item) => item.id === parentDemarcationId)
+    : null;
+  const parentCost = parentDemarcationId
+    ? parent?.allocatedCost ?? 0
+    : asset.valuationAmount;
+  const parentAcres = parentDemarcationId
+    ? (parent?.areaSquareFeet ?? 0) / 43560
+    : getAssetAreaInAcres(asset);
+  if (!parentCost || parentCost <= 0 || parentAcres <= 0) {
     return { allocatedCost: null, costPerAcre: null };
   }
 
-  const costPerAcre = roundMoney(asset.valuationAmount / totalAcres);
+  const manualSiblings = demarcations.filter(
+    (item) =>
+      item.parentDemarcationId === (parentDemarcationId || null) &&
+      item.costAllocationMethod === 'Manual' &&
+      (item.allocatedCost ?? 0) > 0
+  );
+  const manualCost = manualSiblings.reduce(
+    (total, item) => total + (item.allocatedCost ?? 0),
+    0
+  );
+  const manualAcres = manualSiblings.reduce((total, item) => {
+    const siblingAcres = (item.areaSquareFeet ?? 0) / 43560;
+    return siblingAcres > 0 ? total + siblingAcres : total;
+  }, 0);
+  const remainingCost = parentCost - manualCost;
+  const remainingAcres = parentAcres - manualAcres;
+  if (remainingCost <= 0 || remainingAcres <= 0) {
+    return { allocatedCost: null, costPerAcre: null };
+  }
+
+  const costPerAcre = roundMoney(remainingCost / remainingAcres);
   return {
     allocatedCost: roundMoney(costPerAcre * acres),
     costPerAcre,
   };
+}
+
+function buildCostingDemarcations(
+  saved: EstateLandDemarcation[],
+  pending: PendingDemarcation[]
+): CostingDemarcation[] {
+  return [
+    ...saved.map((item) => ({
+      id: item.id,
+      parentDemarcationId: item.parentDemarcationId || null,
+      areaSquareFeet: item.areaSquareFeet,
+      allocatedCost: item.allocatedCost,
+      costAllocationMethod: item.costAllocationMethod,
+    })),
+    ...pending.map((item) => ({
+      id: item.id,
+      parentDemarcationId: item.parentDemarcationId || null,
+      areaSquareFeet: item.areaSquareFeet,
+      allocatedCost: item.allocatedCost,
+      costAllocationMethod: item.costAllocationMethod,
+    })),
+  ];
+}
+
+function rebalanceByAreaEstimates(
+  asset: EstateManagedAsset | null,
+  saved: EstateLandDemarcation[],
+  pending: PendingDemarcation[]
+) {
+  if (!asset || pending.length === 0) return pending;
+
+  const next = [...pending];
+  for (let index = 0; index < next.length; index++) {
+    const item = next[index];
+    if (item.costAllocationMethod === 'Manual' || !item.areaSquareFeet) {
+      continue;
+    }
+
+    const costingDemarcations = buildCostingDemarcations(
+      saved,
+      next.slice(0, index)
+    );
+    const estimate = estimateByAreaCost(
+      asset,
+      costingDemarcations,
+      item.parentDemarcationId,
+      item.areaSquareFeet
+    );
+    next[index] = {
+      ...item,
+      allocatedCost: estimate.allocatedCost,
+      costPerAcre: estimate.costPerAcre,
+      costAllocationMethod: estimate.allocatedCost ? 'ByArea' : 'NotSet',
+    };
+  }
+
+  return next;
 }
 
 export default function DemarcateLandDialog({
@@ -458,7 +536,7 @@ export default function DemarcateLandDialog({
     [leafDemarcations]
   );
   const parentLandValue = asset?.valuationAmount ?? 0;
-  const allocationDifference = allocatedCostTotal - parentLandValue;
+  const unallocatedParentValue = parentLandValue - allocatedCostTotal;
   const hasDraftValues = originalDemarcation
     ? description.trim() !== originalDemarcation.description.trim() ||
       parentDemarcationId !==
@@ -543,28 +621,30 @@ export default function DemarcateLandDialog({
       return;
     }
 
-    const areaSquareFeet = measureBoundaryAreaSquareFeet(boundaryCoordinates);
-    const estimate = estimateByAreaCost(
-      asset,
-      demarcations,
-      parentDemarcationId,
-      areaSquareFeet
-    );
-    setPendingDemarcations((current) => [
-      ...current,
-      {
-        id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    setPendingDemarcations((current) => {
+      const areaSquareFeet = measureBoundaryAreaSquareFeet(boundaryCoordinates);
+      const estimate = estimateByAreaCost(
+        asset,
+        buildCostingDemarcations(demarcations, current),
         parentDemarcationId,
-        description: description.trim(),
-        beaconCount: beacons.length,
-        boundaryCoordinates,
-        boundaryVerified,
-        areaSquareFeet,
-        allocatedCost: estimate.allocatedCost,
-        costPerAcre: estimate.costPerAcre,
-        costAllocationMethod: estimate.allocatedCost ? 'ByArea' : 'NotSet',
-      },
-    ]);
+        areaSquareFeet
+      );
+      return [
+        ...current,
+        {
+          id: `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          parentDemarcationId,
+          description: description.trim(),
+          beaconCount: beacons.length,
+          boundaryCoordinates,
+          boundaryVerified,
+          areaSquareFeet,
+          allocatedCost: estimate.allocatedCost,
+          costPerAcre: estimate.costPerAcre,
+          costAllocationMethod: estimate.allocatedCost ? 'ByArea' : 'NotSet',
+        },
+      ];
+    });
     resetEditor();
   };
 
@@ -572,7 +652,11 @@ export default function DemarcateLandDialog({
     if (!(await confirmEditorReplacement('edit this pending demarcation'))) return;
 
     setPendingDemarcations((current) =>
-      current.filter((pending) => pending.id !== item.id)
+      rebalanceByAreaEstimates(
+        asset,
+        demarcations,
+        current.filter((pending) => pending.id !== item.id)
+      )
     );
     setEditingId(null);
     setParentDemarcationId(item.parentDemarcationId || null);
@@ -583,7 +667,11 @@ export default function DemarcateLandDialog({
 
   const removePendingDemarcation = (id: string) => {
     setPendingDemarcations((current) =>
-      current.filter((pending) => pending.id !== id)
+      rebalanceByAreaEstimates(
+        asset,
+        demarcations,
+        current.filter((pending) => pending.id !== id)
+      )
     );
   };
 
@@ -870,7 +958,7 @@ export default function DemarcateLandDialog({
     if (targetInput) {
       const target = Number(targetInput);
       if (!Number.isFinite(target) || target <= 0) {
-        toast.error('Enter a valid target sale price.');
+        toast.error('Enter a valid minimum sale price.');
         return;
       }
       payload.targetSalePrice = target;
@@ -978,15 +1066,15 @@ export default function DemarcateLandDialog({
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Difference</p>
+            <p className="text-xs text-muted-foreground">Unallocated parent value</p>
             <p
               className={`mt-1 font-semibold ${
-                Math.abs(allocationDifference) < 0.01
-                  ? 'text-emerald-700'
-                  : 'text-amber-700'
+                unallocatedParentValue < -0.01
+                  ? 'text-destructive'
+                  : 'text-muted-foreground'
               }`}
             >
-              {formatCurrency(allocationDifference, asset?.currency)}
+              {formatCurrency(unallocatedParentValue, asset?.currency)}
             </p>
           </div>
         </div>
@@ -1102,7 +1190,7 @@ export default function DemarcateLandDialog({
                               : ''}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Target{' '}
+                            Minimum sale price{' '}
                             {formatCurrency(
                               demarcation.targetSalePrice,
                               asset?.currency
@@ -1291,7 +1379,7 @@ export default function DemarcateLandDialog({
                               : ''}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Target Not set
+                            Minimum sale price not set
                           </p>
                         </div>
                       </td>
@@ -1571,8 +1659,8 @@ export default function DemarcateLandDialog({
             </DialogTitle>
             <DialogDescription>
               By-area cost is calculated from the parent land value. Enter a
-              target sale price here, or switch to manual only when Estate needs
-              to override the allocated cost.
+              minimum sale price here, or switch to manual only when Estate
+              needs to override the allocated cost.
             </DialogDescription>
           </DialogHeader>
 
@@ -1645,7 +1733,7 @@ export default function DemarcateLandDialog({
               ) : null}
 
               <div className="space-y-2">
-                <Label htmlFor="target-sale-price">Target sale price</Label>
+                <Label htmlFor="target-sale-price">Minimum sale price</Label>
                 <Input
                   id="target-sale-price"
                   type="number"
