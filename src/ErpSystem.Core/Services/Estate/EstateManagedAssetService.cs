@@ -525,6 +525,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && item.EstateManagedAsset.TenantId == tenantId
                 && !item.EstateManagedAsset.IsDeleted
                 && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                // Only leaf demarcations can be assigned to a project. A parent parcel
+                // overlaps its child parcels and must remain a grouping boundary.
+                && !item.EstateManagedAsset.Demarcations.Any(child =>
+                    !child.IsDeleted && child.ParentDemarcationId == item.Id)
                 && ((item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
                         && (item.IsReadyForProjectManagement || item.EstateManagedAsset.IsReadyForProjectManagement)
                         && !item.IsPublishedToExternalPortal
