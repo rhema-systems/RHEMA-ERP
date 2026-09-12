@@ -2181,3 +2181,10 @@ the 456/C8 repository state offline, freshly derives the source pending delta, a
 readiness blockers. A clean preflight alone may proceed to COPY_ONLY/CHECKSUM/VERIFYONLY/restore/DBCC, exact
 pending-delta application and two-pass invariant evidence. It never drops or overwrites automatically. Independent
 GPT-5.6 Sol High review is required before any operator may supply connections or execute the final-clone path.
+
+The first D1 candidate `f327cabe31a639332ced416003838f21b6876fd6` was not approved. Independent Sol High
+review required exact reviewed commit/tree and full tracked/untracked cleanliness before SQL; independent pending,
+orphan and PASS target-history reconciliation; hash/identity-bound backup/VERIFYONLY/restore/DBCC evidence;
+canonical content invariants for Accounts, AccountSegmentValues and C1-C8 authority/state; and sanitized SQL,
+machine identity and failure evidence with `.sql` included in package scans. A bounded Sol Medium correction is
+active in the same isolated D1 worktree. No database or configured connection was inspected.

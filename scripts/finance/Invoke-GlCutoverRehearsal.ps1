@@ -33,6 +33,77 @@ $finalCutoverFlags = @(
     'Finance__ProducerIntents__Enabled',
     'Finance__ProducerIntentGroups__Enabled'
 )
+$finalReviewedCommitVariable = 'RHEMA_GL_REVIEWED_COMMIT'
+$finalReviewedTreeVariable = 'RHEMA_GL_REVIEWED_TREE'
+$script:sensitiveEvidenceTokens = [System.Collections.Generic.List[string]]::new()
+$script:finalReviewedGitState = $null
+
+function Register-SensitiveEvidenceToken([string]$value) {
+    if (-not [string]::IsNullOrWhiteSpace($value) -and -not $script:sensitiveEvidenceTokens.Contains($value)) {
+        $script:sensitiveEvidenceTokens.Add($value)
+    }
+}
+
+function ConvertTo-SanitizedEvidenceLine([string]$value) {
+    $line = [string]$value
+    $line = $line.Replace($repositoryRoot, '<REPOSITORY>', [StringComparison]::OrdinalIgnoreCase)
+    $line = [regex]::Replace($line, 'C:\\Users\\[^\\\r\n]+', '<USER_PROFILE>', 'IgnoreCase')
+    $line = [regex]::Replace($line, '(?i)\b[A-Z]:\\[^;\r\n]+', '<LOCAL_PATH>')
+    foreach ($token in $script:sensitiveEvidenceTokens) {
+        $line = $line.Replace($token, '<LOCAL_SQL_SERVER>', [StringComparison]::OrdinalIgnoreCase)
+    }
+    $line = [regex]::Replace($line, '(?i)(Password|Pwd|User ID|UID|Data Source|Server|Integrated Security|Trusted_Connection)\s*=\s*[^;\r\n]+', '$1=<REDACTED>')
+    $line = [regex]::Replace($line, '(?i)ClientConnectionId:[0-9a-f-]+', 'ClientConnectionId:<REDACTED>')
+    return $line
+}
+
+function Get-SanitizedExceptionMessage([System.Exception]$exception) {
+    ConvertTo-SanitizedEvidenceLine $exception.Message
+}
+
+function Assert-FinalReviewedGitState {
+    $reviewedCommit = [Environment]::GetEnvironmentVariable($finalReviewedCommitVariable, 'Process')
+    $reviewedTree = [Environment]::GetEnvironmentVariable($finalReviewedTreeVariable, 'Process')
+    if ($reviewedCommit -notmatch '^[0-9a-fA-F]{40}$' -or $reviewedTree -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "RehearseFinalClone requires exact 40-hex $finalReviewedCommitVariable and $finalReviewedTreeVariable process values from independent review."
+    }
+
+    Push-Location $repositoryRoot
+    try {
+        $executedCommit = (& git rev-parse HEAD).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve executed HEAD.' }
+        $executedTree = (& git rev-parse 'HEAD^{tree}').Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to resolve executed HEAD tree.' }
+        if (-not [string]::Equals($executedCommit, $reviewedCommit, [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals($executedTree, $reviewedTree, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Executed HEAD/tree does not exactly match the independently reviewed commit/tree; descendants and other unreviewed states are forbidden.'
+        }
+        $dirty = @(& git status --porcelain=v1 --untracked-files=all)
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to prove repository cleanliness.' }
+        if ($dirty.Count -ne 0) {
+            throw 'RehearseFinalClone requires a completely clean tracked and untracked repository before any SQL contact.'
+        }
+        $ignoredRelevant = @(& git ls-files --others --ignored --exclude-standard | Where-Object {
+            $normalized = $_.Replace('\','/')
+            $isGeneratedPath = $normalized -match '(?i)(^|/)(bin|obj|out|publish|debug|debugpublic|release|releases|outputs|x64|x86|bld|log|artifacts|\.artifacts|node_modules|\.next|dist|coverage|testresults[^/]*|\.vs|\.idea|\.cache)/'
+            -not $isGeneratedPath -and ($normalized -match '(?i)(\.cs|\.csproj|\.props|\.targets|\.json|\.config|\.ps1|\.psm1|\.sql|\.cshtml|\.ts|\.tsx|\.js|\.jsx|\.user|\.suo)$' -or
+                $normalized -match '(?i)(^|/)\.env(\.|$)')
+        })
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect ignored files for relevant workspace changes.' }
+        if ($ignoredRelevant.Count -ne 0) {
+            throw 'RehearseFinalClone found ignored code, migration, seeder, configuration, or script files outside the generated-output allowlist.'
+        }
+    }
+    finally { Pop-Location }
+
+    [pscustomobject]@{
+        reviewedCommit = $reviewedCommit.ToLowerInvariant()
+        reviewedTree = $reviewedTree.ToLowerInvariant()
+        executedCommit = $executedCommit.ToLowerInvariant()
+        executedTree = $executedTree.ToLowerInvariant()
+        repositoryClean = $true
+    }
+}
 
 function Get-ProcessConnectionString([string]$variableName) {
     $value = [Environment]::GetEnvironmentVariable($variableName, 'Process')
@@ -65,7 +136,7 @@ function ConvertTo-ConnectionTarget([string]$connectionString, [bool]$requireReh
 }
 
 function Write-TargetLog([string]$operation, $target) {
-    Write-Host "[$operation] SQL Server: $($target.Server)"
+    Write-Host (ConvertTo-SanitizedEvidenceLine "[$operation] SQL Server: $($target.Server)")
     Write-Host "[$operation] Database:   $($target.Database)"
 }
 
@@ -88,17 +159,7 @@ function Invoke-NativeWithEvidence([string]$filePath, [string[]]$arguments, [str
         $PSNativeCommandUseErrorActionPreference = $priorNativeErrorPreference
     }
 
-    $sanitizedOutput = @($output | ForEach-Object {
-        $line = [string]$_
-        $line = $line.Replace($repositoryRoot, '<REPOSITORY>', [StringComparison]::OrdinalIgnoreCase)
-        $line = [regex]::Replace($line, 'C:\\Users\\[^\\\r\n]+', '<USER_PROFILE>', 'IgnoreCase')
-        if (-not [string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) {
-            $line = [regex]::Replace($line, [regex]::Escape($env:COMPUTERNAME) + '(\\[^\s;]+)?', '<LOCAL_SQL_SERVER>', 'IgnoreCase')
-        }
-        $line = [regex]::Replace($line, '(?i)(Password|Pwd|User ID|UID|Data Source|Server|Integrated Security|Trusted_Connection)\s*=\s*[^;\r\n]+', '$1=<REDACTED>')
-        $line = [regex]::Replace($line, '(?i)ClientConnectionId:[0-9a-f-]+', 'ClientConnectionId:<REDACTED>')
-        $line
-    })
+    $sanitizedOutput = @($output | ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) })
     $sanitizedOutput | Set-Content -Encoding utf8 -LiteralPath $evidenceFile
     $sanitizedOutput | ForEach-Object { Write-Host $_ }
     if ($exitCode -ne 0 -and -not $AllowFailure) {
@@ -158,6 +219,28 @@ SELECT CONCAT(
 "@)
 }
 
+function Invoke-SqlWithSanitizedEvidence([System.Data.SqlClient.SqlConnectionStringBuilder]$builder,
+    [string]$database, [string]$query, [string]$inputFile, [string]$evidenceFile) {
+    $rawOutput = [System.IO.Path]::GetTempFileName()
+    try {
+        $captured = @()
+        try { $captured = @(Invoke-Sql $builder $database $query $inputFile $rawOutput 2>&1) }
+        catch {
+            $captured += $_.Exception.Message
+            @((Get-Content -LiteralPath $rawOutput -ErrorAction SilentlyContinue), $captured) |
+                ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) } |
+                Set-Content -Encoding utf8 -LiteralPath $evidenceFile
+            throw "SQL command failed; only sanitized evidence was retained at $evidenceFile."
+        }
+        @((Get-Content -LiteralPath $rawOutput -ErrorAction SilentlyContinue), $captured) |
+            ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) } |
+            Set-Content -Encoding utf8 -LiteralPath $evidenceFile
+    }
+    finally {
+        if (Test-Path -LiteralPath $rawOutput -PathType Leaf) { Remove-Item -LiteralPath $rawOutput -Force }
+    }
+}
+
 function Get-MigrationHistory([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$database) {
     $connectionBuilder = [System.Data.SqlClient.SqlConnectionStringBuilder]::new($builder.ConnectionString)
     $connectionBuilder.set_InitialCatalog($database)
@@ -209,8 +292,11 @@ function Write-FinalSummary([string]$directory, [string]$status, $source, $targe
     [string[]]$pendingMigrations, [string]$sourceFingerprint, [hashtable]$extra = @{}) {
     $summary = [ordered]@{
         status = $status
-        gitHead = (git rev-parse HEAD).Trim()
-        gitTree = (git rev-parse 'HEAD^{tree}').Trim()
+        gitHead = $script:finalReviewedGitState.executedCommit
+        gitTree = $script:finalReviewedGitState.executedTree
+        reviewedCommit = $script:finalReviewedGitState.reviewedCommit
+        reviewedTree = $script:finalReviewedGitState.reviewedTree
+        repositoryClean = $script:finalReviewedGitState.repositoryClean
         sourceServer = '<REDACTED_SAME_SERVER>'
         targetServer = '<REDACTED_SAME_SERVER>'
         sameServer = $true
@@ -225,6 +311,10 @@ function Write-FinalSummary([string]$directory, [string]$status, $source, $targe
         completedAtUtc = [DateTime]::UtcNow.ToString('O')
     }
     foreach ($key in $extra.Keys) { $summary[$key] = $extra[$key] }
+    $artifactSha256 = [ordered]@{}
+    Get-ChildItem -LiteralPath $directory -File | Where-Object Name -notin @('summary.json','manifest.sha256') |
+        Sort-Object Name | ForEach-Object { $artifactSha256[$_.Name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash }
+    $summary['artifactSha256'] = $artifactSha256
     $summary | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 -LiteralPath (Join-Path $directory 'summary.json')
 }
 
@@ -312,9 +402,17 @@ if ($Mode -eq 'RehearseFinalClone' -and
      $SourceConnectionEnvironmentVariable -ne 'RHEMA_GL_SOURCE_READONLY_CONNECTION')) {
     throw 'RehearseFinalClone requires the exact process variables RHEMA_GL_REHEARSAL_CONNECTION and RHEMA_GL_SOURCE_READONLY_CONNECTION; alternate variable names are forbidden.'
 }
+if ($Mode -eq 'RehearseFinalClone') {
+    if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
+        throw 'RehearseFinalClone requires an explicit new or empty -EvidenceDirectory.'
+    }
+    # This is deliberately before connection parsing, evidence creation, or any SQL access.
+    $script:finalReviewedGitState = Assert-FinalReviewedGitState
+}
 
 $targetConnection = Get-ProcessConnectionString $TargetConnectionEnvironmentVariable
 $target = ConvertTo-ConnectionTarget $targetConnection $true
+Register-SensitiveEvidenceToken $target.Server
 Write-TargetLog $Mode $target
 
 if ($Mode -eq 'DropRehearsal') {
@@ -356,13 +454,11 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
 $cloneSource = $null
 if ($Mode -in @('RehearseClone', 'RehearseFinalClone')) {
     if ($Mode -eq 'RehearseFinalClone') {
-        if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
-            throw 'RehearseFinalClone requires an explicit new or empty -EvidenceDirectory.'
-        }
         Assert-FinalCutoverFlagsDisabled
     }
     $sourceConnection = Get-ProcessConnectionString $SourceConnectionEnvironmentVariable
     $cloneSource = ConvertTo-ConnectionTarget $sourceConnection $false
+    Register-SensitiveEvidenceToken $cloneSource.Server
     Write-TargetLog 'READ-ONLY SOURCE + COPY_ONLY BACKUP' $cloneSource
     if ($cloneSource.Database.ToUpperInvariant() -match $approvedNamePattern) {
         throw 'Clone source must be the retained development database, not another rehearsal database.'
@@ -379,6 +475,15 @@ if ($Mode -in @('RehearseClone', 'RehearseFinalClone')) {
 }
 
 $evidenceDirectoryResolved = if ($EvidenceDirectory) { $EvidenceDirectory } else { Get-DefaultEvidenceDirectory $target.Database }
+if ($Mode -eq 'RehearseFinalClone') {
+    $evidenceFullPath = [System.IO.Path]::GetFullPath($evidenceDirectoryResolved)
+    $repositoryPrefix = $repositoryRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $approvedInternalEvidencePrefix = (Join-Path $repositoryRoot '.artifacts\finance-gl-rehearsal').TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if ($evidenceFullPath.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+        -not $evidenceFullPath.StartsWith($approvedInternalEvidencePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Final-clone evidence inside the repository is allowed only below .artifacts/finance-gl-rehearsal; use an external directory otherwise.'
+    }
+}
 if (Test-Path -LiteralPath $evidenceDirectoryResolved) {
     if (Get-ChildItem -LiteralPath $evidenceDirectoryResolved -Force | Select-Object -First 1) {
         throw "Evidence directory must be new or empty to prevent stale evidence mixing: $evidenceDirectoryResolved"
@@ -394,11 +499,12 @@ if ($Mode -eq 'RehearseFinalClone') {
     $pendingMigrations = @()
     $sourceFingerprintBefore = ''
     try {
+        $script:finalReviewedGitState | ConvertTo-Json | Set-Content -Encoding utf8 `
+            -LiteralPath (Join-Path $evidenceDirectoryResolved 'reviewed-git-state.json')
         Write-FinalCutoverFlagsEvidence $evidenceDirectoryResolved
         Push-Location $repositoryRoot
         try {
             $null = Invoke-NativeWithEvidence 'git' @('diff', '--check') (Join-Path $evidenceDirectoryResolved 'git-diff-check.log')
-            Invoke-Native 'git' @('merge-base', '--is-ancestor', 'cbc0d3c91142c63c4ea40f08f11d633752268367', 'HEAD')
             $null = Invoke-NativeWithEvidence 'git' @('rev-list', '--parents', 'HEAD') `
                 (Join-Path $evidenceDirectoryResolved 'commit-ancestry.txt')
             $null = Invoke-NativeWithEvidence 'git' @('rev-parse', 'HEAD', 'HEAD^{tree}') (Join-Path $evidenceDirectoryResolved 'git-head-tree.txt')
@@ -421,6 +527,13 @@ if ($Mode -eq 'RehearseFinalClone') {
             throw "Final clone assembly mismatch. Expected $authoritativeMigrationCount migrations ending at $authoritativeLatestMigration; discovered $($repositoryMigrations.Count) ending at $($repositoryMigrations[-1])."
         }
 
+        # Recheck the exact reviewed state immediately before the first SQL contact so a concurrent
+        # repository change cannot pass on the strength of the earlier process-entry check.
+        $finalPreSqlGitState = Assert-FinalReviewedGitState
+        if ($finalPreSqlGitState.executedCommit -ne $script:finalReviewedGitState.executedCommit -or
+            $finalPreSqlGitState.executedTree -ne $script:finalReviewedGitState.executedTree) {
+            throw 'Reviewed repository identity changed before SQL contact.'
+        }
         # Only after every repository-only gate passes may the harness contact SQL Server.
         Assert-TargetAbsent $target
         $sourceHistory = @(Get-MigrationHistory $source.Builder $source.Database)
@@ -456,7 +569,7 @@ if ($Mode -eq 'RehearseFinalClone') {
         $idempotentSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScript).Hash
         "$idempotentSha256  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii `
             -LiteralPath (Join-Path $evidenceDirectoryResolved 'pending-migrations-idempotent.sha256')
-        Invoke-Sql $source.Builder $source.Database '' (Join-Path $PSScriptRoot 'sql\gl-source-readiness.sql') `
+        Invoke-SqlWithSanitizedEvidence $source.Builder $source.Database '' (Join-Path $PSScriptRoot 'sql\gl-source-readiness.sql') `
             (Join-Path $evidenceDirectoryResolved 'source-readiness.txt')
 
         $readinessText = Get-Content -Raw -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-readiness.txt')
@@ -501,8 +614,10 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
         $sourceDataLogical = $dataFiles[0].Name.Replace("'", "''")
         $sourceLogLogical = $logFiles[0].Name.Replace("'", "''")
         $backupRestoreEvidence = Join-Path $evidenceDirectoryResolved 'backup-restore-checkdb.txt'
-        Invoke-Sql $source.Builder 'master' @"
+        Invoke-SqlWithSanitizedEvidence $source.Builder 'master' @"
 SET NOCOUNT ON;
+SELECT N'SOURCE_DATABASE=RhemaERP';
+SELECT N'TARGET_DATABASE=$($target.Database)';
 DECLARE @backupExists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
 INSERT @backupExists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
 IF EXISTS (SELECT 1 FROM @backupExists WHERE FileExists=1)
@@ -561,13 +676,13 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
                     '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectoryResolved 'seed-pass-1.log')
             }
-            Invoke-Sql $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') `
+            Invoke-SqlWithSanitizedEvidence $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') `
                 (Join-Path $evidenceDirectoryResolved 'invariants-pass-1.txt')
             Set-ApplicationConnection $targetConnection {
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
                     '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectoryResolved 'seed-pass-2.log')
             }
-            Invoke-Sql $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') `
+            Invoke-SqlWithSanitizedEvidence $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') `
                 (Join-Path $evidenceDirectoryResolved 'invariants-pass-2.txt')
         }
         finally { Pop-Location }
@@ -582,10 +697,17 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
         if ($sourceFingerprintAfter -ne $sourceFingerprintBefore) {
             throw 'Configured source fingerprint changed during guarded final clone rehearsal.'
         }
+        $finalPostRunGitState = Assert-FinalReviewedGitState
+        if ($finalPostRunGitState.executedCommit -ne $script:finalReviewedGitState.executedCommit -or
+            $finalPostRunGitState.executedTree -ne $script:finalReviewedGitState.executedTree) {
+            throw 'Reviewed repository identity changed during final clone rehearsal.'
+        }
         Write-FinalSummary $evidenceDirectoryResolved 'PASS' $source $target $pendingMigrations $sourceFingerprintAfter @{
             targetCreated = $true
             backupCreated = $true
             backupSha256 = $backupSha256
+            backupRestoreEvidenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupRestoreEvidence).Hash
+            targetMigrationHistorySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectoryResolved 'target-migration-history.txt')).Hash
             pendingMigrationScriptSha256 = $idempotentSha256
             invariantPass1Sha256 = $first
             invariantPass2Sha256 = $second
@@ -602,13 +724,14 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
                     $sourceFingerprintAfterFailure = Get-SourceFingerprint $source.Builder $source.Database
                     $sourceFingerprintAfterFailure | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-fingerprint-after.txt')
                     Write-FinalSummary $evidenceDirectoryResolved 'NO_GO' $source $target $pendingMigrations `
-                        $sourceFingerprintAfterFailure @{ failure = $_.Exception.Message }
+                        $sourceFingerprintAfterFailure @{ failure = (Get-SanitizedExceptionMessage $_.Exception) }
                 }
             }
             catch { }
         }
-        Write-Error "Final clone rehearsal did not pass. Nothing is dropped or overwritten automatically; any exact target/backup is preserved for inspection. $($_.Exception.Message)"
-        throw
+        $sanitizedFailure = Get-SanitizedExceptionMessage $_.Exception
+        Write-Error "Final clone rehearsal did not pass. Nothing is dropped or overwritten automatically; any exact target/backup is preserved for inspection. $sanitizedFailure"
+        throw $sanitizedFailure
     }
 }
 

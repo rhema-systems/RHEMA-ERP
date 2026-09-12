@@ -18,6 +18,7 @@ $required = if ($PackageKind -eq 'FinalClone') {
     }
     $common = @(
         'summary.json',
+        'reviewed-git-state.json',
         'feature-flags.json',
         'git-diff-check.log',
         'commit-ancestry.txt',
@@ -88,6 +89,23 @@ if ($PackageKind -eq 'FinalClone') {
         $summary.targetServer -ne '<REDACTED_SAME_SERVER>') {
         throw 'Final-clone summary does not bind exact RhemaERP source and prefix-safe target identities.'
     }
+    $reviewedState = Get-Content -Raw -LiteralPath (Join-Path $root 'reviewed-git-state.json') | ConvertFrom-Json
+    $gitHeadTree = @(Get-Content -LiteralPath (Join-Path $root 'git-head-tree.txt') |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($gitHeadTree.Count -ne 2 -or $gitHeadTree[0] -notmatch '^[0-9a-fA-F]{40}$' -or
+        $gitHeadTree[1] -notmatch '^[0-9a-fA-F]{40}$' -or
+        $reviewedState.repositoryClean -ne $true -or $summary.repositoryClean -ne $true -or
+        $reviewedState.reviewedCommit -ne $reviewedState.executedCommit -or
+        $reviewedState.reviewedTree -ne $reviewedState.executedTree -or
+        $gitHeadTree[0] -ne $reviewedState.executedCommit -or $gitHeadTree[1] -ne $reviewedState.executedTree -or
+        [string]$summary.gitHead -ne $reviewedState.executedCommit -or [string]$summary.gitTree -ne $reviewedState.executedTree -or
+        [string]$summary.reviewedCommit -ne $reviewedState.reviewedCommit -or [string]$summary.reviewedTree -ne $reviewedState.reviewedTree) {
+        throw 'Final-clone evidence does not bind one exact reviewed and clean executed HEAD/tree.'
+    }
+    $ancestryFirst = (Get-Content -LiteralPath (Join-Path $root 'commit-ancestry.txt') | Select-Object -First 1).Trim()
+    if ($ancestryFirst -notmatch ('^' + [regex]::Escape($reviewedState.executedCommit) + '(\s|$)')) {
+        throw 'Final-clone ancestry evidence does not start at the exact executed commit.'
+    }
     $flags = Get-Content -Raw -LiteralPath (Join-Path $root 'feature-flags.json') | ConvertFrom-Json
     if ($flags.accountingEvents -ne $false -or $flags.producerIntents -ne $false -or
         $flags.producerIntentGroups -ne $false -or
@@ -106,8 +124,24 @@ if ($PackageKind -eq 'FinalClone') {
         (@($migrationIds | Sort-Object) -join "`n") -ne ($migrationIds -join "`n")) {
         throw 'Final-clone migration evidence contains duplicate or out-of-order migration IDs.'
     }
+    $sourceHistory = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if (@($sourceHistory | Sort-Object -Unique).Count -ne $sourceHistory.Count -or
+        (@($sourceHistory | Sort-Object) -join "`n") -ne ($sourceHistory -join "`n")) {
+        throw 'Final-clone source history contains duplicate or out-of-order migration IDs.'
+    }
     $pending = @(Get-Content -LiteralPath (Join-Path $root 'pending-migrations.txt') |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $orphan = @(Get-Content -LiteralPath (Join-Path $root 'orphan-history.txt') |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $derivedPending = @($migrationIds | Where-Object { $_ -notin $sourceHistory })
+    $derivedOrphan = @($sourceHistory | Where-Object { $_ -notin $migrationIds })
+    if (($pending -join "`n") -ne ($derivedPending -join "`n")) {
+        throw 'Final-clone pending migrations do not equal repository history minus source history.'
+    }
+    if (($orphan -join "`n") -ne ($derivedOrphan -join "`n")) {
+        throw 'Final-clone orphan history does not equal source history minus repository history.'
+    }
     if ($pending.Count -ne [int]$summary.pendingMigrationCount -or
         (@($summary.pendingMigrations) -join "`n") -ne ($pending -join "`n")) {
         throw 'Final-clone pending-migration evidence does not match summary.json.'
@@ -136,6 +170,10 @@ if ($PackageKind -eq 'FinalClone') {
             $second -ne [string]$summary.invariantPass2Sha256) {
             throw 'Final-clone two-pass invariant hashes are not identical to summary evidence.'
         }
+        $checksumLines = @(Get-Content -LiteralPath (Join-Path $root 'checksums.sha256'))
+        if (($checksumLines -join "`n") -ne (@("$first  invariants-pass-1.txt", "$second  invariants-pass-2.txt") -join "`n")) {
+            throw 'Final-clone invariant checksum file is inconsistent with the canonical snapshots.'
+        }
         $backupLine = (Get-Content -Raw -LiteralPath (Join-Path $root 'backup.sha256')).Trim()
         if ($backupLine -notmatch '^(?<hash>[0-9A-F]{64})  RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}_COPYONLY\.bak$' -or
             $Matches.hash -ne [string]$summary.backupSha256) {
@@ -144,14 +182,60 @@ if ($PackageKind -eq 'FinalClone') {
         if ([string]$summary.pendingMigrationScriptSha256 -ne $idempotentScriptHash) {
             throw 'Final-clone idempotent SQL checksum disagrees with summary.json.'
         }
+        $targetHistory = @(Get-Content -LiteralPath (Join-Path $root 'target-migration-history.txt') |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $expectedTargetHistory = @(@($sourceHistory) + @($derivedPending) | Sort-Object -Unique)
+        if (@($targetHistory | Sort-Object -Unique).Count -ne $targetHistory.Count -or
+            ($targetHistory -join "`n") -ne ($expectedTargetHistory -join "`n")) {
+            throw 'PASS target history is not exactly source history union the ordered pending delta.'
+        }
+        $targetHistoryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'target-migration-history.txt')).Hash
+        if ($targetHistoryHash -ne [string]$summary.targetMigrationHistorySha256) {
+            throw 'PASS target migration-history hash disagrees with summary.json.'
+        }
+        $backupEvidencePath = Join-Path $root 'backup-restore-checkdb.txt'
+        $backupEvidenceLines = @(Get-Content -LiteralPath $backupEvidencePath | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $requiredMarkers = @(
+            'SOURCE_DATABASE=RhemaERP',
+            "TARGET_DATABASE=$($summary.targetDatabase)",
+            'BACKUP_COPY_ONLY_CHECKSUM_START',
+            'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE',
+            'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE',
+            'RESTORE_TARGET_COMPLETE',
+            'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE'
+        )
+        $priorMarkerIndex = -1
+        foreach ($marker in $requiredMarkers) {
+            $matching = @($backupEvidenceLines | Where-Object { $_ -eq $marker })
+            $markerIndex = [Array]::IndexOf($backupEvidenceLines, $marker)
+            if ($matching.Count -ne 1 -or $markerIndex -le $priorMarkerIndex) {
+                throw "PASS backup/VERIFYONLY/restore/DBCC evidence marker is missing, duplicated, out of order, or identity-inconsistent: $marker"
+            }
+            $priorMarkerIndex = $markerIndex
+        }
+        $backupEvidenceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupEvidencePath).Hash
+        if ($backupEvidenceHash -ne [string]$summary.backupRestoreEvidenceSha256) {
+            throw 'PASS backup/restore/DBCC evidence hash disagrees with summary.json.'
+        }
+    }
+
+    if ($null -eq $summary.artifactSha256) {
+        throw 'Final-clone summary is missing independently checkable artifact SHA-256 bindings.'
+    }
+    foreach ($relative in $required | Where-Object { $_ -ne 'summary.json' }) {
+        $property = $summary.artifactSha256.PSObject.Properties[$relative]
+        $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root $relative)).Hash
+        if ($null -eq $property -or [string]$property.Value -ne $actualHash) {
+            throw "Final-clone artifact hash binding is missing or invalid: $relative"
+        }
     }
 }
 
 $textFiles = Get-ChildItem -LiteralPath $root -File -Recurse |
-    Where-Object Extension -in @('.json', '.txt', '.log', '.sha256')
+    Where-Object Extension -in @('.json', '.txt', '.log', '.sha256', '.sql')
 $forbidden = @(
     '(?i)(Password|Pwd|User ID|UID|Data Source|Server|Integrated Security|Trusted_Connection)\s*=\s*(?!<REDACTED>)[^;\r\n]+',
-    '(?i)C:\\Users\\',
+    '(?i)\b[A-Z]:\\+',
     '(?i)RHEMA-AKWASI',
     '(?i)ClientConnectionId:[0-9a-f-]{36}'
 )
@@ -179,11 +263,21 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw 'Evidence manifest is missing. Run with -WriteManifest after assembling the package.'
 }
 
-foreach ($line in Get-Content -LiteralPath $manifestPath) {
+$manifestLines = @(Get-Content -LiteralPath $manifestPath)
+$manifestRelativePaths = @()
+foreach ($line in $manifestLines) {
     if ($line -notmatch '^(?<hash>[0-9A-F]{64})  (?<path>.+)$') {
         throw "Malformed evidence manifest line: $line"
     }
-    $path = Join-Path $root $Matches.path
+    $relativePath = $Matches.path.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+    if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -split '[\\/]' -contains '..') {
+        throw "Manifest path escapes the evidence package: $($Matches.path)"
+    }
+    $path = [System.IO.Path]::GetFullPath((Join-Path $root $relativePath))
+    if (-not $path.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Manifest path escapes the evidence package: $($Matches.path)"
+    }
+    $manifestRelativePaths += $Matches.path.Replace('\','/')
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Manifest target is missing: $($Matches.path)"
     }
@@ -191,6 +285,14 @@ foreach ($line in Get-Content -LiteralPath $manifestPath) {
     if ($actual -ne $Matches.hash) {
         throw "Evidence hash mismatch: $($Matches.path)"
     }
+}
+$expectedManifestPaths = @(Get-ChildItem -LiteralPath $root -File -Recurse |
+    Where-Object FullName -ne $manifestPath | ForEach-Object {
+        [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\','/')
+    } | Sort-Object)
+if (@($manifestRelativePaths | Sort-Object -Unique).Count -ne $manifestRelativePaths.Count -or
+    (($manifestRelativePaths | Sort-Object) -join "`n") -ne ($expectedManifestPaths -join "`n")) {
+    throw 'Evidence manifest must list every package file exactly once and no external path.'
 }
 
 Write-Host "GL cutover evidence package is complete, sanitized and hash-valid: $root"

@@ -96,18 +96,25 @@ Deployment remains blocked until every item below has durable evidence and an in
 The Stage A `RehearseClone` mode remains a historical regression path and intentionally accepts only its
 documented Phase 4 stop. The operational cutover path is `RehearseFinalClone`. It does not use an application
 configuration fallback: both connection strings and all three disabled flags must be explicit process values.
-It first builds, proves EF model parity, discovers exactly 456 migrations ending at C8, captures source history,
+It also requires the exact independently reviewed commit and tree as process values and refuses a descendant,
+another tree, or any tracked/untracked workspace change before parsing a connection or contacting SQL Server.
+It first binds that clean executed HEAD/tree into evidence, builds, proves EF model parity, discovers exactly 456 migrations ending at C8, captures source history,
 derives and records the exact pending delta, generates and hashes its bounded idempotent SQL artifact, and runs
 read-only readiness diagnostics. Any `BLOCKER` or explicit `REVIEW` finding produces
 durable `NO_GO_PREFLIGHT` evidence before a backup or target exists. Only a clean preflight may proceed through
 the target-derived absent backup check, `COPY_ONLY`/`CHECKSUM`, `RESTORE VERIFYONLY`, prefix-safe restore,
 `DBCC CHECKDB ... PHYSICAL_ONLY`, exact pending-delta application, two real seed passes, and byte-identical
 Finance invariant evidence. Failures preserve evidence and any exact target/backup; the harness never drops or
-overwrites either automatically.
+overwrites either automatically. Raw `sqlcmd` output is held only in an outside-package temporary file, sanitized,
+then deleted; the package validator scans JSON, text, logs, checksums and SQL, independently re-derives pending/
+orphan sets and the exact PASS target-history union, and verifies artifact, identity and ordered backup/restore markers.
+Evidence must be external to the repository or below the dedicated ignored `.artifacts/finance-gl-rehearsal` root.
 
 ```powershell
 $env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<secure same-server connection; exact RhemaERP catalog>'
 $env:RHEMA_GL_REHEARSAL_CONNECTION = '<same server; absent RHEMAERP_GL_REHEARSAL_* catalog>'
+$env:RHEMA_GL_REVIEWED_COMMIT = '<exact independently reviewed 40-hex commit>'
+$env:RHEMA_GL_REVIEWED_TREE = '<exact independently reviewed 40-hex tree>'
 $env:Finance__AccountingEvents__Enabled = 'false'
 $env:Finance__ProducerIntents__Enabled = 'false'
 $env:Finance__ProducerIntentGroups__Enabled = 'false'
@@ -120,7 +127,8 @@ $env:Finance__ProducerIntentGroups__Enabled = 'false'
 An operator must review a NO-GO package; it is not permission to repair, backfill, stamp, weaken a preflight,
 or retry against a different source. Cleanup remains a separate explicit `DropRehearsal -ConfirmDrop` action.
 
-- [ ] Freeze the exact reviewed commit SHA and record its full ancestry and tree hash.
+- [ ] Freeze the exact reviewed commit SHA/tree, set both exact process values, and prove HEAD/tree equality plus
+  a completely clean tracked/untracked repository before any SQL contact.
 - [ ] Capture the source's sanitized server/database identity, current migration history, schema fingerprint,
   Finance control counts, explicit disabled cutover flags, and the absent target identity without exposing credentials;
   verify the restored target history equals that fresh source history before applying anything.

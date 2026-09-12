@@ -12,11 +12,11 @@ $cases = @(
     @{ Name='invalid suffix'; Value='Server=localhost;Database=RHEMAERP_GL_REHEARSAL_bad-name;Integrated Security=true'; Expected='Refusing database' }
 )
 
-$prior = [Environment]::GetEnvironmentVariable('RHEMA_GL_REHEARSAL_CONNECTION', 'Process')
-$priorSource = [Environment]::GetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', 'Process')
 $flagNames = @('Finance__AccountingEvents__Enabled', 'Finance__ProducerIntents__Enabled', 'Finance__ProducerIntentGroups__Enabled')
-$priorFlags = @{}
-foreach ($flagName in $flagNames) { $priorFlags[$flagName] = [Environment]::GetEnvironmentVariable($flagName, 'Process') }
+$reviewNames = @('RHEMA_GL_REVIEWED_COMMIT','RHEMA_GL_REVIEWED_TREE')
+foreach ($name in @('RHEMA_GL_REHEARSAL_CONNECTION','RHEMA_GL_SOURCE_READONLY_CONNECTION') + $flagNames + $reviewNames) {
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+}
 $nonEmptyEvidence = $null
 $emptyEvidence = $null
 try {
@@ -61,6 +61,50 @@ try {
     }
     [Environment]::SetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', 'Server=target-host;Database=RhemaERP;Integrated Security=true', 'Process')
     $emptyEvidence = Join-Path ([System.IO.Path]::GetTempPath()) "RHEMAERP_GL_REHEARSAL_FINAL_EVIDENCE_$([guid]::NewGuid().ToString('N'))"
+    $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    $executedCommit = (& git -C $repositoryRoot rev-parse HEAD).Trim()
+    $executedTree = (& git -C $repositoryRoot rev-parse 'HEAD^{tree}').Trim()
+
+    $reviewCases = @(
+        @{ Name='missing reviewed commit/tree'; Commit=$null; Tree=$null; Expected='requires exact 40-hex' },
+        @{ Name='malformed reviewed commit'; Commit='bad'; Tree=$executedTree; Expected='requires exact 40-hex' },
+        @{ Name='descendant or unreviewed HEAD'; Commit=('0' * 40); Tree=$executedTree; Expected='does not exactly match' },
+        @{ Name='unreviewed tree'; Commit=$executedCommit; Tree=('0' * 40); Expected='does not exactly match' }
+    )
+    foreach ($case in $reviewCases) {
+        [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_COMMIT', $case.Commit, 'Process')
+        [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_TREE', $case.Tree, 'Process')
+        $output = & pwsh -NoProfile -File $script -Mode RehearseFinalClone -EvidenceDirectory $emptyEvidence 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0 -or $output -notmatch [regex]::Escape($case.Expected)) {
+            throw "Safety case '$($case.Name)' did not return '$($case.Expected)'. Output: $output"
+        }
+        Write-Host "PASS: $($case.Name)"
+    }
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_COMMIT', $executedCommit, 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_TREE', $executedTree, 'Process')
+
+    $dirtyProbe = Join-Path $repositoryRoot 'gl-final-clone-dirty-probe.tmp'
+    try {
+        'untracked safety probe' | Set-Content -Encoding ascii -LiteralPath $dirtyProbe
+        $output = & pwsh -NoProfile -File $script -Mode RehearseFinalClone -EvidenceDirectory $emptyEvidence 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0 -or $output -notmatch 'completely clean tracked and untracked repository') {
+            throw "Safety case 'dirty untracked repository' did not fail before SQL. Output: $output"
+        }
+        Write-Host 'PASS: dirty untracked repository'
+    }
+    finally { if (Test-Path -LiteralPath $dirtyProbe) { Remove-Item -LiteralPath $dirtyProbe -Force } }
+
+    $ignoredProbe = Join-Path $repositoryRoot '.env.test'
+    if (Test-Path -LiteralPath $ignoredProbe) { throw 'Cannot run ignored-config safety probe because .env.test already exists.' }
+    try {
+        'ignored configuration safety probe' | Set-Content -Encoding ascii -LiteralPath $ignoredProbe
+        $output = & pwsh -NoProfile -File $script -Mode RehearseFinalClone -EvidenceDirectory $emptyEvidence 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0 -or $output -notmatch 'found ignored code, migration, seeder, configuration, or script files') {
+            throw "Safety case 'ignored relevant configuration' did not fail before SQL. Output: $output"
+        }
+        Write-Host 'PASS: ignored relevant configuration'
+    }
+    finally { if (Test-Path -LiteralPath $ignoredProbe) { Remove-Item -LiteralPath $ignoredProbe -Force } }
 
     $finalCases = @(
         @{ Name='final clone alternate target variable'; Expected='requires the exact process variables'; Arguments=@('-TargetConnectionEnvironmentVariable','ALTERNATE_TARGET','-EvidenceDirectory',$emptyEvidence) },
@@ -71,6 +115,7 @@ try {
         @{ Name='final clone source user instance'; Expected='User Instance connections are forbidden'; Source='Server=target-host;Database=RhemaERP;Integrated Security=true;User Instance=true'; Arguments=@('-EvidenceDirectory',$emptyEvidence) },
         @{ Name='final clone wrong source catalog'; Expected='must be the exact configured RhemaERP catalog'; Source='Server=target-host;Database=master;Integrated Security=true'; Arguments=@('-EvidenceDirectory',$emptyEvidence) },
         @{ Name='final clone cross-server source'; Expected='must resolve to the same SQL Server instance'; Source='Server=source-host;Database=RhemaERP;Integrated Security=true'; Arguments=@('-EvidenceDirectory',$emptyEvidence) },
+        @{ Name='final clone unsafe in-repository evidence'; Expected='allowed only below .artifacts/finance-gl-rehearsal'; Source='Server=target-host;Database=RhemaERP;Integrated Security=true'; Arguments=@('-EvidenceDirectory',(Join-Path $repositoryRoot 'scripts\unsafe-final-evidence')) },
         @{ Name='final clone nonempty evidence'; Expected='Evidence directory must be new or empty'; Source='Server=target-host;Database=RhemaERP;Integrated Security=true'; Arguments=@('-EvidenceDirectory',$nonEmptyEvidence) }
     )
     foreach ($case in $finalCases) {
@@ -109,6 +154,9 @@ try {
         'RESTORE VERIFYONLY',
         'DBCC CHECKDB',
         'This harness never overwrites it',
+        'Assert-FinalReviewedGitState',
+        'Invoke-SqlWithSanitizedEvidence',
+        'reviewed-git-state.json',
         "Write-FinalSummary `$evidenceDirectoryResolved 'NO_GO_PREFLIGHT'"
     )) {
         if ($scriptText -notmatch [regex]::Escape($requiredText)) {
@@ -116,8 +164,9 @@ try {
         }
     }
     $finalInvariantText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql')
-    foreach ($requiredText in @('20260908120000_AddProducerIntentGroupsC8', 'AccountingEventProducerReceipts',
-        'ProducerIntentGroups', 'CONTROL_COUNTS')) {
+    foreach ($requiredText in @('20260908120000_AddProducerIntentGroupsC8', 'ACCOUNT|', 'ACCOUNT_SEGMENT_VALUE|',
+        'APPLICABILITY_POLICY|', 'SELECTION_EVIDENCE|', 'ACCOUNTING_EVENT|', 'ACCOUNTING_EVENT_POSTING|',
+        'AccountingEventProducerReceipts', 'PRODUCER_INTENT_GROUP|', 'PRODUCER_INTENT_GROUP_MEMBER|', 'CONTROL_COUNTS')) {
         if ($finalInvariantText -notmatch [regex]::Escape($requiredText)) {
             throw "Final-clone invariant contract is missing: $requiredText"
         }
@@ -128,10 +177,8 @@ try {
     Write-Host 'PASS: final 456/C8, absent-target, no-overwrite, backup/restore/DBCC and preflight NO-GO contracts'
 }
 finally {
-    [Environment]::SetEnvironmentVariable('RHEMA_GL_REHEARSAL_CONNECTION', $prior, 'Process')
-    [Environment]::SetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', $priorSource, 'Process')
-    foreach ($flagName in $flagNames) {
-        [Environment]::SetEnvironmentVariable($flagName, $priorFlags[$flagName], 'Process')
+    foreach ($name in @('RHEMA_GL_REHEARSAL_CONNECTION','RHEMA_GL_SOURCE_READONLY_CONNECTION') + $flagNames + $reviewNames) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
     if ($nonEmptyEvidence -and (Test-Path -LiteralPath $nonEmptyEvidence)) {
         Remove-Item -LiteralPath $nonEmptyEvidence -Recurse -Force

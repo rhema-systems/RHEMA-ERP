@@ -50,7 +50,9 @@ The 448-migration and expected Phase 4 stop statements below are retained as exa
 evidence. They must not be interpreted as the final cutover terminal gate. The frozen final code candidate
 discovers 456 migrations ending at `20260908120000_AddProducerIntentGroupsC8`; authorized final clone work uses
 `RehearseFinalClone`, derives the pending set from a fresh source-history read, and either completes that exact
-delta or returns fail-closed NO-GO evidence without bypassing any migration preflight.
+delta or returns fail-closed NO-GO evidence without bypassing any migration preflight. That operational mode now
+also requires exact independently reviewed commit/tree process values and a wholly clean tracked/untracked worktree
+before connection parsing; retained evidence binds reviewed and executed identities and is independently reconciled.
 
 ## Database safety boundary
 
