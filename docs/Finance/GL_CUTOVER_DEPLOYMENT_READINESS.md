@@ -361,3 +361,8 @@ uncreated, incomplete pre-phase-03 failures at NOT_STARTED, OFFLINE or SOURCE_CA
 the complete strict tuple is mandatory. Legacy acceptance is limited to the exact documented `22b27ab` commit,
 `13f1eb03` tree, failed SOURCE_CAPTURE outcome and absent V2/ownership fields. Same-basename recovery from another
 full path is refused by path-hash mismatch. Runtime remains prohibited pending approval.
+
+Owned-empty/unresolved-state correction `6f308860c1ff4cdfb4281c7f960b365e527d75a7` (tree
+`d4d9e0ded646bd1a83fb315fef66162dd8437270`) distinguishes a successful zero-byte owned reservation from material
+backup and requires present-exact-empty unresolved V2 fields with no backup/reset claims. The strict 22b historical
+fixture binds its known tree, media, 453042176-byte length and SHA. Offline gates pass; runtime remains prohibited.

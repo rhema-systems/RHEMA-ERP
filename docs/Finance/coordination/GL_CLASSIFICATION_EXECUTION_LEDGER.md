@@ -2533,3 +2533,12 @@ Partial tuple and inconsistent-state tampering refuse. Legacy fallback additiona
 tree `13f1eb03`, failed SOURCE_CAPTURE outcome, no phase-03/reset, and absent V2/ownership fields. Recovery refuses the
 same basename under a different full path hash. Reset/FinalClone offline suites passed; no DB or preserved evidence
 access occurred. Runtime remains prohibited pending Sol High review.
+
+Sol High review of `a0ca32bf2afb77789a61b922080e667d2904ce48` required ownership/material separation and exact
+unresolved state. Correction `6f308860c1ff4cdfb4281c7f960b365e527d75a7` (tree
+`d4d9e0ded646bd1a83fb315fef66162dd8437270`) permits owned zero-byte reservation only without material/completion/
+preservation/verification/reset claims; unresolved V2 requires present, non-null, exactly empty identity fields and
+zero/false material state. Mixed, missing, null and contradictory cases refuse. The strict legacy positive binds exact
+22b/13f1eb03, media `cc918da6ac23465497e00ca210a4c2c6`, 453042176 bytes and SHA
+`7F07CD03EED8F178ED45208936C3CC8F6E9F8D1336FFB3BF371C076D8F343743`. Full offline suites passed; no DB/evidence
+access occurred. Runtime remains prohibited pending review.
