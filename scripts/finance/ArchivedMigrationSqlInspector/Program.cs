@@ -1,0 +1,452 @@
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
+
+const string SnapshotRelativePath = "src/ErpSystem.Data/Migrations/ApplicationDbContextModelSnapshot.cs";
+const string BaselineRelativePath = "src/ErpSystem.Data/Migrations/20260913162402_DisposableDevelopmentCurrentModelBaseline.cs";
+const string ImmutableLotTrigger = "TR_ProcurementSourcingCaseLots_Immutable";
+const string ImmutableLotItemTrigger = "TR_ProcurementSourcingCaseLotItems_Immutable";
+const string ModelLotTrigger = "TR_ProcurementSourcingCaseLots_NoMutation";
+const string ModelLotItemTrigger = "TR_ProcurementSourcingCaseLotItems_NoMutation";
+
+var repositoryRoot = FindRepositoryRoot();
+var snapshotPath = Path.Combine(repositoryRoot, SnapshotRelativePath.Replace('/', Path.DirectorySeparatorChar));
+var baselinePath = Path.Combine(repositoryRoot, BaselineRelativePath.Replace('/', Path.DirectorySeparatorChar));
+var migrations = Assembly.GetExecutingAssembly()
+    .GetTypes()
+    .Where(type => !type.IsAbstract && typeof(Migration).IsAssignableFrom(type))
+    .Select(type => new MigrationType(type, type.GetCustomAttribute<MigrationAttribute>()?.Id))
+    .Where(item => item.Id is not null)
+    .OrderBy(item => item.Id, StringComparer.Ordinal)
+    .ToArray();
+
+if (migrations.Length != 456)
+{
+    throw new InvalidOperationException($"Expected 456 archived migrations, found {migrations.Length}.");
+}
+
+var sqlOperations = migrations.SelectMany(migration =>
+{
+    var instance = (Migration)Activator.CreateInstance(migration.Type, nonPublic: true)!;
+    return instance.UpOperations.OfType<SqlOperation>()
+        .Select((operation, index) => new ArchivedSql(migration.Id!, index, operation.Sql));
+}).ToArray();
+
+var triggerCandidates = sqlOperations.SelectMany(ParseTriggerDefinitions).ToArray();
+var snapshotTriggers = ParseSnapshotTriggers(File.ReadAllText(snapshotPath));
+var selectedTriggers = new Dictionary<string, SqlDefinition>(StringComparer.Ordinal);
+foreach (var modelTrigger in snapshotTriggers.Keys.OrderBy(value => value, StringComparer.Ordinal))
+{
+    var candidates = triggerCandidates
+        .Where(candidate => candidate.Name == modelTrigger)
+        .OrderBy(candidate => candidate.MigrationId, StringComparer.Ordinal)
+        .ThenBy(candidate => candidate.OperationIndex)
+        .ToArray();
+    if (candidates.Length != 0)
+    {
+        selectedTriggers.Add(modelTrigger, candidates[^1]);
+    }
+}
+
+AddCheckedAlias(selectedTriggers, triggerCandidates, snapshotTriggers, ImmutableLotTrigger, ModelLotTrigger);
+AddCheckedAlias(selectedTriggers, triggerCandidates, snapshotTriggers, ImmutableLotItemTrigger, ModelLotItemTrigger);
+
+var missingTriggers = snapshotTriggers.Keys.Except(selectedTriggers.Keys, StringComparer.Ordinal).ToArray();
+if (snapshotTriggers.Count != 355 || selectedTriggers.Count != 355 || missingTriggers.Length != 0)
+{
+    throw new InvalidOperationException(
+        $"Trigger parity failed. Snapshot={snapshotTriggers.Count}; selected={selectedTriggers.Count}; missing={string.Join(',', missingTriggers)}.");
+}
+
+foreach (var selected in selectedTriggers.Values)
+{
+    var expectedTable = snapshotTriggers[selected.Name];
+    var actualTable = ParseTriggerTargetTable(selected.Sql);
+    if (!string.Equals(expectedTable, actualTable, StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException(
+            $"Trigger {selected.Name} targets {actualTable}, but the snapshot binds it to {expectedTable}.");
+    }
+    if (CountTriggerDefinitions(selected.Sql) != 1 || selected.Sql.Contains("\nGO\n", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException($"Trigger {selected.Name} is not one isolated definition.");
+    }
+}
+var baselineTableColumns = ParseBaselineTableColumns(File.ReadAllText(baselinePath));
+var staticallyValidatedColumnReferenceCount = ValidateStaticTriggerColumnReferences(selectedTriggers.Values, baselineTableColumns);
+
+var patches = SelectPostDefinitionPatches(sqlOperations, selectedTriggers);
+var programmableDefinitions = SelectProgrammableDefinitions(sqlOperations);
+var audit = AuditGovernanceObjects(sqlOperations, triggerCandidates);
+var manifest = new
+{
+    schema = "RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V1",
+    archiveMigrationCount = migrations.Length,
+    archiveSqlOperationCount = sqlOperations.Length,
+    modelTriggerCount = snapshotTriggers.Count,
+    selectedTriggerCount = selectedTriggers.Count,
+    additionalFinanceAuthorityTriggerCount = 15,
+    finalUniqueTriggerCount = selectedTriggers.Count + 15,
+    baselineTableCount = baselineTableColumns.Count,
+    staticallyValidatedColumnReferenceCount,
+    triggerDefinitions = selectedTriggers.Values.OrderBy(item => item.Name, StringComparer.Ordinal).Select(item => new
+    {
+        item.Name,
+        table = snapshotTriggers[item.Name],
+        item.MigrationId,
+        item.OperationIndex,
+        item.Derivation,
+        bodySha256 = Sha256(item.Sql)
+    }),
+    postDefinitionPatches = patches.Select(patch => new
+    {
+        patch.MigrationId,
+        patch.OperationIndex,
+        patch.TargetNames,
+        sqlSha256 = Sha256(patch.Sql)
+    }),
+    programmableObjects = programmableDefinitions.Select(item => new
+    {
+        item.Kind,
+        item.Name,
+        item.MigrationId,
+        item.OperationIndex,
+        bodySha256 = Sha256(item.Sql)
+    }),
+    audit
+};
+
+if (args.Length == 0 || args[0] == "--summary")
+{
+    Console.WriteLine($"migrations={migrations.Length}");
+    Console.WriteLine($"sqlOperations={sqlOperations.Length}");
+    Console.WriteLine($"directTriggerDefinitions={triggerCandidates.Length}");
+    Console.WriteLine($"directTriggerNames={triggerCandidates.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count()}");
+    Console.WriteLine($"modelTriggerNames={snapshotTriggers.Count}");
+    Console.WriteLine($"selectedModelTriggers={selectedTriggers.Count}");
+    Console.WriteLine($"postDefinitionPatchOperations={patches.Length}");
+    Console.WriteLine($"baselineTables={baselineTableColumns.Count}");
+    Console.WriteLine($"staticallyValidatedInsertedDeletedColumnReferences={staticallyValidatedColumnReferenceCount}");
+    Console.WriteLine($"programmableObjects={programmableDefinitions.Length}");
+    foreach (var item in programmableDefinitions)
+    {
+        Console.WriteLine($"programmable={item.Kind}|{item.Name}|{item.MigrationId}|{item.OperationIndex}|{Sha256(item.Sql)}");
+    }
+    foreach (var group in audit)
+    {
+        Console.WriteLine($"audit={group.Kind}|definitions={group.DefinitionCount}|names={group.UniqueNameCount}");
+    }
+    return;
+}
+
+if (args.Length != 3 || args[0] is not ("--generate" or "--verify"))
+{
+    throw new InvalidOperationException("Usage: --summary, --generate <helper.cs> <manifest.json>, or --verify <helper.cs> <manifest.json>.");
+}
+
+var helperContent = RenderHelper(programmableDefinitions, selectedTriggers.Values, patches);
+var manifestContent = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+var helperPath = Path.GetFullPath(args[1]);
+var manifestPath = Path.GetFullPath(args[2]);
+if (args[0] == "--verify")
+{
+    VerifyExactFile(helperPath, helperContent);
+    VerifyExactFile(manifestPath, manifestContent);
+    Console.WriteLine("PASS: archived governance helper and manifest are deterministic and current.");
+    return;
+}
+
+WriteAtomic(helperPath, helperContent);
+WriteAtomic(manifestPath, manifestContent);
+Console.WriteLine($"GENERATED_TRIGGERS={selectedTriggers.Count}");
+Console.WriteLine($"GENERATED_PATCHES={patches.Length}");
+Console.WriteLine($"GENERATED_PROGRAMMABLE_OBJECTS={programmableDefinitions.Length}");
+
+static string FindRepositoryRoot()
+{
+    var current = new DirectoryInfo(AppContext.BaseDirectory);
+    while (current is not null)
+    {
+        if (Directory.Exists(Path.Combine(current.FullName, ".git")) || File.Exists(Path.Combine(current.FullName, ".git")))
+        {
+            return current.FullName;
+        }
+        current = current.Parent;
+    }
+    throw new InvalidOperationException("Repository root could not be located.");
+}
+
+static Dictionary<string, string> ParseSnapshotTriggers(string snapshot)
+{
+    var result = new Dictionary<string, string>(StringComparer.Ordinal);
+    var tableBlocks = Regex.Matches(snapshot,
+        @"b\.ToTable\(""(?<table>[^""]+)""[^;]*?t\s*=>\s*\{(?<body>.*?)\}\);",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant);
+    foreach (Match tableBlock in tableBlocks)
+    {
+        foreach (Match trigger in Regex.Matches(tableBlock.Groups["body"].Value,
+                     @"HasTrigger\(""([^""]+)""\)", RegexOptions.CultureInvariant))
+        {
+            var name = trigger.Groups[1].Value;
+            if (!result.TryAdd(name, tableBlock.Groups["table"].Value))
+            {
+                throw new InvalidOperationException($"Duplicate snapshot trigger name: {name}.");
+            }
+        }
+    }
+    return result;
+}
+
+static Dictionary<string, HashSet<string>> ParseBaselineTableColumns(string baseline)
+{
+    var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+    var tableBlocks = Regex.Matches(baseline,
+        @"migrationBuilder\.CreateTable\(\s*name:\s*""(?<table>[^""]+)"".*?columns:\s*table\s*=>\s*new\s*\{(?<columns>.*?)\},\s*constraints:",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant);
+    foreach (Match tableBlock in tableBlocks)
+    {
+        var columns = Regex.Matches(tableBlock.Groups["columns"].Value,
+                @"(?m)^\s*@?(?<column>[A-Za-z0-9_]+)\s*=\s*table\.Column")
+            .Select(match => match.Groups["column"].Value).ToHashSet(StringComparer.Ordinal);
+        if (columns.Count == 0 || !result.TryAdd(tableBlock.Groups["table"].Value, columns))
+            throw new InvalidOperationException($"Baseline table/column extraction is ambiguous: {tableBlock.Groups["table"].Value}.");
+    }
+    if (result.Count == 0) throw new InvalidOperationException("Baseline table/column extraction returned no tables.");
+    return result;
+}
+
+static int ValidateStaticTriggerColumnReferences(IEnumerable<SqlDefinition> triggers,
+    IReadOnlyDictionary<string, HashSet<string>> tableColumns)
+{
+    var validated = 0;
+    foreach (var trigger in triggers)
+    {
+        var table = ParseTriggerTargetTable(trigger.Sql);
+        if (!tableColumns.TryGetValue(table, out var columns))
+            throw new InvalidOperationException($"Trigger {trigger.Name} targets absent baseline table {table}.");
+
+        var aliases = Regex.Matches(trigger.Sql,
+                @"\b(?:FROM|JOIN)\s+(?:(?:\[dbo\]|dbo)\.)?\[?(?<pseudo>inserted|deleted)\]?\s+(?:AS\s+)?\[?(?<alias>[A-Za-z0-9_]+)\]?",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            .Select(match => match.Groups["alias"].Value).Distinct(StringComparer.OrdinalIgnoreCase);
+        foreach (var alias in aliases)
+        {
+            // A nested query can legally shadow i/d. Only validate aliases whose meaning is unambiguous
+            // throughout the definition; ambiguous scopes remain for SQL Server's compile-time check.
+            var shadowPattern = @"\b(?:FROM|JOIN)\s+(?!\[?(?:inserted|deleted)\]?\b)(?:\[[^\]]+\](?:\.\[[^\]]+\])?|[A-Za-z0-9_.]+)\s+(?:AS\s+)?\[?" +
+                                Regex.Escape(alias) + @"\]?\b";
+            if (Regex.IsMatch(trigger.Sql, shadowPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) continue;
+            foreach (Match reference in Regex.Matches(trigger.Sql,
+                         @"\b" + Regex.Escape(alias) + @"\.\[?(?<column>[A-Za-z0-9_]+)\]?",
+                         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                var column = reference.Groups["column"].Value;
+                if (!columns.Contains(column))
+                    throw new InvalidOperationException($"Trigger {trigger.Name} references absent baseline column {table}.{column}.");
+                validated++;
+            }
+        }
+        foreach (Match reference in Regex.Matches(trigger.Sql,
+                     @"\b(?:inserted|deleted)\.\[?(?<column>[A-Za-z0-9_]+)\]?",
+                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            var column = reference.Groups["column"].Value;
+            if (!columns.Contains(column))
+                throw new InvalidOperationException($"Trigger {trigger.Name} references absent baseline column {table}.{column}.");
+            validated++;
+        }
+    }
+    if (validated == 0) throw new InvalidOperationException("No statically detectable inserted/deleted column references were validated.");
+    return validated;
+}
+
+static IEnumerable<SqlDefinition> ParseTriggerDefinitions(ArchivedSql operation)
+{
+    foreach (var sql in ExpandExecutableSql(operation.Sql))
+    {
+        var header = Regex.Match(sql,
+            @"^\s*(?:CREATE\s+OR\s+ALTER|CREATE|ALTER)\s+TRIGGER\s+(?:(?:\[dbo\]|dbo)\.)?(?:\[([^\]]+)\]|(TR_[A-Za-z0-9_]+))",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!header.Success) continue;
+        var name = header.Groups[1].Success ? header.Groups[1].Value : header.Groups[2].Value;
+        var normalized = Regex.Replace(NormalizeNewlines(sql).Trim(),
+            @"^(?:CREATE\s+OR\s+ALTER|CREATE|ALTER)\s+TRIGGER", "CREATE OR ALTER TRIGGER",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        yield return new SqlDefinition(name, operation.MigrationId, operation.OperationIndex, normalized, "ARCHIVED_FINAL_DEFINITION");
+    }
+}
+
+static IEnumerable<string> ExpandExecutableSql(string operationSql)
+{
+    var normalized = NormalizeNewlines(operationSql).Trim();
+    var execMatches = Regex.Matches(normalized,
+        @"EXEC\s*\(\s*N?'(?<body>(?:''|[^'])*)'\s*\)\s*;?",
+        RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    foreach (Match exec in execMatches)
+    {
+        yield return exec.Groups["body"].Value.Replace("''", "'", StringComparison.Ordinal).Trim();
+    }
+    if (Regex.IsMatch(normalized,
+            @"^\s*(?:CREATE\s+OR\s+ALTER|CREATE|ALTER)\s+(?:TRIGGER|FUNCTION|VIEW|PROCEDURE|PROC|SYNONYM|SECURITY\s+POLICY|SEQUENCE)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+    {
+        yield return normalized;
+    }
+}
+
+static void AddCheckedAlias(IDictionary<string, SqlDefinition> selected,
+    IReadOnlyCollection<SqlDefinition> candidates, IReadOnlyDictionary<string, string> snapshotTriggers,
+    string sourceName, string targetName)
+{
+    if (selected.ContainsKey(targetName))
+        throw new InvalidOperationException($"Alias target {targetName} unexpectedly has a direct archived definition.");
+    var source = candidates.Where(candidate => candidate.Name == sourceName)
+        .OrderBy(candidate => candidate.MigrationId, StringComparer.Ordinal).ThenBy(candidate => candidate.OperationIndex)
+        .LastOrDefault() ?? throw new InvalidOperationException($"Alias source trigger is missing: {sourceName}.");
+    var aliasedSql = source.Sql.Replace(sourceName, targetName, StringComparison.Ordinal);
+    if (aliasedSql.Contains(sourceName, StringComparison.Ordinal) ||
+        !string.Equals(ParseTriggerTargetTable(aliasedSql), snapshotTriggers[targetName], StringComparison.Ordinal))
+        throw new InvalidOperationException($"Alias lineage could not be bound safely: {sourceName} -> {targetName}.");
+    selected.Add(targetName, source with { Name = targetName, Sql = aliasedSql, Derivation = $"EXACT_RENAME_ALIAS_FROM:{sourceName}" });
+}
+
+static string ParseTriggerTargetTable(string sql)
+{
+    var match = Regex.Match(sql,
+        @"\bON\s+(?:(?:\[dbo\]|dbo)\.)?(?:\[([^\]]+)\]|([A-Za-z0-9_]+))",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    if (!match.Success) throw new InvalidOperationException("Trigger target table is absent.");
+    return match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+}
+
+static int CountTriggerDefinitions(string sql) => Regex.Matches(sql,
+    @"(?:CREATE\s+OR\s+ALTER|CREATE|ALTER)\s+TRIGGER\b",
+    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count;
+
+static ArchivedSql[] SelectPostDefinitionPatches(IReadOnlyCollection<ArchivedSql> operations,
+    IReadOnlyDictionary<string, SqlDefinition> selected)
+{
+    var result = new List<ArchivedSql>();
+    foreach (var operation in operations)
+    {
+        if (!operation.Sql.Contains("OBJECT_DEFINITION", StringComparison.OrdinalIgnoreCase)) continue;
+        var names = Regex.Matches(operation.Sql, @"TR_[A-Za-z0-9_]+", RegexOptions.CultureInvariant)
+            .Select(match => match.Value).Distinct(StringComparer.Ordinal).Where(selected.ContainsKey)
+            .OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        if (names.Length == 0) continue;
+        var requiresPatch = names.Any(name =>
+        {
+            var definition = selected[name];
+            return string.CompareOrdinal(operation.MigrationId, definition.MigrationId) > 0 ||
+                   operation.MigrationId == definition.MigrationId && operation.OperationIndex > definition.OperationIndex;
+        });
+        if (requiresPatch)
+            result.Add(operation with { Sql = NormalizeNewlines(operation.Sql).Trim(), TargetNames = names });
+    }
+    return result.OrderBy(item => item.MigrationId, StringComparer.Ordinal).ThenBy(item => item.OperationIndex).ToArray();
+}
+
+static SqlDefinition[] SelectProgrammableDefinitions(IReadOnlyCollection<ArchivedSql> operations)
+{
+    var definitions = new List<SqlDefinition>();
+    foreach (var operation in operations)
+    foreach (var sql in ExpandExecutableSql(operation.Sql))
+    {
+        var match = Regex.Match(sql,
+            @"^\s*(?:CREATE\s+OR\s+ALTER|CREATE|ALTER)\s+(FUNCTION|VIEW|PROCEDURE|PROC)\s+(?:(?:\[dbo\]|dbo)\.)?(?:\[([^\]]+)\]|([A-Za-z0-9_]+))",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (!match.Success) continue;
+        var kind = match.Groups[1].Value.Equals("PROC", StringComparison.OrdinalIgnoreCase) ? "PROCEDURE" : match.Groups[1].Value.ToUpperInvariant();
+        var name = match.Groups[2].Success ? match.Groups[2].Value : match.Groups[3].Value;
+        var normalized = Regex.Replace(NormalizeNewlines(sql).Trim(),
+            @"^(?:CREATE\s+OR\s+ALTER|CREATE|ALTER)\s+" + match.Groups[1].Value,
+            "CREATE OR ALTER " + kind, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        definitions.Add(new SqlDefinition(name, operation.MigrationId, operation.OperationIndex, normalized, kind));
+    }
+    return definitions.GroupBy(item => $"{item.Derivation}|{item.Name}", StringComparer.Ordinal)
+        .Select(group => group.OrderBy(item => item.MigrationId, StringComparer.Ordinal).ThenBy(item => item.OperationIndex).Last())
+        .OrderBy(item => item.Derivation == "FUNCTION" ? 0 : 1).ThenBy(item => item.Name, StringComparer.Ordinal).ToArray();
+}
+
+static GovernanceAudit[] AuditGovernanceObjects(IReadOnlyCollection<ArchivedSql> operations,
+    IReadOnlyCollection<SqlDefinition> triggers)
+{
+    var programmable = SelectProgrammableDefinitions(operations);
+    return new[]
+    {
+        new GovernanceAudit("TRIGGER", triggers.Count, triggers.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count()),
+        new GovernanceAudit("FUNCTION", programmable.Count(item => item.Derivation == "FUNCTION"), programmable.Where(item => item.Derivation == "FUNCTION").Select(item => item.Name).Distinct(StringComparer.Ordinal).Count()),
+        new GovernanceAudit("VIEW", programmable.Count(item => item.Derivation == "VIEW"), programmable.Where(item => item.Derivation == "VIEW").Select(item => item.Name).Distinct(StringComparer.Ordinal).Count()),
+        new GovernanceAudit("PROCEDURE", programmable.Count(item => item.Derivation == "PROCEDURE"), programmable.Where(item => item.Derivation == "PROCEDURE").Select(item => item.Name).Distinct(StringComparer.Ordinal).Count()),
+        new GovernanceAudit("SYNONYM", 0, 0), new GovernanceAudit("SECURITY_POLICY", 0, 0), new GovernanceAudit("SEQUENCE", 0, 0)
+    };
+}
+
+static string RenderHelper(IReadOnlyCollection<SqlDefinition> programmable, IEnumerable<SqlDefinition> triggers,
+    IReadOnlyCollection<ArchivedSql> patches)
+{
+    var builder = new StringBuilder();
+    builder.AppendLine("// <auto-generated />");
+    builder.AppendLine("using Microsoft.EntityFrameworkCore.Migrations;");
+    builder.AppendLine(); builder.AppendLine("namespace ErpSystem.Data.Migrations;"); builder.AppendLine();
+    builder.AppendLine("/// <summary>");
+    builder.AppendLine("/// Deterministically extracted from the archived 456-migration Up operations.");
+    builder.AppendLine("/// Contains all 355 current-model triggers, later exact definition patches, and final programmable dependencies.");
+    builder.AppendLine("/// </summary>");
+    builder.AppendLine("internal static class ArchivedGovernanceBaselineSql"); builder.AppendLine("{");
+    builder.AppendLine("    internal static void Apply(MigrationBuilder migrationBuilder)"); builder.AppendLine("    {");
+    foreach (var definition in programmable.Where(item => item.Derivation == "FUNCTION"))
+        AppendSql(builder, definition.Sql, $"{definition.Derivation} {definition.Name} from {definition.MigrationId}:{definition.OperationIndex}");
+    foreach (var trigger in triggers.OrderBy(item => item.Name, StringComparer.Ordinal))
+        AppendSql(builder, trigger.Sql, $"TRIGGER {trigger.Name} from {trigger.MigrationId}:{trigger.OperationIndex} ({trigger.Derivation})");
+    foreach (var patch in patches)
+        AppendSql(builder, patch.Sql, $"POST-DEFINITION PATCH {string.Join(',', patch.TargetNames)} from {patch.MigrationId}:{patch.OperationIndex}");
+    foreach (var definition in programmable.Where(item => item.Derivation != "FUNCTION"))
+        AppendSql(builder, definition.Sql, $"{definition.Derivation} {definition.Name} from {definition.MigrationId}:{definition.OperationIndex}");
+    builder.AppendLine("    }"); builder.AppendLine("}");
+    return builder.ToString();
+}
+
+static void AppendSql(StringBuilder builder, string sql, string provenance)
+{
+    if (sql.Contains("\"\"\"", StringComparison.Ordinal))
+        throw new InvalidOperationException($"SQL cannot be represented by the fixed raw-string delimiter: {provenance}.");
+    builder.AppendLine($"        // {provenance}"); builder.AppendLine("        migrationBuilder.Sql(\"\"\"");
+    foreach (var line in NormalizeNewlines(sql).Split('\n'))
+    {
+        if (string.IsNullOrWhiteSpace(line)) builder.AppendLine();
+        else builder.Append("            ").AppendLine(line.TrimEnd());
+    }
+    builder.AppendLine("            \"\"\");");
+}
+
+static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+static string NormalizeNewlines(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
+static void WriteAtomic(string path, string content)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
+    File.WriteAllText(temporary, content, new UTF8Encoding(false)); File.Move(temporary, path, overwrite: true);
+}
+
+static void VerifyExactFile(string path, string expected)
+{
+    if (!File.Exists(path) || !string.Equals(File.ReadAllText(path), expected, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Generated artifact is stale or missing: {path}.");
+}
+
+internal sealed record MigrationType(Type Type, string? Id);
+internal sealed record ArchivedSql(string MigrationId, int OperationIndex, string Sql)
+{
+    public string[] TargetNames { get; init; } = Array.Empty<string>();
+}
+internal sealed record SqlDefinition(string Name, string MigrationId, int OperationIndex, string Sql, string Derivation)
+{
+    public string Kind => Derivation;
+}
+internal sealed record GovernanceAudit(string Kind, int DefinitionCount, int UniqueNameCount);

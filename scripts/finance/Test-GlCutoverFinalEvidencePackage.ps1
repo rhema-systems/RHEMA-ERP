@@ -4,6 +4,7 @@ $validator = Join-Path $PSScriptRoot 'Test-GlCutoverEvidencePackage.ps1'
 $root = Join-Path ([System.IO.Path]::GetTempPath()) "RHEMAERP_GL_FINAL_PACKAGE_$([guid]::NewGuid().ToString('N'))"
 $head = 'a' * 40
 $tree = 'b' * 40
+$fixtureFingerprint = '1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28'
 
 function Write-Manifest([string]$directory) {
     $manifest = Join-Path $directory 'manifest.sha256'
@@ -26,7 +27,7 @@ function Write-Summary([string]$status, [string[]]$pending) {
         sourceServer='<REDACTED_SAME_SERVER>'; targetServer='<REDACTED_SAME_SERVER>'; sameServer=$true
         repositoryMigrationCount=1; latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'
         pendingMigrationCount=$pending.Count; pendingMigrations=@($pending)
-        sourceFingerprint='1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28'
+        sourceFingerprint=$script:fixtureFingerprint
         cutoverFlagsExplicitlyFalse=$true; targetCreated=($status -eq 'PASS'); backupCreated=($status -eq 'PASS')
     }
     if ($status -eq 'PASS') {
@@ -74,13 +75,26 @@ try {
     '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')
     $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')).Hash
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sha256')
-    '1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
-    '1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
+    $fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+    $fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
     [ordered]@{ accountingEvents=$false; producerIntents=$false; producerIntentGroups=$false; source='explicit process environment variables' } |
         ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'feature-flags.json')
     Write-Summary 'NO_GO_PREFLIGHT' $pending
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Valid final baseline preflight NO-GO package was rejected.' }
+
+    foreach ($summaryTamper in @(
+        @{property='repositoryMigrationCount';value=2;expected='summary repository migration count/latest'},
+        @{property='latestMigration';value='20260913162403_Unreviewed';expected='summary repository migration count/latest'},
+        @{property='sourceFingerprint';value='2|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28';expected='source fingerprint is not stable'}
+    )) {
+        $summary=Get-Content -Raw -LiteralPath (Join-Path $root 'summary.json') | ConvertFrom-Json
+        $summary.($summaryTamper.property)=$summaryTamper.value
+        $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'summary.json')
+        Assert-Refused $summaryTamper.expected
+        Write-Summary 'NO_GO_PREFLIGHT' $pending
+    }
+    Write-Host 'PASS: final-clone summary migration identity and source fingerprint remanifest tampering is refused'
 
     $gitDiffPath = Join-Path $root 'git-diff-check.log'
     $validGitDiffEvidence = @(Get-Content -LiteralPath $gitDiffPath)
@@ -99,6 +113,9 @@ try {
     $idempotentHashPath = Join-Path $root 'pending-migrations-idempotent.sha256'
     $zeroPending = @()
     $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    $script:fixtureFingerprint = "1|$($migrationIds[0])|1|9|28"
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
     Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
     Clear-Content -LiteralPath (Join-Path $root 'orphan-history.txt')
     '-- NO PENDING MIGRATIONS AT FRESH DISCOVERY' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
@@ -118,6 +135,9 @@ try {
     Write-Summary 'NO_GO_PREFLIGHT' $zeroPending; Assert-Refused 'Zero-pending idempotent-script evidence is missing or invalid'
 
     $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    $script:fixtureFingerprint = "1|$orphanId|1|9|28"
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
     $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
     $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
     '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
@@ -172,6 +192,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Valid final baseline PASS package was rejected.' }
 
     $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    $script:fixtureFingerprint = "1|$($migrationIds[0])|1|9|28"
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
     Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
     Clear-Content -LiteralPath (Join-Path $root 'orphan-history.txt')
     $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
@@ -184,6 +207,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Valid zero-pending final PASS package was rejected.' }
 
     $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    $script:fixtureFingerprint = "1|$orphanId|1|9|28"
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+    $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
     $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
     $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
     $targetIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')

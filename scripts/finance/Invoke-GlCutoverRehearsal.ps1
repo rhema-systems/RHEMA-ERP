@@ -15,6 +15,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
+# These public names are retained only so old operator commands fail with an explicit explanation.
+# The implementation and its historical fake-history path were removed with the disposable baseline.
+# This refusal is intentionally before repository resolution, connection lookup/parsing, evidence creation,
+# native commands, or SQL access.
+if ($Mode -in @('RehearseEmpty', 'RehearseClone')) {
+    throw "$Mode is permanently disabled. Its historical evidence remains docs-only; use ResetDisposableDevelopment or RehearseFinalClone under their independent-review contracts."
+}
+
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $apiProject = Join-Path $repositoryRoot 'src\ErpSystem.Api\ErpSystem.Api.csproj'
 $dataProject = Join-Path $repositoryRoot 'src\ErpSystem.Data\ErpSystem.Data.csproj'
@@ -1228,9 +1236,13 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
         }
         $durableBackupVerified = $durableOrdinal -ge 4 -and $reconciledBackupState.backupVerified
         $durableResetStarted = $durableOrdinal -ge 5
+        $durableMigrationsApplied = $durableOrdinal -ge 7
         Write-DisposableRecoveryInstructions $evidenceDirectory $durableBackupVerified $durablePhase $phase
         Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $durablePhase $durableBackupCreated $durableBackupVerified $durableResetStarted @{
             sourceFingerprint = $sourceFingerprint; failure = $safeFailure; failedOperation = $phase; backupPreserved = $durableBackupCreated
+            repositoryMigrationCount = $authoritativeMigrationCount
+            finalMigrationCount = if ($durableMigrationsApplied) { $authoritativeMigrationCount } else { 0 }
+            latestMigration = $authoritativeLatestMigration; orphanMigrationCount = 0
             backupMediaId = $backupMediaId; backupFileName = $backupFileName
             backupPathSha256 = $backupPathSha256; attemptOwnedBackup = $attemptOwnedBackup
             backupSha256 = $reconciledBackupState.verifiedBackupSha256; backupCompleted = $backupCompleted
@@ -1350,10 +1362,8 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
 }
 
 $cloneSource = $null
-if ($Mode -in @('RehearseClone', 'RehearseFinalClone')) {
-    if ($Mode -eq 'RehearseFinalClone') {
-        Assert-FinalCutoverFlagsDisabled
-    }
+if ($Mode -eq 'RehearseFinalClone') {
+    Assert-FinalCutoverFlagsDisabled
     $sourceConnection = Get-ProcessConnectionString $SourceConnectionEnvironmentVariable
     $cloneSource = ConvertTo-ConnectionTarget $sourceConnection $false
     Register-SensitiveEvidenceToken $cloneSource.Server
@@ -1640,229 +1650,4 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
         Write-Error "Final clone rehearsal did not pass. Nothing is dropped or overwritten automatically; any exact target/backup is preserved for inspection. $sanitizedFailure"
         throw $sanitizedFailure
     }
-}
-
-if ($Mode -eq 'RehearseClone') {
-    $source = $cloneSource
-
-    Push-Location $repositoryRoot
-    try {
-        $cloneBuildLog = Join-Path $evidenceDirectoryResolved 'clone-build.log'
-        $null = Invoke-NativeWithEvidence 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo') $cloneBuildLog
-    }
-    finally { Pop-Location }
-
-    $sourceFingerprintBefore = Get-SourceFingerprint $source.Builder $source.Database
-    $sourceFingerprintBefore | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-fingerprint-before.txt')
-    $backupPath = Get-CloneBackupPath $target
-    $escapedBackupPath = $backupPath.Replace("'", "''")
-    $backupExists = [int](Invoke-SqlScalar $target.Builder 'master' @"
-DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
-INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
-SELECT COALESCE(MAX(FileExists),0) FROM @exists;
-"@)
-    if ($backupExists -ne 0) {
-        throw "The exact target-derived rehearsal backup already exists. Run guarded DropRehearsal first: $backupPath"
-    }
-
-    $logicalFiles = @(Get-DatabaseLogicalFiles $source.Builder $source.Database)
-    $dataFiles = @($logicalFiles | Where-Object Type -eq 0)
-    $logFiles = @($logicalFiles | Where-Object Type -eq 1)
-    if ($dataFiles.Count -ne 1 -or $logFiles.Count -ne 1) {
-        throw 'Guarded clone currently requires exactly one ROWS file and one LOG file; no backup or restore was attempted.'
-    }
-    $dataRoot = Get-ServerDefaultPath $target.Builder 'InstanceDefaultDataPath'
-    $logRoot = Get-ServerDefaultPath $target.Builder 'InstanceDefaultLogPath'
-    $dataPath = (Join-Path $dataRoot "$($target.Database).mdf").Replace("'", "''")
-    $logPath = (Join-Path $logRoot "$($target.Database)_log.ldf").Replace("'", "''")
-    $sourceDatabase = $source.Database.Replace(']', ']]')
-    $sourceDataLogical = $dataFiles[0].Name.Replace("'", "''")
-    $sourceLogLogical = $logFiles[0].Name.Replace("'", "''")
-
-    try {
-        $backupRestoreEvidence = Join-Path $evidenceDirectoryResolved 'backup-restore-checkdb.txt'
-        Invoke-Sql $source.Builder 'master' @"
-SET NOCOUNT ON;
-SELECT N'BACKUP_COPY_ONLY_CHECKSUM_START';
-BACKUP DATABASE [$sourceDatabase] TO DISK=N'$escapedBackupPath'
-WITH COPY_ONLY, CHECKSUM, INIT, NAME=N'GL cutover guarded representative clone';
-SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
-RESTORE VERIFYONLY FROM DISK=N'$escapedBackupPath' WITH CHECKSUM;
-SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
-RESTORE DATABASE [$escapedDatabase] FROM DISK=N'$escapedBackupPath'
-WITH MOVE N'$sourceDataLogical' TO N'$dataPath',
-     MOVE N'$sourceLogLogical' TO N'$logPath', CHECKSUM, RECOVERY;
-SELECT N'RESTORE_TARGET_COMPLETE';
-DBCC CHECKDB(N'$($target.Database.Replace("'", "''"))') WITH PHYSICAL_ONLY, NO_INFOMSGS;
-SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
-"@ '' $backupRestoreEvidence
-        $backupRestoreText = Get-Content -Raw -LiteralPath $backupRestoreEvidence
-        foreach ($marker in @('BACKUP_COPY_ONLY_CHECKSUM_COMPLETE', 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE',
-            'RESTORE_TARGET_COMPLETE', 'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE')) {
-            if ($backupRestoreText -notmatch [regex]::Escape($marker)) {
-                throw "Backup/restore evidence did not contain required marker '$marker'."
-            }
-        }
-
-        Push-Location $repositoryRoot
-        try {
-            $applyLog = Join-Path $evidenceDirectoryResolved 'clone-apply-migrations.log'
-            $exitCode = Set-ApplicationConnection $targetConnection {
-                Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                    '--project', $apiProject, '--', 'apply-migrations') $applyLog -AllowFailure
-            }
-            $applyText = Get-Content -Raw -LiteralPath $applyLog
-            if ($exitCode -eq 0 -or $applyText -notmatch 'Phase 4 preflight failed: existing FX revaluation batches') {
-                throw 'Representative clone did not stop at the required Phase 4 historical-FX-evidence guard.'
-            }
-        }
-        finally { Pop-Location }
-
-        $cloneState = [string](Invoke-SqlScalar $target.Builder $target.Database @"
-SELECT CONCAT(
-    (SELECT COUNT_BIG(*) FROM dbo.__EFMigrationsHistory), '|',
-    (SELECT MAX(MigrationId) FROM dbo.__EFMigrationsHistory), '|',
-    CASE WHEN EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId=N'20260903130000_AddFinancialStatementClassificationSnapshots') THEN 1 ELSE 0 END, '|',
-    CASE WHEN EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId=N'20260903190453_AddBookScopedFxRevaluationPolicy') THEN 1 ELSE 0 END, '|',
-    (SELECT COUNT_BIG(*) FROM dbo.FxRevaluationBatches WHERE IsDeleted=0));
-"@)
-        if ($cloneState -notmatch '^449\|20260903130000_AddFinancialStatementClassificationSnapshots\|1\|0\|1$') {
-            throw "Representative clone stopped in an unexpected state: $cloneState"
-        }
-        $cloneState | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'clone-state-at-stop.txt')
-
-        $sourceFingerprintAfter = Get-SourceFingerprint $source.Builder $source.Database
-        $sourceFingerprintAfter | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-fingerprint-after.txt')
-        if ($sourceFingerprintAfter -ne $sourceFingerprintBefore) {
-            throw 'Configured source fingerprint changed during guarded clone rehearsal.'
-        }
-
-        [ordered]@{
-            status = 'EXPECTED_PHASE4_STOP'
-            gitHead = (git rev-parse HEAD).Trim()
-            sourceDatabase = $source.Database
-            targetDatabase = $target.Database
-            sourceFingerprint = $sourceFingerprintAfter
-            cloneState = $cloneState
-            backupPolicy = 'COPY_ONLY_CHECKSUM_VERIFYONLY'
-            completedAtUtc = [DateTime]::UtcNow.ToString('O')
-        } | ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'summary.json')
-        Write-Host "GL cutover representative clone reached its expected Phase 4 stop. Evidence: $evidenceDirectoryResolved"
-        return
-    }
-    catch {
-        Write-Error "Clone rehearsal failed or stopped unexpectedly. The prefix-safe target and exact target-derived backup were preserved for inspection: $($target.Database). $($_.Exception.Message)"
-        throw
-    }
-}
-
-$baselineScript = Join-Path $evidenceDirectoryResolved 'initial-baseline.sql'
-
-Write-Host '[CREATE] Prefix assertion passed; creating the exact resolved rehearsal database.'
-Invoke-Sql $target.Builder 'master' "CREATE DATABASE [$escapedDatabase];"
-
-try {
-    Push-Location $repositoryRoot
-    $oldFocusedTooling = [Environment]::GetEnvironmentVariable('TdcFocusedEfToolingBuild', 'Process')
-    try {
-        # The full historical designers exceed hundreds of MB of generated C#. The repository's
-        # focused tooling mode compiles the authoritative current snapshot plus lightweight
-        # discovery metadata, whose parity is separately tested below.
-        [Environment]::SetEnvironmentVariable('TdcFocusedEfToolingBuild', 'true', 'Process')
-        Invoke-Native 'git' @('diff', '--check')
-        Invoke-Native 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo',
-            "-p:TdcEfToolingMigrationDesigner=Migrations\20260313114533_InitialBaseline.Designer.cs")
-        Invoke-Native 'dotnet' @('ef', 'migrations', 'script', $baselinePredecessor, $baselineMigration,
-            '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
-            '--context', 'ApplicationDbContext', '--no-build', '--output', $baselineScript)
-        Invoke-Sql $target.Builder $target.Database @"
-IF OBJECT_ID(N'[dbo].[__EFMigrationsHistory]', N'U') IS NULL
-BEGIN
-    CREATE TABLE [dbo].[__EFMigrationsHistory]
-    (
-        [MigrationId] nvarchar(150) NOT NULL CONSTRAINT [PK___EFMigrationsHistory] PRIMARY KEY,
-        [ProductVersion] nvarchar(32) NOT NULL
-    );
-END;
-"@
-        Invoke-Sql $target.Builder $target.Database '' $baselineScript
-
-        $stampedMigrations = @($supersededMigrations) + $baselineMigration
-        $stampValues = ($stampedMigrations | ForEach-Object {
-            "IF NOT EXISTS (SELECT 1 FROM [dbo].[__EFMigrationsHistory] WHERE [MigrationId]=N'$_') INSERT INTO [dbo].[__EFMigrationsHistory] ([MigrationId],[ProductVersion]) VALUES (N'$_', N'8.0.0');"
-        }) -join "`n"
-        Invoke-Sql $target.Builder $target.Database $stampValues
-
-        Set-ApplicationConnection $targetConnection {
-            # Exercise the same controlled deployment entry point operators use. It runs
-            # Database.MigrateAsync without starting the HTTP host or invoking seeders.
-            $migrationLog = Join-Path $evidenceDirectoryResolved 'migration-apply.log'
-            $seedPassOneLog = Join-Path $evidenceDirectoryResolved 'seed-pass-1.log'
-            $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                '--project', $apiProject, '--', 'apply-migrations') $migrationLog
-            $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                '--project', $apiProject, '--', 'seed-db') $seedPassOneLog
-        }
-
-        $passOne = Join-Path $evidenceDirectoryResolved 'invariants-pass-1.txt'
-        Invoke-Sql $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-rehearsal-invariants.sql') $passOne
-
-        Set-ApplicationConnection $targetConnection {
-            $seedPassTwoLog = Join-Path $evidenceDirectoryResolved 'seed-pass-2.log'
-            $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                '--project', $apiProject, '--', 'seed-db') $seedPassTwoLog
-        }
-
-        $passTwo = Join-Path $evidenceDirectoryResolved 'invariants-pass-2.txt'
-        Invoke-Sql $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-rehearsal-invariants.sql') $passTwo
-        $first = (Get-FileHash -Algorithm SHA256 $passOne).Hash
-        $second = (Get-FileHash -Algorithm SHA256 $passTwo).Hash
-        if ($first -ne $second) { throw 'Second seed changed the canonical Finance invariant snapshot.' }
-
-        Set-ApplicationConnection $targetConnection {
-            $modelLog = Join-Path $evidenceDirectoryResolved 'ef-no-pending-model.log'
-            $migrationListLog = Join-Path $evidenceDirectoryResolved 'migration-discovery.log'
-            $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'has-pending-model-changes',
-                '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
-                '--context', 'ApplicationDbContext', '--no-build') $modelLog
-            $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'list',
-                '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
-                '--context', 'ApplicationDbContext', '--no-build', '--no-connect') $migrationListLog
-        }
-
-        $migrationCount = @(Get-Content -LiteralPath (Join-Path $evidenceDirectoryResolved 'migration-discovery.log') |
-            Where-Object { $_.Trim() -match '^\d{14}_.+' }).Count
-        $appliedMigrationCount = [long](Invoke-SqlScalar $target.Builder $target.Database 'SELECT COUNT_BIG(*) FROM dbo.__EFMigrationsHistory;')
-        if ($migrationCount -ne 448 -or $appliedMigrationCount -ne 448) {
-            throw "Migration discovery/history mismatch. Discovered=$migrationCount; Applied=$appliedMigrationCount."
-        }
-
-        @(
-            "$first  invariants-pass-1.txt",
-            "$second  invariants-pass-2.txt"
-        ) | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectoryResolved 'checksums.sha256')
-
-        $summary = [ordered]@{
-            status = 'PASS'
-            gitHead = (git rev-parse HEAD).Trim()
-            database = $target.Database
-            migrationCount = $migrationCount
-            latestMigration = '20260904003118_AddGovernedAccountSegmentIdentity'
-            invariantPass1Sha256 = $first
-            invariantPass2Sha256 = $second
-            applicationMigrationCommand = 'dotnet run --no-build --configuration Debug --project src/ErpSystem.Api/ErpSystem.Api.csproj -- apply-migrations'
-            seedPasses = 2
-            completedAtUtc = [DateTime]::UtcNow.ToString('O')
-        }
-        $summary | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $evidenceDirectoryResolved 'summary.json')
-        Write-Host "GL cutover empty-database rehearsal passed. Evidence: $evidenceDirectoryResolved"
-    }
-    finally {
-        [Environment]::SetEnvironmentVariable('TdcFocusedEfToolingBuild', $oldFocusedTooling, 'Process')
-        Pop-Location
-    }
-}
-catch {
-    Write-Error "Rehearsal failed. The safe-named database was preserved for inspection: $($target.Database). $($_.Exception.Message)"
-    throw
 }

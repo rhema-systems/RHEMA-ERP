@@ -259,6 +259,7 @@ if ($PackageKind -eq 'DisposableReset') {
         }
     }
 
+    $repositoryIds = @()
     if (Test-Path -LiteralPath (Join-Path $root 'migration-discovery.log') -PathType Leaf) {
         $repositoryIds = @(Get-Content -LiteralPath (Join-Path $root 'migration-discovery.log') | ForEach-Object {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
@@ -275,11 +276,13 @@ if ($PackageKind -eq 'DisposableReset') {
         }
         if (Test-Path -LiteralPath (Join-Path $root 'target-migration-history.txt') -PathType Leaf) {
             $targetIds = @(Get-Content -LiteralPath (Join-Path $root 'target-migration-history.txt'))
-            if (($targetIds -join "`n") -cne ($repositoryIds -join "`n")) {
+            if (($targetIds -join "`n") -cne ($repositoryIds -join "`n") -or
+                [long]$reset.finalMigrationCount -ne $targetIds.Count -or [long]$reset.orphanMigrationCount -ne 0) {
                 throw 'Disposable-reset target history is not exactly the repository baseline with zero orphans.'
             }
         }
     }
+    $sourceIds = @()
     if (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf) {
         $sourceIds = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -349,6 +352,47 @@ if ($PackageKind -eq 'DisposableReset') {
         }
         if ($reset.backupMaterialStateReconciled -ne $true) {
             throw 'Disposable-reset V2 backup material state must be reconciled before terminal publication.'
+        }
+        foreach ($field in @('repositoryMigrationCount','finalMigrationCount','orphanMigrationCount')) {
+            $fieldValue = Get-RequiredNonNullJsonProperty $reset $field 'Disposable-reset V2 status'
+            if ($fieldValue -isnot [long] -or $fieldValue -lt 0) {
+                throw "Disposable-reset V2 property '$field' must be a nonnegative Int64."
+            }
+        }
+        $latestMigrationValue = Get-RequiredNonNullJsonProperty $reset 'latestMigration' 'Disposable-reset V2 status'
+        if ($latestMigrationValue -isnot [string] -or
+            $latestMigrationValue -cne '20260913162402_DisposableDevelopmentCurrentModelBaseline' -or
+            [long]$reset.repositoryMigrationCount -ne 1 -or [long]$reset.orphanMigrationCount -ne 0) {
+            throw 'Disposable-reset V2 repository migration count/latest/orphan identity is not the exact baseline contract.'
+        }
+        $expectedFinalMigrationCount = if ($phases -ccontains 'MIGRATIONS_APPLIED') { 1 } else { 0 }
+        if ([long]$reset.finalMigrationCount -ne $expectedFinalMigrationCount) {
+            throw 'Disposable-reset V2 final migration count is inconsistent with its terminal durable phase.'
+        }
+        if ($repositoryIds.Count -gt 0 -and
+            ([long]$reset.repositoryMigrationCount -ne $repositoryIds.Count -or
+             [string]$reset.latestMigration -cne $repositoryIds[-1])) {
+            throw 'Disposable-reset V2 status disagrees with independently derived repository migration evidence.'
+        }
+        if ($phaseMarkers.Count -ge 1 -and
+            ([long]$phaseMarkers[0].repositoryMigrationCount -ne 1 -or
+             [string]$phaseMarkers[0].latestMigration -cne '20260913162402_DisposableDevelopmentCurrentModelBaseline')) {
+            throw 'Disposable-reset OFFLINE_GATES phase does not bind the exact baseline repository identity.'
+        }
+        if ($phases -ccontains 'MIGRATIONS_APPLIED') {
+            $migrationPhaseIndex = [Array]::IndexOf($phases, 'MIGRATIONS_APPLIED')
+            if ([long]$phaseMarkers[$migrationPhaseIndex].finalMigrationCount -ne 1) {
+                throw 'Disposable-reset MIGRATIONS_APPLIED phase does not bind the exact baseline count.'
+            }
+        }
+        if ($sourceIds.Count -gt 0 -or (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf)) {
+            $fingerprintValue = Get-RequiredNonNullJsonProperty $reset 'sourceFingerprint' 'Disposable-reset V2 status'
+            $fingerprintParts = @([string]$fingerprintValue -split '\|')
+            $expectedSourceLatest = if ($sourceIds.Count -eq 0) { 'EMPTY' } else { $sourceIds[-1] }
+            if (-not (Test-DisposableSourceFingerprintShape ([string]$fingerprintValue)) -or
+                [uint64]$fingerprintParts[0] -ne $sourceIds.Count -or $fingerprintParts[1] -cne $expectedSourceLatest) {
+                throw 'Disposable-reset V2 source fingerprint count/latest disagrees with independently derived source history.'
+            }
         }
     }
     $ownedProperty = $reset.PSObject.Properties['attemptOwnedBackup']
@@ -653,6 +697,10 @@ if ($PackageKind -eq 'FinalClone') {
         (@($migrationIds | Sort-Object) -join "`n") -ne ($migrationIds -join "`n")) {
         throw 'Final-clone migration evidence contains duplicate or out-of-order migration IDs.'
     }
+    if ($summary.repositoryMigrationCount -isnot [long] -or [long]$summary.repositoryMigrationCount -ne $migrationIds.Count -or
+        $summary.latestMigration -isnot [string] -or [string]$summary.latestMigration -cne $migrationIds[-1]) {
+        throw 'Final-clone summary repository migration count/latest disagrees with independently derived discovery evidence.'
+    }
     $sourceHistory = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if (@($sourceHistory | Sort-Object -Unique).Count -ne $sourceHistory.Count -or
@@ -695,7 +743,12 @@ if ($PackageKind -eq 'FinalClone') {
     }
     $before = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')).Trim()
     $after = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')).Trim()
-    if ($before -ne $after -or $after -ne [string]$summary.sourceFingerprint) {
+    $sourceFingerprintParts = @($before -split '\|')
+    $expectedSourceLatest = if ($sourceHistory.Count -eq 0) { 'EMPTY' } else { $sourceHistory[-1] }
+    if ($before -ne $after -or $after -ne [string]$summary.sourceFingerprint -or
+        -not (Test-DisposableSourceFingerprintShape $before) -or
+        [uint64]$sourceFingerprintParts[0] -ne $sourceHistory.Count -or
+        $sourceFingerprintParts[1] -cne $expectedSourceLatest) {
         throw 'Final-clone source fingerprint is not stable across the rehearsal.'
     }
     $idempotentScriptHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')).Hash

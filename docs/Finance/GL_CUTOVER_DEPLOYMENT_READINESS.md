@@ -76,6 +76,20 @@ current model; its snapshot is current, future EF migrations continue normally f
 final reviewed C5-C8 database-only trigger authority after creating the C1-C8 relational schema. The baseline is
 authorized only for the explicitly disposable local-development reset. It is not an upgrade path for databases
 that contain any legacy migration history.
+The unchanged archive contains 656 tracked files; its canonical base tree-entry inventory SHA-256 is
+`EA21CE6DBF118054F5240D7BE837ADDEF9D1A0D8214779697D17E6634C28023F`.
+
+The D3 correction deterministically evaluates all 922 raw-SQL operations from the archived compiled migration
+chain and reconciles them with the current snapshot. The baseline now carries all 355/355 model-declared trigger
+names as isolated SQL operations, followed in original chronological order by the 22 later definition-patch
+operations. Two snapshot names are exact same-table renames of their last archived definitions. The distinct
+15-trigger C5-C8 authority set remains additive, for 370 unique final trigger names with no collision. The same
+audit retains the final `fn_ProcurementRfqSourceLineIdentity` function and
+`vw_ProcurementReceiptDocumentReconciliation` view; archived final definitions contain no procedures, synonyms,
+security policies, or sequences. A checked manifest binds source migration/operation, target table and body hash;
+offline extraction additionally reconciles 12,627 unambiguous inserted/deleted column references against the
+1,556 zero-to-current baseline tables. Generated SQL must reproduce all 370 unique trigger definitions, the
+function, view, 22 isolated patches, and one baseline history identity before a reset can be reviewed.
 
 The last authorized Stage A read-only fingerprint of configured `RHEMAERP` ended at
 `20260902140000_AddFixedAssetDepreciationConventionEvidence`. On that evidence, the minimum known cutover
@@ -110,8 +124,9 @@ must be regenerated and independently checked after deployment-time discovery.
 
 Deployment remains blocked until every item below has durable evidence and an independent reviewer sign-off.
 
-The Stage A `RehearseClone` mode remains a historical regression path and intentionally accepts only its
-documented Phase 4 stop. The operational cutover path is `RehearseFinalClone`. It does not use an application
+The Stage A `RehearseClone` and `RehearseEmpty` names now fail immediately before any connection-capable work;
+their mutation implementations and fake migration-history stamping have been removed. Their Phase 4 and empty-chain
+results remain historical evidence only. The operational cutover path is `RehearseFinalClone`. It does not use an application
 configuration fallback: both connection strings and all three disabled flags must be explicit process values.
 It also requires the exact independently reviewed commit and tree as process values and refuses a descendant,
 another tree, or any tracked/untracked workspace change before parsing a connection or contacting SQL Server.

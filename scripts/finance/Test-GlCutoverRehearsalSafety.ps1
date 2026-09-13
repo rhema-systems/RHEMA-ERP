@@ -50,7 +50,7 @@ try {
 
     foreach ($case in $cases) {
         [Environment]::SetEnvironmentVariable('RHEMA_GL_REHEARSAL_CONNECTION', $case.Value, 'Process')
-        $output = & pwsh -NoProfile -File $script -Mode RehearseEmpty 2>&1 | Out-String
+        $output = & pwsh -NoProfile -File $script -Mode DropRehearsal 2>&1 | Out-String
         if ($LASTEXITCODE -eq 0) { throw "Safety case '$($case.Name)' unexpectedly succeeded." }
         if ($output -notmatch [regex]::Escape($case.Expected)) {
             throw "Safety case '$($case.Name)' did not return the expected refusal '$($case.Expected)'."
@@ -58,30 +58,17 @@ try {
         Write-Host "PASS: $($case.Name)"
     }
 
-    [Environment]::SetEnvironmentVariable(
-        'RHEMA_GL_REHEARSAL_CONNECTION',
-        'Server=target-host;Database=RHEMAERP_GL_REHEARSAL_CLONE_SAFETY;Integrated Security=true',
-        'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_REHEARSAL_CONNECTION', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', $null, 'Process')
     $nonEmptyEvidence = Join-Path ([System.IO.Path]::GetTempPath()) "RHEMAERP_GL_REHEARSAL_EVIDENCE_$([guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $nonEmptyEvidence | Out-Null
     Set-Content -LiteralPath (Join-Path $nonEmptyEvidence 'stale.txt') -Value 'stale'
-    $cloneCases = @(
-        @{ Name='missing clone source'; Value=$null; Expected="RHEMA_GL_SOURCE_READONLY_CONNECTION' is required" },
-        @{ Name='rehearsal clone source'; Value='Server=target-host;Database=RHEMAERP_GL_REHEARSAL_SOURCE;Integrated Security=true'; Expected='Clone source must be the retained development database' },
-        @{ Name='wrong clone source catalog'; Value='Server=target-host;Database=master;Integrated Security=true'; Expected='must be the exact configured RhemaERP catalog' },
-        @{ Name='cross-server clone'; Value='Server=source-host;Database=RhemaERP;Integrated Security=true'; Expected='must resolve to the same SQL Server instance' },
-        @{ Name='nonempty evidence directory'; Value='Server=target-host;Database=RhemaERP;Integrated Security=true'; Expected='Evidence directory must be new or empty'; EvidenceDirectory=$nonEmptyEvidence }
-    )
-    foreach ($case in $cloneCases) {
-        [Environment]::SetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', $case.Value, 'Process')
-        $arguments = @('-NoProfile', '-File', $script, '-Mode', 'RehearseClone')
-        if ($case.ContainsKey('EvidenceDirectory')) { $arguments += @('-EvidenceDirectory', $case.EvidenceDirectory) }
-        $output = & pwsh @arguments 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) { throw "Safety case '$($case.Name)' unexpectedly succeeded." }
-        if ($output -notmatch [regex]::Escape($case.Expected)) {
-            throw "Safety case '$($case.Name)' did not return the expected refusal '$($case.Expected)'."
+    foreach ($legacyMode in @('RehearseEmpty','RehearseClone')) {
+        $output = & pwsh -NoProfile -File $script -Mode $legacyMode 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0 -or $output -notmatch "$legacyMode is permanently disabled") {
+            throw "$legacyMode did not refuse before connection lookup with its permanent docs-only message. Output: $output"
         }
-        Write-Host "PASS: $($case.Name)"
+        Write-Host "PASS: $legacyMode is hard-disabled before connection parsing"
     }
 
     $transportRoot = Join-Path ([System.IO.Path]::GetTempPath()) "RHEMAERP_GL_SQLCMD_TRANSPORT_$([guid]::NewGuid().ToString('N'))"
@@ -286,10 +273,15 @@ exit 0
             throw "Final clone safety contract is missing: $requiredText"
         }
     }
-    $legacyCloneMarker = "if (`$Mode -eq 'RehearseClone') {"
-    $legacyCloneIndex = $scriptText.IndexOf($legacyCloneMarker, [StringComparison]::Ordinal)
-    if ($legacyCloneIndex -lt 0) { throw 'Could not isolate the final-clone implementation from the historical clone path.' }
-    $finalModeText = $scriptText.Substring(0, $legacyCloneIndex)
+    $legacyRefusalIndex = $scriptText.IndexOf("if (`$Mode -in @('RehearseEmpty', 'RehearseClone'))", [StringComparison]::Ordinal)
+    $repositoryResolutionIndex = $scriptText.IndexOf('$repositoryRoot =', [StringComparison]::Ordinal)
+    if ($legacyRefusalIndex -lt 0 -or $repositoryResolutionIndex -lt 0 -or
+        $legacyRefusalIndex -ge $repositoryResolutionIndex -or
+        $scriptText -match "if \(`$Mode -eq 'RehearseClone'\)" -or
+        $scriptText -match 'INSERT INTO\s+\[dbo\]\.\[__EFMigrationsHistory\]') {
+        throw 'Legacy RehearseEmpty/RehearseClone is not hard-disabled before connection-capable setup, or fake history stamping remains.'
+    }
+    $finalModeText = $scriptText
     if ($finalModeText -match 'COPY_ONLY,\s*CHECKSUM,\s*INIT\b' -or
         $finalModeText -notmatch 'COPY_ONLY,\s*CHECKSUM,\s*NOINIT,\s*NOSKIP,\s*MEDIANAME=') {
         throw 'Final clone backup must use the fresh unpredictable media identity and no-overwrite NOINIT/NOSKIP pattern.'

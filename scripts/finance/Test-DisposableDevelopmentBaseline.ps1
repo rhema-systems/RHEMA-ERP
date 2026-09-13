@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$GeneratedSqlPath)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -13,8 +13,13 @@ $baselinePath = Join-Path $migrationDirectory "$baselineId.cs"
 $designerPath = Join-Path $migrationDirectory "$baselineId.Designer.cs"
 $snapshotPath = Join-Path $migrationDirectory 'ApplicationDbContextModelSnapshot.cs'
 $authorityPath = Join-Path $migrationDirectory 'FinanceC1C8BaselineAuthoritySql.cs'
+$governancePath = Join-Path $migrationDirectory 'ArchivedGovernanceBaselineSql.cs'
+$governanceManifestPath = Join-Path $migrationDirectory 'ArchivedGovernanceBaselineManifest.json'
+$inspectorProject = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\ArchivedMigrationSqlInspector.csproj'
+$inspectorSource = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\Program.cs'
 
-foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPath,$authorityPath,
+foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPath,$authorityPath,$governancePath,
+    $governanceManifestPath,$inspectorProject,$inspectorSource,
     (Join-Path $archiveDirectory 'README.md'))) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Disposable-development baseline artifact is missing: $requiredPath"
@@ -55,7 +60,10 @@ if ($upText -match '\bDrop(?:Table|Column|ForeignKey|Index|PrimaryKey|UniqueCons
     $upText -match '\bUpdateData\s*\(') {
     throw 'The zero-to-current baseline contains predecessor-dependent drop/update operations.'
 }
-if ([regex]::Matches($upText, 'FinanceC1C8BaselineAuthoritySql\.Apply\(migrationBuilder\)').Count -ne 1) {
+if ([regex]::Matches($upText, 'ArchivedGovernanceBaselineSql\.Apply\(migrationBuilder\)').Count -ne 1 -or
+    [regex]::Matches($upText, 'FinanceC1C8BaselineAuthoritySql\.Apply\(migrationBuilder\)').Count -ne 1 -or
+    $upText.IndexOf('ArchivedGovernanceBaselineSql.Apply(migrationBuilder)', [StringComparison]::Ordinal) -ge
+        $upText.IndexOf('FinanceC1C8BaselineAuthoritySql.Apply(migrationBuilder)', [StringComparison]::Ordinal)) {
     throw 'The disposable-development baseline does not apply C5-C8 database-only authority exactly once.'
 }
 
@@ -77,6 +85,54 @@ foreach ($requiredModelToken in @(
     'CK_FinanceSettings_BaseCurrencyCanonical_C3')) {
     if ($upText -notmatch [regex]::Escape($requiredModelToken)) {
         throw "The disposable-development baseline lacks required Finance authority '$requiredModelToken'."
+    }
+}
+
+$snapshotText = Get-Content -Raw -LiteralPath $snapshotPath
+$modelTriggerNames = @([regex]::Matches($snapshotText, 'HasTrigger\("(?<name>[^"]+)"\)') |
+    ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
+$governanceManifest = Get-Content -Raw -LiteralPath $governanceManifestPath | ConvertFrom-Json
+$manifestTriggerNames = @($governanceManifest.triggerDefinitions | ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
+if ($modelTriggerNames.Count -ne 355 -or $manifestTriggerNames.Count -ne 355 -or
+    ($modelTriggerNames -join "`n") -cne ($manifestTriggerNames -join "`n") -or
+    [int]$governanceManifest.archiveMigrationCount -ne 456 -or
+    [int]$governanceManifest.archiveSqlOperationCount -ne 922 -or
+    [int]$governanceManifest.finalUniqueTriggerCount -ne 370 -or
+    [int]$governanceManifest.baselineTableCount -ne 1556 -or
+    [int]$governanceManifest.staticallyValidatedColumnReferenceCount -ne 12627) {
+    throw 'Archived governance manifest does not have exact 355/355 snapshot parity and 370-trigger final authority.'
+}
+
+$governanceText = Get-Content -Raw -LiteralPath $governancePath
+$governanceBatches = @([regex]::Matches($governanceText,
+    'migrationBuilder\.Sql\(\s*"""(?<sql>.*?)"""\);',[Text.RegularExpressions.RegexOptions]::Singleline))
+$triggerBatches = @($governanceBatches | Where-Object {
+    $_.Groups['sql'].Value -match '(?im)^\s*CREATE OR ALTER TRIGGER\s+'
+})
+if ($governanceBatches.Count -ne 379 -or $triggerBatches.Count -ne 355 -or
+    @($governanceBatches | Where-Object {
+        [regex]::Matches($_.Groups['sql'].Value,'(?im)^\s*CREATE OR ALTER TRIGGER\s+').Count -gt 1
+    }).Count -ne 0) {
+    throw 'Archived governance SQL is not one isolated operation per each of 355 current-model triggers.'
+}
+if ([regex]::Matches($governanceText,'(?im)^\s*CREATE OR ALTER FUNCTION\s+').Count -ne 1 -or
+    [regex]::Matches($governanceText,'(?im)^\s*CREATE OR ALTER VIEW\s+').Count -ne 1 -or
+    @($governanceManifest.programmableObjects).Count -ne 2 -or
+    @($governanceManifest.postDefinitionPatches).Count -ne 22) {
+    throw 'Archived raw-SQL governance audit did not retain the one function, one view, and 22 final trigger patches.'
+}
+$representativeHashes = [ordered]@{
+    TR_AuditLogs_AppendOnly='CA1BD7583EBD5B50B1637A9DA26F691337CC28AC5FB40A8614122BD133CF00AC'
+    TR_InventoryTransfers_ControlledLifecycle='5B47F68FB5325AB42C295F0A6CEADD7F2747277A963492B0274C0083EF893532'
+    TR_PurchaseOrders_ApprovedSourceProtected='03877199F3932A4119A987C3546BAE1A683B7324CCDD37548C46C2A54BE5AB5E'
+    TR_ProjectCivilDirectTaskControls_Lifecycle='DE3E27771997B240E8780125BFFBE9C7F9721BF0885D098161EA6B53EA3FD6B8'
+    TR_VendorPaymentAllocation_TDC0505PaymentReadiness='2EC1FE4A63C27772227B05F1C0602417BF54D893932DD10EBAC3292FDBDF700C'
+    TR_ProcurementSourcingCaseLots_NoMutation='FC3DCD2EFE219E37776637383A90EAC62CF087F3D87A28711F6BD4F616F2DEBD'
+}
+foreach ($entry in $representativeHashes.GetEnumerator()) {
+    $definition = @($governanceManifest.triggerDefinitions | Where-Object Name -ceq $entry.Key)
+    if ($definition.Count -ne 1 -or [string]$definition[0].bodySha256 -cne $entry.Value) {
+        throw "Representative archived trigger body changed: $($entry.Key)."
     }
 }
 
@@ -112,7 +168,38 @@ foreach ($c7Trigger in @('TR_AccountingEventProducerReceipts_C7Immutable','TR_Ac
     }
 }
 
+if ($GeneratedSqlPath) {
+    $resolvedGeneratedSql = (Resolve-Path -LiteralPath $GeneratedSqlPath).Path
+    $generatedSql = Get-Content -Raw -LiteralPath $resolvedGeneratedSql
+    $generatedTriggerMatches = @([regex]::Matches($generatedSql,
+        '(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\s+(?:(?:\[dbo\]|dbo)\.)?(?:\[(?<bracketed>[^\]]+)\]|(?<plain>[A-Za-z0-9_]+))'))
+    $generatedTriggerNames = @($generatedTriggerMatches | ForEach-Object {
+        if ($_.Groups['bracketed'].Success) { $_.Groups['bracketed'].Value } else { $_.Groups['plain'].Value }
+    })
+    $expectedGeneratedTriggerNames = @($modelTriggerNames + $requiredTriggers | Sort-Object -Unique)
+    if ($generatedTriggerNames.Count -ne 370 -or
+        @($generatedTriggerNames | Sort-Object -Unique).Count -ne 370 -or
+        (($generatedTriggerNames | Sort-Object) -join "`n") -cne ($expectedGeneratedTriggerNames -join "`n")) {
+        throw 'Generated zero-to-current SQL does not contain the exact 355 model + 15 C5-C8 trigger name set.'
+    }
+    $generatedBatches = @([regex]::Split($generatedSql, '(?im)^\s*GO\s*$'))
+    if (@($generatedBatches | Where-Object {
+        [regex]::Matches($_, '(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\s+').Count -gt 1
+    }).Count -ne 0) {
+        throw 'Generated zero-to-current SQL combines multiple trigger definitions in one executable batch.'
+    }
+    if ([regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?FUNCTION\s+\[dbo\]\.\[fn_ProcurementRfqSourceLineIdentity\]').Count -ne 1 -or
+        [regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+\[dbo\]\.\[vw_ProcurementReceiptDocumentReconciliation\]').Count -ne 1 -or
+        @($generatedBatches | Where-Object { $_ -match 'OBJECT_DEFINITION\s*\(' }).Count -ne 22 -or
+        [regex]::Matches($generatedSql,[regex]::Escape($baselineId)).Count -ne 1) {
+        throw 'Generated zero-to-current SQL omits or duplicates audited governance objects, patches, or baseline history.'
+    }
+    Write-Host 'PASS: generated zero-to-current SQL has exact isolated 370-trigger and audited object authority'
+}
+
 Write-Host "PASS: exactly one compiled EF migration ($baselineId)"
 Write-Host 'PASS: complete 456-migration source chain retained as an uncompiled recoverable archive'
 Write-Host 'PASS: zero-to-current Up has no predecessor-dependent drops/updates'
-Write-Host 'PASS: C1-C8 relational schema and final C5-C8 database trigger authority are preserved'
+Write-Host 'PASS: 355/355 current-model triggers plus 15 distinct C5-C8 triggers are preserved'
+Write-Host 'PASS: archived governance audit retains the final function, view, and chronological trigger patches'
+Write-Host 'PASS: trigger targets and 12,627 unambiguous inserted/deleted column references match the baseline schema'

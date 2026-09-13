@@ -54,6 +54,8 @@ function New-Status([string]$terminalStatus, [string]$phase, [bool]$backupCreate
         currentMaterialSha256=if($backupCreated){'E' * 64}else{''}
         backupSha256=''; backupHashMatchesVerified=$false; verifyEvidencePresent=$false
         backupMediaId=''; backupFileName=''; backupPathSha256=''; attemptOwnedBackup=$backupCreated
+        repositoryMigrationCount=1; finalMigrationCount=if($phase -in @('MIGRATIONS_APPLIED','SEED_INVARIANTS_VERIFIED','DBCC_COMPLETE','COMPLETE')){1}else{0}
+        latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'; orphanMigrationCount=0
         failedOperation=if($terminalStatus -eq 'PASS'){'NOT_APPLICABLE'}else{'SYNTHETIC_OPERATION'}
     }
     $result
@@ -103,7 +105,7 @@ try {
     )) {
         $early = New-PackageRoot $earlyCase.label
         $null = New-Common $early
-        if ($earlyCase.count -ge 1) { Write-Json (Join-Path $early 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE'}) }
+        if ($earlyCase.count -ge 1) { Write-Json (Join-Path $early 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE';repositoryMigrationCount=1;latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'}) }
         if ($earlyCase.count -ge 2) { Write-Json (Join-Path $early 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'}) }
         $earlyStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' $earlyCase.phase $false $false $false
         if ($earlyCase.resolved) {
@@ -127,7 +129,7 @@ try {
     }
     $ownedEmpty = New-PackageRoot 'OWNED_EMPTY'
     $null = New-Common $ownedEmpty
-    Write-Json (Join-Path $ownedEmpty 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE'})
+    Write-Json (Join-Path $ownedEmpty 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE';repositoryMigrationCount=1;latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'})
     Write-Json (Join-Path $ownedEmpty 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'})
     $ownedEmptyStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $false $false $false
     $ownedEmptyStatus.backupMediaId='6' * 32
@@ -241,6 +243,7 @@ try {
     "$('E' * 64)  $partialFileName" | Set-Content -Encoding ascii -LiteralPath (Join-Path $partialBackup 'backup-current.sha256')
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'))) {
         $marker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1] }
+        if ($entry[0] -eq 1) { $marker.repositoryMigrationCount=1; $marker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline' }
         if ($entry[0] -eq 3) {
             $marker.database='RhemaERP'; $marker.backupMediaId=$partialMedia; $marker.backupFileName=$partialFileName; $marker.backupPathSha256=('E' * 64)
             $marker.backupCompleted=$true; $marker.backupByteLength=1024; $marker.currentMaterialSha256=('E' * 64)
@@ -262,9 +265,9 @@ try {
     $markerFailure = New-PackageRoot 'MARKER_FAILURE'
     $null = New-Common $markerFailure
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'))) {
-        Write-Json (Join-Path $markerFailure ("phase-{0:D2}.json" -f $entry[0])) ([ordered]@{
-            schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1]
-        })
+        $marker=[ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=$entry[0];phase=$entry[1]}
+        if($entry[0] -eq 1){$marker.repositoryMigrationCount=1;$marker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'}
+        Write-Json (Join-Path $markerFailure ("phase-{0:D2}.json" -f $entry[0])) $marker
     }
     $markerMedia = 'f' * 32
     $markerFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_${markerMedia}.bak"
@@ -327,6 +330,7 @@ try {
     "$currentHash  $mutatedFileName" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-current.sha256')
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'),@(4,'BACKUP_VERIFIED'))) {
         $marker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1] }
+        if ($entry[0] -eq 1) { $marker.repositoryMigrationCount=1; $marker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline' }
         if ($entry[0] -eq 3) {
             $marker.database='RhemaERP'; $marker.backupMediaId=$mutatedMedia; $marker.backupFileName=$mutatedFileName; $marker.backupPathSha256=('1' * 64)
             $marker.backupCompleted=$true; $marker.backupByteLength=2048; $marker.currentMaterialSha256=$verifiedHash
@@ -402,7 +406,8 @@ try {
     $phaseMismatch = New-PackageRoot 'PHASE_MISMATCH'
     $null = New-Common $phaseMismatch
     Write-Json (Join-Path $phaseMismatch 'phase-01.json') ([ordered]@{
-        schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=1; phase='OFFLINE_GATES_COMPLETE'
+        schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=1; phase='OFFLINE_GATES_COMPLETE'; repositoryMigrationCount=1
+        latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'
     })
     Complete-Status $phaseMismatch (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $false $false $false)
     Invoke-ExpectedFailure $phaseMismatch 'terminal status/final durable phase mismatch'
@@ -460,6 +465,10 @@ try {
         'RESET_STARTED','DATABASE_RECREATED','MIGRATIONS_APPLIED','SEED_INVARIANTS_VERIFIED','DBCC_COMPLETE','COMPLETE')
     for ($index=0; $index -lt $phaseNames.Count; $index++) {
         $phaseMarker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=($index + 1); phase=$phaseNames[$index] }
+        if (($index + 1) -eq 1) {
+            $phaseMarker.repositoryMigrationCount=1
+            $phaseMarker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'
+        }
         if (($index + 1) -eq 3) {
             $phaseMarker.database='RhemaERP'; $phaseMarker.backupMediaId=$mediaId; $phaseMarker.backupFileName=$passBackupFileName; $phaseMarker.backupPathSha256=('C' * 64)
             $phaseMarker.backupCompleted=$true; $phaseMarker.backupByteLength=1024
@@ -468,6 +477,7 @@ try {
         if (($index + 1) -eq 4) {
             $phaseMarker.backupSha256=('D' * 64); $phaseMarker.backupMediaId=$mediaId; $phaseMarker.backupFileName=$passBackupFileName; $phaseMarker.backupPathSha256=('C' * 64)
         }
+        if (($index + 1) -eq 7) { $phaseMarker.finalMigrationCount=1 }
         Write-Json (Join-Path $pass ("phase-{0:D2}.json" -f ($index + 1))) $phaseMarker
     }
     $passStatus = New-Status 'PASS' 'COMPLETE' $true $true $true
@@ -479,6 +489,20 @@ try {
     & pwsh -NoProfile -File $validator -EvidenceDirectory $pass -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Complete disposable-reset PASS package did not validate.' }
     Write-Host 'PASS: complete disposable-development baseline reset package validates and writes a manifest'
+
+    foreach ($migrationTamper in @(
+        @{label='repository count';property='repositoryMigrationCount';value=2},
+        @{label='latest migration';property='latestMigration';value='20260913162403_Unreviewed'},
+        @{label='terminal final count';property='finalMigrationCount';value=0},
+        @{label='orphan count';property='orphanMigrationCount';value=1}
+    )) {
+        $tamperRoot=New-PackageRoot ('MIGRATION_'+$migrationTamper.property)
+        Copy-Item -Path (Join-Path $pass '*') -Destination $tamperRoot
+        $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json') | ConvertFrom-Json -AsHashtable
+        $tamperStatus[$migrationTamper.property]=$migrationTamper.value
+        Complete-Status $tamperRoot $tamperStatus
+        Invoke-ExpectedRemanifestFailure $tamperRoot "baseline $($migrationTamper.label) mismatch"
+    }
 
     foreach ($fingerprintTamper in @(
         @{ label='EMPTY_WITH_NONZERO_COUNT'; value='1|EMPTY|0|0|0' },

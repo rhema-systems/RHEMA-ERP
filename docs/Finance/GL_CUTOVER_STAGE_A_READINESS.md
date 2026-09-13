@@ -58,6 +58,12 @@ before connection parsing; retained evidence binds reviewed and executed identit
 Its current final-cutover invariant snapshot includes row content for C2 balances/exposures, C4 period/opening
 authority and material journal/transaction/posting-event state. Active legacy currency links force pre-backup
 `REVIEW`, and backup creation uses atomic `FileMode.CreateNew` reservation plus no-overwrite SQL media identity.
+The D3 baseline correction also restores the complete current database-trigger contract: deterministic archive
+evaluation selects 355/355 snapshot trigger names, preserves 22 later chronological definition patches, and adds
+the separate 15-trigger C5-C8 authority set for 370 unique triggers. The audited final non-trigger definitions are
+one function and one view, with no final archived procedures, synonyms, security policies, or sequences. Each
+definition is an isolated migration SQL operation and the generated zero-to-current SQL is checked against the
+same exact name/object set. This repository-only result does not authorize a reset retry.
 
 ## Database safety boundary
 
@@ -65,7 +71,7 @@ The configured development source was inspected with `SELECT` statements only ou
 authorized `COPY_ONLY` backup operation. Its sanitized target is `<local SQL Server instance> / RhemaERP`;
 credentials and machine identifiers are neither logged nor copied into retained evidence.
 
-All mutating rehearsal operations must use
+All currently supported mutating rehearsal operations must use
 [`scripts/finance/Invoke-GlCutoverRehearsal.ps1`](../../scripts/finance/Invoke-GlCutoverRehearsal.ps1)
 and a process-scoped connection-string environment variable. The script rejects every target whose
 database name does not match `^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$`, as well as attach-file, user-instance,
@@ -73,30 +79,18 @@ missing-server and missing-database connections. It logs only server/database, r
 never invokes `rebuild-db`, preserves a failed target for inspection, and requires a separate explicit
 `DropRehearsal -ConfirmDrop` action for cleanup.
 
-Example (the value itself must come from a secure local secret source and must not be committed):
+`RehearseEmpty` and `RehearseClone` are permanently disabled at process entry, before repository resolution,
+connection lookup/parsing, evidence creation, native commands, or SQL access. Their old fake-history stamping and
+clone mutation implementations have been removed. The Stage A.1 commands and results in this document are historical
+facts only and must not be rerun. New disposable-development work uses `ResetDisposableDevelopment`; production-style
+readiness inspection uses `RehearseFinalClone`, each under its own independent-review contract.
 
-```powershell
-$env:RHEMA_GL_REHEARSAL_CONNECTION = '<local SQL Server connection; safe rehearsal database name>'
-./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode RehearseEmpty
-./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode DropRehearsal -ConfirmDrop
-Remove-Item Env:RHEMA_GL_REHEARSAL_CONNECTION
-```
-
-The representative clone uses the same harness rather than an undocumented manual procedure. It requires
+The historical representative clone used the same harness rather than an undocumented manual procedure. It required
 the source to resolve exactly to `RhemaERP`, requires source and target on the same SQL Server instance,
 derives the backup/data/log paths only from the prefix-validated target, refuses existing targets/backups,
 and performs `COPY_ONLY` + `CHECKSUM`, `RESTORE VERIFYONLY`, restore, and `DBCC CHECKDB ... PHYSICAL_ONLY`.
 It builds the current HEAD before backup, records the source fingerprint before and after, and accepts only
 the documented Phase 4 historical-FX-evidence stop and exact Phase 3 history state:
-
-```powershell
-$env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<configured RhemaERP connection from a secure local source>'
-$env:RHEMA_GL_REHEARSAL_CONNECTION = '<same server; RHEMAERP_GL_REHEARSAL_CLONE_* database>'
-./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode RehearseClone -EvidenceDirectory '<new empty raw-evidence directory>'
-./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode DropRehearsal -ConfirmDrop -EvidenceDirectory '<same raw-evidence directory>'
-Remove-Item Env:RHEMA_GL_SOURCE_READONLY_CONNECTION
-Remove-Item Env:RHEMA_GL_REHEARSAL_CONNECTION
-```
 
 `DropRehearsal` deletes only the exact prefix-validated database and its target-derived COPY_ONLY backup,
 then fails unless both are absent and writes `cleanup.json`. Raw `.artifacts` output remains local and

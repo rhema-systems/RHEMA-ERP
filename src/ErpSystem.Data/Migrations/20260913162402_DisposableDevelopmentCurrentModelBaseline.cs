@@ -131961,6 +131961,7 @@ namespace ErpSystem.Data.Migrations
                 principalColumn: "Id",
                 onDelete: ReferentialAction.Restrict);
 
+            ArchivedGovernanceBaselineSql.Apply(migrationBuilder);
             FinanceC1C8BaselineAuthoritySql.Apply(migrationBuilder);
         }
 

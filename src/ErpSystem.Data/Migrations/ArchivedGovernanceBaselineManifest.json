@@ -1,0 +1,3087 @@
+{
+  "schema": "RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V1",
+  "archiveMigrationCount": 456,
+  "archiveSqlOperationCount": 922,
+  "modelTriggerCount": 355,
+  "selectedTriggerCount": 355,
+  "additionalFinanceAuthorityTriggerCount": 15,
+  "finalUniqueTriggerCount": 370,
+  "baselineTableCount": 1556,
+  "staticallyValidatedColumnReferenceCount": 12627,
+  "triggerDefinitions": [
+    {
+      "Name": "TR_AuditLogs_AppendOnly",
+      "table": "AuditLogs",
+      "MigrationId": "20260806010613_TDC0706SharedAuditGovernance",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CA1BD7583EBD5B50B1637A9DA26F691337CC28AC5FB40A8614122BD133CF00AC"
+    },
+    {
+      "Name": "TR_AuditRecordLifecycleEvents_AppendOnly",
+      "table": "AuditRecordLifecycleEvents",
+      "MigrationId": "20260806010613_TDC0706SharedAuditGovernance",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F76E5D58E51E89F6A4938749805B756361200F252A64361BE83075B59D979806"
+    },
+    {
+      "Name": "TR_BusinessPartnerRegistrationDocuments_ControlledFileGuard",
+      "table": "BusinessPartnerRegistrationDocuments",
+      "MigrationId": "20260728173000_RequireCleanSupplierRegistrationEvidence",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4686FE98B6F0FBBBABE08D3F57E7930F4ECE4A8B7BD958B4B50169BA2CB6788D"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceAssessmentRevisions_AppendOnly",
+      "table": "CivilEngineeringMaintenanceAssessmentRevisions",
+      "MigrationId": "20260821050000_AddCivilEngineeringMaintenanceAssessments",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5ABA77423EFAD94CE61328543CB09D638A852B873EF67804B88FCB292AC25B98"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceAssessmentRevisions_Lineage",
+      "table": "CivilEngineeringMaintenanceAssessmentRevisions",
+      "MigrationId": "20260821050000_AddCivilEngineeringMaintenanceAssessments",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C394458B10D223830F08662DA0EB09068CADFC883112B9C5FAC91DE24C72C42E"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceAssessments_Lifecycle",
+      "table": "CivilEngineeringMaintenanceAssessments",
+      "MigrationId": "20260821050000_AddCivilEngineeringMaintenanceAssessments",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E9853A85FBE22A54D99E34536A471CBCCCC4CE581397CFC6BE268029C011453B"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceAssessments_Lineage",
+      "table": "CivilEngineeringMaintenanceAssessments",
+      "MigrationId": "20260821050000_AddCivilEngineeringMaintenanceAssessments",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "ABF29FBD083D42BF04503D7570E880C6421F6530A6C3C9144E6A28774A2FECAF"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCompletionControls_Lifecycle",
+      "table": "CivilEngineeringMaintenanceCompletionControls",
+      "MigrationId": "20260821063000_AddCivilEngineeringMaintenanceCompletionControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "35AE13AE47240D668AC25814C4132C6B5EF9166EC5711A2370E17912435C6668"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCompletionControls_Lineage",
+      "table": "CivilEngineeringMaintenanceCompletionControls",
+      "MigrationId": "20260821063000_AddCivilEngineeringMaintenanceCompletionControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DF9296A12887C9A46AED0B823E61500F16BBC14F789B6ED5765BD7F230B836D3"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCompletionRevisions_AppendOnly",
+      "table": "CivilEngineeringMaintenanceCompletionRevisions",
+      "MigrationId": "20260821063000_AddCivilEngineeringMaintenanceCompletionControls",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "112BCC2DC216974CD304C0408F00E5321254FC80D7261CD4DB29CE14EE728413"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCompletionRevisions_Lineage",
+      "table": "CivilEngineeringMaintenanceCompletionRevisions",
+      "MigrationId": "20260821063000_AddCivilEngineeringMaintenanceCompletionControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5613683794ADCD5401138A1A648C9B66D4CD100EA30FE7C6F685E9A418FE7DF3"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCostingHandoffRevisions_AppendOnly",
+      "table": "CivilEngineeringMaintenanceCostingHandoffRevisions",
+      "MigrationId": "20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6CDA1450167635B3AA6CD73BC756EA35A4DE22E00547B31C1FDE4BEC8D4470A9"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCostingHandoffRevisions_Lineage",
+      "table": "CivilEngineeringMaintenanceCostingHandoffRevisions",
+      "MigrationId": "20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AAEE3D3E43B6DDF9B63E57D32E71646358E5541DB90E1B23549E17DFDE3025F5"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCostingHandoffs_Lifecycle",
+      "table": "CivilEngineeringMaintenanceCostingHandoffs",
+      "MigrationId": "20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F5758BDC161473708BCF156DE083272DB249784E765CA5C0A0FAB73BDEBCF5F8"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceCostingHandoffs_Lineage",
+      "table": "CivilEngineeringMaintenanceCostingHandoffs",
+      "MigrationId": "20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6BBFE74D01CF3E3DE2D72D5CF167E0080C88DA6C0C745757DA9D948EBB264687"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceExecutionLinkRevisions_AppendOnly",
+      "table": "CivilEngineeringMaintenanceExecutionLinkRevisions",
+      "MigrationId": "20260821060000_AddCivilEngineeringMaintenanceExecutionLinks",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B874FCFEED6A5CC4633DAEB27F047D4A92EC518FC8358823E0FD1B28F2C8FE76"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceExecutionLinkRevisions_Lineage",
+      "table": "CivilEngineeringMaintenanceExecutionLinkRevisions",
+      "MigrationId": "20260821060000_AddCivilEngineeringMaintenanceExecutionLinks",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4B70DA77F99D3A9BE2E51CD6F5966BBB65D859B0718A8427D4822A955E73FD4D"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceExecutionLinks_Lifecycle",
+      "table": "CivilEngineeringMaintenanceExecutionLinks",
+      "MigrationId": "20260821060000_AddCivilEngineeringMaintenanceExecutionLinks",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F908A074367662EDEF38C52D972D1E5814EC60B309B3BFF3B308C46046661F9F"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceExecutionLinks_Lineage",
+      "table": "CivilEngineeringMaintenanceExecutionLinks",
+      "MigrationId": "20260821060000_AddCivilEngineeringMaintenanceExecutionLinks",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "564EC003F4EF0D70B1F69E754B464BD9DFCA764C257C0D303311E5E74B4D494B"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceIntakeRevisions_AppendOnly",
+      "table": "CivilEngineeringMaintenanceIntakeRevisions",
+      "MigrationId": "20260821033000_AddCivilEngineeringMaintenanceIntakes",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "41C756DBFB5E3F2D9BC4CB3368E400FA56242D6FA93EC31A8F79B912BC5405B3"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceIntakeRevisions_Lineage",
+      "table": "CivilEngineeringMaintenanceIntakeRevisions",
+      "MigrationId": "20260821033000_AddCivilEngineeringMaintenanceIntakes",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "85D2D207BFD04CD606174DF2B35DCAB1A5195BEEC85F62945637F71850E9376E"
+    },
+    {
+      "Name": "TR_CivilEngineeringMaintenanceIntakes_Lineage",
+      "table": "CivilEngineeringMaintenanceIntakes",
+      "MigrationId": "20260821033000_AddCivilEngineeringMaintenanceIntakes",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A62263409A81DA43C4B8F0FE3303DFEC7120824F2AE0FE2E7C6DF8DB3842DDA2"
+    },
+    {
+      "Name": "TR_ContractDocuments_TDC0407DmsRequired",
+      "table": "ContractDocuments",
+      "MigrationId": "20260730132714_TDC0407ContractActivationGate",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EE1830E611962F3BEAA2D280FFD8D57C497983800C5F5CE20B07CE3B6F8C68D0"
+    },
+    {
+      "Name": "TR_Contracts_QS0520CommercialTerms",
+      "table": "Contracts",
+      "MigrationId": "20260811043000_ExtendWorksContractCommercialTerms",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0CCCC9BB8EA23923D9FEEF7D6A6BE457280BEB4260AFD194492FEACD3918450D"
+    },
+    {
+      "Name": "TR_Contracts_TDC0407ActivationGuard",
+      "table": "Contracts",
+      "MigrationId": "20260730132714_TDC0407ContractActivationGate",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4B32D0A721F214C2B0BBC52F96B81C92370CF1124C516D757FD7F69AB0942E44"
+    },
+    {
+      "Name": "TR_Contracts_TDC0409CloseoutGuard",
+      "table": "Contracts",
+      "MigrationId": "20260730171500_TDC0409WorksCloseoutControl",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EA8CA53CF873FDE6FB558352373992258A7C278280ABB9E7B6F0EE430F813F2E"
+    },
+    {
+      "Name": "TR_EmergencyProcurementPlans_Governance",
+      "table": "EmergencyProcurementPlans",
+      "MigrationId": "20260812140000_GovernEmergencyPurchaseExceptions",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9A1FC63EBE7DE3C808F62C4C2D8E1B325E117DB1B2973058F9EB8B66F18AE5E8"
+    },
+    {
+      "Name": "TR_FileUploadRecords_RegistrationEvidenceDeleteGuard",
+      "table": "FileUploadRecords",
+      "MigrationId": "20260728210856_EnforceSupplierApplicantIntegrity",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F5AC72BA972E430D7860D498788BBB68343D2BC6B5E5A8D82A6EF104247EA696"
+    },
+    {
+      "Name": "TR_GoodsReceiptNoteItems_GovernedCapacity",
+      "table": "GoodsReceiptNoteItems",
+      "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DA3640C78519A98EA75204196BC4FE2C7BFB9F2E29FD436EA85E6E30E4350F07"
+    },
+    {
+      "Name": "TR_GoodsReceiptNotes_GovernedSource",
+      "table": "GoodsReceiptNotes",
+      "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9B1E7F2B655D321F23EAB9A54A379246E511B9E55F23D6A6A18D87A121462FA2"
+    },
+    {
+      "Name": "TR_HrIdentityReconciliationItems_NoMutation",
+      "table": "HrIdentityReconciliationItems",
+      "MigrationId": "20260806082400_TDC0809HrIdentityReconciliation",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "557E169F8B602DA27E129AF917E63C00D25CB6418F463B07C72D1FCE64EE820B"
+    },
+    {
+      "Name": "TR_HrIdentityReconciliationItems_TenantGuard",
+      "table": "HrIdentityReconciliationItems",
+      "MigrationId": "20260806082400_TDC0809HrIdentityReconciliation",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FE035AF96AD3AC89139F00C18E9503CFBE30E2678DD5D0823AB5D4EEC21B8F2A"
+    },
+    {
+      "Name": "TR_HrIdentityReconciliationRuns_CompletedImmutable",
+      "table": "HrIdentityReconciliationRuns",
+      "MigrationId": "20260806082400_TDC0809HrIdentityReconciliation",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E2BE51F35BD2A03D43E18F775CA3E81CC44F0B74DD7AD502458E1ED00EE1C2D8"
+    },
+    {
+      "Name": "TR_HrIdentityReconciliationRuns_TenantGuard",
+      "table": "HrIdentityReconciliationRuns",
+      "MigrationId": "20260806082400_TDC0809HrIdentityReconciliation",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "213AD84BF20F07B20F7183FF4B76F56690DE983D14CC1133A5CB342D777FB57F"
+    },
+    {
+      "Name": "TR_HrIdentityReconciliationStates_TenantGuard",
+      "table": "HrIdentityReconciliationStates",
+      "MigrationId": "20260806082400_TDC0809HrIdentityReconciliation",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3B8A4D710A6A5E974BD6CFEE894E3817FC69036698E4ED47CF11E09E81FBB3D7"
+    },
+    {
+      "Name": "TR_HrIdentityWorkflowIssues_TenantGuard",
+      "table": "HrIdentityWorkflowIssues",
+      "MigrationId": "20260806082400_TDC0809HrIdentityReconciliation",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "723084DB95154A687A13A5B0F0DFEE70A20B5ADDE90F6B91D0BD592691FD15D5"
+    },
+    {
+      "Name": "TR_InventoryAllocations_ProjectReservationGuard",
+      "table": "InventoryAllocations",
+      "MigrationId": "20260802160000_TDC0611ProjectInventoryReservations",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "728369FE0A584CDF9F17BBFEFF92388B7D93E985D1ED866EFE09998A425E7620"
+    },
+    {
+      "Name": "TR_InventoryAllocations_WorkOrderReservationGuard",
+      "table": "InventoryAllocations",
+      "MigrationId": "20260813063001_INVREQFU002MaintenanceReservationLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AD1F5C6A42864BE60365502ECC8D3694253DE525D9D94BA748D4640A99CB52FB"
+    },
+    {
+      "Name": "TR_InventoryBalances_ExactBinNegativeStockGuard",
+      "table": "InventoryBalances",
+      "MigrationId": "20260803213000_Phase6ReviewExactBinNegativeStockGuard",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D9DCF2FC1605444653DD38E7A41827BC416F48E2722C2008028875EFF8619EA1"
+    },
+    {
+      "Name": "TR_InventoryCycleCountSchedules_ControlledLifecycle",
+      "table": "InventoryCycleCountSchedules",
+      "MigrationId": "20260802105457_TDC0609ControlledCycleCounts",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7320208938F78FCD837338B22F5F5473CCC295AADF708DAD19A572AFE4EED2E8"
+    },
+    {
+      "Name": "TR_InventoryDisposalActions_AppendOnly",
+      "table": "InventoryDisposalActions",
+      "MigrationId": "20260802190244_TDC0615InventoryDisposalLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A00C00983D85EFE8E72DA9B22CBB3B7679B6D3072547E426B022630985EAEF12"
+    },
+    {
+      "Name": "TR_InventoryDisposalCases_Guard",
+      "table": "InventoryDisposalCases",
+      "MigrationId": "20260802190244_TDC0615InventoryDisposalLifecycle",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "286779C40A1C8D5D94F27A2E3273F79EEEBC49A948564BA48254696E5C11E1AF"
+    },
+    {
+      "Name": "TR_InventoryDisposalCommitteeMembers_Guard",
+      "table": "InventoryDisposalCommitteeMembers",
+      "MigrationId": "20260802190244_TDC0615InventoryDisposalLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9D87A88C3442FC6FDE2171CE42E7F6027A276B5C734714240D9067EC2ECDD480"
+    },
+    {
+      "Name": "TR_InventoryDisposalEvidence_AppendOnly",
+      "table": "InventoryDisposalEvidence",
+      "MigrationId": "20260802190244_TDC0615InventoryDisposalLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F8E52B2335A8B3BFFE79B5AD4372D407AF6045F76815BCD1C00C654E3C2B6CE4"
+    },
+    {
+      "Name": "TR_InventoryDisposalLines_Immutable",
+      "table": "InventoryDisposalLines",
+      "MigrationId": "20260802190244_TDC0615InventoryDisposalLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1940B8BF816CE384ACA9CAFC5ADDB96017A3301BEFC8C2445829C376CF47236C"
+    },
+    {
+      "Name": "TR_InventoryIssueAccountingRules_TenantOwner",
+      "table": "InventoryIssueAccountingRules",
+      "MigrationId": "20260813103157_INVREQFU003IssueFinanceAssetLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4D3AE5DCE7FD98CE66C69AD70BB8A759F23D57BBE3C9845654220949E332A466"
+    },
+    {
+      "Name": "TR_InventoryIssueFinanceLineages_Lifecycle",
+      "table": "InventoryIssueFinanceLineages",
+      "MigrationId": "20260813103157_INVREQFU003IssueFinanceAssetLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0FB272C205B49C30374B0FC5B71DB3AE5504C3B770F53DE661187A145E35D9B3"
+    },
+    {
+      "Name": "TR_InventoryIssueReturnAllocations_Immutable",
+      "table": "InventoryIssueReturnAllocations",
+      "MigrationId": "20260813143000_INVREQFU003ReturnReversalAllocationGate",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C962739D1FBE953FF2C1A04C8B8F56FAADA8891B01DB9B7FADBAE19DCFFDE279"
+    },
+    {
+      "Name": "TR_InventoryIssueVoucherActions_AppendOnly",
+      "table": "InventoryIssueVoucherActions",
+      "MigrationId": "20260802033223_TDC0606ControlledInventoryIssue",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "627DF28C9326249E6AD7CAC4A9AE6FB76C3EDB9AC055C3DC2C7DEB05699830D9"
+    },
+    {
+      "Name": "TR_InventoryIssueVoucherLines_AppendOnly",
+      "table": "InventoryIssueVoucherLines",
+      "MigrationId": "20260802033223_TDC0606ControlledInventoryIssue",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "45CCCEACDB452DC001E245A63E6D3BA4CE76F98E101C61C9141F467D7B1BA10E"
+    },
+    {
+      "Name": "TR_InventoryIssueVouchers_ControlledLifecycle",
+      "table": "InventoryIssueVouchers",
+      "MigrationId": "20260813103157_INVREQFU003IssueFinanceAssetLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "45521AB992335BF92BF65C75431A8DBE78E139578DC725DCF2C055A01845DEBE"
+    },
+    {
+      "Name": "TR_InventoryItems_NegativeStockGuard",
+      "table": "InventoryItems",
+      "MigrationId": "20260802153000_TDC0610NegativeStockControl",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "400430D2847EC2028C6782247D2FBD0B914231732575A9FBC8920F6925EB337D"
+    },
+    {
+      "Name": "TR_InventoryItems_PhysicalCountFreeze",
+      "table": "InventoryItems",
+      "MigrationId": "20260802105457_TDC0609ControlledCycleCounts",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "399FD9F06785D6AEB86DF0F9A7B6AC1AA61C517573FE38E3C31B884D680FE0F9"
+    },
+    {
+      "Name": "TR_InventoryLocations_NegativeStockGuard",
+      "table": "InventoryLocations",
+      "MigrationId": "20260803213000_Phase6ReviewExactBinNegativeStockGuard",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1922E1A836868A068F33AE64E8E43D8516C92490039C31EFBAE883F958F4CDB0"
+    },
+    {
+      "Name": "TR_InventoryMovements_GovernedPurchaseReceipt",
+      "table": "InventoryMovements",
+      "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A284D0857B287DAE9BC9972D50362E239479C5EC35A83CBDBF23F48FAD322289"
+    },
+    {
+      "Name": "TR_InventoryReturnVoucherActions_AppendOnly",
+      "table": "InventoryReturnVoucherActions",
+      "MigrationId": "20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "79CE3321DBFB91955D3A813C7C0193DA15E666C0F3471172E2667F8E36A34037"
+    },
+    {
+      "Name": "TR_InventoryReturnVoucherEvidence_AppendOnly",
+      "table": "InventoryReturnVoucherEvidence",
+      "MigrationId": "20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "41861FE7BEB1729E22567FEA8CEAC0E3064956E7968C318FFDE72389272E2761"
+    },
+    {
+      "Name": "TR_InventoryReturnVoucherLines_AppendOnly",
+      "table": "InventoryReturnVoucherLines",
+      "MigrationId": "20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments",
+      "OperationIndex": 9,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3BA271DF2BE5B86F4124A80C1F14570FCCFDF5E6F381D19ECEFC84A6E93831EB"
+    },
+    {
+      "Name": "TR_InventoryReturnVouchers_ControlledLifecycle",
+      "table": "InventoryReturnVouchers",
+      "MigrationId": "20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "61AC7E44B0AAF2209EA799555BB3A8F8B0283987E1DA712DFCDD0C0405987C7E"
+    },
+    {
+      "Name": "TR_InventoryTransferActionLines_AppendOnly",
+      "table": "InventoryTransferActionLines",
+      "MigrationId": "20260802095353_TDC0608ControlledInventoryTransfers",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7F4237A58E2CA155AA07411518220D7A6D47B3E30908A8F13699018ABBB3CDC0"
+    },
+    {
+      "Name": "TR_InventoryTransferActions_AppendOnly",
+      "table": "InventoryTransferActions",
+      "MigrationId": "20260802095353_TDC0608ControlledInventoryTransfers",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C5C8ACAB768E030773C06216B23D8BB02EB2D3F7E0A1A395904EE1B6CD1BE0EC"
+    },
+    {
+      "Name": "TR_InventoryTransferDiscrepancies_ControlledLifecycle",
+      "table": "InventoryTransferDiscrepancies",
+      "MigrationId": "20260802095353_TDC0608ControlledInventoryTransfers",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "499B0B8A06424EE8008F337742362442E4A0B03A31D18A61B5985061B533027A"
+    },
+    {
+      "Name": "TR_InventoryTransferDiscrepancyEvidence_AppendOnly",
+      "table": "InventoryTransferDiscrepancyEvidence",
+      "MigrationId": "20260802095353_TDC0608ControlledInventoryTransfers",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "750A385F3587697BB7599FDE511E2FEDB6E932CD31A57F22674FAC7307001BDA"
+    },
+    {
+      "Name": "TR_InventoryTransferItems_ControlledMutation",
+      "table": "InventoryTransferItems",
+      "MigrationId": "20260802095353_TDC0608ControlledInventoryTransfers",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D7393C6063C038395DE643A70AB900C388FFA844B3045D06EA505F799C96D0B6"
+    },
+    {
+      "Name": "TR_InventoryTransfers_ControlledLifecycle",
+      "table": "InventoryTransfers",
+      "MigrationId": "20260802095353_TDC0608ControlledInventoryTransfers",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5B47F68FB5325AB42C295F0A6CEADD7F2747277A963492B0274C0083EF893532"
+    },
+    {
+      "Name": "TR_InventoryValuationReconciliationActions_Immutable",
+      "table": "InventoryValuationReconciliationActions",
+      "MigrationId": "20260802171742_TDC0613InventoryValuationReconciliation",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "99ED674DACDBB8FE287B1C158092321B7CE734D49129C17B065979BBB760F686"
+    },
+    {
+      "Name": "TR_InventoryValuationReconciliations_Guard",
+      "table": "InventoryValuationReconciliations",
+      "MigrationId": "20260802171742_TDC0613InventoryValuationReconciliation",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B74B0EDACAA6D79B6777D60FD5D4A924ECD1CD40C2F938578AC2AC3E6F5B19AF"
+    },
+    {
+      "Name": "TR_InventoryWorkOrderReservationActions_Immutable",
+      "table": "InventoryWorkOrderReservationActions",
+      "MigrationId": "20260813063001_INVREQFU002MaintenanceReservationLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F23F5A47626CA7EB5299DCCEFED721B68A19231B13A34A5660AE6797B75B35C5"
+    },
+    {
+      "Name": "TR_PaymentBatchInvoice_TDC0505ImmutableSelection",
+      "table": "PaymentBatchInvoice",
+      "MigrationId": "20260731193000_TDC0505PaymentReadiness",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C2E66A231AB37E86D9E11C1497BE3B6CCDBEFD619D0072B39E52E5682E842F73"
+    },
+    {
+      "Name": "TR_PaymentBatchInvoice_TDC0505PaymentReadiness",
+      "table": "PaymentBatchInvoice",
+      "MigrationId": "20260731193000_TDC0505PaymentReadiness",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CAC2E11CDD5DE07E23BAC2F7992A2FD2A305CA4149C1E16B614059E8AD00E548"
+    },
+    {
+      "Name": "TR_PaymentBatch_TDC0505Readiness",
+      "table": "PaymentBatch",
+      "MigrationId": "20260731193000_TDC0505PaymentReadiness",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7357A2E3F4F132C568909DE963A33687B0E03F1719980F96EC27A6989F1FD7D5"
+    },
+    {
+      "Name": "TR_PaymentBatch_TDC0506InvoiceProcessorSod",
+      "table": "PaymentBatch",
+      "MigrationId": "20260731213000_TDC0506InvoiceProcessorPaymentSod",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7605BED3CF33C1B340F97AB1867FF5FAB8D9F467381A320A4AD43D058350998A"
+    },
+    {
+      "Name": "TR_PhysicalCountActions_AppendOnly",
+      "table": "PhysicalCountActions",
+      "MigrationId": "20260802105457_TDC0609ControlledCycleCounts",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "38B6A2D73EBFAAEF62BF21AEC634174D9849739503AA4B5A8F4F9418F5D885A1"
+    },
+    {
+      "Name": "TR_PhysicalCountItems_ControlledMutation",
+      "table": "PhysicalCountItems",
+      "MigrationId": "20260802105457_TDC0609ControlledCycleCounts",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "63D3ACA1404E6F45298A7B5557497074EFC93B5A0AA458857A1855BE59EAEE67"
+    },
+    {
+      "Name": "TR_PhysicalCounts_ControlledLifecycle",
+      "table": "PhysicalCounts",
+      "MigrationId": "20260802105457_TDC0609ControlledCycleCounts",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "23CDFFF922E253E4447C6594F26E8CAB7DA533AAA8C91DA14D6829ABD9F7F38F"
+    },
+    {
+      "Name": "TR_ProcurementAppSubmissions_NoDelete",
+      "table": "ProcurementAppSubmissions",
+      "MigrationId": "20260721134533_AddProcurementAppSubmissionRegister",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "46A591D783FD3FBE7DA2C8880E1547239000A00B68090BBAA0969B6E9C6B0DC1"
+    },
+    {
+      "Name": "TR_ProcurementAwardReadinessDecisions_Immutable",
+      "table": "ProcurementAwardReadinessDecisions",
+      "MigrationId": "20260724020403_AddProcurementAwardReadinessControls",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BCEC4738DC7F2F917A199DC2979B7834E584DADA0BE406BDEF5BCCF66428F41E"
+    },
+    {
+      "Name": "TR_ProcurementBidderAppealDecisions_Immutable",
+      "table": "ProcurementBidderAppealDecisions",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2B82CD6B34A942405EDBA79C9AF46BEB1B4B2C4B9EAE8F0B8A589E0981A9322B"
+    },
+    {
+      "Name": "TR_ProcurementBidderAppeals_Immutable",
+      "table": "ProcurementBidderAppeals",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "219A1F9364824DF9860745AD7392426B5275899DEDE36A80826251D2564AA951"
+    },
+    {
+      "Name": "TR_ProcurementBidderCommunicationAcknowledgements_Immutable",
+      "table": "ProcurementBidderCommunicationAcknowledgements",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "76877F287EA80596F120A9C0F223A3F7465FD7EBA389F5CBEEE718B5F05045DF"
+    },
+    {
+      "Name": "TR_ProcurementBidderCommunicationDeliveries_Immutable",
+      "table": "ProcurementBidderCommunicationDeliveries",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F23E67CB92ABD86D4D0B486E7D418E4DBF9CA1ED139DC06674ACE3DE0A728426"
+    },
+    {
+      "Name": "TR_ProcurementBidderCommunicationDispatches_Immutable",
+      "table": "ProcurementBidderCommunicationDispatches",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3D7CE88E42EAE9A5F7BB3C1691171D2D9017456BB678848D607792E6D2402D61"
+    },
+    {
+      "Name": "TR_ProcurementBidderCommunicationLetterVersions_Immutable",
+      "table": "ProcurementBidderCommunicationLetterVersions",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3F0C440E2CDF0F77CB8547ADCBBF10671DFE15AC8BDA771751B39E72F5E3CF9D"
+    },
+    {
+      "Name": "TR_ProcurementBidderCommunicationRecipients_Immutable",
+      "table": "ProcurementBidderCommunicationRecipients",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "72C889E84899F176943A6F97AA47DB5399E796D49679EF6BB406174EBE222426"
+    },
+    {
+      "Name": "TR_ProcurementBidderCommunicationRegisters_Immutable",
+      "table": "ProcurementBidderCommunicationRegisters",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C50636A4056EDC2ED4AED8757C8340A12DBC0D4E2CF887A918C7ECFE42020484"
+    },
+    {
+      "Name": "TR_ProcurementBudgetCommitmentLedgerEntries_Immutable",
+      "table": "ProcurementBudgetCommitmentLedgerEntries",
+      "MigrationId": "20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "66901FCDEC326581F7A2014D8084AC026703D4C956A982892C9CAD6BB713A03D"
+    },
+    {
+      "Name": "TR_ProcurementBudgetCommitments_LifecycleGuard",
+      "table": "ProcurementBudgetCommitments",
+      "MigrationId": "20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1A5EB14757872423D7FD4372DB5CCB02D95CC3CAE66613AC292DF02A970DEE15"
+    },
+    {
+      "Name": "TR_ProcurementBudgetCommitments_NoDelete",
+      "table": "ProcurementBudgetCommitments",
+      "MigrationId": "20260722023908_AddProcurementRequisitionBudgetCommitments",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "67A16F774D25FC7F4EE983E3DF99F2EEA704D3C0D2FF000216002C0C2D250CB3"
+    },
+    {
+      "Name": "TR_ProcurementBudgetCommitments_TenantAndEvidenceGuard",
+      "table": "ProcurementBudgetCommitments",
+      "MigrationId": "20260828190000_AlignProcurementReservationAndFormalCommitmentLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "782E81957E8CF828FCF4DAD7ED17029074074DF4039DC21385C4D1019347234D"
+    },
+    {
+      "Name": "TR_ProcurementCalendarOccurrences_TenantGuard",
+      "table": "ProcurementCalendarOccurrences",
+      "MigrationId": "20260722101519_AddProcurementCalendarLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "779195981CC8FE8E663B06AB3933E8B55C2BFB846501BD748CE2892ECE5C2852"
+    },
+    {
+      "Name": "TR_ProcurementCalendarProfiles_LifecycleGuard",
+      "table": "ProcurementCalendarProfiles",
+      "MigrationId": "20260722101519_AddProcurementCalendarLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2F71B5F70A8A237B576246E0A43B4E3728F1F119BD34AE16C694FEC2E28DE880"
+    },
+    {
+      "Name": "TR_ProcurementCalendarRules_LifecycleGuard",
+      "table": "ProcurementCalendarRules",
+      "MigrationId": "20260722101519_AddProcurementCalendarLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "38D74A04DD8B9DF392AB2BCC871FC06C65DF6BE17636DDDF746A9845A26BEBD6"
+    },
+    {
+      "Name": "TR_ProcurementContractActivationEvidence_TDC0407Immutable",
+      "table": "ProcurementContractActivationEvidence",
+      "MigrationId": "20260730132714_TDC0407ContractActivationGate",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7C68E015934456C50EB2A426CD0D14A10FCB519051AC130B4E0BF5D856C78678"
+    },
+    {
+      "Name": "TR_ProcurementContractActivations_TDC0407Protected",
+      "table": "ProcurementContractActivations",
+      "MigrationId": "20260730132714_TDC0407ContractActivationGate",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CD848BEC5D73E4573C72CD949625F734AEC8FB55BDA89E5F2AEFFB617ADA2F69"
+    },
+    {
+      "Name": "TR_ProcurementControlEventEvidenceLinks_AppendOnly",
+      "table": "ProcurementControlEventEvidenceLinks",
+      "MigrationId": "20260721083614_AddProcurementControlEvents",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "52AA8233EA7E17CA1DE36F91DFE2FE0195EFD98F9804860F73F0370D06808872"
+    },
+    {
+      "Name": "TR_ProcurementControlEvents_AppendOnly",
+      "table": "ProcurementControlEvents",
+      "MigrationId": "20260806010613_TDC0706SharedAuditGovernance",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5396EABAF122F4AF7268B2F5941A5F96A9560437FC151EF1F69DA06E84859374"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationAttendanceRecords_Immutable",
+      "table": "ProcurementEvaluationAttendanceRecords",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7298773FA496B3AD6052CD52DA09F2D1D5D889D4490A52E90696F5661B0529E5"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationCommitteeAppointments_Lifecycle",
+      "table": "ProcurementEvaluationCommitteeAppointments",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "16AAE49344E778146BFA0C152003C059EA6BB8FF258BE6B5A3559920DC28839F"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationCommitteeControls_Lifecycle",
+      "table": "ProcurementEvaluationCommitteeControls",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "376C022FE1F09C98830EEF8D083FB1A1768520C59E37E8B483334B0ACAE4DAF0"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationCommitteeRoleRequirements_Immutable",
+      "table": "ProcurementEvaluationCommitteeRoleRequirements",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A7FCECEF707F839A4BF280F29D02F31CF92DDC90735F759C466B5F207B79C2CE"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationConflictDeclarations_Immutable",
+      "table": "ProcurementEvaluationConflictDeclarations",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7D95D90030A4F66C24EB1CD2A06746D827C8D519A5550D7795A38B6D56673EAE"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationMeetings_Lifecycle",
+      "table": "ProcurementEvaluationMeetings",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E050442A0C3F4D77315B0514281573385839B3687DD432EDFD31C2572F8D9BEF"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationScoreRecalls_Lifecycle",
+      "table": "ProcurementEvaluationScoreRecalls",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 8,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9A1010739DAA92A41DF4C9B252F0DB05A102791ECFCB6109F909DA4E77DD53A0"
+    },
+    {
+      "Name": "TR_ProcurementEvaluationScoreSheets_Immutable",
+      "table": "ProcurementEvaluationScoreSheets",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B7D6965A55E3365966F7300CE18D4FC5697DBAB75A76121FE95445862AE6E316"
+    },
+    {
+      "Name": "TR_ProcurementExceptionalSourcingControls_Lifecycle",
+      "table": "ProcurementExceptionalSourcingControls",
+      "MigrationId": "20260723120017_AddProcurementExceptionalSourcingControls",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5F0E6AF34B5D597A1AF977859E6C0B5B70D88B0220D6EA2EF43799494C4BFA9F"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkAgreementBalances_Protected",
+      "table": "ProcurementFrameworkAgreementBalances",
+      "MigrationId": "20260729124416_TDC0402FrameworkCallOffs",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AE68092A58D4CB815662A2B21D40A72B3EC699663064789B49C5DC7FFCC6168D"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkAgreementCategories_Protected",
+      "table": "ProcurementFrameworkAgreementCategories",
+      "MigrationId": "20260729084856_TDC0401FrameworkAgreements",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2E886134163A837BD48E6A06B00EA32F18A9EA169F726B061ECBDFC1A52D9F43"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkAgreementDocuments_Protected",
+      "table": "ProcurementFrameworkAgreementDocuments",
+      "MigrationId": "20260729084856_TDC0401FrameworkAgreements",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6E9C127AC2A0FEFDFB7DDE33E97014E1CE28484ACC8F620BB7486140F2431EE3"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkAgreementExtensions_Lifecycle",
+      "table": "ProcurementFrameworkAgreementExtensions",
+      "MigrationId": "20260729084856_TDC0401FrameworkAgreements",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "33338A011703C136A6892320D929148E9D5B7DE3232658D61896E64078AB924F"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkAgreements_Lifecycle",
+      "table": "ProcurementFrameworkAgreements",
+      "MigrationId": "20260729084856_TDC0401FrameworkAgreements",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C3B11CC3CC53A42D4DCF5D8CFC06EA4838C73F4304E484AEAE11E573774D1700"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkBalanceMovements_AppendOnly",
+      "table": "ProcurementFrameworkBalanceMovements",
+      "MigrationId": "20260729124416_TDC0402FrameworkCallOffs",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9746D9CD3BD2921715C4E24D576A9AEC2E037C2759D3B8F1D5D10CC49469DF31"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkCallOffAuthorities_Protected",
+      "table": "ProcurementFrameworkCallOffAuthorities",
+      "MigrationId": "20260729084856_TDC0401FrameworkAgreements",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "161611B789EB25B53F18802DCAA3CC0EC4C8156078E58D16782AA2D0E31F1AF2"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkCallOffLines_Protected",
+      "table": "ProcurementFrameworkCallOffLines",
+      "MigrationId": "20260729124416_TDC0402FrameworkCallOffs",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "258DB35B16B499C4AC0FF7B073A77B041EAFA37DB27B49A30FD0F6ED42E1F802"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkCallOffs_Lifecycle",
+      "table": "ProcurementFrameworkCallOffs",
+      "MigrationId": "20260729124416_TDC0402FrameworkCallOffs",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D3431B92C663A49F6C0E360A812806042E2F19B86375C1EDFC53BF035B484613"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkCallOffs_PurchaseOrderSource",
+      "table": "ProcurementFrameworkCallOffs",
+      "MigrationId": "20260729210000_TDC0403FrameworkLineageFailClosed",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6F84D53D1042BCDECF97A4705595B86DF50C47E5A3FBCFDACB0A3580293D7859"
+    },
+    {
+      "Name": "TR_ProcurementFrameworkPriceListLines_Protected",
+      "table": "ProcurementFrameworkPriceListLines",
+      "MigrationId": "20260729084856_TDC0401FrameworkAgreements",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1F66454ADF94FE96180A949F4B76446CB5BC2D3867CDAB523744B2A3DE0EDE55"
+    },
+    {
+      "Name": "TR_ProcurementGhanepsExchangeAcknowledgements_Immutable",
+      "table": "ProcurementGhanepsExchangeAcknowledgements",
+      "MigrationId": "20260724175059_AddProcurementGhanepsExchangeControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F27F0FD36CE93558028CAEDEA3E565D23398B6F734AA05DD1AEA7E3E52502183"
+    },
+    {
+      "Name": "TR_ProcurementGhanepsExchangeAttempts_Immutable",
+      "table": "ProcurementGhanepsExchangeAttempts",
+      "MigrationId": "20260724175059_AddProcurementGhanepsExchangeControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "94B650045DBC7A908955D18CA415FE0807001A293900CF53C40B2150129C5348"
+    },
+    {
+      "Name": "TR_ProcurementGhanepsExchangeEvents_Guard",
+      "table": "ProcurementGhanepsExchangeEvents",
+      "MigrationId": "20260724175059_AddProcurementGhanepsExchangeControls",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DBC84E427405E1BAD307DFBF84FADEC5ED4DEF6D31731F4E8F55867D5A6A4DC5"
+    },
+    {
+      "Name": "TR_ProcurementGhanepsExchangePayloads_Immutable",
+      "table": "ProcurementGhanepsExchangePayloads",
+      "MigrationId": "20260724175059_AddProcurementGhanepsExchangeControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9287ECE04613F8B616D3E055EAB6D6790E1B0D774FB96BCBD373CB8B0F8393B9"
+    },
+    {
+      "Name": "TR_ProcurementGhanepsExchangeReconciliations_Immutable",
+      "table": "ProcurementGhanepsExchangeReconciliations",
+      "MigrationId": "20260724175059_AddProcurementGhanepsExchangeControls",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "65774246CFBB2B98991475F6E00F4326F5EFD62F931BE8934E2C001F8B2A4224"
+    },
+    {
+      "Name": "TR_ProcurementMasterDataChangeEvidenceLinks_SubmittedGuard",
+      "table": "ProcurementMasterDataChangeEvidenceLinks",
+      "MigrationId": "20260721100238_AddProcurementMasterDataChangeControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "34A69599511F93C74843E8F8A8D9E882EEE3F390787E19A07F4A644AEF951C00"
+    },
+    {
+      "Name": "TR_ProcurementMasterDataChangeRequests_NoDelete",
+      "table": "ProcurementMasterDataChangeRequests",
+      "MigrationId": "20260721100238_AddProcurementMasterDataChangeControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EE50AA761C145B49F54360227F9FB409108942DB259A6B93F586F72C9CABD118"
+    },
+    {
+      "Name": "TR_ProcurementMasterDataChangeRequests_SnapshotGuard",
+      "table": "ProcurementMasterDataChangeRequests",
+      "MigrationId": "20260721183000_EnsureProcurementMasterDataCancellationTransition",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A0684A0597E42713C96564CCD7C09CDFA2E11EC3ED561B5ACC05B04F44FD186C"
+    },
+    {
+      "Name": "TR_ProcurementMasterDataControlPolicies_LifecycleGuard",
+      "table": "ProcurementMasterDataControlPolicies",
+      "MigrationId": "20260721100238_AddProcurementMasterDataChangeControls",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "608764242A430B2C0087088D98CA1B34C236D3B9A7B8AB645785A7E7716BE821"
+    },
+    {
+      "Name": "TR_ProcurementPrequalificationApplications_Lifecycle",
+      "table": "ProcurementPrequalificationApplications",
+      "MigrationId": "20260723145650_AddProcurementPrequalificationLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9BD04E257A311C375E2075A0528810FF38BDD1BE41B6FE27CD9F32B3309FED4C"
+    },
+    {
+      "Name": "TR_ProcurementPrequalificationCriteria_ImmutableAfterAdvertisement",
+      "table": "ProcurementPrequalificationCriteria",
+      "MigrationId": "20260723145650_AddProcurementPrequalificationLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FAC7B049D30F84FD9439E19CE8D8BAAB8F112333DF9C9E373F13D184D96C5E79"
+    },
+    {
+      "Name": "TR_ProcurementPrequalificationExercises_Lifecycle",
+      "table": "ProcurementPrequalificationExercises",
+      "MigrationId": "20260723145650_AddProcurementPrequalificationLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "977A17B3F79176A7D73FD9F6C25E8661B562DB3F554BC7D9E5B5CE9A2FC9A774"
+    },
+    {
+      "Name": "TR_ProcurementPrequalificationScores_Immutable",
+      "table": "ProcurementPrequalificationScores",
+      "MigrationId": "20260723145650_AddProcurementPrequalificationLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "343934D8FC147A97A5094A8D75756169A43DDFCA3AC8DA0DD5F95B47A1532012"
+    },
+    {
+      "Name": "TR_ProcurementPurchaseOrderAmendmentAcknowledgements_Immutable",
+      "table": "ProcurementPurchaseOrderAmendmentAcknowledgements",
+      "MigrationId": "20260730032601_TDC0406PurchaseOrderAmendments",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9D7F775D727523F3986B53CA18817DFBDA532804181C35B7E3A346D43BE014F4"
+    },
+    {
+      "Name": "TR_ProcurementPurchaseOrderAmendmentDispatches_Immutable",
+      "table": "ProcurementPurchaseOrderAmendmentDispatches",
+      "MigrationId": "20260730032601_TDC0406PurchaseOrderAmendments",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1D2522C4154E1EE2F5151865080D4D55926C3075513B5334B2896C5F79D898AD"
+    },
+    {
+      "Name": "TR_ProcurementPurchaseOrderAmendments_Protected",
+      "table": "ProcurementPurchaseOrderAmendments",
+      "MigrationId": "20260730032601_TDC0406PurchaseOrderAmendments",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "603F1E4124B3A5B68BEE7F9639C41FF8B3CA03376BF61223715164CF4526A656"
+    },
+    {
+      "Name": "TR_ProcurementPurchaseOrderCommitmentAdjustments_Immutable",
+      "table": "ProcurementPurchaseOrderCommitmentAdjustments",
+      "MigrationId": "20260730032601_TDC0406PurchaseOrderAmendments",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "66F84B4ABFCD198E012464915A410B17DC7F0FF7D9B9F71F747FDDAEFDD05EEB"
+    },
+    {
+      "Name": "TR_ProcurementQualifiedListEntries_Lifecycle",
+      "table": "ProcurementQualifiedListEntries",
+      "MigrationId": "20260723145650_AddProcurementPrequalificationLifecycle",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9CB34E3413249E65601B294096033F9E841225539C497A37B1C2FD0DDB9B3A60"
+    },
+    {
+      "Name": "TR_ProcurementReceiptDocumentActions_TDC0509Immutable",
+      "table": "ProcurementReceiptDocumentActions",
+      "MigrationId": "20260801013000_TDC0509ReceiptDocumentLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "811F2B8309CA6F4CD47F270E2EABFEEF805E348EEF29D99D29E3FF7D597134B9"
+    },
+    {
+      "Name": "TR_ProcurementReceiptDocumentSignatures_TDC0509Immutable",
+      "table": "ProcurementReceiptDocumentSignatures",
+      "MigrationId": "20260801013000_TDC0509ReceiptDocumentLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9E70A675D80959409EDDF1B6CF0FE805ED68664B6C924F83AB2EBEB0D546D904"
+    },
+    {
+      "Name": "TR_ProcurementReceiptDocuments_TDC0509Protected",
+      "table": "ProcurementReceiptDocuments",
+      "MigrationId": "20260801114500_TDC0509IssuedSnapshotTransition",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8FDFACDC7BFDD7862D09607FB5D51E0D91EE905FE710794AC77A3F9D42D863E2"
+    },
+    {
+      "Name": "TR_ProcurementReceiptInspectionActions_TDC0502Immutable",
+      "table": "ProcurementReceiptInspectionActions",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B73E2EA42211B64206513E3490C9E585AD1BC9789DA89A42EE312BF216B2862F"
+    },
+    {
+      "Name": "TR_ProcurementReceiptInspectionCases_TDC0502Protected",
+      "table": "ProcurementReceiptInspectionCases",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E7342C48CC250868DDB985AB405333A0B9C3F0CB92D3220E48EA28283EF7C7B9"
+    },
+    {
+      "Name": "TR_ProcurementReceiptInspectionEvidence_TDC0502Immutable",
+      "table": "ProcurementReceiptInspectionEvidence",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4631DE6BB50E797D7542B1F99872C47FEE9FFC6F49781970B874BA925456EC83"
+    },
+    {
+      "Name": "TR_ProcurementReceiptInspectionLines_TDC0502Protected",
+      "table": "ProcurementReceiptInspectionLines",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3ABD1556DE4C6265AB195E0638A00AB0806ACCF91439886BEB694AC580C57DF6"
+    },
+    {
+      "Name": "TR_ProcurementReceiptSourceEvidence_INVREQFU001",
+      "table": "ProcurementReceiptSourceEvidence",
+      "MigrationId": "20260812195409_INVREQFU001GovernedReceiptSourceEvidence",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A4B32F48E7BF60ACDF5804EF2B829D7229B976A1E52E0932EE0E66A37C85B95C"
+    },
+    {
+      "Name": "TR_ProcurementRequisitionAuthorityRouteSteps_NoMutation",
+      "table": "ProcurementRequisitionAuthorityRouteSteps",
+      "MigrationId": "20260722050707_AddProcurementRequisitionAuthorityRoutes",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BF7F9E445BAE95A0D17916FC140ED2EC8165309F92EB2EF90D1DBB8926B5D951"
+    },
+    {
+      "Name": "TR_ProcurementRequisitionAuthorityRouteSteps_TenantGuard",
+      "table": "ProcurementRequisitionAuthorityRouteSteps",
+      "MigrationId": "20260722050707_AddProcurementRequisitionAuthorityRoutes",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "27CBF4912F94D394C7F91F913662CAD3758E1E9719191DACB62145A7F8420B74"
+    },
+    {
+      "Name": "TR_ProcurementRequisitionAuthorityRoutes_NoMutation",
+      "table": "ProcurementRequisitionAuthorityRoutes",
+      "MigrationId": "20260722050707_AddProcurementRequisitionAuthorityRoutes",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7A47F41D6D12F1E5CCA7DA6BE960370C3CD4EAB1D6CACF36516D2AC842B096CF"
+    },
+    {
+      "Name": "TR_ProcurementRequisitionAuthorityRoutes_TenantGuard",
+      "table": "ProcurementRequisitionAuthorityRoutes",
+      "MigrationId": "20260722050707_AddProcurementRequisitionAuthorityRoutes",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7AA47D32420DED6038B82680B076F64D9F2F9D6BEE106F26F48A67D7F272D792"
+    },
+    {
+      "Name": "TR_ProcurementRequisitionSourcingReleases_NoMutation",
+      "table": "ProcurementRequisitionSourcingReleases",
+      "MigrationId": "20260722074659_AddProcurementRequisitionSourcingReleases",
+      "OperationIndex": 25,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A69AB497A3657B487D3ADF4CB83487506A2017E9B5C4D4CD7B4B72944722F062"
+    },
+    {
+      "Name": "TR_ProcurementRequisitionSourcingReleases_TenantGuard",
+      "table": "ProcurementRequisitionSourcingReleases",
+      "MigrationId": "20260824183000_SimplifyPurchaseRequisitionControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "159009C7B4252EEC2FBA38BEBDF3A3C239E0024D1931533D82B0CC9D579DD8DC"
+    },
+    {
+      "Name": "TR_ProcurementRfqEvaluationLines_Lifecycle",
+      "table": "ProcurementRfqEvaluationLines",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 11,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "12F8344B95261E873076942847072EEDF679C7F8F4B97C5473B117378F5A801C"
+    },
+    {
+      "Name": "TR_ProcurementRfqEvaluations_Lifecycle",
+      "table": "ProcurementRfqEvaluations",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 10,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0E98E4B559D22A2F44A79C1F2AC21371E4823FD64158624B13CAA7D418F500AD"
+    },
+    {
+      "Name": "TR_ProcurementRfqOpeningEntries_Immutable",
+      "table": "ProcurementRfqOpeningEntries",
+      "MigrationId": "20260723025539_AddProcurementRfqStatutoryControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8E814571E04FE88C97E48D317F608505896C81F2B2F658EFF0E0BFBBB9EE22AF"
+    },
+    {
+      "Name": "TR_ProcurementRfqOpeningParticipants_Immutable",
+      "table": "ProcurementRfqOpeningParticipants",
+      "MigrationId": "20260723025539_AddProcurementRfqStatutoryControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "09F4C9DD7AFDE259B6F026846B70A128EDCAE5FF14BCB75367395DF0E343B3D9"
+    },
+    {
+      "Name": "TR_ProcurementRfqOpeningRegisters_Immutable",
+      "table": "ProcurementRfqOpeningRegisters",
+      "MigrationId": "20260723025539_AddProcurementRfqStatutoryControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "626A3EACD6889C83BE736FB7D85254A3C032EA1B49D544ED218250E722674763"
+    },
+    {
+      "Name": "TR_ProcurementRfqReceipts_Immutable",
+      "table": "ProcurementRfqReceipts",
+      "MigrationId": "20260723025539_AddProcurementRfqStatutoryControls",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3CC8057A96D50D090422B5EF1D3CFE4CAC43C5E070EF1167E9D01CE0FCA6304E"
+    },
+    {
+      "Name": "TR_ProcurementSourcingCaseLotItems_NoMutation",
+      "table": "ProcurementSourcingCaseLotItems",
+      "MigrationId": "20260722130004_AddProcurementSourcingCases",
+      "OperationIndex": 6,
+      "Derivation": "EXACT_RENAME_ALIAS_FROM:TR_ProcurementSourcingCaseLotItems_Immutable",
+      "bodySha256": "6D8CA686CC21643FCBE0DC77784E54DBB677EE4F151A03B7F855B60AF20EBF15"
+    },
+    {
+      "Name": "TR_ProcurementSourcingCaseLots_NoMutation",
+      "table": "ProcurementSourcingCaseLots",
+      "MigrationId": "20260722130004_AddProcurementSourcingCases",
+      "OperationIndex": 5,
+      "Derivation": "EXACT_RENAME_ALIAS_FROM:TR_ProcurementSourcingCaseLots_Immutable",
+      "bodySha256": "FC3DCD2EFE219E37776637383A90EAC62CF087F3D87A28711F6BD4F616F2DEBD"
+    },
+    {
+      "Name": "TR_ProcurementSourcingCaseSourceRequests_Lifecycle",
+      "table": "ProcurementSourcingCaseSourceRequests",
+      "MigrationId": "20260722130004_AddProcurementSourcingCases",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "61902D63EFE175619AA78F5006F37BD6270A3AF996B967262FD5E7282EEAEB84"
+    },
+    {
+      "Name": "TR_ProcurementSourcingCases_Lifecycle",
+      "table": "ProcurementSourcingCases",
+      "MigrationId": "20260825120000_SimplifyProcurementSourcingCaseLineage",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "349102F9AA8DFB76687BF4344B046A53BC69F1DC31BEB713D8885F65061E0C72"
+    },
+    {
+      "Name": "TR_ProcurementSpecificationTemplates_LifecycleGuard",
+      "table": "ProcurementSpecificationTemplates",
+      "MigrationId": "20260721194837_AddProcurementSpecificationTemplates",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2AF4052DF1A7854FF939566E1F1B0B862D14765337C835E120A23C81C08FB932"
+    },
+    {
+      "Name": "TR_ProcurementSpecificationTemplates_NoDelete",
+      "table": "ProcurementSpecificationTemplates",
+      "MigrationId": "20260721194837_AddProcurementSpecificationTemplates",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "700DA714415D6BB8DAF4DF04FA59C6406E1FC39F68E11203BF6262D3295DA3AA"
+    },
+    {
+      "Name": "TR_ProcurementSupplierApplicantAccesses_Protected",
+      "table": "ProcurementSupplierApplicantAccesses",
+      "MigrationId": "20260809204500_AllowPreProvisioningSupplierContactCorrection",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9E64A58FC27031C0ED5E5E538E7660D40E0ED3FC1BA10E92CBBBE3C8F28EFDE4"
+    },
+    {
+      "Name": "TR_ProcurementSupplierApplicantSessions_Protected",
+      "table": "ProcurementSupplierApplicantSessions",
+      "MigrationId": "20260727113854_AddProcurementSupplierApplicantAccess",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1B205E192C1391CE17C84D2EDC4515E2A6798DC331FB69932F115E55B38ECB41"
+    },
+    {
+      "Name": "TR_ProcurementSupplierAvlEntries_Protected",
+      "table": "ProcurementSupplierAvlEntries",
+      "MigrationId": "20260726174311_AddProcurementSupplierAvlLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "007D36770C425F444748892753D69F921C8D753BA2DB2850FCE461DCC171434B"
+    },
+    {
+      "Name": "TR_ProcurementSupplierAvlEntryStatusHistories_AppendOnly",
+      "table": "ProcurementSupplierAvlEntryStatusHistories",
+      "MigrationId": "20260726174311_AddProcurementSupplierAvlLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7AE39D5F1E97E6A5787B73C86EE153A8D31296BC7CEA3489CBF61D933C71F979"
+    },
+    {
+      "Name": "TR_ProcurementSupplierAvlPublicationSnapshots_AppendOnly",
+      "table": "ProcurementSupplierAvlPublicationSnapshots",
+      "MigrationId": "20260726174311_AddProcurementSupplierAvlLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E790AA9835ACF5B30FA3A99BD519C603D0DA1D88C67EE8D59932674291B3171E"
+    },
+    {
+      "Name": "TR_ProcurementSupplierAvlRegisters_Lifecycle",
+      "table": "ProcurementSupplierAvlRegisters",
+      "MigrationId": "20260726174311_AddProcurementSupplierAvlLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "81940F61FF91C9723D335635C1ED2537EF571B1416BE0CD3229FB450369C3C12"
+    },
+    {
+      "Name": "TR_ProcurementSupplierDueDiligenceChecks_Protected",
+      "table": "ProcurementSupplierDueDiligenceChecks",
+      "MigrationId": "20260726101435_AddProcurementSupplierDueDiligence",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5E11DED296A78C8A65EAE2B32E9339F5AA9F1C0A9BA15066C633B4E51CBA329A"
+    },
+    {
+      "Name": "TR_ProcurementSupplierDueDiligenceEvidenceLinks_Protected",
+      "table": "ProcurementSupplierDueDiligenceEvidenceLinks",
+      "MigrationId": "20260726101435_AddProcurementSupplierDueDiligence",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "07A1A5542CD1073EA109B993B85BA5EDB3718A535730479CE1F5724ABB20B8B5"
+    },
+    {
+      "Name": "TR_ProcurementSupplierDueDiligenceReviews_Lifecycle",
+      "table": "ProcurementSupplierDueDiligenceReviews",
+      "MigrationId": "20260726101435_AddProcurementSupplierDueDiligence",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D5BACA3A11F47B90BBE18100996A67A802E7135C2BF387576CFFDDE50985231D"
+    },
+    {
+      "Name": "TR_ProcurementSupplierEvidencePackVersions_Lifecycle",
+      "table": "ProcurementSupplierEvidencePackVersions",
+      "MigrationId": "20260724203636_AddProcurementSupplierEvidencePacks",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "04405E52BECF71AFB62C975E1094EF0D54A478A3465F4130AD44A7BD8CE6F86F"
+    },
+    {
+      "Name": "TR_ProcurementSupplierEvidenceRequirements_Protected",
+      "table": "ProcurementSupplierEvidenceRequirements",
+      "MigrationId": "20260724203636_AddProcurementSupplierEvidencePacks",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0B8C456DA6FA65D7B919A02EF50FFF8B24ACA71B2B22258C009D14C97F97CFAC"
+    },
+    {
+      "Name": "TR_ProcurementSupplierOnboardingExemptions_Protected",
+      "table": "ProcurementSupplierOnboardingExemptions",
+      "MigrationId": "20260725111657_AddProcurementSupplierOnboardingTokens",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FBBDC93A1E6F1CABE65189961726EC1202C13C312BD97C0DB8CFABB118B34617"
+    },
+    {
+      "Name": "TR_ProcurementSupplierOnboardingPayments_Protected",
+      "table": "ProcurementSupplierOnboardingPayments",
+      "MigrationId": "20260805122000_FixSupplierApplicantPaymentAttribution",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5DF50D913AB07D53DFEB692E2CFB758DCB2C9FB4DE4DE90A1949008EE3297CE9"
+    },
+    {
+      "Name": "TR_ProcurementSupplierOnboardingTokens_Protected",
+      "table": "ProcurementSupplierOnboardingTokens",
+      "MigrationId": "20260725111657_AddProcurementSupplierOnboardingTokens",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "61E0D08F54FC8834D25F2CFDC719E1CCD5A5D2116B38F568117D1EC86906EC31"
+    },
+    {
+      "Name": "TR_ProcurementSupplierPerformanceScorecards_AppendOnly",
+      "table": "ProcurementSupplierPerformanceScorecards",
+      "MigrationId": "20260727005601_AddProcurementSupplierPerformanceScorecards",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E6F311A8EE78D99B293B2C32FB63A197DE2E93066577C987B0FF6A211BCDFD2D"
+    },
+    {
+      "Name": "TR_ProcurementSupplierRegistrationEvidencePackBindings_Immutable",
+      "table": "ProcurementSupplierRegistrationEvidencePackBindings",
+      "MigrationId": "20260807233500_FixSupplierEvidencePackBindingLineageTrigger",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6AD206A873C4D3049A1042CF2AE28C333ED18A84FF572A75ECFD4920057E893A"
+    },
+    {
+      "Name": "TR_ProcurementSupplierRiskAlerts_Lifecycle",
+      "table": "ProcurementSupplierRiskAlerts",
+      "MigrationId": "20260726224147_AddProcurementSupplierRiskAndConcentration",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FB2D5876489F4CA35F4D8ED9FDA9B8B1DEDC8D98493F85619C2C552C38D90C09"
+    },
+    {
+      "Name": "TR_ProcurementSupplierRiskAssessments_AppendOnly",
+      "table": "ProcurementSupplierRiskAssessments",
+      "MigrationId": "20260726224147_AddProcurementSupplierRiskAndConcentration",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0604FE6808C87CC64615AEC762B314264C7645F4170277FA1CCEB31D3AD8F68C"
+    },
+    {
+      "Name": "TR_ProcurementTenderControls_Lifecycle",
+      "table": "ProcurementTenderControls",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CB5E14321695FBB76D4B5705D340B12B604CA5A8E18B6E424D133D8356E8BA6C"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentAcknowledgements_Immutable",
+      "table": "ProcurementTenderDocumentAcknowledgements",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BF08E1CDED7039DF5603F2201483C336D0541BA9FDB83044777F1C3A3D36B5F0"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentChangeRecipients_Immutable",
+      "table": "ProcurementTenderDocumentChangeRecipients",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "557214B702F261BEB21054E61C9721C91A252A3A6443E9B8B2D495C5470F6F96"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentChanges_Lifecycle",
+      "table": "ProcurementTenderDocumentChanges",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "639BA143FB636D34C1ED525D515270E98E261A4DE4BB731CC8D163F6A9E98A34"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentIssuances_Immutable",
+      "table": "ProcurementTenderDocumentIssuances",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A5B4DD4E588E7B58E18F263301C7FFE409125B637A302B02CC3AABDF3C9484E6"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentIssues_Immutable",
+      "table": "ProcurementTenderDocumentIssues",
+      "MigrationId": "20260723071908_AddProcurementTenderStatutoryControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B2471C63306A1CFF508648608A3D80A0C8165E095654371FD3F3559C09462A67"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentRegisters_Immutable",
+      "table": "ProcurementTenderDocumentRegisters",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D554D01F4A220BF6F2063E7CEC0EF1198D100872DFCBBE1E5C7BCDB4D3B64A19"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentTemplateMethods_Immutable",
+      "table": "ProcurementTenderDocumentTemplateMethods",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9981B141A94D86E2CC1EC85DA579EEA1417E90F2D39E36C02ABD5C124F31B207"
+    },
+    {
+      "Name": "TR_ProcurementTenderDocumentTemplateVersions_Lifecycle",
+      "table": "ProcurementTenderDocumentTemplateVersions",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B3AE8DEC1B95CA398723CD81E0D4C576B10E13D1ED374B26B8A888CD2B65EF6B"
+    },
+    {
+      "Name": "TR_ProcurementTenderSecurityActions_Immutable",
+      "table": "ProcurementTenderSecurityActions",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 9,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "31BC241C147F2B4D42C9068D1034CE65329C1A779A73DF5D093580F26EAE6738"
+    },
+    {
+      "Name": "TR_ProcurementTenderSecurityInstruments_Immutable",
+      "table": "ProcurementTenderSecurityInstruments",
+      "MigrationId": "20260724134047_AddProcurementBidderCommunicationsAndSecurityReturns",
+      "OperationIndex": 8,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C0D18F5351EFA34BBE8A27EBDB038352FF8C2E4B55D950B8171D7202BC53E3DE"
+    },
+    {
+      "Name": "TR_ProcurementTenderSubmissionReceipts_Immutable",
+      "table": "ProcurementTenderSubmissionReceipts",
+      "MigrationId": "20260723071908_AddProcurementTenderStatutoryControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B5711DA8CB1FC986319E1D04DA5D6EF665B819B26B4E9F89CA8AAD35C4A14877"
+    },
+    {
+      "Name": "TR_ProcurementWorksCloseoutActions_QS0504RetentionGuard",
+      "table": "ProcurementWorksCloseoutActions",
+      "MigrationId": "20260810165005_AddQuantitySurveyRetentionReleaseLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4084AAD9874909BD1E74288C29ED1ABEB9716D00A3D21B645E3FB86FF79F905E"
+    },
+    {
+      "Name": "TR_ProcurementWorksCloseoutActions_TDC0409Protected",
+      "table": "ProcurementWorksCloseoutActions",
+      "MigrationId": "20260730171500_TDC0409WorksCloseoutControl",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8CE314650EEBAEAC3657D0A2813787E7DEDFF9676445D26CE683AF2F939318AD"
+    },
+    {
+      "Name": "TR_ProcurementWorksCloseoutEvidence_TDC0409Immutable",
+      "table": "ProcurementWorksCloseoutEvidence",
+      "MigrationId": "20260730171500_TDC0409WorksCloseoutControl",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D0F6C2D4DD26F33BA14DD2D3E2A89891C7004882436D1E722C30A9F12620641E"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignCases_Lifecycle",
+      "table": "ProjectCivilDesignCases",
+      "MigrationId": "20260814234022_AddCivilEngineeringDesignWorkflow",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EFC52F43D9F707A1A5D058F7748212EB95428129C98FC54F8C244D901520112B"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignEvidence_AppendOnly",
+      "table": "ProjectCivilDesignEvidence",
+      "MigrationId": "20260814234022_AddCivilEngineeringDesignWorkflow",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "50E8A29AD6CE6A89325516C03862E017F8F4617015298D5AA24A96EF330BCA14"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignEvidence_Lineage",
+      "table": "ProjectCivilDesignEvidence",
+      "MigrationId": "20260814234022_AddCivilEngineeringDesignWorkflow",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D602835AF8FE5061E5F284F53A3843A3F67AD5229AD72BD217E29ACC203307FD"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignInputResponses_AppendOnly",
+      "table": "ProjectCivilDesignInputResponses",
+      "MigrationId": "20260815031044_AddCivilEngineeringDesignInputRequests",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7F8E872D404954EBEC382C134E0790750F1D1D6B764DE6C15C6AB3BFE50ADC27"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignInputResponses_Lineage",
+      "table": "ProjectCivilDesignInputResponses",
+      "MigrationId": "20260815031044_AddCivilEngineeringDesignInputRequests",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DD2D403955678D1D5318DB60F883A1031FB887C3600C97E3919F98FD2A7DFF12"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignRevisions_AppendOnly",
+      "table": "ProjectCivilDesignRevisions",
+      "MigrationId": "20260814234022_AddCivilEngineeringDesignWorkflow",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4610B8FB9606A49EBB64D9A5C569173FF0A7B3C4629C8CD1375F54B60C1B519F"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignRevisions_Lineage",
+      "table": "ProjectCivilDesignRevisions",
+      "MigrationId": "20260814234022_AddCivilEngineeringDesignWorkflow",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8910E55D2C8897E89CBB6BCD45E69B5FA507BF140FED188047274F5FF43D4B6F"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_AppendOnly",
+      "table": "ProjectCivilDevelopmentApprovalEngineeringReviewDecisions",
+      "MigrationId": "20260821153000_AddCivilEngineeringPermittingHodDecisions",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8F6921A9148A2364AE412AF5739E2CDB0696A9FB3B13ED1990EFE476E9D84ABF"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalEngineeringReviewDecisions",
+      "MigrationId": "20260821153000_AddCivilEngineeringPermittingHodDecisions",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "36BC375C2D8E59075FBF0C08E8E44C29F3455CC62F39692FBFCE0821FA71BEBE"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewRevisions_AppendOnly",
+      "table": "ProjectCivilDevelopmentApprovalEngineeringReviewRevisions",
+      "MigrationId": "20260821143000_AddCivilEngineeringPermittingEngineeringReviews",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7AF73567966F89EC7C179D3ED3251C76D471BC461FB046711514C3B3DD80614A"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewRevisions_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalEngineeringReviewRevisions",
+      "MigrationId": "20260821143000_AddCivilEngineeringPermittingEngineeringReviews",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "61A8057E85A9AB86554D57E5B7BA24A24872B052FDB7D99EA69B73B5CF34BEE6"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lifecycle",
+      "table": "ProjectCivilDevelopmentApprovalEngineeringReviews",
+      "MigrationId": "20260821143000_AddCivilEngineeringPermittingEngineeringReviews",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FB87883E0593F05338F4AB414F1174A4E53B4BCFDF23A6C190EC42D414060DC0"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalEngineeringReviews",
+      "MigrationId": "20260821143000_AddCivilEngineeringPermittingEngineeringReviews",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "50B0CA99C38A94B530A9260CB83D62F082F2D83E3BB9918FD3F28AF9E06A0026"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEvidence_AppendOnly",
+      "table": "ProjectCivilDevelopmentApprovalEvidence",
+      "MigrationId": "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "187F7393265001A7B64F883758EBE167BBC5C0EED9B06300D9ED9C48EF0C57B2"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEvidence_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalEvidence",
+      "MigrationId": "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9C85EBDF7302859D31F91F6F044158BCB3A4DB469336B15EC1245E34A88096DD"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalFileHandoffs_AppendOnly",
+      "table": "ProjectCivilDevelopmentApprovalFileHandoffs",
+      "MigrationId": "20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "72358E3451282FFD287E2733CE5B12A24EE9812FC27C758CC9F9DEE39AFA6EBE"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalFileHandoffs_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalFileHandoffs",
+      "MigrationId": "20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FBCD19EA90C600629BB0D71B9F6F2CDEAE89B2E7F2F5CD8698769758BF3F9CE4"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalFileRevisions_AppendOnly",
+      "table": "ProjectCivilDevelopmentApprovalFileRevisions",
+      "MigrationId": "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2C47C930216358C94DC353F298F30481F96554509BCE372D4808A72BDB37F151"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalFileRevisions_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalFileRevisions",
+      "MigrationId": "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "321F09847FB7AC2CED0F508E089FF6E15BF7A5F9A71DC2536CF440BF37D6FF2E"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalFiles_Lifecycle",
+      "table": "ProjectCivilDevelopmentApprovalFiles",
+      "MigrationId": "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6A361E103F3C90A433EBA351B129275DAFCBFEB052A43D4CBA9D20420444BDB4"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalFiles_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalFiles",
+      "MigrationId": "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "349B8AF8E7312636A64188DB17340F28883DEAC33E811904C3CD643D3670F1CE"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalHandoffEvidence_AppendOnly",
+      "table": "ProjectCivilDevelopmentApprovalHandoffEvidence",
+      "MigrationId": "20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4D9E2132A782EE637D2189F6AD850DB8A482E9F67FF8377EFF89F1DAB38B2B68"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalHandoffEvidence_Lineage",
+      "table": "ProjectCivilDevelopmentApprovalHandoffEvidence",
+      "MigrationId": "20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "006FB2107979D362A5C8988559A1211950C29C79B4DA6042F60818001A9E5FC5"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskControls_FeedbackLifecycle",
+      "table": "ProjectCivilDirectTaskControls",
+      "MigrationId": "20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "02682E1095C663267B2EECFFE78700FF2A9D29B5DFD93371CB40290CE555C4C6"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskControls_Lifecycle",
+      "table": "ProjectCivilDirectTaskControls",
+      "MigrationId": "20260821170000_AddCivilEngineeringDirectTaskControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DE3E27771997B240E8780125BFFBE9C7F9721BF0885D098161EA6B53EA3FD6B8"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskControls_Lineage",
+      "table": "ProjectCivilDirectTaskControls",
+      "MigrationId": "20260821170000_AddCivilEngineeringDirectTaskControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5477B136BF0A4E9E086A03E0BB39B4A7353312C6D9D7186350131770C67F2443"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskControls_UrgentPath",
+      "table": "ProjectCivilDirectTaskControls",
+      "MigrationId": "20260821190000_AddCivilEngineeringUrgentTaskControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4304B9712BAAA985F00008834400DDEA25FB6508E8CDF21D6540454569BA444F"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskFeedbackEntries_AppendOnly",
+      "table": "ProjectCivilDirectTaskFeedbackEntries",
+      "MigrationId": "20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DFCA864F453E0839790DB9857BED63689B034C1BEF95E19125C8AEBC4E645F5F"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskFeedbackEntries_Lineage",
+      "table": "ProjectCivilDirectTaskFeedbackEntries",
+      "MigrationId": "20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9ED116AE56BAB878557E7D737F428F04005BAFAC25379E75BF61855A6C8E4AB3"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskRevisions_AppendOnly",
+      "table": "ProjectCivilDirectTaskRevisions",
+      "MigrationId": "20260821170000_AddCivilEngineeringDirectTaskControls",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "86CBC9E2FFD84352E915044DDFCDA9DC5D24A913ABFFF2FA0549BF5AAE3F1041"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskRevisions_Lineage",
+      "table": "ProjectCivilDirectTaskRevisions",
+      "MigrationId": "20260821170000_AddCivilEngineeringDirectTaskControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3527E2F67C780702B77BAF2685312A4E9ADA8DC3A32360255EC6B6C90AA999F4"
+    },
+    {
+      "Name": "TR_ProjectCivilEngineeringDocumentRevisions_AppendOnly",
+      "table": "ProjectCivilEngineeringDocumentRevisions",
+      "MigrationId": "20260815135156_AddCivilEngineeringDocumentRegister",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1C4E33A72E26DD7DD2E7431E232B877E3B4E4E3121421B014070519F058AC998"
+    },
+    {
+      "Name": "TR_ProjectCivilEngineeringDocumentRevisions_Lineage",
+      "table": "ProjectCivilEngineeringDocumentRevisions",
+      "MigrationId": "20260815135156_AddCivilEngineeringDocumentRegister",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C17FDFC1F1459661A01D2F3320D9F85BF82C76DA5AEBE4DF97E5D1E250BF8691"
+    },
+    {
+      "Name": "TR_ProjectCivilEngineeringDocuments_Lifecycle",
+      "table": "ProjectCivilEngineeringDocuments",
+      "MigrationId": "20260815135156_AddCivilEngineeringDocumentRegister",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "149AC9076CF0585E25E5ED874161B29D40610154827C8C5A63E65CB5B71E1C18"
+    },
+    {
+      "Name": "TR_ProjectCivilEngineeringDocuments_Lineage",
+      "table": "ProjectCivilEngineeringDocuments",
+      "MigrationId": "20260815135156_AddCivilEngineeringDocumentRegister",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5CDCFC8E9FDF1A0CA35EF966D784871641DC3724D5B8314C7911724B786B3FDC"
+    },
+    {
+      "Name": "TR_ProjectCivilExtensionOfTimeControls_Lifecycle",
+      "table": "ProjectCivilExtensionOfTimeControls",
+      "MigrationId": "20260822003400_AddCivilEngineeringExtensionOfTimeControls",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3E33AC36CDA501CB9D83D87C2F082DA53CCE7C9BE4733B2C344A6E5578A0C577"
+    },
+    {
+      "Name": "TR_ProjectCivilExtensionOfTimeControls_Lineage",
+      "table": "ProjectCivilExtensionOfTimeControls",
+      "MigrationId": "20260822003400_AddCivilEngineeringExtensionOfTimeControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DCD4B11F6037464DF802B60B70BFBB8F5D47AA645DD5DC33B3938BEA79227F77"
+    },
+    {
+      "Name": "TR_ProjectCivilExtensionOfTimeRevisions_AppendOnly",
+      "table": "ProjectCivilExtensionOfTimeRevisions",
+      "MigrationId": "20260822003400_AddCivilEngineeringExtensionOfTimeControls",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CFF12C963260340DF4D073FC1455DD2B38D1A1ACCFAD81790B0F59A032E330FB"
+    },
+    {
+      "Name": "TR_ProjectCivilExtensionOfTimeRevisions_Lineage",
+      "table": "ProjectCivilExtensionOfTimeRevisions",
+      "MigrationId": "20260822003400_AddCivilEngineeringExtensionOfTimeControls",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7D1FFC9903F5FB3F9E4856EDE4FD21251CA65B0129DF4D8C6E2EB4FD86EFC1F7"
+    },
+    {
+      "Name": "TR_ProjectCivilInspectionControls_Lifecycle",
+      "table": "ProjectCivilInspectionControls",
+      "MigrationId": "20260822003700_GovernCivilInspectionPlanWorkflow",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5EECC13A09D443DAC5B8E9AC37F9A0DEE660CBBC0CD4EFFF0280DD3C2DC9885E"
+    },
+    {
+      "Name": "TR_ProjectCivilInspectionControls_Lineage",
+      "table": "ProjectCivilInspectionControls",
+      "MigrationId": "20260822003000_AddCivilEngineeringInspectionControls",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "41C347CC376C4E7C8EF8FF42877DE26EE93CE181D302C07113F90751995A4557"
+    },
+    {
+      "Name": "TR_ProjectCivilInspectionControls_Workflow",
+      "table": "ProjectCivilInspectionControls",
+      "MigrationId": "20260822003700_GovernCivilInspectionPlanWorkflow",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F5E5D77C9CC073A86A5DBD6450118277B7CADF67037B2736D6294805F5AF52AF"
+    },
+    {
+      "Name": "TR_ProjectCivilInspectionRevisions_AppendOnly",
+      "table": "ProjectCivilInspectionRevisions",
+      "MigrationId": "20260822003000_AddCivilEngineeringInspectionControls",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F9E6873F3F83947AAB128D61610D0445748259FC3B3B17359BE63CD9F6B84230"
+    },
+    {
+      "Name": "TR_ProjectCivilInspectionRevisions_Lineage",
+      "table": "ProjectCivilInspectionRevisions",
+      "MigrationId": "20260822003700_GovernCivilInspectionPlanWorkflow",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0811F6F19D2453CD4A2379AC2E8F9578E060254166C4C089C9F856571089BC93"
+    },
+    {
+      "Name": "TR_ProjectCivilIpcEndorsementRevisions_AppendOnly",
+      "table": "ProjectCivilIpcEndorsementRevisions",
+      "MigrationId": "20260820233000_AddCivilEngineeringIpcEndorsements",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A62544D13E5AFFBA48CA7588285B593FA6A9D103BDD4F0D458D798980A68DB18"
+    },
+    {
+      "Name": "TR_ProjectCivilIpcEndorsementRevisions_Lineage",
+      "table": "ProjectCivilIpcEndorsementRevisions",
+      "MigrationId": "20260820233000_AddCivilEngineeringIpcEndorsements",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8A17794CFC5307868D0A9FD2832F4EBD516606F1F6957E892C92BC278A12F8D6"
+    },
+    {
+      "Name": "TR_ProjectCivilIpcEndorsements_Lifecycle",
+      "table": "ProjectCivilIpcEndorsements",
+      "MigrationId": "20260820233000_AddCivilEngineeringIpcEndorsements",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B858B40F7B2D480551A2C336B9E6AB42D6236A011D42BB9D471A2ABE21940E02"
+    },
+    {
+      "Name": "TR_ProjectCivilIpcEndorsements_Lineage",
+      "table": "ProjectCivilIpcEndorsements",
+      "MigrationId": "20260820233000_AddCivilEngineeringIpcEndorsements",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "23E5E0B0783B646D8FBFB5A0D3D0E47B7D1BA55498BD37C3164D98B66B079B4D"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationBatches_Lifecycle",
+      "table": "ProjectCivilMigrationBatches",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "54720A489ACAAF728B6E9E183A25A05960495A9136EB46879E4B307132329AB0"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationBatches_Lineage",
+      "table": "ProjectCivilMigrationBatches",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C5E49989E9A3669F61860B34BE73976991CB1E5AB2BD2033A3BA8E38F4EA23B4"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationRecords_AppendOnly",
+      "table": "ProjectCivilMigrationRecords",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8A052E3BB9CD9D7E5663705A605F31F1ED884EA6211C32647C8D313DC0353382"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationRecords_Lineage",
+      "table": "ProjectCivilMigrationRecords",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E2BA97F12CA33A8D606348CA507F4004B346A39717F6DC0BA925CF9E85FAEEFB"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationRevisions_AppendOnly",
+      "table": "ProjectCivilMigrationRevisions",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 8,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A8AE92CEC2B5FE635AC820C5A2D233704F93AF640AFB99AF521E16909989E317"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationRevisions_Lineage",
+      "table": "ProjectCivilMigrationRevisions",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DD0DB01578BC5760CE55300214CEE0F13494E705CBE184B35BE54F45B35324A1"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationValidationIssues_AppendOnly",
+      "table": "ProjectCivilMigrationValidationIssues",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CCC9A199C9B56E28241E3C6CBFE272ABA4EFB7B6E9F20F66FD8861A068A90130"
+    },
+    {
+      "Name": "TR_ProjectCivilMigrationValidationIssues_Lineage",
+      "table": "ProjectCivilMigrationValidationIssues",
+      "MigrationId": "20260821210000_AddCivilEngineeringMigrationWorkbench",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9C372D6C955688E89549181EF98585514917FC2CE776A4C1D457AB4358FA1B61"
+    },
+    {
+      "Name": "TR_ProjectCivilPlanningGisValidationRevisions_AppendOnly",
+      "table": "ProjectCivilPlanningGisValidationRevisions",
+      "MigrationId": "20260822000000_AddCivilEngineeringPlanningGisValidation",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BDA31314980925FF5EA91B9648E8F0E363AF1E9F3270B32FC80B9A302AA12999"
+    },
+    {
+      "Name": "TR_ProjectCivilPlanningGisValidationRevisions_Lineage",
+      "table": "ProjectCivilPlanningGisValidationRevisions",
+      "MigrationId": "20260822000000_AddCivilEngineeringPlanningGisValidation",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E520525226D054C4786162E27B43A1D4E527266D38990CC194CD1A3E0BD2246C"
+    },
+    {
+      "Name": "TR_ProjectCivilPlanningGisValidations_EvidenceBinding",
+      "table": "ProjectCivilPlanningGisValidations",
+      "MigrationId": "20260822001000_HardenCivilEngineeringPlanningGisEvidenceBinding",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "81ADE6779AFECD9D9755CE91747ADD439661DF9652519BBB44A42434D144BC09"
+    },
+    {
+      "Name": "TR_ProjectCivilPlanningGisValidations_Lifecycle",
+      "table": "ProjectCivilPlanningGisValidations",
+      "MigrationId": "20260822000000_AddCivilEngineeringPlanningGisValidation",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1852B8A3F47BA23158357A87EF4480622697AEF20DE552B23CFFE82BAFA88130"
+    },
+    {
+      "Name": "TR_ProjectCivilPlanningGisValidations_Lineage",
+      "table": "ProjectCivilPlanningGisValidations",
+      "MigrationId": "20260822000000_AddCivilEngineeringPlanningGisValidation",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "96AD78BDCC273EC0847BFC62737159A11CCE08AC1DF513338D376DAF5995A696"
+    },
+    {
+      "Name": "TR_ProjectCivilProjectEngineerAssignmentRevisions_AppendOnly",
+      "table": "ProjectCivilProjectEngineerAssignmentRevisions",
+      "MigrationId": "20260820150000_AddCivilEngineeringProjectEngineerAssignments",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2FB548B42931AF539919E8C332EDD76E705B459E4F80E8353D55356DE6C192D7"
+    },
+    {
+      "Name": "TR_ProjectCivilProjectEngineerAssignmentRevisions_Lineage",
+      "table": "ProjectCivilProjectEngineerAssignmentRevisions",
+      "MigrationId": "20260820150000_AddCivilEngineeringProjectEngineerAssignments",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "52A0D746AAC1828F3DB34CC60812B13737BDFBCB5DA31E721C2404845F5FCF84"
+    },
+    {
+      "Name": "TR_ProjectCivilProjectEngineerAssignments_Lifecycle",
+      "table": "ProjectCivilProjectEngineerAssignments",
+      "MigrationId": "20260820150000_AddCivilEngineeringProjectEngineerAssignments",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "43DAEBF8EBDEE84FDB498AF0419649AE10DB096A524A1B311085993FB0FE5DB4"
+    },
+    {
+      "Name": "TR_ProjectCivilProjectEngineerAssignments_Lineage",
+      "table": "ProjectCivilProjectEngineerAssignments",
+      "MigrationId": "20260820150000_AddCivilEngineeringProjectEngineerAssignments",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "68ADDAEDA0E3FF0F8865067A726596BE9BAC60604C95D182DE222DBB8C214D11"
+    },
+    {
+      "Name": "TR_ProjectCivilQualityTestReports_Lifecycle",
+      "table": "ProjectCivilQualityTestReports",
+      "MigrationId": "20260820193000_AddCivilEngineeringQualityTestRegister",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "26596281F55E3CF2996F65CC394383F12B5E89680132492C467A85E0734ADD9C"
+    },
+    {
+      "Name": "TR_ProjectCivilQualityTestReports_Lineage",
+      "table": "ProjectCivilQualityTestReports",
+      "MigrationId": "20260820193000_AddCivilEngineeringQualityTestRegister",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "47DB183C11CE3DF99C8D46C2BB21AF5754D5E08B0D5A23A04D3CE4BDBE0A4939"
+    },
+    {
+      "Name": "TR_ProjectCivilQualityTestRevisions_AppendOnly",
+      "table": "ProjectCivilQualityTestRevisions",
+      "MigrationId": "20260820193000_AddCivilEngineeringQualityTestRegister",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9534C3307E38DF5BDB748604C1913B11752B9E9236CF3056372F5590DA3ED8F1"
+    },
+    {
+      "Name": "TR_ProjectCivilQualityTestRevisions_Lineage",
+      "table": "ProjectCivilQualityTestRevisions",
+      "MigrationId": "20260820193000_AddCivilEngineeringQualityTestRegister",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EA0A420AE95E0D9D5D1CBD08A5465A3C170EF0A12485DE11F41F914AC33E7E5E"
+    },
+    {
+      "Name": "TR_ProjectCivilReconnaissanceItems_Lineage",
+      "table": "ProjectCivilReconnaissanceItems",
+      "MigrationId": "20260815005453_AddCivilEngineeringReconnaissance",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "08606E4D8CDC597AD2CF128BBD2EF70B1A8F6F47D225E678A212463421C2A89B"
+    },
+    {
+      "Name": "TR_ProjectCivilReconnaissanceReports_Lifecycle",
+      "table": "ProjectCivilReconnaissanceReports",
+      "MigrationId": "20260815005453_AddCivilEngineeringReconnaissance",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DFA898EE8E27663636B0894C0F2D580BBBBDDA70103035ADC34A8EA62FB39BF9"
+    },
+    {
+      "Name": "TR_ProjectCivilReconnaissanceRevisions_AppendOnly",
+      "table": "ProjectCivilReconnaissanceRevisions",
+      "MigrationId": "20260815005453_AddCivilEngineeringReconnaissance",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "17331981A34610706B8DCE236579D2AD813092A8E340BB384283EF24757E0E2D"
+    },
+    {
+      "Name": "TR_ProjectCivilReconnaissanceRevisions_Lineage",
+      "table": "ProjectCivilReconnaissanceRevisions",
+      "MigrationId": "20260815005453_AddCivilEngineeringReconnaissance",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "27929CE95C13D1B0CA8FF9F595C0F5AAA572409C9315657B49C4DBE2C2B662F7"
+    },
+    {
+      "Name": "TR_ProjectCivilRfiEvidence_Lineage",
+      "table": "ProjectCivilRfiEvidence",
+      "MigrationId": "20260820190000_AddCivilEngineeringRfiRouting",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E5692F275070C323C161DDF16B4633B542DFD2F91C2C567E6FB82782D68E8721"
+    },
+    {
+      "Name": "TR_ProjectCivilRfiResponses_AppendOnly",
+      "table": "ProjectCivilRfiResponses",
+      "MigrationId": "20260820190000_AddCivilEngineeringRfiRouting",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B9467DCB31331A97405CBDC301E65AA6A5BB871D2E5112A387DDEBCB8AF7D894"
+    },
+    {
+      "Name": "TR_ProjectCivilRfiResponses_Lineage",
+      "table": "ProjectCivilRfiResponses",
+      "MigrationId": "20260820190000_AddCivilEngineeringRfiRouting",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B9866B63190A311B1B9A3959A49B3EAC7F797B268A65AE2BA6ED3C2DB99558B7"
+    },
+    {
+      "Name": "TR_ProjectCivilRfiRevisions_AppendOnly",
+      "table": "ProjectCivilRfiRevisions",
+      "MigrationId": "20260820190000_AddCivilEngineeringRfiRouting",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "311C7C0C38C160014137DDC8772FBCAD2B94641CC420296847E5F36B037277D1"
+    },
+    {
+      "Name": "TR_ProjectCivilRfiRevisions_Lineage",
+      "table": "ProjectCivilRfiRevisions",
+      "MigrationId": "20260820190000_AddCivilEngineeringRfiRouting",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BA6790B7A058FFF5514482BFC041E5340AEAB49D685C24D3ED35026155712D54"
+    },
+    {
+      "Name": "TR_ProjectCivilRfiRoutings_Lifecycle",
+      "table": "ProjectCivilRfiRoutings",
+      "MigrationId": "20260820190000_AddCivilEngineeringRfiRouting",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4708179497CAAA9D19B71DD2080C261C0112ABE2E304382791B435E0347085A7"
+    },
+    {
+      "Name": "TR_ProjectCivilRfiRoutings_Lineage",
+      "table": "ProjectCivilRfiRoutings",
+      "MigrationId": "20260820190000_AddCivilEngineeringRfiRouting",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6C435A18848AFAE7D6FA60B1E74CAF144853B5A0E2941471BCD8CD28CE0492B3"
+    },
+    {
+      "Name": "TR_ProjectCivilSiteInstructionEvidence_Lineage",
+      "table": "ProjectCivilSiteInstructionEvidence",
+      "MigrationId": "20260822002000_HardenCivilEngineeringSiteInstructionLifecycle",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BA3C90C2AB3C36C2FAE4B388DF352F60DD6314D23651B983A3F0DC38A4775F03"
+    },
+    {
+      "Name": "TR_ProjectCivilSiteInstructionResponses_AppendOnly",
+      "table": "ProjectCivilSiteInstructionResponses",
+      "MigrationId": "20260820170000_AddCivilEngineeringSiteInstructionRouting",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C664EED30BB1570D8E01A6B3F88C9FAE4B769D84EF3B8DBB0A8483CF56625422"
+    },
+    {
+      "Name": "TR_ProjectCivilSiteInstructionResponses_Lineage",
+      "table": "ProjectCivilSiteInstructionResponses",
+      "MigrationId": "20260822002000_HardenCivilEngineeringSiteInstructionLifecycle",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EC156D3875BB3A851C82B44E2101043D2A9B3B05BD97C6D0D6BF40B98F4B7AE9"
+    },
+    {
+      "Name": "TR_ProjectCivilSiteInstructionRevisions_AppendOnly",
+      "table": "ProjectCivilSiteInstructionRevisions",
+      "MigrationId": "20260820170000_AddCivilEngineeringSiteInstructionRouting",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "87DF49026A0371954545D8B19E2E6F269BA6D0098953B17DD0FEF4543484A561"
+    },
+    {
+      "Name": "TR_ProjectCivilSiteInstructionRevisions_Lineage",
+      "table": "ProjectCivilSiteInstructionRevisions",
+      "MigrationId": "20260820170000_AddCivilEngineeringSiteInstructionRouting",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "56A43F9BED6A343E33119D9961C3B9932E9D4D9E6968911BADFE2EF1632307AF"
+    },
+    {
+      "Name": "TR_ProjectCivilSiteInstructionRoutings_Lifecycle",
+      "table": "ProjectCivilSiteInstructionRoutings",
+      "MigrationId": "20260822002000_HardenCivilEngineeringSiteInstructionLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "128FD831CBA1E7EE4C0A2AF2824C549338BE9B9E91B6DB5E2FEB03B7E2D4F95C"
+    },
+    {
+      "Name": "TR_ProjectCivilSiteInstructionRoutings_Lineage",
+      "table": "ProjectCivilSiteInstructionRoutings",
+      "MigrationId": "20260822002000_HardenCivilEngineeringSiteInstructionLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7AC7C694130C73E127C064664A645AD97BD33BA8A16F8AD249EB43952EBCC503"
+    },
+    {
+      "Name": "TR_ProjectCivilWeeklySupervisionActivities_Lineage",
+      "table": "ProjectCivilWeeklySupervisionActivities",
+      "MigrationId": "20260820213000_AddCivilEngineeringWeeklySupervisionReports",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9E1CA31A18A9EACCD126667BE78CF647096024059D0AA0F1B35314CB17688D48"
+    },
+    {
+      "Name": "TR_ProjectCivilWeeklySupervisionEvidence_Lineage",
+      "table": "ProjectCivilWeeklySupervisionEvidence",
+      "MigrationId": "20260820213000_AddCivilEngineeringWeeklySupervisionReports",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "469A2FA68580B95A95ACD33560FDE9CAB280D616A8D188B5DF4355698319052C"
+    },
+    {
+      "Name": "TR_ProjectCivilWeeklySupervisionReports_Lifecycle",
+      "table": "ProjectCivilWeeklySupervisionReports",
+      "MigrationId": "20260822003300_SnapshotCivilWeeklyMilestoneSchedule",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0402071F73353C1A539ED9AC5BCF87548A984CACAC18B469FE8667EA883DE19C"
+    },
+    {
+      "Name": "TR_ProjectCivilWeeklySupervisionReports_Lineage",
+      "table": "ProjectCivilWeeklySupervisionReports",
+      "MigrationId": "20260822003300_SnapshotCivilWeeklyMilestoneSchedule",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9F3871CF806DAD1C441C1A2F8B39026BE96D7DC3FFDFA7A4D7C02776B26A3F8C"
+    },
+    {
+      "Name": "TR_ProjectCivilWeeklySupervisionReviews_Lineage",
+      "table": "ProjectCivilWeeklySupervisionReviews",
+      "MigrationId": "20260820213000_AddCivilEngineeringWeeklySupervisionReports",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9A9756830F982E625FE63E81F5768A9BCEFE98DBE09BC9625F4D9BF526E5FA88"
+    },
+    {
+      "Name": "TR_ProjectCivilWeeklySupervisionRevisions_AppendOnly",
+      "table": "ProjectCivilWeeklySupervisionRevisions",
+      "MigrationId": "20260820213000_AddCivilEngineeringWeeklySupervisionReports",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1C3030B0F59F68E6A733191DC520291405D1CF7DAEAD482DC35B55AA53A9D9E3"
+    },
+    {
+      "Name": "TR_ProjectCivilWeeklySupervisionRevisions_Lineage",
+      "table": "ProjectCivilWeeklySupervisionRevisions",
+      "MigrationId": "20260820213000_AddCivilEngineeringWeeklySupervisionReports",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D2F7A8B13814489B2EF6A14D2843900DE5FAC0B582BA52DF71BDB14EED0B44D7"
+    },
+    {
+      "Name": "TR_ProjectPaymentCertificates_QsLifecycle",
+      "table": "ProjectPaymentCertificates",
+      "MigrationId": "20260810154236_AddQuantitySurveyPaymentCertificateLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4D868EE4A6136D92F65AA6C6E790A3F9864113B0ACE4AF4ECEBAF1268AA50593"
+    },
+    {
+      "Name": "TR_ProjectRfis_CivilDesignInputLifecycle",
+      "table": "ProjectRfis",
+      "MigrationId": "20260815031044_AddCivilEngineeringDesignInputRequests",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "59370FDEEB8AC9943EC50A757506E4C8F4EDC9E2A5DA5D341C8BAD681449F70F"
+    },
+    {
+      "Name": "TR_PurchaseOrderItems_FrameworkCallOffProtected",
+      "table": "PurchaseOrderItems",
+      "MigrationId": "20260729124416_TDC0402FrameworkCallOffs",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D37E1890684CE7DA41163FF2080A7F03C9B47DB51404EABE1DEF6B1A525A9DDE"
+    },
+    {
+      "Name": "TR_PurchaseOrderReceiptItems_GovernedCapacity",
+      "table": "PurchaseOrderReceiptItems",
+      "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AF8220A7508A5089E7C7821024DDC9DA8F44737C1E68F571264AA888261CBE63"
+    },
+    {
+      "Name": "TR_PurchaseOrderReceipts_GovernedSource",
+      "table": "PurchaseOrderReceipts",
+      "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "90BB0191DB9527D25389AFFBB2B6C1021348FB34DA492732D3B3EFE12DF50756"
+    },
+    {
+      "Name": "TR_PurchaseOrders_ApprovedSourceProtected",
+      "table": "PurchaseOrders",
+      "MigrationId": "20260729153000_TDC0403MandatoryPurchaseOrderSources",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "03877199F3932A4119A987C3546BAE1A683B7324CCDD37548C46C2A54BE5AB5E"
+    },
+    {
+      "Name": "TR_PurchaseOrders_FrameworkCallOffProtected",
+      "table": "PurchaseOrders",
+      "MigrationId": "20260729124416_TDC0402FrameworkCallOffs",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "09DBE3DD800DE542340ACCDCD641EF20E42AA5E088A4C45FD2423708245F0DE9"
+    },
+    {
+      "Name": "TR_PurchaseRequisitions_LinkageGuard",
+      "table": "PurchaseRequisitions",
+      "MigrationId": "20260722023908_AddProcurementRequisitionBudgetCommitments",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "993F8FF8105B9A152A21708CA6A95EE87C4C7B503D93AF7FC6ABA3992C1DEED5"
+    },
+    {
+      "Name": "TR_QS0507_MaterialReconciliationLines_Governance",
+      "table": "QuantitySurveyMaterialReconciliationLines",
+      "MigrationId": "20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DF87D41B5824137FDED32E25A80BD0EB05B3E2CAB55210AA15C6B556EA3AE361"
+    },
+    {
+      "Name": "TR_QS0507_MaterialReconciliationRevisions_AppendOnly",
+      "table": "QuantitySurveyMaterialReconciliationRevisions",
+      "MigrationId": "20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B5AF8BC21C2A17DE7753FBCC7208398E89BC7E7BA106BC39E333832605725435"
+    },
+    {
+      "Name": "TR_QS0507_MaterialReconciliation_Governance",
+      "table": "QuantitySurveyMaterialReconciliations",
+      "MigrationId": "20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "757CF778099FE1F26A9A293C314D32368A68131F5F7C5A28BDAB98C2DC70CF2B"
+    },
+    {
+      "Name": "TR_QS0507_PaymentCertificateMaterialLineage",
+      "table": "ProjectPaymentCertificates",
+      "MigrationId": "20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "932F62898E05190BD5E16ACDD2B4907D298F12E070E973A78AF40C5801B23B01"
+    },
+    {
+      "Name": "TR_QS0508_ProjectVariation_Governance",
+      "table": "ProjectVariationOrders",
+      "MigrationId": "20260810234912_AddQuantitySurveyVariationLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6F170448082C6B57AE6FBFFBD1291280029C6E87E4489F13D56862B9BE1AE272"
+    },
+    {
+      "Name": "TR_QS0508_VariationEvidence_AppendOnly",
+      "table": "QuantitySurveyVariationEvidence",
+      "MigrationId": "20260810234912_AddQuantitySurveyVariationLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "673B888E467293150B56CAE71F9C05F9B9BDA9E8D4FF4ABA349FE1016DCF8BC4"
+    },
+    {
+      "Name": "TR_QS0508_VariationLines_Governance",
+      "table": "QuantitySurveyVariationValuationLines",
+      "MigrationId": "20260810234912_AddQuantitySurveyVariationLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "33CC741346AE3F222F92EF5FBFA8DE9345A3234E31A53D82E079EF633AFF9FA7"
+    },
+    {
+      "Name": "TR_QS0508_VariationRevisions_AppendOnly",
+      "table": "QuantitySurveyVariationRevisions",
+      "MigrationId": "20260810234912_AddQuantitySurveyVariationLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "03C2D2986F9F8A37338D176C4BACCDB0A65E4890FDA89E7E8B72D53816A433B8"
+    },
+    {
+      "Name": "TR_QS0509_ContractClaimEvidence_AppendOnly",
+      "table": "QuantitySurveyContractClaimEvidence",
+      "MigrationId": "20260811010013_AddQuantitySurveyContractClaimLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "86A6618A248F7E9822EAB234BE1825B8DCF1405B7FA39F423960E86BAC7CEDD3"
+    },
+    {
+      "Name": "TR_QS0509_ContractClaimRevisions_AppendOnly",
+      "table": "QuantitySurveyContractClaimRevisions",
+      "MigrationId": "20260811010013_AddQuantitySurveyContractClaimLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "018B2DFAC0EC6E1A475D1C0F8C1180C95DAA52713A38C689577161B4695B6089"
+    },
+    {
+      "Name": "TR_QS0509_ContractClaims_Governance",
+      "table": "QuantitySurveyContractClaims",
+      "MigrationId": "20260811010013_AddQuantitySurveyContractClaimLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0B9BBF2D20E5FF61DBB5D6AA6669E252F484A6DF89E55E675525A03453FA0B26"
+    },
+    {
+      "Name": "TR_QS0510_DayworkEvidence_AppendOnly",
+      "table": "QuantitySurveyDayworkEvidence",
+      "MigrationId": "20260811013838_AddQuantitySurveyDayworkLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C0CAF18895C94E1F5898558B5A1A8FB45ED4DEC99A96EBFEF4FE7BE9D690AE0C"
+    },
+    {
+      "Name": "TR_QS0510_DayworkLines_Governance",
+      "table": "QuantitySurveyDayworkLines",
+      "MigrationId": "20260811013838_AddQuantitySurveyDayworkLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0A3243056CD9D821637FB60D5366C5F9BD5D77811DFF413D7B290CC8AB39A582"
+    },
+    {
+      "Name": "TR_QS0510_DayworkRevisions_AppendOnly",
+      "table": "QuantitySurveyDayworkRevisions",
+      "MigrationId": "20260811013838_AddQuantitySurveyDayworkLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B1102A8249979528298B25186AB098F9BBDF0E3C959815D754F3E5E15DF7CD15"
+    },
+    {
+      "Name": "TR_QS0510_DayworkSheets_Governance",
+      "table": "QuantitySurveyDayworkSheets",
+      "MigrationId": "20260811013838_AddQuantitySurveyDayworkLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1DA22C7B058482BB741540572B609690C5BEB6075053168C1BA4A61B146FFE5F"
+    },
+    {
+      "Name": "TR_QS0511_VariationApplication_Governance",
+      "table": "ProjectVariationOrders",
+      "MigrationId": "20260811022852_AddQuantitySurveyVariationApplications",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E51605019E62A64BADDD9DC82458E4C8D1E3AA4E743DA44DC25115E96691B81E"
+    },
+    {
+      "Name": "TR_QS0521_SubcontractEvidence_AppendOnly",
+      "table": "QuantitySurveySubcontractEvidence",
+      "MigrationId": "20260811050412_AddQuantitySurveySubcontractLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DE9B89899182931B374B739585B055D7AC345702E0B4F67126C8CBA1D9C8D247"
+    },
+    {
+      "Name": "TR_QS0521_SubcontractRevisions_AppendOnly",
+      "table": "QuantitySurveySubcontractRevisions",
+      "MigrationId": "20260811050412_AddQuantitySurveySubcontractLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2B12E073EF4F29AD5526E9FDC38B0550014034FF510B2122009F971ECCF038AA"
+    },
+    {
+      "Name": "TR_QS0521_SubcontractValuations_Governance",
+      "table": "QuantitySurveySubcontractValuations",
+      "MigrationId": "20260811063100_AddQuantitySurveySubcontractChargeLifecycle",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1C515D9C34C4E594A929681214E8BFCE2F5A950D3FE0FEC241C67627DEFC09A0"
+    },
+    {
+      "Name": "TR_QS0521_Subcontracts_Governance",
+      "table": "QuantitySurveySubcontracts",
+      "MigrationId": "20260811050412_AddQuantitySurveySubcontractLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "05963660AF9FB3B65EEA5A0646D5F5D20933B753095BBD8D8692BBC42B6D7177"
+    },
+    {
+      "Name": "TR_QS0522_SubcontractChargeEvidence_AppendOnly",
+      "table": "QuantitySurveySubcontractChargeEvidence",
+      "MigrationId": "20260811063100_AddQuantitySurveySubcontractChargeLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "77E3F7F5B54B6DE032BBF339E001C132DB9E5737FB089BEC1FCBCF5A32F1DDFD"
+    },
+    {
+      "Name": "TR_QS0522_SubcontractChargeRevisions_AppendOnly",
+      "table": "QuantitySurveySubcontractChargeRevisions",
+      "MigrationId": "20260811063100_AddQuantitySurveySubcontractChargeLifecycle",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AE6D248C000BAFB20ED9ECB5443E2537DE97AE7C449E7AB8292801B2882DCE86"
+    },
+    {
+      "Name": "TR_QS0522_SubcontractCharges_Governance",
+      "table": "QuantitySurveySubcontractChargeNotices",
+      "MigrationId": "20260811063100_AddQuantitySurveySubcontractChargeLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9FC04F7641B0A960994CD2D6CD39F5E2FBFF156DCAD559739489CFFC5D54E9A7"
+    },
+    {
+      "Name": "TR_QsMeasurementAttachments_Guard",
+      "table": "QuantitySurveyMeasurementAttachments",
+      "MigrationId": "20260810023000_AddQuantitySurveyMeasurementSheets",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5EEC3BC19D86DE2979D593A8A40A703F7C2A46673E70B29089BC9920C51CC655"
+    },
+    {
+      "Name": "TR_QsMeasurementLines_Guard",
+      "table": "QuantitySurveyMeasurementLines",
+      "MigrationId": "20260810023000_AddQuantitySurveyMeasurementSheets",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DBF7A4988B8C2C60323CF870B2390A21B1F33F347DEFB0663E3C0446A40DE355"
+    },
+    {
+      "Name": "TR_QsMeasurementRevisions_Guard",
+      "table": "QuantitySurveyMeasurementRevisions",
+      "MigrationId": "20260810023000_AddQuantitySurveyMeasurementSheets",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3712C3E1AE27EE53C1F9AC850B237B532F4CD9FF2AD0C9D9B8ED55BA1BE1E377"
+    },
+    {
+      "Name": "TR_QsMeasurementSheets_Guard",
+      "table": "QuantitySurveyMeasurementSheets",
+      "MigrationId": "20260810023000_AddQuantitySurveyMeasurementSheets",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7BEC2C7B5E1AD98B0A0BCD82C313171991E82D0D4E5AFDB26821717E2FFCE00C"
+    },
+    {
+      "Name": "TR_QsValuationWorksheetEvidence_AppendOnly",
+      "table": "QuantitySurveyValuationWorksheetEvidence",
+      "MigrationId": "20260810134646_AddQuantitySurveyInterimValuationWorkflow",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A87CAE475DD54221EDDB4B6BED7B41FB8DFE7CF368D2347CB3D3933682EEB71F"
+    },
+    {
+      "Name": "TR_QsValuationWorksheetLines_Guard",
+      "table": "QuantitySurveyValuationWorksheetLines",
+      "MigrationId": "20260810134646_AddQuantitySurveyInterimValuationWorkflow",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9CF37B56C2CDFB16A20CEE376C649AB683F4FF8EF8BF17D4300778AC975B45D6"
+    },
+    {
+      "Name": "TR_QsValuationWorksheetRevisions_AppendOnly",
+      "table": "QuantitySurveyValuationWorksheetRevisions",
+      "MigrationId": "20260810134646_AddQuantitySurveyInterimValuationWorkflow",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0A5C5E73FD95A039AB0796DFF298FA9E6B0978A2259D370ADFDE09CE8C642A15"
+    },
+    {
+      "Name": "TR_QsValuationWorksheets_Guard",
+      "table": "QuantitySurveyValuationWorksheets",
+      "MigrationId": "20260810134646_AddQuantitySurveyInterimValuationWorkflow",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "037C3C5EB935DAB5D745B3B0D93926779F6976BB559A4EBDBFAA6FC627C75E05"
+    },
+    {
+      "Name": "TR_QuantitySurveyPaymentCertificateRevisions_AppendOnly",
+      "table": "QuantitySurveyPaymentCertificateRevisions",
+      "MigrationId": "20260810154236_AddQuantitySurveyPaymentCertificateLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "14E533B8688B8417619D3DBE3D9FBB60041285451D6D43BF288E1EC007771BC2"
+    },
+    {
+      "Name": "TR_RequestForQuotations_SourcingReleaseGuard",
+      "table": "RequestForQuotations",
+      "MigrationId": "20260825170000_AllowReleaseOnlyProcurementSourceEntry",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E0FDDB6D2EEA8FE8CC9F62B728BC4ACE918F4E57DE1047CBABD7C78F41ABB405"
+    },
+    {
+      "Name": "TR_RequestForQuotations_StatutoryLifecycleGuard",
+      "table": "RequestForQuotations",
+      "MigrationId": "20260826170000_AllowReleaseOnlyRfqAwardTransition",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AB29E19E7874D9BDD0F0195B778FC24F6D954AF2231203F54DEF0FAAEA633AF9"
+    },
+    {
+      "Name": "TR_StockAdjustmentActions_AppendOnly",
+      "table": "StockAdjustmentActions",
+      "MigrationId": "20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments",
+      "OperationIndex": 7,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A808D5571F0F1DAF1B58671DAC4627CE9FA51EDF3E144F99908BB7B8C5343ECD"
+    },
+    {
+      "Name": "TR_StockAdjustmentEvidence_AppendOnly",
+      "table": "StockAdjustmentEvidence",
+      "MigrationId": "20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "74347647F816049713C6515DAA3B99AFF5C30A58110DE92CDA2EAE5651BAF6FF"
+    },
+    {
+      "Name": "TR_StockAdjustmentItems_ControlledMutation",
+      "table": "StockAdjustmentItems",
+      "MigrationId": "20260820100000_AddInventoryOpeningStockBook",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "89A4763AEA8F4A1572125FF8647C2B6ECE1BEC85BA1A1FFAB4B20A977D19148F"
+    },
+    {
+      "Name": "TR_StockAdjustments_ControlledLifecycle",
+      "table": "StockAdjustments",
+      "MigrationId": "20260820100000_AddInventoryOpeningStockBook",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A6D860294952B55E0DF7DC151000E0FABDF13B879AEE8100F621EFABEF59960D"
+    },
+    {
+      "Name": "TR_StockMovements_GovernedPurchaseReceipt",
+      "table": "StockMovements",
+      "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "106C2D043B14912375F43229F6422AD060E0E694C704C4FCE3A587929A124A6A"
+    },
+    {
+      "Name": "TR_StockMovements_GovernedRequisitionIssue",
+      "table": "StockMovements",
+      "MigrationId": "20260813103157_INVREQFU003IssueFinanceAssetLifecycle",
+      "OperationIndex": 5,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2618A33DC449EB3418DB66EF93CCB43FFD4553FEFF28A96A5CC990EAD4F0FA9B"
+    },
+    {
+      "Name": "TR_StockMovements_PhysicalCountFreeze",
+      "table": "StockMovements",
+      "MigrationId": "20260802105457_TDC0609ControlledCycleCounts",
+      "OperationIndex": 6,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5E3CCFE32015EC30F0B6D535880731E10F429CEAF9EC02EAAABB44F810983139"
+    },
+    {
+      "Name": "TR_TDC0501_GoodsReceiptIdempotencyFingerprint",
+      "table": "GoodsReceiptNotes",
+      "MigrationId": "20260801140000_TDC0502ReceiptReplayAndReplacementLineage",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8057880E97F9383D90D4F907969EA6BF73FF0B01D34A66634F8CE5D1010E6039"
+    },
+    {
+      "Name": "TR_TDC0502_ReceiptReplacementLineage",
+      "table": "ProcurementReceiptInspectionCases",
+      "MigrationId": "20260801140000_TDC0502ReceiptReplayAndReplacementLineage",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3AD6E58F0B098FCE0CD5FFAB4F5EE6F500CC570B579E624F4CBA1574DF79CA7A"
+    },
+    {
+      "Name": "TR_TDC0601_InventoryItems_IdentifierIntegrity",
+      "table": "InventoryItems",
+      "MigrationId": "20260801150000_TDC0601InventoryItemIdentifiers",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "38D970C429CD39761B40E0789EA3C65656D3CA2E80C2A73515668097FCDD6FC1"
+    },
+    {
+      "Name": "TR_TDC0601_ItemUnitsOfMeasure_IdentifierIntegrity",
+      "table": "ItemUnitsOfMeasure",
+      "MigrationId": "20260801150000_TDC0601InventoryItemIdentifiers",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AD7291C118DF7D8950EFC7F897E5A06291F69F109990A0619AAFFE3A9CFA3373"
+    },
+    {
+      "Name": "TR_TDC0616_InventoryItems_ProfileIntegrity",
+      "table": "InventoryItems",
+      "MigrationId": "20260802202554_TDC0616ItemMasterProfile",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7168A1FB19BF729D0EC14CB4DD6D96AC3BF58E8FA347ADB753F66956B054467C"
+    },
+    {
+      "Name": "TR_TenderEvaluations_CommitteeScoreProjection",
+      "table": "TenderEvaluations",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 9,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6D36AAFB63D3196A50ED1EF1CBB15D915EC3FBE3C7738C9B53AB006CEB7FDCD8"
+    },
+    {
+      "Name": "TR_Tenders_SourcingReleaseGuard",
+      "table": "Tenders",
+      "MigrationId": "20260901033000_AllowGovernedTenderLineageRecovery",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F7449B833562DD9E3D5540BFC43F710FC64A0F21746D06989ACC0E9EACDEA3EB"
+    },
+    {
+      "Name": "TR_VendorInvoiceLineItem_TDC0504MatchIntegrity",
+      "table": "VendorInvoiceLineItem",
+      "MigrationId": "20260731170000_TDC0504MandatoryThreeWayMatch",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "379113A546710EE0B566AD8FE3D7EA3755B8D8487204DE30B6D7BE5492EC7814"
+    },
+    {
+      "Name": "TR_VendorInvoiceMatchExceptionAction_TDC0507Immutable",
+      "table": "VendorInvoiceMatchExceptionAction",
+      "MigrationId": "20260731233000_TDC0507InvoiceMatchExceptions",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "957CA33CEDB6A8175D0749F4505963541BE15B2BAD8342C4DC602E1A12913D46"
+    },
+    {
+      "Name": "TR_VendorInvoiceMatchExceptionEvidence_TDC0507Immutable",
+      "table": "VendorInvoiceMatchExceptionEvidence",
+      "MigrationId": "20260731233000_TDC0507InvoiceMatchExceptions",
+      "OperationIndex": 3,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "13ABC3D1464978A70823C6993589F737DE25CDF218F976BA7631E2654ACF3FD9"
+    },
+    {
+      "Name": "TR_VendorInvoiceMatchExceptionVariance_TDC0507Immutable",
+      "table": "VendorInvoiceMatchExceptionVariance",
+      "MigrationId": "20260731233000_TDC0507InvoiceMatchExceptions",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6F951BF14A0C723F8767CF5F15492C682C12AD4CEB59129AE2C148C4781682EF"
+    },
+    {
+      "Name": "TR_VendorInvoiceMatchException_TDC0507Protected",
+      "table": "VendorInvoiceMatchException",
+      "MigrationId": "20260731233000_TDC0507InvoiceMatchExceptions",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6C4571E576578859E98F538E2C25A00730AFB7439DE99EE2AF9B82B50663F3B7"
+    },
+    {
+      "Name": "TR_VendorInvoice_AcceptedSupplyProtected",
+      "table": "VendorInvoice",
+      "MigrationId": "20260812113000_AddCategoryAwareAcceptedSupply",
+      "OperationIndex": 1,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1FDCE9C78568C12E084D404AF33BD7455D7B614594A954FFA8433A3AFB3086C6"
+    },
+    {
+      "Name": "TR_VendorInvoice_TDC0504MandatoryMatch",
+      "table": "VendorInvoice",
+      "MigrationId": "20260731170000_TDC0504MandatoryThreeWayMatch",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A1D084E256349282338BA8349C9AD479D19E58BE2606F8B3E75E7F7D7FA6FB8D"
+    },
+    {
+      "Name": "TR_VendorPaymentAllocation_TDC0505PaymentReadiness",
+      "table": "VendorPaymentAllocation",
+      "MigrationId": "20260731193000_TDC0505PaymentReadiness",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2EC1FE4A63C27772227B05F1C0602417BF54D893932DD10EBAC3292FDBDF700C"
+    },
+    {
+      "Name": "TR_VendorPayment_TDC0506InvoiceProcessorSod",
+      "table": "VendorPayment",
+      "MigrationId": "20260802033000_TDC0506EffectivePaymentAllocations",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6BB9B94B985692FFB97AAB47BFE1C6A736AB866EB15644BD33B7349C5E4B6E17"
+    },
+    {
+      "Name": "TR_WarehouseQuantities_NegativeStockGuard",
+      "table": "WarehouseQuantities",
+      "MigrationId": "20260802153000_TDC0610NegativeStockControl",
+      "OperationIndex": 0,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "82583A2B92E5E5542F9BFA25E66187DAC9361C6D9C78A158DCD87880771933DD"
+    },
+    {
+      "Name": "TR_WarehouseQuantities_PhysicalCountFreeze",
+      "table": "WarehouseQuantities",
+      "MigrationId": "20260802105457_TDC0609ControlledCycleCounts",
+      "OperationIndex": 4,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A48CDB97CF52176099C517A4B4BC26995630307C477B9959849B641530A0A2B9"
+    },
+    {
+      "Name": "TR_WorkOrderParts_ReservationLineageGuard",
+      "table": "WorkOrderParts",
+      "MigrationId": "20260813063001_INVREQFU002MaintenanceReservationLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FCB914613C5238AE3F59EC05B2E754F2C2992D058066D4DA91EFA645D978B78F"
+    }
+  ],
+  "postDefinitionPatches": [
+    {
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 13,
+      "TargetNames": [
+        "TR_ProcurementTenderControls_Lifecycle"
+      ],
+      "sqlSha256": "B79362627E6BDB1FED1BC59416CE88D2F8F434DA4E610A7691A86A4F895294CF"
+    },
+    {
+      "MigrationId": "20260730030000_TDC0403RfqAwardSupplierHardStop",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_PurchaseOrders_ApprovedSourceProtected"
+      ],
+      "sqlSha256": "43FC72339E43182FADCBA596C1497707D77BF01BADF412EE63865FF09B47EC5C"
+    },
+    {
+      "MigrationId": "20260730031000_TDC0403ExceptionalFrameworkLineage",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_ProcurementFrameworkCallOffs_PurchaseOrderSource"
+      ],
+      "sqlSha256": "B267265E912F90846D778FDE510954267435B27472250CAED75231D12FEB8596"
+    },
+    {
+      "MigrationId": "20260730032601_TDC0406PurchaseOrderAmendments",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_PurchaseOrders_ApprovedSourceProtected"
+      ],
+      "sqlSha256": "1457C1CD0ABF272BA076355DA46321E6E595D670669E7272266EB252E30778D5"
+    },
+    {
+      "MigrationId": "20260730150000_TDC0403OrdinarySourceTriggerCorrections",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_PurchaseOrders_ApprovedSourceProtected"
+      ],
+      "sqlSha256": "4ED8C89D258063DF3AA7EC8B3B36513AD97A8891B206704DFBCE4BF038037DF1"
+    },
+    {
+      "MigrationId": "20260730183000_TDC0402ExtensionSafeCallOffLineage",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_ProcurementFrameworkCallOffs_Lifecycle"
+      ],
+      "sqlSha256": "7F620D92A91AA3AA51C31250F3D9F6269AF3777AAAF5C1630E0A96239F6A11F0"
+    },
+    {
+      "MigrationId": "20260730192500_TDC0402TerminalReviewPaths",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_ProcurementFrameworkAgreementExtensions_Lifecycle",
+        "TR_ProcurementFrameworkCallOffs_Lifecycle"
+      ],
+      "sqlSha256": "8929CB4C5B02625A0D043BCF7F0F95FA640308766ABFB01B1BCA47FDC403CA93"
+    },
+    {
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 9,
+      "TargetNames": [
+        "TR_GoodsReceiptNoteItems_GovernedCapacity",
+        "TR_PurchaseOrderReceiptItems_GovernedCapacity"
+      ],
+      "sqlSha256": "65D9F9869D6474504BE9437E37CE848173D26E522C685C863AB4FE2625044B76"
+    },
+    {
+      "MigrationId": "20260801060000_TDC0505TerminalReceiptEligibility",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_PaymentBatchInvoice_TDC0505PaymentReadiness",
+        "TR_VendorPaymentAllocation_TDC0505PaymentReadiness"
+      ],
+      "sqlSha256": "5D873CA419E1CEA566D784164D1CFAA4EB69A4EED038759E10284F7FD1946F07"
+    },
+    {
+      "MigrationId": "20260801073000_TDC0501LegacyReceiptCompatibility",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_PurchaseOrderReceipts_GovernedSource"
+      ],
+      "sqlSha256": "326BE1F56447F0685C2DAB3DF4DAD88F2DEB4143E784D6CA4C5705E1E96D585D"
+    },
+    {
+      "MigrationId": "20260801073000_TDC0501LegacyReceiptCompatibility",
+      "OperationIndex": 1,
+      "TargetNames": [
+        "TR_GoodsReceiptNotes_GovernedSource"
+      ],
+      "sqlSha256": "95A9F63C60F776E605634E02AB32F5D6C7510F72B857CF8C9C491FCE03CCDDAA"
+    },
+    {
+      "MigrationId": "20260801073000_TDC0501LegacyReceiptCompatibility",
+      "OperationIndex": 2,
+      "TargetNames": [
+        "TR_PurchaseOrderReceiptItems_GovernedCapacity"
+      ],
+      "sqlSha256": "9E61DF9EDE18C2726E5B6D5D7249D2799D5636DDA4CC0D294D9FBE1E025A8AEC"
+    },
+    {
+      "MigrationId": "20260801073000_TDC0501LegacyReceiptCompatibility",
+      "OperationIndex": 3,
+      "TargetNames": [
+        "TR_PurchaseOrderReceiptItems_GovernedCapacity"
+      ],
+      "sqlSha256": "89774594B7A2353374BFEF1927C252CE2AEE3996E1734C0BE4876116EFA0C29B"
+    },
+    {
+      "MigrationId": "20260801073000_TDC0501LegacyReceiptCompatibility",
+      "OperationIndex": 4,
+      "TargetNames": [
+        "TR_GoodsReceiptNoteItems_GovernedCapacity"
+      ],
+      "sqlSha256": "08A9510105E2C5FC7DA3065AB7BBAF663CFA09DFB55576DD453FEA9D227A6A73"
+    },
+    {
+      "MigrationId": "20260801073000_TDC0501LegacyReceiptCompatibility",
+      "OperationIndex": 5,
+      "TargetNames": [
+        "TR_GoodsReceiptNoteItems_GovernedCapacity"
+      ],
+      "sqlSha256": "3DC3853CD4DA97CC85AADE7E8A6C549B520E44C4CD3E814500344D9DA5BDC84B"
+    },
+    {
+      "MigrationId": "20260812170000_ExtendControlledSourcingMethods",
+      "OperationIndex": 1,
+      "TargetNames": [
+        "TR_ProcurementTenderControls_Lifecycle"
+      ],
+      "sqlSha256": "DE18C6CAE5B3B8360B2C4EEA9AE824FBD4135A1A0AC06D3565A088D5619F29B2"
+    },
+    {
+      "MigrationId": "20260813150000_INVREQFU003AllowPostedFullReturnReversal",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_InventoryReturnVouchers_ControlledLifecycle"
+      ],
+      "sqlSha256": "43B9054C255C58A14B8E058332F377A23BB5EA2751463B4361C4567ED4D7F140"
+    },
+    {
+      "MigrationId": "20260813171000_INVREQFU004RequireCleanTransferEvidence",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_InventoryTransferDiscrepancyEvidence_AppendOnly"
+      ],
+      "sqlSha256": "7BB812D05CD370F2D7096AF92902350BFA6B88EB98E8DE29916E83BE8020D4C8"
+    },
+    {
+      "MigrationId": "20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_ProcurementSupplierDueDiligenceReviews_Lifecycle"
+      ],
+      "sqlSha256": "D2066F411DCC97D176E25E784422B653992BD03CF63E64469E49F0E2324C36E5"
+    },
+    {
+      "MigrationId": "20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_ProcurementReceiptInspectionCases_TDC0502Protected"
+      ],
+      "sqlSha256": "CF86BB9D99071E6A3EB1B393CCD3C4253B4B8B11489EA2683C44BDFB693089E8"
+    },
+    {
+      "MigrationId": "20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_PurchaseOrders_ApprovedSourceProtected"
+      ],
+      "sqlSha256": "F503FE21483AFDADF702EBA66D9DFAB22629C9B067E3CDFB42CEDBBAFE270F10"
+    },
+    {
+      "MigrationId": "20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage",
+      "OperationIndex": 0,
+      "TargetNames": [
+        "TR_ProcurementReceiptDocuments_TDC0509Protected"
+      ],
+      "sqlSha256": "A6739C40C86F98041D11C2C66220BA93A815F2D5722D4639E3B18747BCF71E01"
+    }
+  ],
+  "programmableObjects": [
+    {
+      "Kind": "FUNCTION",
+      "Name": "fn_ProcurementRfqSourceLineIdentity",
+      "MigrationId": "20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster",
+      "OperationIndex": 0,
+      "bodySha256": "A71D0CCF34D050B52F7D6353CDE2A7E0921BAF7777A2979F42AAD13E7479C882"
+    },
+    {
+      "Kind": "VIEW",
+      "Name": "vw_ProcurementReceiptDocumentReconciliation",
+      "MigrationId": "20260801013000_TDC0509ReceiptDocumentLifecycle",
+      "OperationIndex": 5,
+      "bodySha256": "A09BEE494A62A76B5F03D45C61F9B0029474484FB30F22E4A415FCE865D68F57"
+    }
+  ],
+  "audit": [
+    {
+      "Kind": "TRIGGER",
+      "DefinitionCount": 505,
+      "UniqueNameCount": 454
+    },
+    {
+      "Kind": "FUNCTION",
+      "DefinitionCount": 1,
+      "UniqueNameCount": 1
+    },
+    {
+      "Kind": "VIEW",
+      "DefinitionCount": 1,
+      "UniqueNameCount": 1
+    },
+    {
+      "Kind": "PROCEDURE",
+      "DefinitionCount": 0,
+      "UniqueNameCount": 0
+    },
+    {
+      "Kind": "SYNONYM",
+      "DefinitionCount": 0,
+      "UniqueNameCount": 0
+    },
+    {
+      "Kind": "SECURITY_POLICY",
+      "DefinitionCount": 0,
+      "UniqueNameCount": 0
+    },
+    {
+      "Kind": "SEQUENCE",
+      "DefinitionCount": 0,
+      "UniqueNameCount": 0
+    }
+  ]
+}
