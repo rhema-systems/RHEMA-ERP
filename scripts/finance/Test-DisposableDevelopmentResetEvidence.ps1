@@ -72,6 +72,12 @@ function Invoke-ExpectedSemanticFailure([string]$root, [string]$label) {
     Write-Host "PASS: $label refused before manifest publication"
 }
 
+function Invoke-ExpectedRemanifestFailure([string]$root, [string]$label) {
+    $output = & pwsh -NoProfile -File $validator -EvidenceDirectory $root -PackageKind DisposableReset -WriteManifest 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) { throw "Bound-identity tamper unexpectedly passed after re-manifesting: $label" }
+    Write-Host "PASS: $label refused before manifest publication"
+}
+
 function Update-ArtifactBinding([string]$root, [string]$name) {
     $status = Get-Content -Raw -LiteralPath (Join-Path $root 'reset-status.json') | ConvertFrom-Json
     $status.artifactSha256.PSObject.Properties[$name].Value =
@@ -169,6 +175,7 @@ try {
     $postVerifyMutation = New-PackageRoot 'POST_VERIFY_MUTATION'
     $null = New-Common $postVerifyMutation
     $mutatedMedia = '1' * 32
+    $mutatedFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_${mutatedMedia}.bak"
     $verifiedHash = 'A' * 64
     $currentHash = 'B' * 64
     @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mutatedMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
@@ -176,19 +183,21 @@ try {
     (@('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mutatedMedia",'The backup set on file 1 is valid.',
         'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') -join ' ') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-verify.txt')
-    "$verifiedHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup.sha256')
-    "$currentHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-current.sha256')
+    "$verifiedHash  $mutatedFileName" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup.sha256')
+    "$currentHash  $mutatedFileName" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-current.sha256')
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'),@(4,'BACKUP_VERIFIED'))) {
         $marker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1] }
         if ($entry[0] -eq 3) {
-            $marker.database='RhemaERP'; $marker.backupMediaId=$mutatedMedia
+            $marker.database='RhemaERP'; $marker.backupMediaId=$mutatedMedia; $marker.backupFileName=$mutatedFileName
             $marker.backupCompleted=$true; $marker.backupByteLength=2048; $marker.currentMaterialSha256=$verifiedHash
         }
-        if ($entry[0] -eq 4) { $marker.backupSha256=$verifiedHash }
+        if ($entry[0] -eq 4) {
+            $marker.backupSha256=$verifiedHash; $marker.backupMediaId=$mutatedMedia; $marker.backupFileName=$mutatedFileName
+        }
         Write-Json (Join-Path $postVerifyMutation ("phase-{0:D2}.json" -f $entry[0])) $marker
     }
     $mutationStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'BACKUP_VERIFIED' $true $false $false
-    $mutationStatus.backupMediaId=$mutatedMedia; $mutationStatus.backupSha256=$verifiedHash
+    $mutationStatus.backupMediaId=$mutatedMedia; $mutationStatus.backupFileName=$mutatedFileName; $mutationStatus.backupSha256=$verifiedHash
     $mutationStatus.currentMaterialSha256=$currentHash; $mutationStatus.backupHashMatchesVerified=$false
     $mutationStatus.verifyEvidencePresent=$true; $mutationStatus.backupCompleted=$true; $mutationStatus.backupPreserved=$true
     $mutationStatus.failedOperation='PRE_MUTATION_HASH_RECHECK'
@@ -196,6 +205,31 @@ try {
     & pwsh -NoProfile -File $validator -EvidenceDirectory $postVerifyMutation -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Post-VERIFY backup-mutation recovery package did not validate truthfully.' }
     Write-Host 'PASS: post-VERIFY backup mutation preserves original verified hash and reports current bytes unverified'
+    foreach ($case in @('wrong media','wrong filename','phase-03 filename','current-hash filename')) {
+        $identityTamper = New-PackageRoot ("BACKUP_IDENTITY_" + $case.Replace(' ','_'))
+        Copy-Item -Path (Join-Path $postVerifyMutation '*') -Destination $identityTamper
+        if ($case -eq 'wrong media') {
+            $status = Get-Content -Raw -LiteralPath (Join-Path $identityTamper 'reset-status.json') | ConvertFrom-Json
+            $status.backupMediaId = '2' * 32
+            Write-Json (Join-Path $identityTamper 'reset-status.json') $status
+        }
+        elseif ($case -eq 'wrong filename') {
+            $status = Get-Content -Raw -LiteralPath (Join-Path $identityTamper 'reset-status.json') | ConvertFrom-Json
+            $status.backupFileName = '..\spoof.bak'
+            Write-Json (Join-Path $identityTamper 'reset-status.json') $status
+        }
+        elseif ($case -eq 'phase-03 filename') {
+            $phaseThree = Get-Content -Raw -LiteralPath (Join-Path $identityTamper 'phase-03.json') | ConvertFrom-Json
+            $phaseThree.backupFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_$('3' * 32).bak"
+            Write-Json (Join-Path $identityTamper 'phase-03.json') $phaseThree
+            Update-ArtifactBinding $identityTamper 'phase-03.json'
+        }
+        else {
+            "$currentHash  spoof.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $identityTamper 'backup-current.sha256')
+            Update-ArtifactBinding $identityTamper 'backup-current.sha256'
+        }
+        Invoke-ExpectedRemanifestFailure $identityTamper "media-bound backup $case tamper"
+    }
     $falseClaim = Get-Content -Raw -LiteralPath (Join-Path $postVerifyMutation 'reset-status.json') | ConvertFrom-Json
     $falseClaim.backupVerified=$true; $falseClaim.backupHashMatchesVerified=$true
     (Get-Content -Raw -LiteralPath (Join-Path $postVerifyMutation 'RECOVERY.md')).Replace(
@@ -254,14 +288,15 @@ try {
     "LOCAL_SQL_INSTANCE_IDENTITY_SHA256=$('B' * 64)" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'source-server-identity.sha256')
     Write-Json (Join-Path $pass 'pre-mutation-reviewed-git-state.json') $reviewed
     $mediaId = 'c' * 32
+    $passBackupFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_${mediaId}.bak"
     @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mediaId",'BACKUP_PATH_ATOMICALLY_RESERVED',
         'BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup-create.txt')
     (@('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mediaId",'The backup set on file 1 is valid.',
         'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') -join ' ') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup-verify.txt')
-    "$('D' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup.sha256')
-    "$('D' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup-current.sha256')
+    "$('D' * 64)  $passBackupFileName" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup.sha256')
+    "$('D' * 64)  $passBackupFileName" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup-current.sha256')
     @('DISPOSABLE_RESET_SOURCE_QUIESCED','DISPOSABLE_RESET_FINAL_SOURCE_RECHECK_COMPLETE',
         "SOURCE_FINAL_FINGERPRINT=$fingerprint",'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'reset-database.log')
@@ -280,15 +315,17 @@ try {
     for ($index=0; $index -lt $phaseNames.Count; $index++) {
         $phaseMarker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=($index + 1); phase=$phaseNames[$index] }
         if (($index + 1) -eq 3) {
-            $phaseMarker.database='RhemaERP'; $phaseMarker.backupMediaId=$mediaId
+            $phaseMarker.database='RhemaERP'; $phaseMarker.backupMediaId=$mediaId; $phaseMarker.backupFileName=$passBackupFileName
             $phaseMarker.backupCompleted=$true; $phaseMarker.backupByteLength=1024
             $phaseMarker.currentMaterialSha256=('D' * 64)
         }
-        if (($index + 1) -eq 4) { $phaseMarker.backupSha256=('D' * 64) }
+        if (($index + 1) -eq 4) {
+            $phaseMarker.backupSha256=('D' * 64); $phaseMarker.backupMediaId=$mediaId; $phaseMarker.backupFileName=$passBackupFileName
+        }
         Write-Json (Join-Path $pass ("phase-{0:D2}.json" -f ($index + 1))) $phaseMarker
     }
     $passStatus = New-Status 'PASS' 'COMPLETE' $true $true $true
-    $passStatus.backupMediaId=$mediaId; $passStatus.backupSha256=('D' * 64)
+    $passStatus.backupMediaId=$mediaId; $passStatus.backupFileName=$passBackupFileName; $passStatus.backupSha256=('D' * 64)
     $passStatus.invariantSha256=$invariantHash; $passStatus.sourceFingerprint=$fingerprint; $passStatus.backupCompleted=$true
     $passStatus.currentMaterialSha256=('D' * 64); $passStatus.backupHashMatchesVerified=$true
     $passStatus.verifyEvidencePresent=$true; $passStatus.backupPreserved=$true

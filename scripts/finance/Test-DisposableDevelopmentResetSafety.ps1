@@ -127,7 +127,8 @@ try {
 
     foreach ($functionName in @('ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
         'Assert-UniqueOrderedSqlEvidenceTokens','Invoke-Native','Assert-SqlcmdOutputWidth','Invoke-Sql',
-        'Invoke-SqlWithSanitizedEvidence','Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
+        'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
+        'Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
         'Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
         'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -137,6 +138,32 @@ try {
         }
         . ([ScriptBlock]::Create($functionAst[0].Extent.Text))
     }
+    $uniqueBackupRoot = New-ExternalEvidencePath 'UNIQUE_BACKUPS'
+    New-Item -ItemType Directory -Path $uniqueBackupRoot | Out-Null
+    $legacyBackupPath = Join-Path $uniqueBackupRoot 'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
+    'preserved legacy backup' | Set-Content -Encoding ascii -LiteralPath $legacyBackupPath
+    $firstMediaId = '1' * 32
+    $secondMediaId = '2' * 32
+    $firstAttemptPath = Join-DisposableBackupPath $uniqueBackupRoot $firstMediaId
+    $secondAttemptPath = Join-DisposableBackupPath $uniqueBackupRoot $secondMediaId
+    if ($firstAttemptPath -ceq $secondAttemptPath -or $firstAttemptPath -ceq $legacyBackupPath -or
+        (Split-Path -Leaf $firstAttemptPath) -cne "RhemaERP_DISPOSABLE_RESET_COPYONLY_${firstMediaId}.bak" -or
+        (Split-Path -Leaf $secondAttemptPath) -cne "RhemaERP_DISPOSABLE_RESET_COPYONLY_${secondMediaId}.bak") {
+        throw 'Media-bound disposable backup paths are not exact and attempt-unique.'
+    }
+    New-AtomicBackupReservation $firstAttemptPath
+    New-AtomicBackupReservation $secondAttemptPath
+    $collisionRefused = $false
+    try { New-AtomicBackupReservation $firstAttemptPath } catch [System.IO.IOException] { $collisionRefused = $true }
+    if (-not $collisionRefused -or (Get-Content -Raw -LiteralPath $legacyBackupPath).Trim() -cne 'preserved legacy backup') {
+        throw 'Attempt-unique reservation did not refuse collision or preserve the prior fixed backup.'
+    }
+    foreach ($invalidMediaId in @('',('../' + ('a' * 29)),('A' * 32),('a' * 31),('a' * 33))) {
+        $refused = $false
+        try { Join-DisposableBackupPath $uniqueBackupRoot $invalidMediaId } catch { $refused = $true }
+        if (-not $refused) { throw 'Disposable backup filename accepted malformed/path-ambiguous media identity.' }
+    }
+    Write-Host 'PASS: prior fixed backup coexists with two unique media-bound attempts; collision and path spoofing are refused'
     $sqlcmdMaxVariableWidth = 8000
     $sqlcmdScreenWidth = 8000
     $script:sensitiveEvidenceTokens = [System.Collections.Generic.List[string]]::new()
@@ -258,18 +285,21 @@ exit 0
 
     $mutationRoot = New-ExternalEvidencePath 'POST_VERIFY_MUTATION'
     New-Item -ItemType Directory -Path $mutationRoot | Out-Null
-    $mutationBackupPath = Join-Path $mutationRoot 'verified-then-mutated.bak'
+    $recoveryMediaId = '8' * 32
+    $recoveryBackupFileName = Get-DisposableBackupFileName $recoveryMediaId
+    $mutationBackupPath = Join-Path $mutationRoot $recoveryBackupFileName
     [System.IO.File]::WriteAllBytes($mutationBackupPath, [System.Text.Encoding]::UTF8.GetBytes('verified bytes'))
     $originalState = Get-DisposableMaterialBackupState $mutationBackupPath
-    $recoveryMediaId = '8' * 32
     Write-DisposablePhaseMarker $mutationRoot 1 'OFFLINE_GATES_COMPLETE'
     Write-DisposablePhaseMarker $mutationRoot 2 'SOURCE_CAPTURE_COMPLETE'
     Write-DisposablePhaseMarker $mutationRoot 3 'BACKUP_CREATED' @{
-        database='RhemaERP'; backupMediaId=$recoveryMediaId; backupCompleted=$true;
+        database='RhemaERP'; backupMediaId=$recoveryMediaId; backupFileName=$recoveryBackupFileName; backupCompleted=$true;
         backupByteLength=$originalState.byteLength; currentMaterialSha256=$originalState.sha256
     }
-    Write-DisposablePhaseMarker $mutationRoot 4 'BACKUP_VERIFIED' @{ backupSha256=$originalState.sha256 }
-    "$($originalState.sha256)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" |
+    Write-DisposablePhaseMarker $mutationRoot 4 'BACKUP_VERIFIED' @{
+        backupSha256=$originalState.sha256; backupMediaId=$recoveryMediaId; backupFileName=$recoveryBackupFileName
+    }
+    "$($originalState.sha256)  $recoveryBackupFileName" |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $mutationRoot 'backup.sha256')
     $coalescedVerifyEvidence = "DATABASE=RhemaERP BACKUP_MEDIA_ID=$recoveryMediaId " +
         "The backup set on file 1 is valid. RESTORE_VERIFYONLY_CHECKSUM_COMPLETE"

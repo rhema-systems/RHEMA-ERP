@@ -282,6 +282,21 @@ if ($PackageKind -eq 'DisposableReset') {
     }
 
     $createPath = Join-Path $root 'backup-create.txt'
+    $backupFileProperty = $reset.PSObject.Properties['backupFileName']
+    $expectedBackupFileName = if ($null -eq $backupFileProperty -or
+        [string]::IsNullOrWhiteSpace([string]$backupFileProperty.Value)) {
+        'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
+    }
+    else {
+        $candidateBackupFileName = [string]$backupFileProperty.Value
+        $derivedBackupFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_$($reset.backupMediaId).bak"
+        if ([string]$reset.backupMediaId -cnotmatch '^[0-9a-f]{32}$' -or
+            $candidateBackupFileName -cne $derivedBackupFileName -or
+            [System.IO.Path]::GetFileName($candidateBackupFileName) -cne $candidateBackupFileName) {
+            throw 'Disposable-reset media-bound backup filename is malformed or path-ambiguous.'
+        }
+        $candidateBackupFileName
+    }
     $create = if (Test-Path -LiteralPath $createPath -PathType Leaf) {
         @(Get-SqlEvidenceTokens $createPath)
     }
@@ -308,16 +323,22 @@ if ($PackageKind -eq 'DisposableReset') {
         $currentHashLine = (Get-Content -Raw -LiteralPath $currentHashPath).Trim()
         if ([string]$reset.backupMediaId -notmatch '^[0-9a-f]{32}$' -or
             $create -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)" -or
-            $currentHashLine -notmatch '^(?<hash>[0-9A-F]{64})  RhemaERP_DISPOSABLE_RESET_COPYONLY\.bak$' -or
-            $Matches.hash -cne [string]$reset.currentMaterialSha256 -or [long]$reset.backupByteLength -le 0 -or
+            $currentHashLine -notmatch '^(?<hash>[0-9A-F]{64})  (?<file>[^\\/]+\.bak)$' -or
+            $Matches.hash -cne [string]$reset.currentMaterialSha256 -or $Matches.file -cne $expectedBackupFileName -or
+            [long]$reset.backupByteLength -le 0 -or
             $reset.backupPreserved -ne $true -or $reset.backupMaterialStateReconciled -ne $true) {
             throw 'Disposable-reset material backup identity/current-hash/preservation evidence is invalid.'
         }
         if ($backupPhaseMarkerPublished) {
             $phaseThree = $phaseMarkers[2]
+            $phaseThreeFileProperty = $phaseThree.PSObject.Properties['backupFileName']
+            $phaseThreeFileName = if ($null -eq $phaseThreeFileProperty) {
+                'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
+            } else { [string]$phaseThreeFileProperty.Value }
             if ($reset.backupCompleted -ne $true -or $phaseThree.backupCompleted -ne $true -or
                 [string]$phaseThree.database -cne 'RhemaERP' -or
                 [string]$phaseThree.backupMediaId -cne [string]$reset.backupMediaId -or
+                $phaseThreeFileName -cne $expectedBackupFileName -or
                 [long]$phaseThree.backupByteLength -le 0 -or
                 [string]$phaseThree.currentMaterialSha256 -notmatch '^[0-9A-F]{64}$') {
                 throw 'Durable BACKUP_CREATED requires database/media identity, completed SQL markers, positive length and hash reconciliation.'
@@ -336,6 +357,8 @@ if ($PackageKind -eq 'DisposableReset') {
         $verify = @(Get-SqlEvidenceTokens $verifyPath)
         $hashLine = (Get-Content -Raw -LiteralPath $hashPath).Trim()
         $phaseFourHash = [string]$phaseMarkers[3].backupSha256
+        $phaseFourFileProperty = $phaseMarkers[3].PSObject.Properties['backupFileName']
+        $phaseFourMediaProperty = $phaseMarkers[3].PSObject.Properties['backupMediaId']
         $currentMatchesVerified = [string]$reset.currentMaterialSha256 -ceq $phaseFourHash
         try {
             Assert-UniqueOrderedSqlEvidenceTokens $verifyPath @(
@@ -349,8 +372,12 @@ if ($PackageKind -eq 'DisposableReset') {
             [string]$phaseMarkers[2].currentMaterialSha256 -cne $phaseFourHash -or
             $reset.backupCompleted -ne $true -or $verify -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE' -or
             $verify -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)" -or
-            $hashLine -notmatch '^(?<hash>[0-9A-F]{64})  RhemaERP_DISPOSABLE_RESET_COPYONLY\.bak$' -or
-            $Matches.hash -cne $phaseFourHash -or [string]$reset.backupSha256 -cne $phaseFourHash -or
+            $hashLine -notmatch '^(?<hash>[0-9A-F]{64})  (?<file>[^\\/]+\.bak)$' -or
+            $Matches.hash -cne $phaseFourHash -or $Matches.file -cne $expectedBackupFileName -or
+            ($null -ne $backupFileProperty -and
+             ($null -eq $phaseFourFileProperty -or [string]$phaseFourFileProperty.Value -cne $expectedBackupFileName -or
+              $null -eq $phaseFourMediaProperty -or [string]$phaseFourMediaProperty.Value -cne [string]$reset.backupMediaId)) -or
+            [string]$reset.backupSha256 -cne $phaseFourHash -or
             $reset.verifyEvidencePresent -ne $true -or [bool]$reset.backupHashMatchesVerified -ne $currentMatchesVerified -or
             [bool]$reset.backupVerified -ne $currentMatchesVerified) {
             throw 'Disposable-reset VERIFYONLY, media identity, or backup hash proof is invalid.'
