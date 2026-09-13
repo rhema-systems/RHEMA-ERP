@@ -2221,3 +2221,11 @@ sqlcmd retained its default 256-character variable-width display, so wide canoni
 tail content before hashing. A final narrow offline correction is active to make the actual shared `Invoke-Sql`
 transport use conflict-free `-y 8000`, refuse any line at the truncation boundary, and prove with a fake sqlcmd
 transport that a sentinel beyond character 256 survives. No database or configured connection is in scope.
+
+The transport correction completed as clean commits `4eed448de27355f89e2c0dead8ffb64b20f8f27f` and
+`a9c91a820336ebad55c7924d51536b18353e1888`. Shared `Invoke-Sql` now supplies exact `-y 8000`, omits
+conflicting `-W`/`-Y`, and refuses any evidence line at the maximum where truncation cannot be excluded. An
+offline fake-sqlcmd exercise of the real transport proves a sentinel after character 256 survives and an
+8000-character line fails closed. Exact-candidate parse, complete safety/refusal, final evidence/tamper, diff and
+clean-status gates passed. No database, migration or configured connection was accessed; Sol High re-review is
+required over the ledger-only handoff descendant.
