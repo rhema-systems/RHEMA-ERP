@@ -527,7 +527,7 @@ try {
         $latePath=Join-Path $identityDriftFailure $lateArtifact
         if(Test-Path -LiteralPath $latePath){Remove-Item -LiteralPath $latePath -Force}
     }
-    'Sqlcmd: Error: DISPOSABLE_RESET_IDENTITY_DRIFT' |
+    'DISPOSABLE_RESET_IDENTITY_DRIFT' |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $identityDriftFailure 'reset-database.log')
     $identityDriftStatus=Get-Content -Raw -LiteralPath (Join-Path $identityDriftFailure 'reset-status.json')|ConvertFrom-Json -AsHashtable
     $identityDriftStatus.status='FAILED_NO_AUTOMATIC_RETRY';$identityDriftStatus.phase='RESET_STARTED'
@@ -535,7 +535,32 @@ try {
     Complete-Status $identityDriftFailure $identityDriftStatus
     & pwsh -NoProfile -File $validator -EvidenceDirectory $identityDriftFailure -PackageKind DisposableReset -WriteManifest
     if($LASTEXITCODE -ne 0){throw 'Truthful pre-final-fingerprint identity-drift package was rejected.'}
-    Write-Host 'PASS: RESET_STARTED identity drift may truthfully omit the not-yet-produced final fingerprint token'
+    Write-Host 'PASS: standalone exact RESET_STARTED identity drift may omit the not-yet-produced final fingerprint token'
+
+    $coalescedIdentityDrift=New-PackageRoot 'RESET_STARTED_IDENTITY_DRIFT_COALESCED'
+    Copy-Item -Path (Join-Path $identityDriftFailure '*') -Destination $coalescedIdentityDrift
+    'Sqlcmd: Error: DISPOSABLE_RESET_IDENTITY_DRIFT transport-stopped' |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $coalescedIdentityDrift 'reset-database.log')
+    $coalescedStatus=Get-Content -Raw -LiteralPath (Join-Path $coalescedIdentityDrift 'reset-status.json')|ConvertFrom-Json -AsHashtable
+    Complete-Status $coalescedIdentityDrift $coalescedStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $coalescedIdentityDrift -PackageKind DisposableReset -WriteManifest
+    if($LASTEXITCODE -ne 0){throw 'Truthful coalesced pre-final-fingerprint identity-drift package was rejected.'}
+    Write-Host 'PASS: coalesced transport accepts one exact case-sensitive early-failure token'
+
+    foreach($signalTamper in @(
+        @{label='prefix';log='PREFIX_DISPOSABLE_RESET_IDENTITY_DRIFT'},
+        @{label='suffix';log='DISPOSABLE_RESET_IDENTITY_DRIFT_SUFFIX'},
+        @{label='hyphen';log='DISPOSABLE-RESET-IDENTITY-DRIFT'},
+        @{label='duplicate';log='DISPOSABLE_RESET_IDENTITY_DRIFT DISPOSABLE_RESET_IDENTITY_DRIFT'},
+        @{label='mixed';log='DISPOSABLE_RESET_IDENTITY_DRIFT DISPOSABLE_RESET_FINAL_HISTORY_DRIFT'},
+        @{label='case mutation';log='disposable_reset_identity_drift'}
+    )){
+        $tamperRoot=New-PackageRoot ('EARLY_SIGNAL_'+($signalTamper.label -replace ' ','_'))
+        Copy-Item -Path (Join-Path $identityDriftFailure '*') -Destination $tamperRoot
+        $signalTamper.log|Set-Content -Encoding ascii -LiteralPath (Join-Path $tamperRoot 'reset-database.log')
+        Update-ArtifactBinding $tamperRoot 'reset-database.log'
+        Invoke-ExpectedRemanifestFailure $tamperRoot "early failure signal $($signalTamper.label)"
+    }
 
     foreach($earlyFailureTamper in @(
         @{label='later failed operation';operation='PHASE_07_PUBLICATION';log='Sqlcmd: Error: DISPOSABLE_RESET_IDENTITY_DRIFT'},

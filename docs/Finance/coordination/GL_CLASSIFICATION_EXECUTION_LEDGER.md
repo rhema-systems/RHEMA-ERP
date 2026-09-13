@@ -2614,8 +2614,10 @@ The unchanged archive has 656 tracked files and canonical base tree-entry invent
 
 Sol-High D3 evidence correction: a failed disposable reset whose last durable phase and failed operation are both
 `RESET_STARTED` may omit `SOURCE_FINAL_FINGERPRINT` only when retained destructive-boundary evidence contains an
-explicit pre-marker identity/history/fingerprint failure and contains no final-recheck, database-recreated, target
-history, or later-phase claim. Any marker that is present must remain the exact unique captured fingerprint token;
+exactly one whitespace-delimited, case-sensitive pre-marker identity/history/fingerprint failure token and contains
+no final-recheck, database-recreated, target history, or later-phase claim. Prefixes, suffixes, punctuation variants,
+duplicates, and mixed allowed signals are rejected. Any marker that is present must remain the exact unique captured
+fingerprint token;
 later completion, mismatch, duplicate, embedded-token, operation-downgrade, and re-manifested missing-token evidence
 is refused.
 `RehearseEmpty` and `RehearseClone` now refuse at process entry, before repository or connection work, and their old

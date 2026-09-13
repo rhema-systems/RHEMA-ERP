@@ -436,10 +436,15 @@ if ($PackageKind -eq 'DisposableReset') {
                     [string]$reset.failedOperation -ceq 'RESET_STARTED' -and
                     $phases.Count -eq 5 -and $phases[-1] -ceq 'RESET_STARTED' -and
                     [bool]$reset.resetStarted -and -not $boundaryCompletionClaimed
-                $earlyFailureSignals = [regex]::Matches(
-                    (Get-Content -Raw -LiteralPath $resetLogPath),
-                    '(?<![A-Z0-9_])DISPOSABLE_RESET_(?:SERVER_IDENTITY_DRIFT|IDENTITY_DRIFT|POST_QUIESCENCE_IDENTITY_DRIFT|FINAL_HISTORY_DRIFT|FINAL_FINGERPRINT_DRIFT)(?![A-Z0-9_])',
-                    [Text.RegularExpressions.RegexOptions]::CultureInvariant)
+                $allowedEarlyFailureTokens = @(
+                    'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT',
+                    'DISPOSABLE_RESET_IDENTITY_DRIFT',
+                    'DISPOSABLE_RESET_POST_QUIESCENCE_IDENTITY_DRIFT',
+                    'DISPOSABLE_RESET_FINAL_HISTORY_DRIFT',
+                    'DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT'
+                )
+                $earlyFailureSignals = @($resetBoundaryTokens |
+                    Where-Object { $allowedEarlyFailureTokens -ccontains $_ })
                 $exactMarkerValid = $finalFingerprintMarkers.Count -eq 1 -and
                     $fingerprintMarkerLikeTokens.Count -eq 1
                 if (($boundaryCompletionClaimed -or $finalFingerprintMarkers.Count -gt 0) -and -not $exactMarkerValid) {
@@ -447,7 +452,7 @@ if ($PackageKind -eq 'DisposableReset') {
                 }
                 if (-not $boundaryCompletionClaimed -and $finalFingerprintMarkers.Count -eq 0 -and
                     (-not $earlyBoundaryFailure -or $fingerprintMarkerLikeTokens.Count -ne 0 -or
-                     $earlyFailureSignals.Count -lt 1)) {
+                     $earlyFailureSignals.Count -ne 1)) {
                     throw 'Failed disposable-reset lacks an exact final fingerprint or an explicit pre-marker destructive-boundary failure.'
                 }
             }
