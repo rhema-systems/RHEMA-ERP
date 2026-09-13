@@ -29,9 +29,6 @@ const schema = z
     endDate: z.string().optional().or(z.literal('')),
     contractEndDate: z.string().optional().or(z.literal('')),
     workingHoursPerWeek: z.coerce.number().int().min(0).max(168),
-    annualLeaveEntitlementDays: z.coerce.number().int().min(0).max(365),
-    vacationDaysPerYear: z.coerce.number().int().min(0),
-    sickDaysPerYear: z.coerce.number().int().min(0),
     probationPeriodDays: z.string().optional().or(z.literal('')),
     confirmationDate: z.string().optional().or(z.literal('')),
     workSchedule: z.enum(['FullTime', 'PartTime', 'Shift', 'Flexi', 'Remote', 'Hybrid']),
@@ -66,9 +63,6 @@ const empty: FormValues = {
   endDate: '',
   contractEndDate: '',
   workingHoursPerWeek: 40,
-  annualLeaveEntitlementDays: 20,
-  vacationDaysPerYear: 0,
-  sickDaysPerYear: 0,
   probationPeriodDays: '',
   confirmationDate: '',
   workSchedule: 'FullTime',
@@ -90,9 +84,6 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   endDate: v.endDate || null,
   contractEndDate: v.contractEndDate || null,
   workingHoursPerWeek: v.workingHoursPerWeek,
-  annualLeaveEntitlementDays: v.annualLeaveEntitlementDays,
-  vacationDaysPerYear: v.vacationDaysPerYear,
-  sickDaysPerYear: v.sickDaysPerYear,
   probationPeriodDays: v.probationPeriodDays ? Number(v.probationPeriodDays) : null,
   confirmationDate: v.confirmationDate || null,
   workSchedule: v.workSchedule,
@@ -217,9 +208,6 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
         endDate: c.endDate?.slice(0, 10) ?? '',
         contractEndDate: c.contractEndDate?.slice(0, 10) ?? '',
         workingHoursPerWeek: c.workingHoursPerWeek ?? 40,
-        annualLeaveEntitlementDays: c.annualLeaveEntitlementDays ?? 20,
-        vacationDaysPerYear: c.vacationDaysPerYear ?? 0,
-        sickDaysPerYear: c.sickDaysPerYear ?? 0,
         // ⚠ Both were hardcoded blank because the read DTO carried neither — they were settable
         // and unreadable. Now bound, so an edit shows the probation term instead of hiding it.
         probationPeriodDays: c.probationPeriodDays != null ? String(c.probationPeriodDays) : '',
@@ -266,11 +254,9 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
           <FieldRow>
             {/* When it ACTUALLY ended — normally written by terminating, not typed. */}
             <DateField form={form} name="endDate" label="Actual end date" />
-            <NumberField
-              form={form}
-              name="annualLeaveEntitlementDays"
-              label="Annual leave (days)"
-            />
+            {/* ⚠ Round 3, lane P3 (D-5): no leave figures here any more. Entitlement is the leave
+                module's — LeaveType / allocations / balances — and the profile's Leave tab shows it. */}
+            <div />
           </FieldRow>
           {/* ⚠ No salary, currency, pay frequency, tax treatment, withholding, pension or
               tax-exempt here since lane E1 (§ 6.5.4): basic pay and its treatment are payroll's,
@@ -289,10 +275,6 @@ export function ContractsTab({ employeeId }: { employeeId: string }) {
           <FieldRow>
             <NumberField form={form} name="workingHoursPerWeek" label="Hours per week" />
             <NumberField form={form} name="probationPeriodDays" label="Probation (days)" />
-          </FieldRow>
-          <FieldRow>
-            <NumberField form={form} name="vacationDaysPerYear" label="Vacation days / year" />
-            <NumberField form={form} name="sickDaysPerYear" label="Sick days / year" />
           </FieldRow>
           <FieldRow>
             <DateField form={form} name="confirmationDate" label="Confirmation date" />

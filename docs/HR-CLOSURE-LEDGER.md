@@ -1244,6 +1244,12 @@ picker has to scope itself from the detail.
 
 ### `EmployeeContractDetail` — the four twin columns · ⛔ **THREE RESERVED BY DECISION, DO NOT DROP** · 2026-09-01
 
+> ✅ **CLOSED 2026-09-13 (round 3, lane P3; decision D-5).** `AnnualLeaveEntitlementDays`,
+> `VacationDaysPerYear` and `SickDaysPerYear` were dropped by migration
+> `DropContractLeaveColumns` — entitlement is the leave module's, and the probe below had found
+> 0 of 24 rows off the defaults. The reserved trio (`EffectiveDate`, `ContractEndDate`,
+> `IsCurrent`) is **untouched**; the banner beneath still stands for those three.
+
 > ⛔ **DECISION 2026-09-01 — read this before acting on anything below.** The user has reserved
 > `EffectiveDate`, `ContractEndDate` and `IsCurrent` **because contract versioning is coming soon**.
 > **Do not drop them.** The analysis that follows concluded they were droppable and it is still

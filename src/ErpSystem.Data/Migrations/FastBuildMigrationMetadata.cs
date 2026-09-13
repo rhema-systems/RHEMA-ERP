@@ -324,3 +324,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260913181139_AddUnionContactsDocumentsLogo")] partial class AddUnionContactsDocumentsLogo { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260913214947_AddJobDescriptionProposedGrade")] partial class AddJobDescriptionProposedGrade { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260913224857_AddDisabilityTypes")] partial class AddDisabilityTypes { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260913234443_DropContractLeaveColumns")] partial class DropContractLeaveColumns { }

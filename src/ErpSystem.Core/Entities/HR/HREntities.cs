@@ -1668,22 +1668,12 @@ public class EmployeeContractDetail : TenantEntity
 
     public int WorkingHoursPerWeek { get; set; } = 40;
 
-    /// <summary>
-    /// The annual leave this contract grants, as the contract states it.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Written by NOTHING and read by NOTHING until lane D1 — a column with a default of 20 that
-    /// no caller could reach, sitting beside <see cref="VacationDaysPerYear"/> (default 15), which
-    /// the DTOs did expose. Two numbers for one entitlement, disagreeing by five days out of the
-    /// box. This is the one the appointment letter quotes and the one the leave module's
-    /// entitlement should be reconciled against; <see cref="VacationDaysPerYear"/> stays for the
-    /// rows that hold it.
-    /// </remarks>
-    public int AnnualLeaveEntitlementDays { get; set; } = 20;
-
-    public int VacationDaysPerYear { get; set; } = 15;
-
-    public int SickDaysPerYear { get; set; } = 10;
+    // ⚠ Round 3, lane P3 (decision D-5): `AnnualLeaveEntitlementDays`, `VacationDaysPerYear` and
+    // `SickDaysPerYear` were DROPPED (migration DropContractLeaveColumns). Leave entitlement lives in
+    // the leave module — LeaveType / LeaveCategoryAllocation / LeaveBalance — and a second copy on
+    // the contract disagreed with it by default (20 against 15) and was read by nothing but its own
+    // tab. The ledger's probe found 0 of 24 rows off the defaults, so nothing was lost. The reserved
+    // trio (EffectiveDate, ContractEndDate, IsCurrent) is untouched — see HR-CLOSURE-LEDGER § F.
 
     public int? ProbationPeriodDays { get; set; }
 

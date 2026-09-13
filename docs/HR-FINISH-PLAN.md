@@ -23,7 +23,7 @@ sweep closed; coverage queue 3 real endpoints from empty.
 | **0** | Ledger truth — make the instruments tell the truth again | ✅ **done 2026-08-31** | — | — |
 | **1** | Close the coverage queue | ✅ **done 2026-08-31** | — | — |
 | **2** | Decisions owed — 6 settings ✅ built, the rest is a memo | 13 asks | memo | TDC / the user |
-| **3** | Employee Master feedback block | ✅ **3a · 3a-ii · 3b · 3c · 3d’s buildable rows all done** | — | — (1 row needs TDC) |
+| **3** | Employee Master feedback block | ✅ **3a · 3a-ii · 3b · 3c · 3d’s buildable rows all done** · contract leave columns dropped 2026-09-13 (round 3, lane P3) | — | — (1 row needs TDC) |
 | **4** | Leave · Training · Succession · Recruitment feedback | 15 | 2 slices | partly lane 2 |
 | **5** | Section E — 5a ✅; **5b 47 of 49 fields built** | 2 fields | — | **blocked on D-13** |
 | **6** | Deferred area residues | 13 | 2 slices | 4 are blocked outside HR |

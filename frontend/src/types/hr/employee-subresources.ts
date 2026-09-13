@@ -555,10 +555,7 @@ export interface EmployeeContract {
   isTaxExempt?: boolean | null;
   contractStatus?: ContractStatus | null;
   workingHoursPerWeek: number;
-  /** The annual leave the contract grants. Reachable from nowhere at all before 2026-09-09. */
-  annualLeaveEntitlementDays: number;
-  vacationDaysPerYear: number;
-  sickDaysPerYear: number;
+  // Round 3, lane P3 (D-5): the three leave figures are gone from the contract; see the leave module.
   /**
    * The probation term and the date it was passed.
    *
@@ -613,9 +610,6 @@ export interface CreateEmployeeContractRequest {
   isPensionApplicable?: boolean;
   isTaxExempt?: boolean;
   workingHoursPerWeek: number;
-  annualLeaveEntitlementDays?: number | null;
-  vacationDaysPerYear: number;
-  sickDaysPerYear: number;
   probationPeriodDays?: number | null;
   confirmationDate?: string | null;
   terms?: string | null;

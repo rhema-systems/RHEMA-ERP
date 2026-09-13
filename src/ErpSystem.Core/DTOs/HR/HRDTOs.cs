@@ -1252,11 +1252,7 @@ public class EmployeeContractDetailDto
     public ContractStatus? ContractStatus { get; set; }
     public int WorkingHoursPerWeek { get; set; }
 
-    /// <summary>The annual leave this contract grants, as the contract states it.</summary>
-    public int AnnualLeaveEntitlementDays { get; set; }
-
-    public int VacationDaysPerYear { get; set; }
-    public int SickDaysPerYear { get; set; }
+    // Round 3, lane P3 (D-5): the three leave columns are gone; entitlement is the leave module's.
 
     /// <summary>The probation term, and the date it was passed.</summary>
     /// <remarks>
@@ -1341,12 +1337,7 @@ public class CreateEmployeeContractDetailDto
 
     public int WorkingHoursPerWeek { get; set; } = 40;
 
-    /// <summary>The annual leave this contract grants. Defaults to 20 on the entity.</summary>
-    [Range(0, 365)]
-    public int? AnnualLeaveEntitlementDays { get; set; }
-
-    public int VacationDaysPerYear { get; set; } = 15;
-    public int SickDaysPerYear { get; set; } = 10;
+    // Round 3, lane P3 (D-5): no leave figures on a contract — they are the leave module's.
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
 
@@ -1424,16 +1415,7 @@ public class UpdateEmployeeContractDetailDto
     public bool? IsTaxExempt { get; set; }
     public int? WorkingHoursPerWeek { get; set; }
 
-    /// <summary>The annual leave this contract grants.</summary>
-    /// <remarks>
-    /// ⚠ Was reachable from nowhere at all before lane D1 — no writer, no reader, a default of 20
-    /// beside <c>VacationDaysPerYear</c>'s 15.
-    /// </remarks>
-    [Range(0, 365)]
-    public int? AnnualLeaveEntitlementDays { get; set; }
-
-    public int? VacationDaysPerYear { get; set; }
-    public int? SickDaysPerYear { get; set; }
+    // Round 3, lane P3 (D-5): no leave figures on a contract — they are the leave module's.
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
 

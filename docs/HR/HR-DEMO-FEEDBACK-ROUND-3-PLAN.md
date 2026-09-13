@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) and P2 (72 ×2, `hr-employee-docs/run-p2.mjs`; lane 3a 47, D2 121, round-2 lane A 88, P1 17 after) BUILT 2026-09-13. Three slices remain; P3 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) P2 (72 ×2, `hr-employee-docs/run-p2.mjs`; lane 3a 47, D2 121, round-2 lane A 88, P1 17 after) and P3 (19 ×2, `hr-probation/run-p3.mjs`; D1 79, lane 3d 35 after) BUILT 2026-09-13. Two slices remain; X next (probe first).** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -169,7 +169,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 14 | **T3** — record tabs: Training, Appraisals & goals, Discipline, Awards, Assets, Medical, Travel, Orientation, Succession · ✅ **DONE 2026-09-13 · 70** (screen walk owed) | none | `hr-employee-docs/run-t3.mjs` (static + live reads) + screen walk | |
 | 15 | **J2** — derived intrinsic value, proposed grade, the matcher · ✅ **DONE 2026-09-13 · 67 ×2** | `20260913214947_AddJobDescriptionProposedGrade` | `hr-jobarch/run-j2.mjs` | |
 | 16 | **P2** — the disability catalogue · ✅ **DONE 2026-09-13 · 72 ×2** | `20260913224857_AddDisabilityTypes` | `hr-employee-docs/run-p2.mjs` | |
-| 17 | **P3** — drop the contract leave columns | `DropContractLeaveColumns` | `hr-probation/run-p3.mjs` | |
+| 17 | **P3** — drop the contract leave columns · ✅ **DONE 2026-09-13 · 19 ×2** | `20260913234443_DropContractLeaveColumns` | `hr-probation/run-p3.mjs` | |
 | 18 | **X** — allowances and deductions (probe → editor or read-only) | none | `hr-payroll-membership/run-x.mjs` | the probe decides; can move earlier |
 | 19 | **V** — talent segment ownership | `AddTalentSegmentOwnership` | `hr-recruitment/run-v.mjs` | |
 
@@ -597,6 +597,30 @@ delete the two files by hand and `git checkout` the snapshot instead. (2) Harnes
 spread from the detail read carries the OLD type id, so an "untick" that keeps it is (correctly)
 refused — send the type as null when unticking, as the form mapper does. (3) `EmployeeForm.tsx`
 already had a component-scoped `NONE`; the picker uses its own `NO_DISABILITY_TYPE` sentinel.
+
+**Lane P3 log (2026-09-13).** Migration `20260913234443_DropContractLeaveColumns` — the round's first
+DESTRUCTIVE migration: guarded `DropColumn` ×3 on `EmployeeContractDetails` (each column's default
+constraint looked up, not named); `Down` restores the three with the entity's OLD defaults (20/15/10,
+not the scaffold's 0). Scratch proof: a stub table with server-named defaults and a row — Up drops
+through the lookup, Up again no-op, Down restores and the row reads 20/15/10, Down again no-op, Up
+again; zero orphan default constraints at every step. **Live check before applying:** 1,088 contract
+rows on the dev tenant, 34 off the defaults — every one harness litter (14 × `vacationDaysPerYear: 28`
+from the probation/awards/separation fixture actors `A15bVer`, 20 × D1's 26/30 on `D1Ver` subjects);
+nothing a person typed, so nothing lost. Code: the three properties removed from
+`EmployeeContractDetail`, the three contract DTOs, `EmployeeService` (new-version carry, create,
+update) and the mapper; a payload that still sends them is IGNORED, not refused (unknown JSON), so an
+old client keeps working; `ContractsTab.tsx` and `employee-subresources.ts` lose the fields (the
+annual-leave and vacation/sick rows are gone from the form). The reserved trio (`EffectiveDate`,
+`ContractEndDate`, `IsCurrent`) is untouched, and the closure ledger's § F carries a CLOSED banner
+above the standing "do not drop" banner; HR-FINISH-PLAN row 3 notes the drop. Harness 19 ×2
+(`hr-probation/run-p3.mjs`: every contract read and write answers none of the three, the reserved
+trio and hours survive, the leave module's balances and types answer). `run-d1.mjs` D4/E8 (which
+asserted the figure round-tripped) now assert it is ABSENT — 79/79. Regression: lane 3d 35/35;
+probation slices 0 and 1 die on a PRE-EXISTING 409 ("confirmation is routed through the confirming
+authority on this tenant" — lane 3b's policy, older than this round; the slices call `/confirm`
+directly) and slice 2's three misses are master #38's 403-text masking — none touch contracts.
+Payload-only fixtures elsewhere (hr-awards, hr-separation, hr-portal, demo-smoke 005/065) still
+send the keys; harmless and left alone. Deviations: none.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

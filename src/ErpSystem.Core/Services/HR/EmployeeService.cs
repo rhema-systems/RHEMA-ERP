@@ -2238,9 +2238,6 @@ public class EmployeeService : IEmployeeService
             IsPensionApplicable = current.IsPensionApplicable,
             IsTaxExempt = current.IsTaxExempt,
             WorkingHoursPerWeek = current.WorkingHoursPerWeek,
-            AnnualLeaveEntitlementDays = current.AnnualLeaveEntitlementDays,
-            VacationDaysPerYear = current.VacationDaysPerYear,
-            SickDaysPerYear = current.SickDaysPerYear,
             ProbationPeriodDays = current.ProbationPeriodDays,
             // ⚠ ConfirmationDate is deliberately NOT carried across. It is a hand-typed copy of a
             // fact that lives on the employee, and copying it onto every successor would spread a
@@ -2306,9 +2303,6 @@ public class EmployeeService : IEmployeeService
             IsPensionApplicable = dto.IsPensionApplicable,
             IsTaxExempt = dto.IsTaxExempt,
             WorkingHoursPerWeek = dto.WorkingHoursPerWeek,
-            AnnualLeaveEntitlementDays = dto.AnnualLeaveEntitlementDays ?? 20,
-            VacationDaysPerYear = dto.VacationDaysPerYear,
-            SickDaysPerYear = dto.SickDaysPerYear,
             ProbationPeriodDays = dto.ProbationPeriodDays,
             ConfirmationDate = dto.ConfirmationDate,
             CurrencyCode = dto.CurrencyCode,
@@ -2378,9 +2372,6 @@ public class EmployeeService : IEmployeeService
         if (dto.IsPensionApplicable.HasValue) entity.IsPensionApplicable = dto.IsPensionApplicable.Value;
         if (dto.IsTaxExempt.HasValue) entity.IsTaxExempt = dto.IsTaxExempt.Value;
         if (dto.WorkingHoursPerWeek.HasValue) entity.WorkingHoursPerWeek = dto.WorkingHoursPerWeek.Value;
-        if (dto.AnnualLeaveEntitlementDays.HasValue) entity.AnnualLeaveEntitlementDays = dto.AnnualLeaveEntitlementDays.Value;
-        if (dto.VacationDaysPerYear.HasValue) entity.VacationDaysPerYear = dto.VacationDaysPerYear.Value;
-        if (dto.SickDaysPerYear.HasValue) entity.SickDaysPerYear = dto.SickDaysPerYear.Value;
         // ⚠ Ledger lane 3d. Probation terms stayed editable after the employee was confirmed:
         // the term could be stretched, or the confirmation date moved, on a contract whose probation
         // had already been decided and a letter issued against it. The same shape as D-03, where an
