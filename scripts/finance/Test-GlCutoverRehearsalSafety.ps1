@@ -19,6 +19,10 @@ foreach ($name in @('RHEMA_GL_REHEARSAL_CONNECTION','RHEMA_GL_SOURCE_READONLY_CO
 }
 $nonEmptyEvidence = $null
 $emptyEvidence = $null
+$transportRoot = $null
+$transportEvidence = $null
+$transportRiskEvidence = $null
+$priorPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
 try {
     foreach ($case in $cases) {
         [Environment]::SetEnvironmentVariable('RHEMA_GL_REHEARSAL_CONNECTION', $case.Value, 'Process')
@@ -54,6 +58,52 @@ try {
             throw "Safety case '$($case.Name)' did not return the expected refusal '$($case.Expected)'."
         }
         Write-Host "PASS: $($case.Name)"
+    }
+
+    $transportRoot = Join-Path ([System.IO.Path]::GetTempPath()) "RHEMAERP_GL_SQLCMD_TRANSPORT_$([guid]::NewGuid().ToString('N'))"
+    $transportEvidence = Join-Path $transportRoot 'wide-evidence'
+    $transportRiskEvidence = Join-Path $transportRoot 'limit-evidence'
+    New-Item -ItemType Directory -Path $transportRoot | Out-Null
+    @'
+$captured = @($args)
+$captured | Set-Content -Encoding ascii -LiteralPath $env:RHEMA_GL_SQLCMD_ARGUMENT_CAPTURE
+$outputIndex = [Array]::IndexOf($captured, '-o')
+if ($outputIndex -lt 0 -or $outputIndex + 1 -ge $captured.Count) { exit 91 }
+$width = [int]$env:RHEMA_GL_SQLCMD_PROBE_WIDTH
+if ($width -ge 8000) { $line = 'X' * 8000 }
+else { $line = 'CANONICAL|' + ('X' * 400) + '|TAIL_AFTER_256' }
+$line | Set-Content -Encoding utf8 -LiteralPath $captured[$outputIndex + 1]
+exit 0
+'@ | Set-Content -Encoding utf8 -LiteralPath (Join-Path $transportRoot 'sqlcmd.ps1')
+    [Environment]::SetEnvironmentVariable('PATH', "$transportRoot$([System.IO.Path]::PathSeparator)$priorPath", 'Process')
+    $capturePath = Join-Path $transportRoot 'arguments.txt'
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_SQLCMD_ARGUMENT_CAPTURE', $capturePath, 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', 'Server=transport-probe;Database=RhemaERP;Integrated Security=true', 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_SQLCMD_PROBE_WIDTH', '512', 'Process')
+    $output = & pwsh -NoProfile -File $script -Mode InspectSource -EvidenceDirectory $transportEvidence 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Offline sqlcmd transport probe failed: $output" }
+    $transportArguments = @(Get-Content -LiteralPath $capturePath)
+    $widthIndex = [Array]::IndexOf($transportArguments, '-y')
+    if ($widthIndex -lt 0 -or $transportArguments[$widthIndex + 1] -ne '8000' -or
+        $transportArguments -contains '-W' -or $transportArguments -contains '-Y') {
+        throw "Actual Invoke-Sql transport did not use conflict-free '-y 8000': $($transportArguments -join ' ')"
+    }
+    $wideEvidenceLine = (Get-Content -LiteralPath (Join-Path $transportEvidence 'source-readiness.txt') | Select-Object -First 1)
+    if ($wideEvidenceLine.Length -le 256 -or -not $wideEvidenceLine.EndsWith('TAIL_AFTER_256', [StringComparison]::Ordinal)) {
+        throw 'Actual Invoke-Sql transport lost the canonical tail beyond character 256.'
+    }
+    Write-Host 'PASS: actual Invoke-Sql transport retains canonical tail content beyond character 256'
+
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_SQLCMD_PROBE_WIDTH', '8000', 'Process')
+    $output = & pwsh -NoProfile -File $script -Mode InspectSource -EvidenceDirectory $transportRiskEvidence 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -or $output -notmatch 'truncation cannot be excluded') {
+        throw "Actual Invoke-Sql transport did not fail closed at the 8000-character display limit. Output: $output"
+    }
+    Write-Host 'PASS: actual Invoke-Sql transport refuses evidence at the display-width truncation boundary'
+
+    [Environment]::SetEnvironmentVariable('PATH', $priorPath, 'Process')
+    foreach ($name in @('RHEMA_GL_SQLCMD_ARGUMENT_CAPTURE','RHEMA_GL_SQLCMD_PROBE_WIDTH')) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
 
     foreach ($flagName in $flagNames) {
@@ -148,6 +198,7 @@ try {
     $scriptText = Get-Content -Raw -LiteralPath $script
     foreach ($requiredText in @(
         '$authoritativeMigrationCount = 456',
+        '$sqlcmdMaxVariableWidth = 8000',
         "'20260908120000_AddProducerIntentGroupsC8'",
         'Assert-TargetAbsent $target',
         'COPY_ONLY, CHECKSUM, NOINIT, NOSKIP, MEDIANAME=',
@@ -216,6 +267,10 @@ try {
     Write-Host 'PASS: final 456/C8, absent-target, no-overwrite, backup/restore/DBCC and preflight NO-GO contracts'
 }
 finally {
+    [Environment]::SetEnvironmentVariable('PATH', $priorPath, 'Process')
+    foreach ($name in @('RHEMA_GL_SQLCMD_ARGUMENT_CAPTURE','RHEMA_GL_SQLCMD_PROBE_WIDTH')) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
     foreach ($name in @('RHEMA_GL_REHEARSAL_CONNECTION','RHEMA_GL_SOURCE_READONLY_CONNECTION') + $flagNames + $reviewNames) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
@@ -224,6 +279,9 @@ finally {
     }
     if ($emptyEvidence -and (Test-Path -LiteralPath $emptyEvidence)) {
         Remove-Item -LiteralPath $emptyEvidence -Recurse -Force
+    }
+    if ($transportRoot -and (Test-Path -LiteralPath $transportRoot)) {
+        Remove-Item -LiteralPath $transportRoot -Recurse -Force
     }
 }
 

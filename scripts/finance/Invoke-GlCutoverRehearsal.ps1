@@ -28,6 +28,7 @@ $supersededMigrations = @(
 $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
 $authoritativeMigrationCount = 456
 $authoritativeLatestMigration = '20260908120000_AddProducerIntentGroupsC8'
+$sqlcmdMaxVariableWidth = 8000
 $finalCutoverFlags = @(
     'Finance__AccountingEvents__Enabled',
     'Finance__ProducerIntents__Enabled',
@@ -168,11 +169,22 @@ function Invoke-NativeWithEvidence([string]$filePath, [string[]]$arguments, [str
     return $exitCode
 }
 
+function Assert-SqlcmdOutputWidth([string]$outputFile) {
+    if ([string]::IsNullOrWhiteSpace($outputFile) -or -not (Test-Path -LiteralPath $outputFile -PathType Leaf)) { return }
+    $atRisk = Get-Content -LiteralPath $outputFile | Where-Object { $_.Length -ge $sqlcmdMaxVariableWidth } | Select-Object -First 1
+    if ($null -ne $atRisk) {
+        throw "sqlcmd evidence contains a line at the configured ${sqlcmdMaxVariableWidth}-character maximum; truncation cannot be excluded."
+    }
+}
+
 function Invoke-Sql([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$database,
     [string]$query, [string]$inputFile = '', [string]$outputFile = '') {
     # -I keeps QUOTED_IDENTIFIER enabled for the generated baseline's filtered and
     # computed-column indexes. sqlcmd otherwise defaults it off for input scripts.
-    $arguments = @('-S', $builder.DataSource, '-d', $database, '-b', '-C', '-I', '-W', '-h', '-1')
+    # sqlcmd defaults variable-length display to 256 characters. Canonical cutover rows are wider,
+    # so use the supported 8000-character maximum. -W conflicts with -y and is deliberately absent.
+    $arguments = @('-S', $builder.DataSource, '-d', $database, '-b', '-C', '-I', '-h', '-1',
+        '-y', $sqlcmdMaxVariableWidth.ToString([Globalization.CultureInfo]::InvariantCulture))
     $oldPassword = [Environment]::GetEnvironmentVariable('SQLCMDPASSWORD', 'Process')
     try {
         if ($builder.IntegratedSecurity) {
@@ -187,6 +199,7 @@ function Invoke-Sql([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, 
         else { $arguments += @('-Q', $query) }
         if (-not [string]::IsNullOrWhiteSpace($outputFile)) { $arguments += @('-o', $outputFile) }
         Invoke-Native 'sqlcmd' $arguments
+        Assert-SqlcmdOutputWidth $outputFile
     }
     finally {
         [Environment]::SetEnvironmentVariable('SQLCMDPASSWORD', $oldPassword, 'Process')

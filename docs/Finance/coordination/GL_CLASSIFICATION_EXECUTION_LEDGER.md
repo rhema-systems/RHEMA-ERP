@@ -2215,3 +2215,9 @@ uses `NOINIT`, `NOSKIP` and `MEDIANAME`; an existing/raced path cannot be overwr
 PowerShell parsing, complete safety/refusal, atomic collision, final 456/C8 PASS/NO-GO package and tamper gates
 all passed. No database, migration or configured connection was accessed; Sol High re-review remains required
 over the ledger-only handoff descendant.
+
+Final Sol High review of exact `d1ead82f013ab77641d612b717f2cdfef8093fe7` found one new P1 transport gap:
+sqlcmd retained its default 256-character variable-width display, so wide canonical invariant rows could lose
+tail content before hashing. A final narrow offline correction is active to make the actual shared `Invoke-Sql`
+transport use conflict-free `-y 8000`, refuse any line at the truncation boundary, and prove with a fake sqlcmd
+transport that a sentinel beyond character 256 survives. No database or configured connection is in scope.

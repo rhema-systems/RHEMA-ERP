@@ -112,6 +112,9 @@ overwrites either automatically. Raw `sqlcmd` output is held only in an outside-
 then deleted; the package validator scans JSON, text, logs, checksums and SQL, independently re-derives pending/
 orphan sets and the exact PASS target-history union, and verifies artifact, identity and ordered backup/restore markers.
 Evidence must be external to the repository or below the dedicated ignored `.artifacts/finance-gl-rehearsal` root.
+The shared sqlcmd transport sets the supported maximum variable-width display (`-y 8000`), omits conflicting
+`-W`/`-Y`, and fails closed if any emitted line reaches that boundary; offline transport evidence proves a
+canonical sentinel beyond character 256 survives the actual `Invoke-Sql` argument path.
 The exact target-derived backup path is atomically reserved with OS `FileMode.CreateNew`; SQL then uses a fresh
 media identity with `NOINIT`, `NOSKIP`, and `MEDIANAME`, so a concurrent/pre-existing file is never overwritten.
 
