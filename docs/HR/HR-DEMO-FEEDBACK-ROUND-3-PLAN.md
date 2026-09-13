@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) and T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) BUILT 2026-09-13. Seven slices remain; T2 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) and T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) BUILT 2026-09-13. Six slices remain; T3 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -165,7 +165,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 10 | **G** — stage flags + pre-employment providers · ✅ **DONE 2026-09-13 · 49 ×2** | `20260913161339_AddPreEmploymentCheckProviders` | `hr-recruitment/run-g.mjs` | |
 | 11 | **U** — union contacts, documents, logo · ✅ **DONE 2026-09-13 · 137 ×2** | `20260913181139_AddUnionContactsDocumentsLogo` | `hr-unions/run-u.mjs` | |
 | 12 | **T1** — profile grouped navigation · ✅ **DONE 2026-09-13 · 24 static** (screen walk owed) | none | `hr-employee-docs/run-t1.mjs` + screen walk | |
-| 13 | **T2** — record tabs: Movements, Probation, Separation, Leave, Attendance, Benefits, Salary changes | none | screen walk + a static harness asserting each tab's service call | |
+| 13 | **T2** — record tabs: Movements, Probation, Separation, Leave, Attendance, Benefits, Salary changes · ✅ **DONE 2026-09-13 · 54** (screen walk owed) | none | `hr-employee-docs/run-t2.mjs` (static + live reads) + screen walk | |
 | 14 | **T3** — record tabs: Training, Appraisals & goals, Discipline, Awards, Assets, Medical, Travel, Orientation, Succession | none | as T2 | |
 | 15 | **J2** — derived intrinsic value, proposed grade, the matcher | `AddJobDescriptionProposedGrade` | `hr-jobarch/run-j2.mjs` | |
 | 16 | **P2** — the disability catalogue | `AddDisabilityTypes` | `hr-employee-docs/run-p2.mjs` | |
@@ -487,6 +487,27 @@ assertions (`hr-employee-docs/run-t1.mjs`: one table, every row ↔ one `TabsCon
 the nav, the context). Deviation: the mobile surface is a grouped select rather than "group pills"
 — one control every phone renders well, and it keeps the group names in view. **Screen walk owed
 (§ 8 item 4)** — the rail at ≥1024px, the select below, `?tab=salary` from a proposal, back button.
+
+**Lane T2 log (2026-09-13).** No migration; frontend only. `RecordSummaryTab` (one read through
+`useQuery`, columns, a row link to the record, an "Open in <module>" door, a toolbar slot, an error
+line distinct from the empty state — a 403 is the module's gate answering, not "no records"; NO
+mutation) and seven tabs in `EmployeeRecordTabs.tsx`, each over the module's existing by-employee
+service method: Movements (`movementService.getByEmployee`, row → `/hr/movements/{id}`), Probation
+(`probationService.getForEmployee`, row → `/hr/probation/{id}`), Separation
+(`separationService.getForEmployee`, row → `/hr/separations/{id}`), Leave (history page 1×50 for a
+picked year + the balances strip from `getEmployeeBalances`, row → `/hr/leave/requests/{id}`),
+Attendance (`monthlySummaryService.getByEmployeeAndYear` for a picked year — the roll-up payroll
+reads), Benefits (`employeeBenefitEnrollmentService.getByEmployee`), Salary changes
+(`salaryChangeRequestService.list(employeeId)`; its door is the Salary tab, where the raise, the
+engine's actions and the retry already live — the card from lane S stays there, not duplicated).
+Table rows: Movements/Probation/Separation join Employment, Salary changes/Benefits join Pay &
+benefits, and the new group Time & leave carries Leave and Attendance. Harness 54
+(`hr-employee-docs/run-t2.mjs`): static — each component exported, makes the named call, has a row
+and a `TabsContent`, no write anywhere; live — the seven routes (and the balances) answer 200 as a
+list or a page on a real employee. Deviations: no counts on group headers (only discipline has a
+cheap count and it is T3's); the year pickers are the tabs' own, not a page-level control.
+**Screen walk owed** with T1's. Harness lesson: `POST /api/hr/Employees/paged` — the paged employee
+read is a POST.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

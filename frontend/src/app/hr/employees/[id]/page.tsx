@@ -41,6 +41,15 @@ import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
 import { EmployeeProfileProvider } from '@/components/hr/employee/EmployeeProfileContext';
 import { ProfileTabNav } from '@/components/hr/employee/ProfileTabNav';
 import {
+  AttendanceRecordTab,
+  BenefitsRecordTab,
+  LeaveRecordTab,
+  MovementsRecordTab,
+  ProbationRecordTab,
+  SalaryChangesRecordTab,
+  SeparationRecordTab,
+} from '@/components/hr/employee/tabs/EmployeeRecordTabs';
+import {
   DEFAULT_PROFILE_TAB,
   resolveProfileTab,
   visibleProfileTabs,
@@ -454,6 +463,28 @@ function EmployeeDetailPageInner() {
         </TabsContent>
         <TabsContent value="bank" className="mt-0">
           <BankDetailsTab employeeId={id} />
+        </TabsContent>
+        {/* Lane T2 record tabs: read-only, one per owning module; every write is a door to that module. */}
+        <TabsContent value="movements" className="mt-0">
+          <MovementsRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="probation" className="mt-0">
+          <ProbationRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="separation" className="mt-0">
+          <SeparationRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="salary-changes" className="mt-0">
+          <SalaryChangesRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="benefits" className="mt-0">
+          <BenefitsRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="leave" className="mt-0">
+          <LeaveRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="attendance" className="mt-0">
+          <AttendanceRecordTab employeeId={id} />
         </TabsContent>
         </div>
       </Tabs>

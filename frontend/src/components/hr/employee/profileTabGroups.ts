@@ -45,8 +45,12 @@ export const PROFILE_TAB_GROUPS: ProfileTabGroup[] = [
     tabs: [
       { key: 'contracts', label: 'Contracts' },
       { key: 'position-history', label: 'Position history' },
+      // Lane T2 record tabs — read-only views over the owning module's by-employee read.
+      { key: 'movements', label: 'Movements' },
+      { key: 'probation', label: 'Probation' },
       { key: 'teams', label: 'Teams' },
       { key: 'relievers', label: 'Relievers' },
+      { key: 'separation', label: 'Separation' },
     ],
   },
   {
@@ -54,7 +58,9 @@ export const PROFILE_TAB_GROUPS: ProfileTabGroup[] = [
     label: 'Pay & benefits',
     tabs: [
       { key: 'salary', label: 'Salary' },
+      { key: 'salary-changes', label: 'Salary changes' },
       { key: 'bank', label: 'Bank' },
+      { key: 'benefits', label: 'Benefits' },
     ],
   },
   {
@@ -65,6 +71,14 @@ export const PROFILE_TAB_GROUPS: ProfileTabGroup[] = [
       { key: 'skills', label: 'Skills' },
       { key: 'certifications', label: 'Certifications' },
       { key: 'work-history', label: 'Work history' },
+    ],
+  },
+  {
+    key: 'time',
+    label: 'Time & leave',
+    tabs: [
+      { key: 'leave', label: 'Leave' },
+      { key: 'attendance', label: 'Attendance' },
     ],
   },
   {
