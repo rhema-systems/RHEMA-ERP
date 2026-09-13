@@ -314,7 +314,7 @@ SELECT MigrationId FROM dbo.__EFMigrationsHistory ORDER BY MigrationId;
 }
 
 function Get-DiscoveredMigrationIds([string]$path) {
-    @(
+    $content = @(
         Get-Content -LiteralPath $path | ForEach-Object {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         }
@@ -443,6 +443,27 @@ function Assert-LocalDisposableSqlServer([string]$dataSource) {
     }
 }
 
+function Assert-DisposableConnectionUnambiguous([System.Data.SqlClient.SqlConnectionStringBuilder]$builder) {
+    if (-not [string]::IsNullOrWhiteSpace($builder.FailoverPartner)) {
+        throw 'ResetDisposableDevelopment forbids Failover Partner routing.'
+    }
+    if ($builder.MultiSubnetFailover) {
+        throw 'ResetDisposableDevelopment forbids MultiSubnetFailover routing.'
+    }
+    if ($builder.ApplicationIntent -ne [System.Data.SqlClient.ApplicationIntent]::ReadWrite) {
+        throw 'ResetDisposableDevelopment requires ApplicationIntent=ReadWrite.'
+    }
+}
+
+function Assert-DisposableRawConnectionUnambiguous([string]$connectionString) {
+    if ($connectionString -match '(?i)(?:^|;)\s*(?:Network\s+Library|Network)\s*=') {
+        throw 'ResetDisposableDevelopment forbids Network Library routing overrides.'
+    }
+    if ($connectionString -match '(?i)(?:^|;)\s*Application\s+Intent\s*=') {
+        throw 'ResetDisposableDevelopment forbids Application Intent routing overrides.'
+    }
+}
+
 function Get-DisposableBackupPath($databaseTarget) {
     $backupRoot = Get-ServerDefaultPath $databaseTarget.Builder 'InstanceDefaultBackupPath'
     Join-Path $backupRoot 'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
@@ -452,6 +473,56 @@ function Get-TextSha256([string]$value) {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
     $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
     [Convert]::ToHexString($hash)
+}
+
+function New-AtomicBackupReservation([string]$path) {
+    $stream = $null
+    try {
+        # FileMode.CreateNew is the OS-level create-if-absent boundary. SQL then writes the
+        # already-reserved medium with NOINIT/NOSKIP and can never overwrite another file.
+        $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        if ($stream.Length -ne 0) { throw 'Atomic backup reservation was unexpectedly nonempty.' }
+        $stream.Flush($true)
+    }
+    finally { if ($null -ne $stream) { $stream.Dispose() } }
+}
+
+function Write-AtomicTextFile([string]$path, [string]$content, [bool]$replaceExisting = $true) {
+    $directory = Split-Path -Parent $path
+    $temporaryPath = Join-Path $directory ('.' + [System.IO.Path]::GetFileName($path) + '.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $stream = [System.IO.File]::Open($temporaryPath, [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+            $writer = [System.IO.StreamWriter]::new($stream, [System.Text.UTF8Encoding]::new($false))
+            try {
+                $writer.Write($content)
+                if (-not $content.EndsWith("`n", [StringComparison]::Ordinal)) { $writer.WriteLine() }
+                $writer.Flush()
+                $stream.Flush($true)
+            }
+            finally { $writer.Dispose() }
+        }
+        finally { if ($null -ne $stream) { $stream.Dispose() } }
+        if ($replaceExisting) { [System.IO.File]::Move($temporaryPath, $path, $true) }
+        else { [System.IO.File]::Move($temporaryPath, $path, $false) }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) { Remove-Item -LiteralPath $temporaryPath -Force }
+    }
+}
+
+function Write-DisposablePhaseMarker([string]$directory, [int]$ordinal, [string]$phase,
+    [hashtable]$details = @{}) {
+    $expectedOrdinal = @(Get-ChildItem -LiteralPath $directory -File -Filter 'phase-*.json').Count + 1
+    if ($ordinal -ne $expectedOrdinal) {
+        throw "Disposable reset phase markers must be monotonic and contiguous; expected $expectedOrdinal, got $ordinal."
+    }
+    $payload = [ordered]@{ schema = 'RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal = $ordinal; phase = $phase }
+    foreach ($key in $details.Keys) { $payload[$key] = $details[$key] }
+    $path = Join-Path $directory ("phase-{0:D2}.json" -f $ordinal)
+    Write-AtomicTextFile $path ($payload | ConvertTo-Json -Depth 8) $false
 }
 
 function Write-DisposableResetStatus([string]$directory, [string]$status, [string]$phase,
@@ -477,7 +548,7 @@ function Write-DisposableResetStatus([string]$directory, [string]$status, [strin
     Get-ChildItem -LiteralPath $directory -File | Where-Object Name -notin @('reset-status.json','manifest.sha256') |
         Sort-Object Name | ForEach-Object { $artifactSha256[$_.Name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash }
     $payload['artifactSha256'] = $artifactSha256
-    $payload | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath (Join-Path $directory 'reset-status.json')
+    Write-AtomicTextFile (Join-Path $directory 'reset-status.json') ($payload | ConvertTo-Json -Depth 8) $true
 }
 
 function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupVerified, [string]$phase) {
@@ -492,15 +563,25 @@ function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupV
         'A DBA must independently verify the recorded SHA-256 and RESTORE VERIFYONLY evidence.',
         'If recovery is required, restore that exact backup under explicit DBA control; this harness never restores or drops after a partial reset.',
         'Before any new attempt, use a new empty external evidence directory and obtain review of a new exact commit/tree.'
-    ) | Set-Content -Encoding utf8 -LiteralPath (Join-Path $directory 'RECOVERY.md')
+    ) -join "`n"
+    Write-AtomicTextFile (Join-Path $directory 'RECOVERY.md') $content $true
+}
+
+function Write-DisposableResetEvidenceManifest([string]$directory) {
+    & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Test-GlCutoverEvidencePackage.ps1') `
+        -EvidenceDirectory $directory -PackageKind DisposableReset -WriteManifest
+    if ($LASTEXITCODE -ne 0) { throw 'Disposable reset evidence package validation or manifest creation failed.' }
 }
 
 function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionString, [string]$evidenceDirectory) {
     $phase = 'OFFLINE_GATES'
     $backupCreated = $false
+    $backupCompleted = $false
     $backupVerified = $false
     $resetStarted = $false
     $backupPath = ''
+    $backupMediaId = ''
+    $backupSha256 = ''
     $sourceFingerprint = ''
     $sourceHistory = @()
     try {
@@ -527,15 +608,39 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
         if ($repositoryMigrations.Count -ne $authoritativeMigrationCount -or $repositoryLatest -ne $authoritativeLatestMigration) {
             throw "Disposable reset requires authoritative 456/C8 repository history; found $($repositoryMigrations.Count)/$repositoryLatest."
         }
+        if (@($repositoryMigrations | Sort-Object -Unique).Count -ne $authoritativeMigrationCount -or
+            (@($repositoryMigrations | Sort-Object) -join "`n") -cne ($repositoryMigrations -join "`n")) {
+            throw 'Disposable reset requires the exact unique ordered authoritative 456 migration identity list before DROP.'
+        }
+        $repositoryMigrations | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'repository-migration-history.txt')
+        $repositoryHistoryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'repository-migration-history.txt')).Hash
+        Write-DisposablePhaseMarker $evidenceDirectory 1 'OFFLINE_GATES_COMPLETE' @{
+            repositoryMigrationCount = $authoritativeMigrationCount
+            latestMigration = $authoritativeLatestMigration
+            repositoryHistorySha256 = $repositoryHistoryHash
+        }
 
         $phase = 'SOURCE_CAPTURE'
         $sourceHistory = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
+        if (@($sourceHistory | Sort-Object -Unique).Count -ne $sourceHistory.Count -or
+            (@($sourceHistory | Sort-Object) -join "`n") -cne ($sourceHistory -join "`n") -or
+            @($sourceHistory | Where-Object { $_ -notmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0) {
+            throw 'Disposable reset source migration history is not a unique ordered safe identity list.'
+        }
         $sourceHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'source-migration-history.txt')
         $sourceFingerprint = Get-SourceFingerprint $databaseTarget.Builder 'RhemaERP'
         $sourceFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectory 'source-fingerprint-before.txt')
+        $serverInstanceIdentity = [string](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
+SELECT CONVERT(nvarchar(128),SERVERPROPERTY('ServerName'));
+"@)
+        if ([string]::IsNullOrWhiteSpace($serverInstanceIdentity)) {
+            throw 'Could not bind the disposable connection to one actual local SQL Server instance.'
+        }
+        Register-SensitiveEvidenceToken $serverInstanceIdentity
         $databaseIdentity = [string](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
 SELECT CONCAT(CONVERT(nvarchar(20),database_id),N'|',CONVERT(nvarchar(33),create_date,126))
-FROM sys.databases WHERE name=N'RhemaERP';
+FROM sys.databases
+WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_100_BIN2;
 "@)
         if ($databaseIdentity -notmatch '^(?<id>\d+)\|(?<created>[^|]+)$') {
             throw 'Could not bind the exact disposable RhemaERP database identity.'
@@ -544,6 +649,14 @@ FROM sys.databases WHERE name=N'RhemaERP';
         $expectedCreateDate = $Matches.created
         "RHEMAERP_DATABASE_IDENTITY_SHA256=$(Get-TextSha256 $databaseIdentity)" | Set-Content -Encoding ascii `
             -LiteralPath (Join-Path $evidenceDirectory 'source-database-identity.sha256')
+        "LOCAL_SQL_INSTANCE_IDENTITY_SHA256=$(Get-TextSha256 $serverInstanceIdentity)" | Set-Content -Encoding ascii `
+            -LiteralPath (Join-Path $evidenceDirectory 'source-server-identity.sha256')
+        Write-DisposablePhaseMarker $evidenceDirectory 2 'SOURCE_CAPTURE_COMPLETE' @{
+            sourceFingerprint = $sourceFingerprint
+            sourceHistorySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'source-migration-history.txt')).Hash
+            databaseIdentitySha256 = (Get-TextSha256 $databaseIdentity)
+            serverIdentitySha256 = (Get-TextSha256 $serverInstanceIdentity)
+        }
 
         $phase = 'BACKUP'
         $backupPath = Get-DisposableBackupPath $databaseTarget
@@ -558,8 +671,9 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
         }
         $backupMediaId = [Guid]::NewGuid().ToString('N')
         New-AtomicBackupReservation $backupPath
-        $backupEvidence = Join-Path $evidenceDirectory 'backup-verify.txt'
-        Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
+        $backupCreateEvidence = Join-Path $evidenceDirectory 'backup-create.txt'
+        try {
+            Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
 SET NOCOUNT ON;
 SELECT N'DATABASE=RhemaERP';
 SELECT N'BACKUP_MEDIA_ID=$backupMediaId';
@@ -572,16 +686,49 @@ SELECT N'BACKUP_COPY_ONLY_CHECKSUM_START';
 BACKUP DATABASE [RhemaERP] TO DISK=N'$escapedBackupPath'
 WITH COPY_ONLY, CHECKSUM, NOINIT, NOSKIP, MEDIANAME=N'$backupMediaId', NAME=N'RhemaERP disposable development reset';
 SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
-RESTORE VERIFYONLY FROM DISK=N'$escapedBackupPath' WITH CHECKSUM;
-SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
-"@ '' $backupEvidence
-        $backupEvidenceLines = @(Get-Content -LiteralPath $backupEvidence | ForEach-Object { $_.Trim() })
-        foreach ($marker in @('BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE','RESTORE_VERIFYONLY_CHECKSUM_COMPLETE')) {
-            if ($backupEvidenceLines -cnotcontains $marker) {
-                throw "Disposable reset backup evidence lacks required marker '$marker'; reset is forbidden."
+"@ '' $backupCreateEvidence
+        }
+        finally {
+            # The local file length is checked even when sqlcmd/marker handling fails. Once SQL has
+            # written any backup bytes, recovery evidence must never fall back to backupCreated=false.
+            if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+                $backupFileLength = (Get-Item -LiteralPath $backupPath).Length
+                if ($backupFileLength -gt 0) {
+                    $backupCreated = $true
+                    if (-not (Test-Path -LiteralPath (Join-Path $evidenceDirectory 'phase-03.json') -PathType Leaf)) {
+                        Write-DisposablePhaseMarker $evidenceDirectory 3 'BACKUP_CREATED' @{
+                            backupMediaId = $backupMediaId
+                            backupByteLength = $backupFileLength
+                        }
+                    }
+                    Write-DisposableRecoveryInstructions $evidenceDirectory $false 'BACKUP_CREATED_VERIFY_PENDING'
+                    Write-DisposableResetStatus $evidenceDirectory 'BACKUP_CREATED_VERIFY_PENDING' 'BACKUP_CREATED' $true $false $false @{
+                        sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; latestMigration = $authoritativeLatestMigration
+                        backupMediaId = $backupMediaId; backupPreserved = $true; backupCompleted = $false
+                    }
+                }
             }
         }
-        $backupCreated = $true
+        $backupCreateLines = @(Get-Content -LiteralPath $backupCreateEvidence | ForEach-Object { $_.Trim() })
+        foreach ($marker in @('BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
+            if ($backupCreateLines -cnotcontains $marker) {
+                throw "Disposable reset backup creation evidence lacks required marker '$marker'; reset is forbidden."
+            }
+        }
+        $backupCompleted = $true
+        if (-not $backupCreated) { throw 'Disposable reset backup did not create a nonempty recovery artifact.' }
+        $backupVerifyEvidence = Join-Path $evidenceDirectory 'backup-verify.txt'
+        Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
+SET NOCOUNT ON;
+SELECT N'DATABASE=RhemaERP';
+SELECT N'BACKUP_MEDIA_ID=$backupMediaId';
+RESTORE VERIFYONLY FROM DISK=N'$escapedBackupPath' WITH CHECKSUM;
+SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
+"@ '' $backupVerifyEvidence
+        $backupVerifyLines = @(Get-Content -LiteralPath $backupVerifyEvidence | ForEach-Object { $_.Trim() })
+        if ($backupVerifyLines -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') {
+            throw 'Disposable reset backup VERIFYONLY evidence lacks its completion marker; reset is forbidden.'
+        }
         if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
             throw 'Verified reset backup is not locally readable for SHA-256; reset is forbidden.'
         }
@@ -595,19 +742,15 @@ INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
 SELECT COALESCE(MAX(FileExists),0) FROM @exists;
 "@)
         if ($backupStillExists -ne 1) { throw 'Verified reset backup disappeared before mutation; reset is forbidden.' }
-        $sourceHistoryBeforeReset = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
-        $sourceFingerprintBeforeReset = Get-SourceFingerprint $databaseTarget.Builder 'RhemaERP'
-        $sourceFingerprintBeforeReset | Set-Content -Encoding utf8 `
-            -LiteralPath (Join-Path $evidenceDirectory 'source-fingerprint-pre-reset.txt')
-        if (($sourceHistoryBeforeReset -join "`n") -ne ($sourceHistory -join "`n") -or
-            $sourceFingerprintBeforeReset -ne $sourceFingerprint) {
-            throw 'Disposable RhemaERP source changed between capture and verified backup; reset is forbidden.'
-        }
         $backupVerified = $true
+        Write-DisposablePhaseMarker $evidenceDirectory 4 'BACKUP_VERIFIED' @{
+            backupSha256 = $backupSha256
+            backupVerifyEvidenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupVerifyEvidence).Hash
+        }
         Write-DisposableRecoveryInstructions $evidenceDirectory $true 'BACKUP_VERIFIED'
         Write-DisposableResetStatus $evidenceDirectory 'READY_TO_RESET' 'BACKUP_VERIFIED' $true $true $false @{
             sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; latestMigration = $authoritativeLatestMigration
-            backupSha256 = $backupSha256; backupMediaId = $backupMediaId
+            backupSha256 = $backupSha256; backupMediaId = $backupMediaId; backupCompleted = $true
         }
 
         $phase = 'IDENTITY_RECHECK_AND_RESET'
@@ -630,23 +773,99 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
             throw 'Disposable reset backup SHA-256 proof changed before mutation; reset is forbidden.'
         }
         $escapedCreateDate = $expectedCreateDate.Replace("'", "''")
-        $resetStarted = $true
-        Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
+        $escapedServerInstanceIdentity = $serverInstanceIdentity.Replace("'", "''")
+        $sourceFingerprintParts = @($sourceFingerprint -split '\|')
+        if ($sourceFingerprintParts.Count -ne 5 -or
+            $sourceFingerprintParts[0] -notmatch '^\d+$' -or
+            $sourceFingerprintParts[1] -notmatch '^\d{14}_[A-Za-z0-9_]+$' -or
+            $sourceFingerprintParts[2] -notmatch '^\d+$' -or
+            $sourceFingerprintParts[3] -notmatch '^\d+$' -or
+            $sourceFingerprintParts[4] -notmatch '^\d+$') {
+            throw 'Captured disposable source fingerprint is not safe to bind into the destructive boundary.'
+        }
+        $historyRows = @($sourceHistory | ForEach-Object { "(N'$($_)')" })
+        $expectedHistorySql = if ($historyRows.Count -eq 0) { '' } else {
+            "INSERT INTO #ExpectedHistory(MigrationId) VALUES " + ($historyRows -join ',') + ';'
+        }
+        $destructiveSql = @"
 SET NOCOUNT ON;
+SET XACT_ABORT ON;
+DECLARE @lockResult int;
+EXEC @lockResult = sys.sp_getapplock
+    @Resource=N'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET', @LockMode='Exclusive', @LockOwner='Session', @LockTimeout=0;
+IF @lockResult < 0 THROW 51203, 'DISPOSABLE_RESET_QUIESCENCE_LOCK_UNAVAILABLE', 1;
 DECLARE @backupProof table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
 INSERT @backupProof EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
 IF NOT EXISTS (SELECT 1 FROM @backupProof WHERE FileExists=1 AND FileIsDirectory=0)
     THROW 51202, 'DISPOSABLE_RESET_VERIFIED_BACKUP_MISSING', 1;
-IF DB_ID(N'RhemaERP') <> $expectedDatabaseId OR NOT EXISTS (
-    SELECT 1 FROM sys.databases WHERE database_id=$expectedDatabaseId AND name=N'RhemaERP'
+IF CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')) COLLATE Latin1_General_100_BIN2 <>
+   N'$escapedServerInstanceIdentity' COLLATE Latin1_General_100_BIN2
+    THROW 51204, 'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT', 1;
+IF (SELECT COUNT_BIG(*) FROM sys.databases
+    WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_100_BIN2) <> 1 OR
+   NOT EXISTS (SELECT 1 FROM sys.databases WHERE database_id=$expectedDatabaseId
+      AND name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_100_BIN2
       AND CONVERT(nvarchar(33),create_date,126)=N'$escapedCreateDate')
     THROW 51201, 'DISPOSABLE_RESET_IDENTITY_DRIFT', 1;
 SELECT N'DISPOSABLE_RESET_IDENTITY_RECHECK_COMPLETE';
 ALTER DATABASE [RhemaERP] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+SELECT N'DISPOSABLE_RESET_SOURCE_QUIESCED';
+IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE database_id=$expectedDatabaseId
+      AND name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_100_BIN2
+      AND CONVERT(nvarchar(33),create_date,126)=N'$escapedCreateDate')
+    THROW 51205, 'DISPOSABLE_RESET_POST_QUIESCENCE_IDENTITY_DRIFT', 1;
+CREATE TABLE #ExpectedHistory(MigrationId nvarchar(150) COLLATE Latin1_General_100_BIN2 NOT NULL PRIMARY KEY);
+$expectedHistorySql
+IF EXISTS (
+    SELECT MigrationId COLLATE Latin1_General_100_BIN2 FROM [RhemaERP].dbo.__EFMigrationsHistory
+    EXCEPT SELECT MigrationId FROM #ExpectedHistory) OR EXISTS (
+    SELECT MigrationId FROM #ExpectedHistory
+    EXCEPT SELECT MigrationId COLLATE Latin1_General_100_BIN2 FROM [RhemaERP].dbo.__EFMigrationsHistory)
+    THROW 51206, 'DISPOSABLE_RESET_FINAL_HISTORY_DRIFT', 1;
+DECLARE @actualMigrationCount bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.__EFMigrationsHistory);
+DECLARE @actualLatest nvarchar(150)=(SELECT MAX(MigrationId) FROM [RhemaERP].dbo.__EFMigrationsHistory);
+DECLARE @actualFx bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.FxRevaluationBatches WHERE IsDeleted=0);
+DECLARE @actualLinks bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.AccountCurrencyLinks WHERE IsDeleted=0 AND IsActive=1);
+DECLARE @actualJournals bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.JournalEntries WHERE IsDeleted=0);
+IF @actualMigrationCount <> $($sourceFingerprintParts[0]) OR
+   @actualLatest COLLATE Latin1_General_100_BIN2 <> N'$($sourceFingerprintParts[1])' COLLATE Latin1_General_100_BIN2 OR
+   @actualFx <> $($sourceFingerprintParts[2]) OR @actualLinks <> $($sourceFingerprintParts[3]) OR
+   @actualJournals <> $($sourceFingerprintParts[4])
+    THROW 51207, 'DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT', 1;
+SELECT N'DISPOSABLE_RESET_FINAL_SOURCE_RECHECK_COMPLETE';
+SELECT N'SOURCE_FINAL_FINGERPRINT=$sourceFingerprint';
 DROP DATABASE [RhemaERP];
 CREATE DATABASE [RhemaERP];
 SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
-"@ '' (Join-Path $evidenceDirectory 'reset-database.log')
+"@
+        $destructiveSqlPath = Join-Path ([System.IO.Path]::GetTempPath()) ("rhema-disposable-reset-$([Guid]::NewGuid().ToString('N')).sql")
+        Write-AtomicTextFile $destructiveSqlPath $destructiveSql $false
+        $resetStarted = $true
+        $phase = 'RESET_STARTED'
+        Write-DisposablePhaseMarker $evidenceDirectory 5 'RESET_STARTED' @{
+            backupSha256 = $backupSha256
+            repositoryHistorySha256 = $repositoryHistoryHash
+            sourceFingerprint = $sourceFingerprint
+        }
+        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'RESET_STARTED'
+        Write-DisposableResetStatus $evidenceDirectory 'RESET_STARTED' 'RESET_STARTED' $true $true $true @{
+            sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; latestMigration = $authoritativeLatestMigration
+            backupSha256 = $backupSha256; backupMediaId = $backupMediaId; backupPreserved = $true; backupCompleted = $true
+        }
+        try {
+            Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' '' $destructiveSqlPath `
+                (Join-Path $evidenceDirectory 'reset-database.log')
+        }
+        finally {
+            if (Test-Path -LiteralPath $destructiveSqlPath -PathType Leaf) { Remove-Item -LiteralPath $destructiveSqlPath -Force }
+        }
+        $resetDatabaseLines = @(Get-Content -LiteralPath (Join-Path $evidenceDirectory 'reset-database.log') | ForEach-Object { $_.Trim() })
+        foreach ($marker in @('DISPOSABLE_RESET_SOURCE_QUIESCED','DISPOSABLE_RESET_FINAL_SOURCE_RECHECK_COMPLETE','DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED')) {
+            if ($resetDatabaseLines -cnotcontains $marker) { throw "Disposable reset destructive-boundary evidence lacks '$marker'." }
+        }
+        Write-DisposablePhaseMarker $evidenceDirectory 6 'DATABASE_RECREATED' @{
+            destructiveBoundaryEvidenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'reset-database.log')).Hash
+        }
 
         $phase = 'APPLY_MIGRATIONS'
         Push-Location $repositoryRoot
@@ -661,6 +880,10 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
         $finalHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'target-migration-history.txt')
         if (($finalHistory -join "`n") -ne ($repositoryMigrations -join "`n")) {
             throw 'Reset RhemaERP history is not exactly authoritative repository 456/C8 with zero orphans.'
+        }
+        Write-DisposablePhaseMarker $evidenceDirectory 7 'MIGRATIONS_APPLIED' @{
+            finalMigrationCount = $finalHistory.Count
+            targetHistorySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'target-migration-history.txt')).Hash
         }
 
         $phase = 'SEED_AND_INVARIANTS'
@@ -685,6 +908,10 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
         if ($firstInvariant -ne $secondInvariant) { throw 'Second disposable reset seed changed canonical Finance invariants.' }
         @("$firstInvariant  reset-invariants-pass-1.txt","$secondInvariant  reset-invariants-pass-2.txt") |
             Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'reset-invariants.sha256')
+        Write-DisposablePhaseMarker $evidenceDirectory 8 'SEED_INVARIANTS_VERIFIED' @{
+            seedPasses = 2
+            invariantSha256 = $firstInvariant
+        }
 
         $phase = 'DBCC'
         Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
@@ -694,17 +921,26 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
         if ((Get-Content -Raw -LiteralPath (Join-Path $evidenceDirectory 'reset-dbcc.txt')) -notmatch 'DBCC_CHECKDB_COMPLETE') {
             throw 'Disposable reset DBCC completion marker is missing.'
         }
+        Write-DisposablePhaseMarker $evidenceDirectory 9 'DBCC_COMPLETE' @{
+            dbccEvidenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'reset-dbcc.txt')).Hash
+        }
         $finalGitState = Assert-FinalReviewedGitState 'ResetDisposableDevelopment'
         if ($finalGitState.executedCommit -ne $script:finalReviewedGitState.executedCommit -or
             $finalGitState.executedTree -ne $script:finalReviewedGitState.executedTree) {
             throw 'Reviewed repository identity changed during disposable reset.'
         }
+        Write-DisposablePhaseMarker $evidenceDirectory 10 'COMPLETE' @{
+            repositoryClean = $true
+            finalMigrationCount = $authoritativeMigrationCount
+        }
         Write-DisposableRecoveryInstructions $evidenceDirectory $true 'PASS'
         Write-DisposableResetStatus $evidenceDirectory 'PASS' 'COMPLETE' $true $true $true @{
             sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; finalMigrationCount = 456
             latestMigration = $authoritativeLatestMigration; orphanMigrationCount = 0; backupSha256 = $backupSha256
-            invariantSha256 = $firstInvariant; seedPasses = 2; dbcc = 'PASS'
+            invariantSha256 = $firstInvariant; seedPasses = 2; dbcc = 'PASS'; backupMediaId = $backupMediaId
+            backupCompleted = $true
         }
+        Write-DisposableResetEvidenceManifest $evidenceDirectory
         Write-Host "Disposable RhemaERP development reset passed. Evidence: $evidenceDirectory"
     }
     catch {
@@ -712,7 +948,10 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
         Write-DisposableRecoveryInstructions $evidenceDirectory $backupVerified $phase
         Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $phase $backupCreated $backupVerified $resetStarted @{
             sourceFingerprint = $sourceFingerprint; failure = $safeFailure; backupPreserved = $backupCreated
+            backupMediaId = $backupMediaId; backupSha256 = $backupSha256; backupCompleted = $backupCompleted
         }
+        try { Write-DisposableResetEvidenceManifest $evidenceDirectory }
+        catch { Write-Warning (Get-SanitizedExceptionMessage $_.Exception) }
         Write-Error "Disposable RhemaERP reset stopped at $phase. Backup/evidence are preserved; no retry, restore, or cleanup was attempted. $safeFailure"
         throw $safeFailure
     }
@@ -740,10 +979,12 @@ if ($Mode -eq 'ResetDisposableDevelopment') {
         throw 'ResetDisposableDevelopment evidence directory must be new and absent.'
     }
     $connectionString = Get-ProcessConnectionString $disposableConnectionVariable
+    Assert-DisposableRawConnectionUnambiguous $connectionString
     $databaseTarget = ConvertTo-ConnectionTarget $connectionString $false
     if (-not [string]::Equals($databaseTarget.Database, 'RhemaERP', [StringComparison]::Ordinal)) {
         throw 'ResetDisposableDevelopment permits only the exact case-sensitive local database RhemaERP.'
     }
+    Assert-DisposableConnectionUnambiguous $databaseTarget.Builder
     Assert-LocalDisposableSqlServer $databaseTarget.Server
     Register-SensitiveEvidenceToken $databaseTarget.Server
     New-Item -ItemType Directory -Path $evidenceFullPath | Out-Null
@@ -763,18 +1004,6 @@ if ($Mode -eq 'InspectSource') {
         (Join-Path $evidence 'source-readiness.txt')
     Write-Host "Source readiness evidence: $evidence"
     return
-}
-
-function New-AtomicBackupReservation([string]$path) {
-    $stream = $null
-    try {
-        # FileMode.CreateNew is an atomic OS create-if-absent operation. It throws if any file won
-        # the race, so the harness can never claim or overwrite a pre-existing backup artifact.
-        $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::CreateNew,
-            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-        if ($stream.Length -ne 0) { throw 'Atomic backup reservation was unexpectedly nonempty.' }
-    }
-    finally { if ($null -ne $stream) { $stream.Dispose() } }
 }
 
 if ($Mode -eq 'RehearseFinalClone' -and

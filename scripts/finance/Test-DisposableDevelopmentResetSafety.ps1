@@ -88,23 +88,69 @@ try {
     [Environment]::SetEnvironmentVariable($connectionVariable, 'Server=remote-sql;Database=RhemaERP;Integrated Security=true', 'Process')
     Invoke-Refusal 'nonlocal SQL Server' 'requires an explicitly local SQL Server data source' `
         @('-ConfirmDisposableDevelopmentReset','-EvidenceDirectory',(New-ExternalEvidencePath 'REMOTE'))
-
-    $collisionPath = Join-Path ([System.IO.Path]::GetTempPath()) "RhemaERP_DISPOSABLE_RESET_COLLISION_$([Guid]::NewGuid().ToString('N')).bak"
-    try {
-        $first = [System.IO.File]::Open($collisionPath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None)
-        $first.Dispose()
-        $refused = $false
-        try {
-            $second = [System.IO.File]::Open($collisionPath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None)
-            $second.Dispose()
-        }
-        catch [System.IO.IOException] { $refused = $true }
-        if (-not $refused) { throw 'CreateNew did not refuse the occupied backup path.' }
-    }
-    finally { if (Test-Path -LiteralPath $collisionPath) { Remove-Item -LiteralPath $collisionPath -Force } }
-    Write-Host 'PASS: atomic backup collision is refused'
+    [Environment]::SetEnvironmentVariable($connectionVariable, 'Server=localhost;Database=RhemaERP;Integrated Security=true;Failover Partner=localhost\other', 'Process')
+    Invoke-Refusal 'failover partner routing' 'forbids Failover Partner routing' `
+        @('-ConfirmDisposableDevelopmentReset','-EvidenceDirectory',(New-ExternalEvidencePath 'FAILOVER'))
+    [Environment]::SetEnvironmentVariable($connectionVariable, 'Server=localhost;Database=RhemaERP;Integrated Security=true;MultiSubnetFailover=true', 'Process')
+    Invoke-Refusal 'multisubnet routing' 'forbids MultiSubnetFailover routing' `
+        @('-ConfirmDisposableDevelopmentReset','-EvidenceDirectory',(New-ExternalEvidencePath 'MULTISUBNET'))
+    [Environment]::SetEnvironmentVariable($connectionVariable, 'Server=localhost;Database=RhemaERP;Integrated Security=true;Application Intent=ReadOnly', 'Process')
+    Invoke-Refusal 'readonly routing intent' 'forbids Application Intent routing overrides' `
+        @('-ConfirmDisposableDevelopmentReset','-EvidenceDirectory',(New-ExternalEvidencePath 'APP_INTENT'))
+    [Environment]::SetEnvironmentVariable($connectionVariable, 'Server=localhost;Database=RhemaERP;Integrated Security=true;Network Library=dbmssocn', 'Process')
+    Invoke-Refusal 'network-library routing override' 'forbids Network Library routing overrides' `
+        @('-ConfirmDisposableDevelopmentReset','-EvidenceDirectory',(New-ExternalEvidencePath 'NETWORK_LIBRARY'))
 
     $text = Get-Content -Raw -LiteralPath $script
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$parseErrors)
+    if ($parseErrors.Count -ne 0) { throw 'Could not parse rehearsal harness for function-availability exercise.' }
+    $dispatcherOffset = $text.IndexOf("if (`$Mode -eq 'ResetDisposableDevelopment')", [StringComparison]::Ordinal)
+    $reservationAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'New-AtomicBackupReservation' }, $true))
+    if ($reservationAst.Count -ne 1 -or $reservationAst[0].Extent.StartOffset -ge $dispatcherOffset) {
+        throw 'New-AtomicBackupReservation is not uniquely defined before reset dispatch.'
+    }
+    . ([ScriptBlock]::Create($reservationAst[0].Extent.Text))
+    $collisionPath = Join-Path ([System.IO.Path]::GetTempPath()) "RhemaERP_DISPOSABLE_RESET_COLLISION_$([Guid]::NewGuid().ToString('N')).bak"
+    try {
+        New-AtomicBackupReservation $collisionPath
+        $refused = $false
+        try { New-AtomicBackupReservation $collisionPath }
+        catch [System.IO.IOException] { $refused = $true }
+        if (-not $refused) { throw 'Actual pre-dispatch backup reservation helper did not refuse the occupied path.' }
+    }
+    finally { if (Test-Path -LiteralPath $collisionPath) { Remove-Item -LiteralPath $collisionPath -Force } }
+    Write-Host 'PASS: actual pre-dispatch backup reservation helper is available and refuses collisions'
+
+    foreach ($functionName in @('Write-AtomicTextFile','Write-DisposablePhaseMarker','Write-DisposableResetStatus')) {
+        $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName }, $true))
+        if ($functionAst.Count -ne 1 -or $functionAst[0].Extent.StartOffset -ge $dispatcherOffset) {
+            throw "Durable reset state helper is not uniquely available before dispatch: $functionName"
+        }
+        . ([ScriptBlock]::Create($functionAst[0].Extent.Text))
+    }
+    $stateRoot = New-ExternalEvidencePath 'STATE_MACHINE'
+    New-Item -ItemType Directory -Path $stateRoot | Out-Null
+    $script:finalReviewedGitState = [pscustomobject]@{ reviewedCommit=$head; reviewedTree=$tree }
+    Write-DisposablePhaseMarker $stateRoot 1 'OFFLINE_GATES_COMPLETE'
+    Write-DisposableResetStatus $stateRoot 'READY_TO_RESET' 'BACKUP_VERIFIED' $true $true $false
+    foreach ($entry in @(@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'),@(4,'BACKUP_VERIFIED'),@(5,'RESET_STARTED'))) {
+        Write-DisposablePhaseMarker $stateRoot $entry[0] $entry[1]
+    }
+    Write-DisposableResetStatus $stateRoot 'RESET_STARTED' 'RESET_STARTED' $true $true $true
+    $durableState = Get-Content -Raw -LiteralPath (Join-Path $stateRoot 'reset-status.json') | ConvertFrom-Json
+    if ($durableState.status -cne 'RESET_STARTED' -or $durableState.resetStarted -ne $true -or
+        -not (Test-Path -LiteralPath (Join-Path $stateRoot 'phase-05.json') -PathType Leaf)) {
+        throw 'Atomic RESET_STARTED replacement did not durably supersede READY_TO_RESET.'
+    }
+    $gapRefused = $false
+    try { Write-DisposablePhaseMarker $stateRoot 7 'INVALID_GAP' } catch { $gapRefused = $true }
+    if (-not $gapRefused) { throw 'Monotonic phase writer accepted a phase gap.' }
+    Write-Host 'PASS: durable reset status is atomically monotonic across simulated termination boundary'
+
     $start = $text.IndexOf('function Invoke-DisposableDevelopmentReset', [StringComparison]::Ordinal)
     $end = $text.IndexOf("if (`$Mode -eq 'ResetDisposableDevelopment')", $start, [StringComparison]::Ordinal)
     if ($start -lt 0 -or $end -le $start) { throw 'Could not isolate disposable reset implementation.' }
@@ -140,7 +186,11 @@ try {
         'Disposable reset backup SHA-256 proof changed before mutation',
         'DISPOSABLE_RESET_VERIFIED_BACKUP_MISSING',
         'pre-mutation-reviewed-git-state.json',
-        'Disposable RhemaERP source changed between capture and verified backup',
+        'DISPOSABLE_RESET_FINAL_HISTORY_DRIFT',
+        'DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT',
+        'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT',
+        'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET',
+        "Write-DisposableResetStatus `$evidenceDirectory 'RESET_STARTED'",
         'Reset RhemaERP history is not exactly authoritative repository 456/C8 with zero orphans',
         'Second disposable reset seed changed canonical Finance invariants',
         "'FAILED_NO_AUTOMATIC_RETRY'",
@@ -156,10 +206,18 @@ try {
     if (-not $text.Contains("server = '<REDACTED_LOCAL_SERVER>'")) {
         throw 'Disposable reset status does not redact the local machine/server identity.'
     }
-    $identityIndex = $reset.IndexOf('DISPOSABLE_RESET_IDENTITY_DRIFT', [StringComparison]::Ordinal)
+    $resetStartedIndex = $reset.IndexOf("Write-DisposableResetStatus `$evidenceDirectory 'RESET_STARTED'", [StringComparison]::Ordinal)
+    $invokeBoundaryIndex = $reset.IndexOf("Invoke-SqlWithSanitizedEvidence `$databaseTarget.Builder 'master' '' `$destructiveSqlPath", [StringComparison]::Ordinal)
+    if ($resetStartedIndex -lt 0 -or $invokeBoundaryIndex -le $resetStartedIndex) {
+        throw 'Durable RESET_STARTED status is not written before the destructive SQL call.'
+    }
     $singleUserIndex = $reset.IndexOf('ALTER DATABASE [RhemaERP] SET SINGLE_USER', [StringComparison]::Ordinal)
-    if ($singleUserIndex - $identityIndex -gt 350) {
-        throw 'Exact database identity is not rechecked immediately before SINGLE_USER/drop.'
+    $finalHistoryIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_HISTORY_DRIFT', [StringComparison]::Ordinal)
+    $finalFingerprintIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT', [StringComparison]::Ordinal)
+    $dropIndex = $reset.IndexOf('DROP DATABASE [RhemaERP]', [StringComparison]::Ordinal)
+    if ($singleUserIndex -lt 0 -or $finalHistoryIndex -le $singleUserIndex -or
+        $finalFingerprintIndex -le $finalHistoryIndex -or $dropIndex -le $finalFingerprintIndex) {
+        throw 'Final history/fingerprint checks are not inside the quiescent destructive SQL boundary immediately before DROP.'
     }
     Write-Host 'PASS: backup proof, identity-drift, partial-failure, no-retry, history, seed, DBCC and sanitization contracts'
 }

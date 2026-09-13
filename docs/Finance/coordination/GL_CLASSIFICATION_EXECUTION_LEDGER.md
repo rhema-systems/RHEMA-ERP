@@ -2338,3 +2338,15 @@ evidence-path, exact database/casing, remote-server, backup collision, missing p
 failure, zero-output, sanitization and ordered destructive-boundary checks. Existing rehearsal safety, final
 package/tamper and PowerShell parse gates remain green. No database, connection variable or preserved evidence
 was accessed. Execution remains prohibited until Sol High approves the exact ledger-only handoff descendant.
+
+Independent review of exact ledger descendant `5ced81af19fbfa7498ec92ea15d6296b6a0605c2` returned
+`CHANGES_REQUIRED`. The reset path lacked a dedicated independently validated/manifested evidence-package kind;
+accepted failover/routing ambiguity and collation-sensitive database identity; separated its final source-stability
+check from destructive quiescence; dispatched before `New-AtomicBackupReservation` was defined; did not durably
+persist monotonic `RESET_STARTED=true` before drop; could report `backupCreated=false` after a backup followed by
+VERIFYONLY failure; and checked only repository count/latest rather than the exact unique ordered 456 identities.
+A bounded Sol Medium correction is active in the same isolated worktree. It adds binary local-instance identity,
+one quiescent final history/fingerprint/reset batch, pre-dispatch helper availability, atomic phase/status evidence,
+immediate partial-backup recovery state, exact 456/C8 list proof, a dedicated `DisposableReset` hash/sanitization/
+tamper validator and behavioral failure/termination fixtures. No database, connection variable or preserved
+evidence directory is accessed; execution remains prohibited pending clean gates and Sol High re-review.

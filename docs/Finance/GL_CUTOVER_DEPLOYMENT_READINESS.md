@@ -182,20 +182,26 @@ requires one of these explicit decisions:
    data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
    is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Phase D2 implementation is active offline. Execution remains prohibited until the exact reset implementation and
-tree receive Sol High approval; no database mutation has occurred under this authorization.
+Phase D2 correction is active offline after independent review of exact `5ced81af`. Execution remains prohibited
+until the corrected reset implementation and tree receive Sol High approval; no database mutation has occurred
+under this authorization.
 
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
 `-ConfirmDisposableDevelopmentReset`, the exact process attestation shown below, reviewed commit/tree equality,
 a wholly clean repository before connection parsing and immediately before mutation, all C6-C8 flags false, and
-a new absent external evidence directory. Before any `SINGLE_USER`/drop it captures source history/fingerprint,
-atomically reserves a no-overwrite target-derived backup, takes `COPY_ONLY CHECKSUM` with random media identity,
-runs `RESTORE VERIFYONLY`, records SHA-256, proves the source is unchanged, and rechecks the exact database
-identity in the same SQL batch immediately before reset. A successful reset recreates only `RhemaERP`, applies
-authoritative 456/C8, seeds twice with byte-identical Finance invariants, proves exact migration history with zero
-orphans, and completes DBCC. Any failure preserves backup/evidence, writes recovery instructions, and performs no
-automatic retry, restore, cleanup, or second drop.
+a new absent external evidence directory. It rejects failover, multisubnet, read-only-intent, network-library,
+attach-file and user-instance ambiguity, then binds an exact binary `RhemaERP` name to the actual local instance.
+Before any `SINGLE_USER`/drop it captures source history/fingerprint, atomically reserves a no-overwrite
+target-derived backup, takes `COPY_ONLY CHECKSUM` with random media identity, records backup creation before a
+separate `RESTORE VERIFYONLY`, and records SHA-256. It then persists monotonic `RESET_STARTED=true` evidence before
+one SQL batch acquires the reset lock, rechecks server/database/backup identity, quiesces the source, proves the
+exact captured source history and fingerprint, and immediately performs the sole drop/recreate. A successful reset
+recreates only `RhemaERP`, applies the exact unique ordered 456/C8 list, seeds twice with byte-identical Finance
+invariants, proves zero-orphan history, and completes DBCC. Terminal success and failure packages use the dedicated
+`DisposableReset` validator, bind every artifact by SHA-256, scan retained text/SQL/Markdown for machine or secret
+material, and atomically write a complete manifest. Any failure preserves backup/evidence, writes recovery
+instructions, and performs no automatic retry, restore, cleanup, or second drop.
 
 After Sol High approval only, an operator may prepare a new external evidence path and run:
 
@@ -209,6 +215,8 @@ $env:Finance__ProducerIntents__Enabled = 'false'
 $env:Finance__ProducerIntentGroups__Enabled = 'false'
 ./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode ResetDisposableDevelopment `
   -ConfirmDisposableDevelopmentReset -EvidenceDirectory '<new absent external directory>'
+./scripts/finance/Test-GlCutoverEvidencePackage.ps1 -PackageKind DisposableReset `
+  -EvidenceDirectory '<same external directory>'
 ```
 
 ```powershell

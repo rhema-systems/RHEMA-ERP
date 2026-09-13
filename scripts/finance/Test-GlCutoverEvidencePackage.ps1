@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory)]
     [string]$EvidenceDirectory,
-    [ValidateSet('StageA1', 'FinalClone')]
+    [ValidateSet('StageA1', 'FinalClone', 'DisposableReset')]
     [string]$PackageKind = 'StageA1',
     [switch]$WriteManifest
 )
@@ -11,7 +11,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path -LiteralPath $EvidenceDirectory).Path
-$required = if ($PackageKind -eq 'FinalClone') {
+$required = if ($PackageKind -eq 'DisposableReset') {
+    @('reset-status.json','RECOVERY.md','reviewed-git-state.json','feature-flags.json')
+}
+elseif ($PackageKind -eq 'FinalClone') {
     $summary = Get-Content -Raw -LiteralPath (Join-Path $root 'summary.json') | ConvertFrom-Json
     if ($summary.status -notin @('PASS', 'NO_GO_PREFLIGHT', 'NO_GO')) {
         throw "Unsupported final-clone status '$($summary.status)'."
@@ -79,6 +82,221 @@ foreach ($relative in $required) {
     $path = Join-Path $root $relative
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required rehearsal evidence is missing: $relative"
+    }
+}
+
+if ($PackageKind -eq 'DisposableReset') {
+    $reset = Get-Content -Raw -LiteralPath (Join-Path $root 'reset-status.json') | ConvertFrom-Json
+    if ($reset.mode -cne 'ResetDisposableDevelopment' -or $reset.database -cne 'RhemaERP' -or
+        $reset.server -cne '<REDACTED_LOCAL_SERVER>' -or $reset.repositoryClean -ne $true -or
+        $reset.automaticRetry -ne $false -or $reset.automaticCleanup -ne $false -or
+        $reset.status -notin @('FAILED_NO_AUTOMATIC_RETRY','PASS')) {
+        throw 'Disposable-reset status identity, safety flags, or terminal status is invalid.'
+    }
+    $reviewedState = Get-Content -Raw -LiteralPath (Join-Path $root 'reviewed-git-state.json') | ConvertFrom-Json
+    if ($reviewedState.repositoryClean -ne $true -or
+        [string]$reviewedState.reviewedCommit -notmatch '^[0-9a-f]{40}$' -or
+        [string]$reviewedState.reviewedTree -notmatch '^[0-9a-f]{40}$' -or
+        $reviewedState.reviewedCommit -cne $reviewedState.executedCommit -or
+        $reviewedState.reviewedTree -cne $reviewedState.executedTree -or
+        [string]$reset.reviewedCommit -cne [string]$reviewedState.reviewedCommit -or
+        [string]$reset.reviewedTree -cne [string]$reviewedState.reviewedTree) {
+        throw 'Disposable-reset evidence does not bind one exact reviewed clean HEAD/tree.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $root 'git-head-tree.txt') -PathType Leaf) {
+        $headTree = @(Get-Content -LiteralPath (Join-Path $root 'git-head-tree.txt') |
+            Where-Object { $_ -notlike 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' })
+        if ($headTree.Count -ne 2 -or $headTree[0] -cne [string]$reviewedState.executedCommit -or
+            $headTree[1] -cne [string]$reviewedState.executedTree) {
+            throw 'Disposable-reset git transport evidence disagrees with reviewed HEAD/tree.'
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $root 'pre-mutation-reviewed-git-state.json') -PathType Leaf) {
+        $preMutationState = Get-Content -Raw -LiteralPath (Join-Path $root 'pre-mutation-reviewed-git-state.json') | ConvertFrom-Json
+        if ($preMutationState.repositoryClean -ne $true -or
+            [string]$preMutationState.executedCommit -cne [string]$reviewedState.executedCommit -or
+            [string]$preMutationState.executedTree -cne [string]$reviewedState.executedTree) {
+            throw 'Disposable-reset pre-mutation reviewed state disagrees with initial reviewed HEAD/tree.'
+        }
+    }
+    $flags = Get-Content -Raw -LiteralPath (Join-Path $root 'feature-flags.json') | ConvertFrom-Json
+    if ($flags.accountingEvents -ne $false -or $flags.producerIntents -ne $false -or
+        $flags.producerIntentGroups -ne $false -or $flags.source -cne 'explicit process environment variables') {
+        throw 'Disposable-reset evidence does not prove C6, C7 and C8 explicitly false.'
+    }
+
+    $phaseFiles = @(Get-ChildItem -LiteralPath $root -File -Filter 'phase-*.json' | Sort-Object Name)
+    $phases = @()
+    for ($index = 0; $index -lt $phaseFiles.Count; $index++) {
+        if ($phaseFiles[$index].Name -cne ("phase-{0:D2}.json" -f ($index + 1))) {
+            throw 'Disposable-reset phase markers are not a contiguous monotonic sequence.'
+        }
+        $marker = Get-Content -Raw -LiteralPath $phaseFiles[$index].FullName | ConvertFrom-Json
+        if ($marker.schema -cne 'RHEMA_DISPOSABLE_RESET_PHASE_V1' -or [int]$marker.ordinal -ne ($index + 1)) {
+            throw 'Disposable-reset phase marker schema or ordinal is invalid.'
+        }
+        $phases += [string]$marker.phase
+    }
+    $expectedPhases = @('OFFLINE_GATES_COMPLETE','SOURCE_CAPTURE_COMPLETE','BACKUP_CREATED','BACKUP_VERIFIED',
+        'RESET_STARTED','DATABASE_RECREATED','MIGRATIONS_APPLIED','SEED_INVARIANTS_VERIFIED','DBCC_COMPLETE','COMPLETE')
+    for ($index = 0; $index -lt $phases.Count; $index++) {
+        if ($index -ge $expectedPhases.Count -or $phases[$index] -cne $expectedPhases[$index]) {
+            throw 'Disposable-reset phase markers contain an unknown or out-of-order phase.'
+        }
+    }
+    if (($phases -ccontains 'BACKUP_CREATED') -ne [bool]$reset.backupCreated) {
+        throw 'Disposable-reset status and durable BACKUP_CREATED marker disagree.'
+    }
+    if (($phases -ccontains 'BACKUP_VERIFIED') -ne [bool]$reset.backupVerified) {
+        throw 'Disposable-reset status and durable BACKUP_VERIFIED marker disagree.'
+    }
+    if (($phases -ccontains 'RESET_STARTED') -ne [bool]$reset.resetStarted) {
+        throw 'Disposable-reset RESET_STARTED marker and terminal status disagree.'
+    }
+    if ($reset.status -eq 'PASS' -and (($phases -join "`n") -cne ($expectedPhases -join "`n") -or
+        $reset.backupCreated -ne $true -or $reset.backupVerified -ne $true -or $reset.resetStarted -ne $true)) {
+        throw 'Disposable-reset PASS does not contain the complete monotonic phase sequence.'
+    }
+
+    $commandEvidence = [ordered]@{
+        'git-diff-check.log'='git'; 'commit-ancestry.txt'='git'; 'git-head-tree.txt'='git';
+        'reset-build.log'='dotnet'; 'ef-no-pending-model.log'='dotnet'; 'migration-discovery.log'='dotnet';
+        'reset-apply-migrations.log'='dotnet'; 'reset-seed-pass-1.log'='dotnet'; 'reset-seed-pass-2.log'='dotnet'
+    }
+    foreach ($entry in $commandEvidence.GetEnumerator()) {
+        $path = Join-Path $root $entry.Key
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $lines = @(Get-Content -LiteralPath $path)
+        $expectedMarker = "RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=$($entry.Value)"
+        $failurePattern = '^RHEMA_NATIVE_COMMAND_EVIDENCE_V1\|STATUS=FAILURE\|EXIT_CODE=[1-9]\d*\|COMMAND=' + [regex]::Escape($entry.Value) + '$'
+        $validTerminalMarker = $lines[-1] -ceq $expectedMarker -or
+            ($reset.status -eq 'FAILED_NO_AUTOMATIC_RETRY' -and $lines[-1] -cmatch $failurePattern)
+        if ($lines.Count -eq 0 -or -not $validTerminalMarker -or
+            @($lines | Where-Object { $_ -like 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' }).Count -ne 1) {
+            throw "Disposable-reset native evidence is empty or marker-invalid: $($entry.Key)"
+        }
+    }
+
+    if (Test-Path -LiteralPath (Join-Path $root 'migration-discovery.log') -PathType Leaf) {
+        $repositoryIds = @(Get-Content -LiteralPath (Join-Path $root 'migration-discovery.log') | ForEach-Object {
+            if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
+        })
+        if ($repositoryIds.Count -ne 456 -or $repositoryIds[-1] -cne '20260908120000_AddProducerIntentGroupsC8' -or
+            @($repositoryIds | Sort-Object -Unique).Count -ne 456 -or
+            (@($repositoryIds | Sort-Object) -join "`n") -cne ($repositoryIds -join "`n")) {
+            throw 'Disposable-reset repository history is not the exact unique ordered 456/C8 list.'
+        }
+        $repositoryHistoryPath = Join-Path $root 'repository-migration-history.txt'
+        if (-not (Test-Path -LiteralPath $repositoryHistoryPath -PathType Leaf) -or
+            ((Get-Content -LiteralPath $repositoryHistoryPath) -join "`n") -cne ($repositoryIds -join "`n")) {
+            throw 'Disposable-reset repository migration identity evidence is missing or inconsistent.'
+        }
+        if (Test-Path -LiteralPath (Join-Path $root 'target-migration-history.txt') -PathType Leaf) {
+            $targetIds = @(Get-Content -LiteralPath (Join-Path $root 'target-migration-history.txt'))
+            if (($targetIds -join "`n") -cne ($repositoryIds -join "`n")) {
+                throw 'Disposable-reset target history is not exactly repository 456/C8 with zero orphans.'
+            }
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf) {
+        $sourceIds = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if (@($sourceIds | Sort-Object -Unique).Count -ne $sourceIds.Count -or
+            (@($sourceIds | Sort-Object) -join "`n") -cne ($sourceIds -join "`n") -or
+            @($sourceIds | Where-Object { $_ -notmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0) {
+            throw 'Disposable-reset source history is duplicate, out of order, or malformed.'
+        }
+    }
+    foreach ($identityFile in @('source-database-identity.sha256','source-server-identity.sha256')) {
+        $identityPath = Join-Path $root $identityFile
+        if (Test-Path -LiteralPath $identityPath -PathType Leaf) {
+            $identityLine = (Get-Content -Raw -LiteralPath $identityPath).Trim()
+            if ($identityLine -notmatch '^[A-Z_]+_SHA256=[0-9A-F]{64}$') {
+                throw "Disposable-reset identity binding is malformed: $identityFile"
+            }
+        }
+    }
+
+    if ($reset.backupCreated -eq $true) {
+        $createPath = Join-Path $root 'backup-create.txt'
+        if (-not (Test-Path -LiteralPath $createPath -PathType Leaf)) { throw 'BACKUP_CREATED evidence is missing.' }
+        $create = @(Get-Content -LiteralPath $createPath | ForEach-Object { $_.Trim() })
+        if ([string]$reset.backupMediaId -notmatch '^[0-9a-f]{32}$' -or
+            $create -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)") {
+            throw 'Disposable-reset backup creation markers or media identity are invalid.'
+        }
+        if (($reset.status -eq 'PASS' -or $reset.backupCompleted -eq $true) -and
+            ($create -cnotcontains 'BACKUP_PATH_ATOMICALLY_RESERVED' -or
+             $create -cnotcontains 'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
+            throw 'Disposable-reset status claims a completed backup without completion markers.'
+        }
+    }
+    if ($reset.backupVerified -eq $true) {
+        $verifyPath = Join-Path $root 'backup-verify.txt'
+        $hashPath = Join-Path $root 'backup.sha256'
+        if (-not (Test-Path -LiteralPath $verifyPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $hashPath -PathType Leaf)) { throw 'BACKUP_VERIFIED proof is incomplete.' }
+        $verify = @(Get-Content -LiteralPath $verifyPath | ForEach-Object { $_.Trim() })
+        $hashLine = (Get-Content -Raw -LiteralPath $hashPath).Trim()
+        if ($reset.backupCompleted -ne $true -or $verify -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE' -or
+            $verify -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)" -or
+            $hashLine -notmatch '^(?<hash>[0-9A-F]{64})  RhemaERP_DISPOSABLE_RESET_COPYONLY\.bak$' -or
+            $Matches.hash -cne [string]$reset.backupSha256) {
+            throw 'Disposable-reset VERIFYONLY, media identity, or backup hash proof is invalid.'
+        }
+    }
+    if ($reset.resetStarted -eq $true) {
+        $resetLog = Join-Path $root 'reset-database.log'
+        if (-not (Test-Path -LiteralPath $resetLog -PathType Leaf)) {
+            throw 'RESET_STARTED status requires retained destructive-boundary evidence.'
+        }
+        if ($reset.status -eq 'PASS') {
+            $resetLines = @(Get-Content -LiteralPath $resetLog | ForEach-Object { $_.Trim() })
+            foreach ($marker in @('DISPOSABLE_RESET_SOURCE_QUIESCED','DISPOSABLE_RESET_FINAL_SOURCE_RECHECK_COMPLETE',
+                'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED')) {
+                if ($resetLines -cnotcontains $marker) { throw "Disposable-reset PASS lacks boundary marker: $marker" }
+            }
+        }
+    }
+    if ($reset.status -eq 'PASS') {
+        foreach ($name in @('git-diff-check.log','commit-ancestry.txt','git-head-tree.txt','reset-build.log',
+            'ef-no-pending-model.log','migration-discovery.log','repository-migration-history.txt',
+            'source-migration-history.txt','source-fingerprint-before.txt','source-database-identity.sha256',
+            'source-server-identity.sha256','pre-mutation-reviewed-git-state.json','backup-create.txt',
+            'backup-verify.txt','backup.sha256','reset-database.log','reset-apply-migrations.log','target-migration-history.txt','reset-seed-pass-1.log',
+            'reset-seed-pass-2.log','reset-invariants-pass-1.txt','reset-invariants-pass-2.txt',
+            'reset-invariants.sha256','reset-dbcc.txt')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $name) -PathType Leaf)) { throw "Disposable-reset PASS is missing: $name" }
+        }
+        $firstHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'reset-invariants-pass-1.txt')).Hash
+        $secondHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'reset-invariants-pass-2.txt')).Hash
+        $hashLines = @("$firstHash  reset-invariants-pass-1.txt","$secondHash  reset-invariants-pass-2.txt")
+        if ($firstHash -cne $secondHash -or [string]$reset.invariantSha256 -cne $firstHash -or
+            ((Get-Content -LiteralPath (Join-Path $root 'reset-invariants.sha256')) -join "`n") -cne ($hashLines -join "`n") -or
+            (Get-Content -Raw -LiteralPath (Join-Path $root 'reset-dbcc.txt')) -notmatch '(?m)^DBCC_CHECKDB_COMPLETE\s*$') {
+            throw 'Disposable-reset PASS invariant or DBCC evidence is invalid.'
+        }
+        $sourceFingerprint = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')).Trim()
+        $resetLines = @(Get-Content -LiteralPath (Join-Path $root 'reset-database.log') | ForEach-Object { $_.Trim() })
+        if ($sourceFingerprint -cne [string]$reset.sourceFingerprint -or
+            $resetLines -cnotcontains "SOURCE_FINAL_FINGERPRINT=$sourceFingerprint") {
+            throw 'Disposable-reset PASS does not bind the captured fingerprint to the final quiescent recheck.'
+        }
+    }
+
+    if ($null -eq $reset.artifactSha256) { throw 'Disposable-reset status lacks artifact hash bindings.' }
+    $actualArtifacts = @(Get-ChildItem -LiteralPath $root -File -Recurse | Where-Object Name -notin @('reset-status.json','manifest.sha256'))
+    foreach ($file in $actualArtifacts) {
+        $relative = [System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\','/')
+        $property = $reset.artifactSha256.PSObject.Properties[$relative]
+        if ($null -eq $property -or [string]$property.Value -cne (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash) {
+            throw "Disposable-reset artifact hash binding is missing or invalid: $relative"
+        }
+    }
+    foreach ($property in $reset.artifactSha256.PSObject.Properties) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $property.Name) -PathType Leaf)) {
+            throw "Disposable-reset status binds a missing artifact: $($property.Name)"
+        }
     }
 }
 
@@ -282,7 +500,7 @@ if ($PackageKind -eq 'FinalClone') {
 }
 
 $textFiles = Get-ChildItem -LiteralPath $root -File -Recurse |
-    Where-Object Extension -in @('.json', '.txt', '.log', '.sha256', '.sql')
+    Where-Object Extension -in @('.json', '.txt', '.log', '.sha256', '.sql', '.md')
 $forbidden = @(
     '(?i)(Password|Pwd|User ID|UID|Data Source|Server|Integrated Security|Trusted_Connection)\s*=\s*(?!<REDACTED>)[^;\r\n]+',
     '(?i)\b[A-Z]:\\+',
@@ -300,13 +518,28 @@ foreach ($file in $textFiles) {
 
 $manifestPath = Join-Path $root 'manifest.sha256'
 if ($WriteManifest) {
-    Get-ChildItem -LiteralPath $root -File -Recurse |
+    $manifestContent = @(Get-ChildItem -LiteralPath $root -File -Recurse |
         Where-Object FullName -ne $manifestPath |
         Sort-Object FullName |
         ForEach-Object {
             $relative = [System.IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
             "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)  $relative"
-        } | Set-Content -Encoding ascii -LiteralPath $manifestPath
+        }) -join "`n"
+    $manifestTemporaryPath = Join-Path $root ('.manifest.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $stream = [System.IO.File]::Open($manifestTemporaryPath, [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+            $writer = [System.IO.StreamWriter]::new($stream, [System.Text.ASCIIEncoding]::new())
+            try { $writer.WriteLine($manifestContent); $writer.Flush(); $stream.Flush($true) }
+            finally { $writer.Dispose() }
+        }
+        finally { if ($null -ne $stream) { $stream.Dispose() } }
+        [System.IO.File]::Move($manifestTemporaryPath, $manifestPath, $true)
+    }
+    finally {
+        if (Test-Path -LiteralPath $manifestTemporaryPath -PathType Leaf) { Remove-Item -LiteralPath $manifestTemporaryPath -Force }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
